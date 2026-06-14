@@ -1,0 +1,49 @@
+# ---- macOS ----
+.DS_Store
+**/.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# ---- Xcode ----
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcresult
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+# Package.resolved is intentionally tracked (reproducible SPM dependency graph).
+
+# ---- Swift Package Manager ----
+.build/
+**/.swiftpm/xcode/xcuserdata/
+
+# ---- Instruments / profiling captures (xctrace) ----
+*.trace
+
+# ---- Local build/signing config & secrets (NEVER commit real values) ----
+# Config/Lava.xcconfig and Config/Lava.QA.xcconfig are TRACKED templates with
+# empty values. Real Supabase/Google/Team values live in the *.local.xcconfig
+# overrides, which are gitignored.
+Config/*.local.xcconfig
+*.local.xcconfig
+
+# ---- Editors ----
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- Merge / patch leftovers ----
+*.orig
+*.rej

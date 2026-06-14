@@ -1,0 +1,30 @@
+// Lava Security for iOS — base build configuration (TRACKED).
+//
+// This file is committed and intentionally contains NO account/signing values.
+// Real values live in `Config/Lava.local.xcconfig`, which is gitignored and
+// pulled in by the optional include at the bottom of this file.
+//
+//   cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig
+//   # then fill in your own team / Supabase / Google values
+//
+// With no local file present, the app still builds and the local DNS-filtering
+// core runs fully; only the optional account/backup and Google sign-in features
+// are disabled.
+
+// ---- Apple signing (empty = none; set in your local file for device builds) ----
+DEVELOPMENT_TEAM =
+LAVASEC_APP_PROFILE =
+LAVASEC_TUNNEL_PROFILE =
+LAVASEC_WIDGET_PROFILE =
+
+// ---- Supabase (optional: account login / encrypted backup) ----
+LAVA_SUPABASE_URL =
+LAVA_SUPABASE_ANON_KEY =
+
+// ---- Google Sign-In (optional) ----
+LAVA_GOOGLE_IOS_CLIENT_ID =
+LAVA_GOOGLE_REVERSED_CLIENT_ID =
+LAVA_GOOGLE_SERVER_CLIENT_ID =
+
+// Pull in real values if present (gitignored). Keep this line last.
+#include? "Lava.local.xcconfig"

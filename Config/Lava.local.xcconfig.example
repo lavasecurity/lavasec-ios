@@ -1,0 +1,24 @@
+// Template for `Config/Lava.local.xcconfig` — copy this file and fill in your
+// own values. The real file is gitignored.
+//
+//   cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig
+//
+// Everything here is OPTIONAL. With no values set, the app still builds and the
+// local DNS-filtering core runs; only account/backup and Google sign-in are off.
+
+// ---- Apple signing (needed for device builds) ----
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+LAVASEC_APP_PROFILE =
+LAVASEC_TUNNEL_PROFILE =
+LAVASEC_WIDGET_PROFILE =
+
+// ---- Supabase (your OWN project; anon/publishable key only, never service_role) ----
+// xcconfig treats `//` as a comment, so build the scheme separators via a var:
+LAVA_SLASH = /
+LAVA_SUPABASE_URL = https:$(LAVA_SLASH)$(LAVA_SLASH)YOUR_PROJECT.supabase.co
+LAVA_SUPABASE_ANON_KEY = sb_publishable_REPLACE_ME
+
+// ---- Google Sign-In (your OWN OAuth client IDs) ----
+LAVA_GOOGLE_IOS_CLIENT_ID = REPLACE.apps.googleusercontent.com
+LAVA_GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.REPLACE
+LAVA_GOOGLE_SERVER_CLIENT_ID = REPLACE.apps.googleusercontent.com

@@ -1,0 +1,15 @@
+// Lava Security for iOS — QA build configuration (TRACKED).
+//
+// The internal QA build (com.lavasec.dev.qa) uses a SEPARATE Google OAuth
+// project than production, so its Google client IDs differ. Everything else
+// (Supabase, signing team) is shared with the base config.
+//
+// Real QA Google values live in `Config/Lava.QA.local.xcconfig` (gitignored).
+
+#include "Lava.xcconfig"
+
+// ---- QA-only Google Sign-In overrides (empty here; real values in local) ----
+LAVA_GOOGLE_IOS_CLIENT_ID =
+LAVA_GOOGLE_REVERSED_CLIENT_ID =
+
+#include? "Lava.QA.local.xcconfig"

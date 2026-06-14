@@ -1,0 +1,322 @@
+import Foundation
+import Darwin
+
+public struct NetworkActivityLogEntry: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let timestamp: Date
+    public let event: NetworkActivityEvent
+    public let lavaState: LavaStateSnapshot
+
+    public init(
+        id: UUID = UUID(),
+        timestamp: Date,
+        event: NetworkActivityEvent,
+        lavaState: LavaStateSnapshot
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.event = event
+        self.lavaState = lavaState
+    }
+
+    public var timestampLine: String {
+        LocalLogTimestampFormatter.string(from: timestamp)
+    }
+
+    public var eventLine: String {
+        event.displayLine
+    }
+
+    public var lavaStateLine: String {
+        let connectivity = lavaState.connectivityStatus.privacySafeLogText(fallback: lavaState.protectionStatus)
+        let resolver = lavaState.resolverDisplayName.privacySafeLogText(fallback: lavaState.resolverTransport.displayName)
+        return "Lava: \(connectivity), \(resolver), \(lavaState.deviceDNSFallbackDisplayText)"
+    }
+}
+
+public enum NetworkActivityEvent: Codable, Equatable, Sendable {
+    case networkChanged(from: TunnelNetworkKind?, to: TunnelNetworkKind, isSatisfied: Bool)
+    case protectionConnected
+    case userAction(NetworkActivityUserAction)
+    case dnsSmokeProbeSucceeded(resolver: String, transport: DNSResolverTransport, dohHTTPVersion: String?)
+    case dnsSmokeProbeFailed(reason: String)
+    case deviceDNSFallbackActivated(reason: String)
+    case deviceDNSFallbackRecovered
+    case reconnectNeeded(reason: String)
+    case networkSettingsReapplyFailed(reason: String)
+
+    fileprivate var displayLine: String {
+        switch self {
+        case .networkChanged(let previousKind, let newKind, let isSatisfied):
+            if let previousKind, previousKind != newKind, isSatisfied {
+                return "Network changed: \(previousKind.displayName) to \(newKind.displayName)"
+            }
+
+            return "Network changed: \(newKind.displayName) path \(isSatisfied ? "available" : "lost")"
+        case .protectionConnected:
+            return "Connected"
+        case .userAction(let action):
+            return action.displayLine
+        case .dnsSmokeProbeSucceeded(let resolver, let transport, let dohHTTPVersion):
+            let displayResolver = resolver.privacySafeLogText(fallback: "configured resolver")
+            let transportText = transport == .dnsOverHTTPS && DoHHTTPVersion.isHTTP3(dohHTTPVersion)
+                ? "DoH3"
+                : transport.displayName
+            return "DNS smoke probe succeeded: \(displayResolver) (\(transportText))"
+        case .dnsSmokeProbeFailed(let reason):
+            return "DNS smoke probe failed: \(reason.privacySafeLogText(fallback: "unavailable"))"
+        case .deviceDNSFallbackActivated(let reason):
+            return "Device DNS fallback activated: \(reason.privacySafeLogText(fallback: "network DNS rules changed"))"
+        case .deviceDNSFallbackRecovered:
+            return "Device DNS fallback recovered"
+        case .reconnectNeeded(let reason):
+            return "Reconnect needed: \(reason.privacySafeLogText(fallback: "DNS is not resolving"))"
+        case .networkSettingsReapplyFailed(let reason):
+            return "Network settings refresh failed: \(reason.privacySafeLogText(fallback: "iOS did not apply tunnel settings"))"
+        }
+    }
+}
+
+public enum NetworkActivityUserAction: String, Codable, Equatable, Sendable {
+    case turnProtectionOn
+    case turnProtectionOff
+    case reconnectProtection
+    case changeResolver
+    case toggleDeviceDNSFallback
+    case changeFilters
+    case clearActivity
+
+    fileprivate var displayLine: String {
+        switch self {
+        case .turnProtectionOn:
+            return "User action: Turned protection on"
+        case .turnProtectionOff:
+            return "User action: Turned protection off"
+        case .reconnectProtection:
+            return "User action: Reconnected protection"
+        case .changeResolver:
+            return "User action: Changed DNS resolver"
+        case .toggleDeviceDNSFallback:
+            return "User action: Changed Device DNS fallback"
+        case .changeFilters:
+            return "User action: Changed filters"
+        case .clearActivity:
+            return "User action: Cleared local activity"
+        }
+    }
+}
+
+public struct LavaStateSnapshot: Codable, Equatable, Sendable {
+    public let protectionStatus: String
+    public let connectivityStatus: String
+    public let networkKind: TunnelNetworkKind
+    public let networkPathIsSatisfied: Bool
+    public let resolverDisplayName: String
+    public let resolverTransport: DNSResolverTransport
+    public let fallbackToDeviceDNS: Bool
+    public let deviceDNSFallbackActive: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case protectionStatus
+        case connectivityStatus
+        case networkKind
+        case networkPathIsSatisfied
+        case resolverDisplayName
+        case resolverTransport
+        case fallbackToDeviceDNS
+        case deviceDNSFallbackActive
+    }
+
+    public init(
+        protectionStatus: String,
+        connectivityStatus: String,
+        networkKind: TunnelNetworkKind,
+        networkPathIsSatisfied: Bool,
+        resolverDisplayName: String,
+        resolverTransport: DNSResolverTransport,
+        fallbackToDeviceDNS: Bool,
+        deviceDNSFallbackActive: Bool
+    ) {
+        self.protectionStatus = protectionStatus
+        self.connectivityStatus = connectivityStatus
+        self.networkKind = networkKind
+        self.networkPathIsSatisfied = networkPathIsSatisfied
+        self.resolverDisplayName = resolverDisplayName
+        self.resolverTransport = resolverTransport
+        self.fallbackToDeviceDNS = fallbackToDeviceDNS
+        self.deviceDNSFallbackActive = deviceDNSFallbackActive
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        protectionStatus = try container.decode(String.self, forKey: .protectionStatus)
+        connectivityStatus = try container.decode(String.self, forKey: .connectivityStatus)
+        networkKind = try container.decode(TunnelNetworkKind.self, forKey: .networkKind)
+        networkPathIsSatisfied = try container.decode(Bool.self, forKey: .networkPathIsSatisfied)
+        resolverDisplayName = try container.decode(String.self, forKey: .resolverDisplayName)
+        resolverTransport = try container.decode(DNSResolverTransport.self, forKey: .resolverTransport)
+        fallbackToDeviceDNS = try container.decodeIfPresent(Bool.self, forKey: .fallbackToDeviceDNS) ?? false
+        deviceDNSFallbackActive = try container.decodeIfPresent(Bool.self, forKey: .deviceDNSFallbackActive) ?? false
+    }
+
+    fileprivate var deviceDNSFallbackDisplayText: String {
+        if deviceDNSFallbackActive {
+            return "Device fallback active"
+        }
+
+        return fallbackToDeviceDNS ? "Device fallback idle" : "Device fallback off"
+    }
+}
+
+public struct NetworkActivityLog: Codable, Equatable, Sendable {
+    public static let defaultMaximumEntryCount = 300
+    public static let defaultDuplicateCoalescingWindow: TimeInterval = 30
+
+    public private(set) var entries: [NetworkActivityLogEntry]
+    public let maximumEntryCount: Int
+    public let duplicateCoalescingWindow: TimeInterval
+
+    public init(
+        entries: [NetworkActivityLogEntry] = [],
+        maximumEntryCount: Int = Self.defaultMaximumEntryCount,
+        duplicateCoalescingWindow: TimeInterval = Self.defaultDuplicateCoalescingWindow
+    ) {
+        self.maximumEntryCount = max(1, maximumEntryCount)
+        self.duplicateCoalescingWindow = max(0, duplicateCoalescingWindow)
+        self.entries = entries.sorted { $0.timestamp > $1.timestamp }
+        trimToMaximumEntryCount()
+    }
+
+    public mutating func append(_ entry: NetworkActivityLogEntry) {
+        guard !isDuplicateWithinCoalescingWindow(entry) else {
+            return
+        }
+
+        entries.insert(entry, at: 0)
+        entries.sort { $0.timestamp > $1.timestamp }
+        trimToMaximumEntryCount()
+    }
+
+    public mutating func clear() {
+        entries.removeAll()
+    }
+
+    private func isDuplicateWithinCoalescingWindow(_ entry: NetworkActivityLogEntry) -> Bool {
+        entries.contains { existing in
+            existing.event == entry.event
+                && existing.lavaState == entry.lavaState
+                && abs(entry.timestamp.timeIntervalSince(existing.timestamp)) <= duplicateCoalescingWindow
+        }
+    }
+
+    private mutating func trimToMaximumEntryCount() {
+        if entries.count > maximumEntryCount {
+            entries.removeLast(entries.count - maximumEntryCount)
+        }
+    }
+}
+
+public enum NetworkActivityLogPersistence {
+    public static func load(from url: URL) -> NetworkActivityLog {
+        guard let data = try? Data(contentsOf: url),
+              let log = try? makeJSONDecoder().decode(NetworkActivityLog.self, from: data)
+        else {
+            return NetworkActivityLog()
+        }
+
+        return log
+    }
+
+    public static func save(_ log: NetworkActivityLog, to url: URL) throws {
+        let directoryURL = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        let data = try makeJSONEncoder().encode(log)
+        try data.write(to: url, options: [.atomic])
+    }
+
+    public static func append(_ entry: NetworkActivityLogEntry, to url: URL) {
+        withExclusiveFileLock(for: url) {
+            var log = load(from: url)
+            log.append(entry)
+            try? save(log, to: url)
+        }
+    }
+
+    public static func clear(at url: URL) {
+        withExclusiveFileLock(for: url) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    public static func makeJSONDecoder() -> JSONDecoder {
+        JSONDecoder()
+    }
+
+    public static func makeJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    private static func withExclusiveFileLock(for url: URL, perform work: () -> Void) {
+        let directoryURL = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let lockURL = url.appendingPathExtension("lock")
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            work()
+            return
+        }
+
+        defer {
+            close(descriptor)
+        }
+
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            work()
+            return
+        }
+
+        defer {
+            flock(descriptor, LOCK_UN)
+        }
+        work()
+    }
+}
+
+private extension TunnelNetworkKind {
+    var displayName: String {
+        switch self {
+        case .unknown:
+            return "Unknown"
+        case .wifi:
+            return "Wi-Fi"
+        case .cellular:
+            return "Cellular"
+        case .wired:
+            return "Wired"
+        case .other:
+            return "Other"
+        }
+    }
+}
+
+private extension String {
+    func privacySafeLogText(fallback: String) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return fallback
+        }
+
+        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        let pattern = #"\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}\b"#
+        let regex = try? NSRegularExpression(pattern: pattern)
+        return regex?.stringByReplacingMatches(
+            in: trimmed,
+            options: [],
+            range: range,
+            withTemplate: "domain"
+        ) ?? trimmed
+    }
+}
