@@ -6878,13 +6878,18 @@ final class AppViewModel: ObservableObject {
     }
 
     private func modificationDate(for url: URL?) -> Date? {
-        guard let url,
-              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        else {
+        // Fetch only the content-modification date rather than building
+        // `FileManager.attributesOfItem`'s full attribute dictionary (owner,
+        // permissions, size, type, every timestamp…). Same `st_mtime` semantics,
+        // less work per stat — these report-refresh paths poll several files.
+        // NB: a cross-refresh cache is intentionally avoided — this date is the
+        // signal used to detect the tunnel process's writes, so a TTL would mask
+        // fresh data and a vnode monitor is unreliable for atomic-rename writes.
+        guard let url else {
             return nil
         }
 
-        return attributes[.modificationDate] as? Date
+        return try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
     private var tunnelProviderBundleIdentifier: String {
