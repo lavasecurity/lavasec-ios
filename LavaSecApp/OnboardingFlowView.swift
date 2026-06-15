@@ -169,7 +169,7 @@ struct LavaOnboardingView: View {
             if viewModel.vpnMessageIsError, let message = viewModel.vpnMessage {
                 Text(message)
                     .lavaQuietNoteText()
-                    .foregroundStyle(.red)
+                    .foregroundStyle(LavaStyle.errorText)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

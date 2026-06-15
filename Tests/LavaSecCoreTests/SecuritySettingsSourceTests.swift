@@ -210,13 +210,14 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testRootGatesTabsAndProtectionActionsThroughSecurityController() throws {
         let root = try Self.appSource(named: "RootView.swift")
+        let guardSource = try Self.appSource(named: "GuardView.swift")
 
         XCTAssertTrue(root.contains("@EnvironmentObject private var security: SecurityController"))
         XCTAssertTrue(root.contains("guardedRootTabSelection"))
         XCTAssertTrue(root.contains("security.requireAuthentication"))
         XCTAssertTrue(root.contains(".activityViewing"))
         XCTAssertTrue(root.contains(".appSettings"))
-        XCTAssertTrue(root.contains(".protectionControl"))
+        XCTAssertTrue(guardSource.contains(".protectionControl"))
         XCTAssertTrue(root.contains("security.resetForegroundSession()"))
         XCTAssertTrue(root.contains("SecurityPasscodeAuthenticationView"))
         XCTAssertTrue(root.contains("security.isAppUnlockBlockingUI && security.passcodeAuthenticationRequest == nil"))
@@ -375,7 +376,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testRepeatSensitiveActionsRequireFreshAuthentication() throws {
         let controller = try Self.appSource(named: "SecurityController.swift")
-        let root = try Self.appSource(named: "RootView.swift")
+        let root = try Self.appSource(named: "GuardView.swift")
         let filters = try Self.appSource(named: "FiltersView.swift")
         let diagnostics = try Self.appSource(named: "DiagnosticsView.swift")
 

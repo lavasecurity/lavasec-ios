@@ -21,6 +21,11 @@
 		1A000001000000000000001B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007004 /* GoogleSignIn */; };
 		1A000001000000000000001C /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101A /* OnboardingFlowView.swift */; };
 		1A0000010000000000000003 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001003 /* RootView.swift */; };
+		1A0000010000000000000025 /* GuardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001025 /* GuardView.swift */; };
+		1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001026 /* DeveloperPreviewViews.swift */; };
+		1A0000010000000000000022 /* LavaTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001022 /* LavaTokens.swift */; };
+		1A0000010000000000000023 /* LavaScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001023 /* LavaScaffold.swift */; };
+		1A0000010000000000000024 /* LavaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001024 /* LavaComponents.swift */; };
 		1A0000010000000000000010 /* LavaCondensedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001010 /* LavaCondensedList.swift */; };
 		1A0000010000000000000004 /* FiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001004 /* FiltersView.swift */; };
 		1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101D /* FilterReviewFlowView.swift */; };
@@ -123,6 +128,11 @@
 		1A0000010000000000001017 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
 		1A000001000000000000101A /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001003 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		1A0000010000000000001025 /* GuardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardView.swift; sourceTree = "<group>"; };
+		1A0000010000000000001026 /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
+		1A0000010000000000001022 /* LavaTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaTokens.swift; sourceTree = "<group>"; };
+		1A0000010000000000001023 /* LavaScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaScaffold.swift; sourceTree = "<group>"; };
+		1A0000010000000000001024 /* LavaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaComponents.swift; sourceTree = "<group>"; };
 		1A0000010000000000001010 /* LavaCondensedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaCondensedList.swift; sourceTree = "<group>"; };
 		1A0000010000000000001004 /* FiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersView.swift; sourceTree = "<group>"; };
 		1A000001000000000000101D /* FilterReviewFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterReviewFlowView.swift; sourceTree = "<group>"; };
@@ -240,6 +250,11 @@
 				1A0000010000000000001017 /* LavaStrings.swift */,
 				1A000001000000000000101A /* OnboardingFlowView.swift */,
 				1A0000010000000000001003 /* RootView.swift */,
+				1A0000010000000000001025 /* GuardView.swift */,
+				1A0000010000000000001026 /* DeveloperPreviewViews.swift */,
+				1A0000010000000000001022 /* LavaTokens.swift */,
+				1A0000010000000000001023 /* LavaScaffold.swift */,
+				1A0000010000000000001024 /* LavaComponents.swift */,
 				1A0000010000000000001010 /* LavaCondensedList.swift */,
 				1A0000010000000000001004 /* FiltersView.swift */,
 				1A000001000000000000101D /* FilterReviewFlowView.swift */,
@@ -521,6 +536,11 @@
 				1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */,
 				1A0000010000000000000018 /* LavaStrings.swift in Sources */,
 				1A0000010000000000000003 /* RootView.swift in Sources */,
+				1A0000010000000000000025 /* GuardView.swift in Sources */,
+				1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */,
+				1A0000010000000000000022 /* LavaTokens.swift in Sources */,
+				1A0000010000000000000023 /* LavaScaffold.swift in Sources */,
+				1A0000010000000000000024 /* LavaComponents.swift in Sources */,
 				1A000001000000000000001C /* OnboardingFlowView.swift in Sources */,
 				1A0000010000000000000010 /* LavaCondensedList.swift in Sources */,
 				1A0000010000000000000004 /* FiltersView.swift in Sources */,

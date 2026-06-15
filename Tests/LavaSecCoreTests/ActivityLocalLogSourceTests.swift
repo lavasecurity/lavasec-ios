@@ -151,7 +151,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testNetworkActivityPullRefreshAlwaysAllowsBounce() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let screenContentBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaScreenContent<Content: View>: View",
@@ -172,7 +172,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testScrollablePullRefreshDoesNotInstallCompetingDragRecognizer() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let screenContentBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaScreenContent<Content: View>: View",

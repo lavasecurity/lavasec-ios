@@ -232,7 +232,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
     func testStandaloneToolbarIconButtonsUseFullTapAreas() throws {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let toolbarBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "struct LavaToolbarIconButton: View",
@@ -580,11 +580,11 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testToolbarIconTemplateUsesCompactCircularChrome() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let toolbarTemplateBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "enum LavaToolbarMetrics",
-            endingBefore: "struct LavaPanelActionButtonStyle"
+            endingBefore: "*** end ***"
         )
         let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
 
@@ -624,7 +624,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testNativeToolbarIconButtonUsesSharedSquareLabelFrame() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let nativeToolbarButtonBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "struct NativeToolbarIconButton: View",

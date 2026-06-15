@@ -24,7 +24,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowRowsUseStatusDrivenStyling() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
 
         XCTAssertTrue(rootViewSource.contains("status: viewModel.guardDNSFlowStepStatus"))
@@ -42,7 +42,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardViewRefreshesTunnelHealthWhileVisible() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
 
         XCTAssertTrue(rootViewSource.contains("private func refreshGuardProtectionState() async"))
         XCTAssertTrue(rootViewSource.contains("await viewModel.sampleTunnelHealth()"))
@@ -50,7 +50,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowConnectorsUseStableIconRailSpacing() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
 
         XCTAssertTrue(rootViewSource.contains("private enum GuardFlowMetrics"))
         XCTAssertTrue(rootViewSource.contains("GuardFlowMetrics.iconSize"))
@@ -64,7 +64,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowNonHealthyRowsDimTheirTitleText() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let inactivePaletteBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "case .inactive:",
@@ -81,7 +81,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowRowsDoNotUseHoverButtonChrome() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
 
         XCTAssertFalse(rootViewSource.contains("GuardFlowRowButtonStyle"))
         XCTAssertTrue(rootViewSource.contains(".buttonStyle(.plain)"))
@@ -89,7 +89,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowStepNamesTailTruncateWhenTooLong() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let labelBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "Text(labelText)",
@@ -101,7 +101,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowStatusColorsAnimateWithMascotWakeTiming() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
 
         XCTAssertTrue(rootViewSource.contains("GuardianMascotAnimationPlan.wakeDuration"))
         XCTAssertTrue(rootViewSource.contains("GuardFlowAnimation.statusColor(for: status, reduceMotion: reduceMotion)"))
@@ -216,7 +216,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotAnimationDemoExercisesGratefulReturnToAwake() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "DeveloperPreviewViews.swift", in: "LavaSecApp")
         let demoSequenceBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "let sequence: [(GuardianMascotState, String, UInt64)] = [",
@@ -292,11 +292,11 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowConnectorLinesDoNotAnimateColorOverlaps() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let connectorBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "private struct GuardFlowConnectorRow: View",
-            endingBefore: "struct LavaMetricPill"
+            endingBefore: "#if DEBUG"
         )
 
         XCTAssertTrue(connectorBlock.contains(".fill(palette.connectorFill)"))
@@ -305,7 +305,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowChevronsStayNeutralAcrossStatuses() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let chevronBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "private func chevronSlot",
@@ -333,7 +333,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionStatusPanelTopAlignsHeroContent() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let statusPanelBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "struct ProtectionStatusPanel: View",
@@ -344,14 +344,15 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardStatusPanelKeepsIntrinsicHeightAboveFlowPanel() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let guardViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
+        let scaffoldSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let guardViewBlock = try Self.sourceBlock(
-            in: rootViewSource,
+            in: guardViewSource,
             startingAt: "struct GuardView: View",
             endingBefore: "private func refreshGuardProtectionState() async"
         )
         let primaryTabBlock = try Self.sourceBlock(
-            in: rootViewSource,
+            in: scaffoldSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
         )
@@ -364,12 +365,13 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testPrimaryTabsUseNativeTitleScrollAndRefreshModes() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
+        let guardViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
         let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
         let guardViewBlock = try Self.sourceBlock(
-            in: rootViewSource,
+            in: guardViewSource,
             startingAt: "struct GuardView: View",
             endingBefore: "private func refreshGuardProtectionState() async"
         )
@@ -433,6 +435,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
 
     func testRootTabReselectRequestsPrimaryScrollToTop() throws {
         let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let scaffoldSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
         let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
@@ -447,12 +450,12 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
             endingBefore: "private func selectRootTab"
         )
         let screenContentBlock = try Self.sourceBlock(
-            in: rootViewSource,
+            in: scaffoldSource,
             startingAt: "struct LavaScreenContent<Content: View>",
             endingBefore: "struct LavaSheetScaffold"
         )
         let primaryTabBlock = try Self.sourceBlock(
-            in: rootViewSource,
+            in: scaffoldSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
         )
@@ -482,7 +485,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDateSelectorUsesClickableToolbarAccessory() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let primaryTabBlock = try Self.sourceBlock(
             in: rootViewSource,
@@ -610,7 +613,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFlowConnectorsAreCondensed() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let metricsBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "private enum GuardFlowMetrics",
@@ -624,7 +627,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testRootTabsSharePrimaryTitleChrome() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
         let settingsBlock = try Self.sourceBlock(
             in: settingsSource,
@@ -643,7 +646,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionPrimaryActionContextMenuUsesConstrainedPreviewSource() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let statusPanelBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "struct ProtectionStatusPanel: View",
@@ -677,7 +680,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionStatusPanelOffersTemporaryPauseContextMenuAndHint() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let statusPanelBlock = try Self.sourceBlock(
             in: rootViewSource,

@@ -566,6 +566,7 @@ final class AppViewModelSourceTests: XCTestCase {
     func testVPNStopAndStartWaitThroughIOSDisconnectingState() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let guardSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
         let initBlock = try Self.sourceBlock(
             in: source,
             startingAt: "if loadVPNState {",
@@ -604,7 +605,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("ProtectionLifecyclePolicy.shouldDisablePrimaryAction"))
         XCTAssertTrue(source.contains("private static let protectionRestartStopWaitTimeout: TimeInterval = 15"))
         XCTAssertTrue(source.contains("private static let protectionStartWaitTimeout: TimeInterval = 15"))
-        XCTAssertTrue(rootSource.contains(".disabled(viewModel.protectionPrimaryActionIsDisabled)"))
+        XCTAssertTrue(guardSource.contains(".disabled(viewModel.protectionPrimaryActionIsDisabled)"))
         XCTAssertTrue(rootSource.contains("await viewModel.refreshProtectionStatus(force: true)"))
         XCTAssertTrue(enableBlock.contains("manager.connection.status == .disconnecting"))
         XCTAssertTrue(enableBlock.contains("await waitForProtectionToStop(timeout: Self.protectionRestartStopWaitTimeout)"))

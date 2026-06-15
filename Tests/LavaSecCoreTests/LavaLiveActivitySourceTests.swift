@@ -372,6 +372,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
         let attributes = try readSource("Shared/LavaActivityAttributes.swift")
         let rootView = try readSource("LavaSecApp/RootView.swift")
+        let guardView = try readSource("LavaSecApp/GuardView.swift")
         let settings = try readSource("LavaSecApp/SettingsView.swift")
 
         XCTAssertTrue(attributes.contains("enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable, Sendable"))
@@ -445,7 +446,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: ".tint(LavaStyle.safeGreen)"
         )
 
-        XCTAssertTrue(rootView.contains("SoftShieldGuardian(size: 96, state: guardianState, shieldStyle: viewModel.lavaGuardLook)"))
+        XCTAssertTrue(guardView.contains("SoftShieldGuardian(size: 96, state: guardianState, shieldStyle: viewModel.lavaGuardLook)"))
         XCTAssertTrue(settings.contains("shieldStyle: viewModel.lavaGuardLook"))
         XCTAssertTrue(settings.contains(".foregroundStyle(availability.titleColor(for: look))"))
         XCTAssertTrue(settings.contains("case .cherryQuartz:"))

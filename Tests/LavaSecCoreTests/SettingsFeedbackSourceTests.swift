@@ -3,12 +3,12 @@ import XCTest
 
 final class SettingsFeedbackSourceTests: XCTestCase {
     func testRejectPanelUsesLavaOrangeBorderWhileInfoPanelKeepsDefaultBorder() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
         let reviewSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
         let infoPanelBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaInfoPanel: View",
-            endingBefore: "struct GentleProtectionDiagram: View"
+            endingBefore: "*** end ***"
         )
         let rejectPanelBlock = try Self.sourceBlock(
             in: reviewSource,
@@ -22,7 +22,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSharedMultilineTextInputAlignsFreeformContentWithRowLabel() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
         let editorRowBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaTextEditorInputRow: View",
@@ -37,7 +37,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
     func testSettingsRootUsesNativeLargeTitleScrollAndDropsFreeProtectionPanel() throws {
         let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let settingsBlock = try Self.sourceBlock(
             in: source,
             startingAt: "struct SettingsView: View",
@@ -125,7 +125,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testScreenContentScrollAnchorDoesNotAddTopSpacing() throws {
-        let source = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let source = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let screenContentBlock = try Self.sourceBlock(
             in: source,
             startingAt: "struct LavaScreenContent<Content: View>: View",
@@ -401,7 +401,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let rageShakeSheetBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "private struct BugReportSheetView: View",
-            endingBefore: "struct GuardView: View"
+            endingBefore: "#Preview"
         )
 
         XCTAssertTrue(feedbackBlock.contains("onDismissRequested"))
@@ -924,7 +924,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testScreenContentUsesNativeRefreshableInsteadOfCustomPullRefresh() throws {
-        let source = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let source = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let screenContentBlock = try Self.sourceBlock(
             in: source,
             startingAt: "struct LavaScreenContent<Content: View>: View",
@@ -1005,6 +1005,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     ) throws -> String {
         let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
         let suffix = source[start...]
+        guard endMarker != "*** end ***" else {
+            return String(suffix)
+        }
         let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
 
         return String(suffix[..<end])

@@ -1,0 +1,467 @@
+import SwiftUI
+import LavaSecCore
+import UIKit
+
+struct LavaNavigationRow<Destination: View>: View {
+    let systemImage: String?
+    let title: String
+    let summary: String
+    let destination: Destination
+
+    init(
+        systemImage: String? = nil,
+        title: String,
+        summary: String,
+        @ViewBuilder destination: () -> Destination
+    ) {
+        self.systemImage = systemImage
+        self.title = title
+        self.summary = summary
+        self.destination = destination()
+    }
+
+    var body: some View {
+        NavigationLink {
+            destination
+        } label: {
+            HStack(spacing: 12) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.headline)
+                        .foregroundStyle(LavaStyle.safeGreen)
+                        .frame(width: 34, height: 34)
+                        .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.iconBadgeCornerRadius))
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title.lavaLocalized)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(summary.lavaLocalized)
+                        .lavaRowSubtitleText()
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lavaSurface(.card)
+            .contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous))
+        }
+        .buttonStyle(LavaNavigationRowButtonStyle())
+        .hoverEffect(.highlight)
+    }
+}
+
+private struct LavaNavigationRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .overlay {
+                RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
+            }
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct LavaPanelActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    let height: CGFloat
+    let cornerRadius: CGFloat
+
+    init(height: CGFloat = 38, cornerRadius: CGFloat = LavaSurface.controlCornerRadius) {
+        self.height = height
+        self.cornerRadius = cornerRadius
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(LavaStyle.panelActionGreen)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(configuration.isPressed ? LavaStyle.panelActionPressedFill : LavaStyle.panelActionFill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
+                    }
+            }
+            .scaleEffect(configuration.isPressed ? 0.99 : 1)
+            .opacity(isEnabled ? 1 : 0.55)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct LavaStandaloneActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background {
+                RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
+                    .fill(LavaStyle.safeControlGreen)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
+                            .fill(Color.black.opacity(configuration.isPressed ? 0.10 : 0))
+                    }
+            }
+            .scaleEffect(configuration.isPressed ? 0.99 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+struct LavaPlainCard<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lavaSurface(.card)
+    }
+}
+
+struct LavaTextInputPanel<Content: View>: View {
+    let spacing: CGFloat
+    let content: Content
+
+    init(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        LavaPlainCard {
+            VStack(alignment: .leading, spacing: spacing) {
+                content
+            }
+        }
+    }
+}
+
+struct LavaTextInputRow<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.lavaLocalized)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(LavaStyle.secondaryText)
+
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct LavaTextEditorInputRow: View {
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+    var minHeight: CGFloat = 96
+
+    var body: some View {
+        LavaTextInputRow(title: title) {
+            ZStack(alignment: .topLeading) {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(placeholder.lavaLocalized)
+                        .font(.body)
+                        .foregroundStyle(LavaStyle.tertiaryText)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $text)
+                    .font(.body)
+                    .frame(minHeight: minHeight)
+                    .scrollContentBackground(.hidden)
+                    // TextEditor keeps UITextView line padding; pull it back to align with the row label.
+                    .padding(.leading, -5)
+            }
+        }
+    }
+}
+
+extension View {
+    func lavaTextInputBody(
+        keyboardType: UIKeyboardType = .default,
+        submitLabel: SubmitLabel = .done,
+        axis: Axis = .horizontal
+    ) -> some View {
+        modifier(
+            LavaTextInputBodyModifier(
+                keyboardType: keyboardType,
+                submitLabel: submitLabel,
+                axis: axis
+            )
+        )
+    }
+}
+
+private struct LavaTextInputBodyModifier: ViewModifier {
+    let keyboardType: UIKeyboardType
+    let submitLabel: SubmitLabel
+    let axis: Axis
+
+    func body(content: Content) -> some View {
+        content
+            .font(.body)
+            .textInputAutocapitalization(.never)
+            .keyboardType(keyboardType)
+            .autocorrectionDisabled()
+            .submitLabel(submitLabel)
+            .lineLimit(axis == .vertical ? nil : 1)
+            .fixedSize(horizontal: false, vertical: axis == .vertical)
+    }
+}
+
+struct LavaDetailRow: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String?
+    let tint: Color
+
+    init(
+        systemImage: String,
+        title: String,
+        subtitle: String? = nil,
+        tint: Color = LavaStyle.safeGreen
+    ) {
+        self.systemImage = systemImage
+        self.title = title
+        self.subtitle = subtitle
+        self.tint = tint
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title.lavaLocalized)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let subtitle {
+                    Text(subtitle.lavaLocalized)
+                        .lavaRowSubtitleText()
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+struct LavaMetricPill: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(title.lavaLocalized)
+                .lavaMetricLabelText()
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 54)
+        .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius))
+    }
+}
+
+struct LavaInfoCard<Content: View>: View {
+    let content: Content
+    let borderTint: Color?
+
+    init(borderTint: Color? = nil, @ViewBuilder content: () -> Content) {
+        self.borderTint = borderTint
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lavaPanelBackground(cornerRadius: 20, borderTint: borderTint)
+    }
+}
+
+struct LavaTabOverviewCard<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        LavaInfoCard {
+            content
+                .frame(height: 262, alignment: .center)
+        }
+    }
+}
+
+struct LavaOverviewMetricBlock: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 42, weight: .bold, design: .rounded))
+                .foregroundStyle(LavaStyle.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+                .allowsTightening(true)
+                .minimumScaleFactor(0.9)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+
+            Text(label.lavaLocalized)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(LavaStyle.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .frame(height: 20)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 74)
+    }
+}
+
+struct LavaOverviewBannerRow: View {
+    let systemImage: String
+    let title: String
+    let tint: Color
+    let background: Color
+    var allowsTitleWrapping: Bool = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+
+            Text(title.lavaLocalized)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .lineLimit(titleLineLimit)
+                .minimumScaleFactor(allowsTitleWrapping ? 1 : 0.82)
+                .fixedSize(horizontal: false, vertical: allowsTitleWrapping)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, allowsTitleWrapping ? 10 : 0)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 50)
+        .frame(height: rowHeight)
+        .background(background, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var rowHeight: CGFloat? {
+        allowsTitleWrapping ? nil : 50
+    }
+
+    private var titleLineLimit: Int? {
+        allowsTitleWrapping ? nil : 1
+    }
+}
+
+struct LavaInfoPanel: View {
+    let title: String
+    let description: String?
+    let systemImage: String?
+    let tint: Color
+    var borderTint: Color? = nil
+
+    init(
+        title: String,
+        description: String? = nil,
+        systemImage: String? = nil,
+        tint: Color = LavaStyle.safeGreen,
+        borderTint: Color? = nil
+    ) {
+        self.title = title
+        self.description = description
+        self.systemImage = systemImage
+        self.tint = tint
+        self.borderTint = borderTint
+    }
+
+    var body: some View {
+        LavaInfoCard(borderTint: borderTint) {
+            VStack(alignment: .leading, spacing: description == nil ? 0 : 10) {
+                header
+
+                if let description {
+                    Text(description.lavaLocalized)
+                        .lavaSupportingText()
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        titleText
+            .font(.headline)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(title.lavaLocalized)
+    }
+
+    private var titleText: Text {
+        if let systemImage {
+            Text(Image(systemName: systemImage))
+                .foregroundColor(tint)
+                + Text(" \(title.lavaLocalized)")
+                .foregroundColor(LavaStyle.ink)
+        } else {
+            Text(title.lavaLocalized)
+                .foregroundColor(LavaStyle.ink)
+        }
+    }
+}

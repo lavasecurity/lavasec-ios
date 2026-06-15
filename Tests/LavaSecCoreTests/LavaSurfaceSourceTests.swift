@@ -2,11 +2,11 @@ import XCTest
 
 final class LavaSurfaceSourceTests: XCTestCase {
     func testSharedSurfaceScaffoldDefinesCardPanelAndSelectionTokens() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaTokens.swift", in: "LavaSecApp/LavaDesignSystem")
         let viewExtensionBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "extension View",
-            endingBefore: "func lavaListChrome()"
+            endingBefore: "*** end ***"
         )
 
         XCTAssertTrue(rootSource.contains("enum LavaSurface"))
@@ -24,7 +24,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
     }
 
     func testFormAndListScaffoldsUseCardSurfaceToken() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
         let plainCardBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaPlainCard<Content: View>: View",

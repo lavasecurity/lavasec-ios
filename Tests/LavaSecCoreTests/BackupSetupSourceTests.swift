@@ -118,7 +118,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testPasskeyChoiceButtonsUseMatchingHeights() throws {
         let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let rootSource = try Self.readAppSource("LavaSecApp/RootView.swift")
+        let rootSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
 
         XCTAssertTrue(rootSource.contains("let height: CGFloat"))
         XCTAssertTrue(setupSource.contains("LavaPanelActionButtonStyle(height: 44"))

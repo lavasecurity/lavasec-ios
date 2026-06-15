@@ -2,7 +2,7 @@ import XCTest
 
 final class LavaSheetScaffoldSourceTests: XCTestCase {
     func testSheetScaffoldUsesNativeSafeAreaBarsForFooters() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let scaffoldBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
@@ -20,7 +20,7 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
     }
 
     func testSheetScaffoldGivesScrollContentNativeBarBreathingRoom() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let scaffoldBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
@@ -35,7 +35,7 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
     }
 
     func testSheetScaffoldKeepsIOSSixteenPresentationBackgroundFallback() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let scaffoldBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
@@ -48,7 +48,7 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
     }
 
     func testSheetScaffoldUnifiesTopHeaderAndNavigationMaterial() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let scaffoldBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",

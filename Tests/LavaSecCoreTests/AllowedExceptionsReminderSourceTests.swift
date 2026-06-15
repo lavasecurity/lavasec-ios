@@ -49,7 +49,7 @@ final class AllowedExceptionsReminderSourceTests: XCTestCase {
     }
 
     func testOverviewBannerRowSupportsOptInWrappingWithCenteredIcon() throws {
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
         let bannerBlock = try Self.sourceBlock(
             in: rootSource,
             startingAt: "struct LavaOverviewBannerRow: View",

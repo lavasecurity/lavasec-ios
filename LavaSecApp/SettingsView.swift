@@ -94,6 +94,7 @@ private struct SettingsRouteDestinationView: View {
                 CustomizationSettingsView()
             case .dnsResolver:
                 DNSResolverSettingsView()
+                    .lavaTier(.technical)
             case .privacyData:
                 PrivacyDataSettingsView()
             case .security:
@@ -104,6 +105,7 @@ private struct SettingsRouteDestinationView: View {
                 LegalNoticesView()
             case .versionNerdStats:
                 VersionNerdStatsView()
+                    .lavaTier(.technical)
 #if DEBUG || LAVA_QA_TOOLS
             case .phoneQA:
                 PhoneQASettingsView()
@@ -180,7 +182,7 @@ struct SettingsView: View {
                     SettingsNavigationRow(
                         path: $path,
                         route: .upgrade,
-                        systemImage: "sparkles",
+                        badge: LavaSecurityPlusGlyph(),
                         title: "Upgrade",
                         summary: viewModel.planStatusText
                     )
@@ -289,22 +291,44 @@ struct SettingsView: View {
     }
 }
 
+/// The Lava Security+ mark: a shield with a centered plus, reading as "Security+".
+/// No stock SF Symbol composes shield + plus, so it's built from `shield.fill` +
+/// `plus`. (Natural home for a `LavaIconRole.securityPlus` once the Phase 2 icon
+/// layer lands.)
+private struct LavaSecurityPlusGlyph: View {
+    var body: some View {
+        Image(systemName: "shield.fill")
+            .font(.headline)
+            .foregroundStyle(LavaStyle.safeGreen)
+            .overlay {
+                Image(systemName: "plus")
+                    .font(.system(size: 9.9, weight: .heavy))
+                    .foregroundStyle(LavaStyle.softGreen)
+                    .offset(y: -1)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 private struct SettingsNavigationRow: View {
     @EnvironmentObject private var security: SecurityController
     @State private var isShowingDestination = false
     let route: SettingsRoute
     let systemImage: String?
+    let badgeGlyph: AnyView?
     let title: String
     let summary: String
 
     init(
         route: SettingsRoute,
         systemImage: String? = nil,
+        badgeGlyph: AnyView? = nil,
         title: String,
         summary: String
     ) {
         self.route = route
         self.systemImage = systemImage
+        self.badgeGlyph = badgeGlyph
         self.title = title
         self.summary = summary
     }
@@ -324,6 +348,24 @@ private struct SettingsNavigationRow: View {
         )
     }
 
+    /// For a custom composed badge glyph (e.g. the Security+ shield+plus, which
+    /// has no stock SF Symbol).
+    init(
+        path: Binding<[SettingsRoute]>,
+        route: SettingsRoute,
+        badge: some View,
+        title: String,
+        summary: String
+    ) {
+        self.init(
+            route: route,
+            systemImage: nil,
+            badgeGlyph: AnyView(badge),
+            title: title,
+            summary: summary
+        )
+    }
+
     var body: some View {
         Button {
             Task {
@@ -335,7 +377,11 @@ private struct SettingsNavigationRow: View {
             }
         } label: {
             HStack(spacing: 12) {
-                if let systemImage {
+                if let badgeGlyph {
+                    badgeGlyph
+                        .frame(width: 34, height: 34)
+                        .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: 10))
+                } else if let systemImage {
                     Image(systemName: systemImage)
                         .font(.headline)
                         .foregroundStyle(LavaStyle.safeGreen)
@@ -888,7 +934,7 @@ private struct UpgradeSettingsView: View {
             if let message = viewModel.lavaSecurityPlusMessage {
                 Text(message)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(viewModel.lavaSecurityPlusMessageIsError ? .red : LavaStyle.safeGreen)
+                    .foregroundStyle(viewModel.lavaSecurityPlusMessageIsError ? LavaStyle.errorText : LavaStyle.safeGreen)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -1249,6 +1295,7 @@ private struct CustomizationSettingsView: View {
                     availability: viewModel.lavaGuardAvailability(for: viewModel.lavaGuardLook),
                     onSelect: selectLavaGuardLook
                 )
+                .lavaTier(.celebratory)
 
                 LavaPlainCard {
                     Toggle("Match App Icon to Lava Guard", isOn: updatesAppIconBinding)
@@ -4032,6 +4079,7 @@ private struct VersionNerdStatsView: View {
                         Divider()
                         LabeledContent("Sampled", value: viewModel.tunnelHealthUpdatedText)
                     }
+                    .lavaTierMetadata()
                 }
             }
         }
