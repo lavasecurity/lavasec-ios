@@ -68,3 +68,36 @@ jobs:
             "$GITLEAKS_IMAGE" \
             detect --source=/repo --config=/gitleaks-config/.gitleaks.toml \
             --no-banner --redact --exit-code=1
+
+  mobsfscan:
+    name: mobsfscan (mobile SAST)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run mobsfscan
+        # mobile-specific static analysis (insecure storage, weak crypto, ATS, etc.).
+        # Report to the Security tab rather than gate CI for now — `|| true` keeps a
+        # finding from failing the build while the ruleset beds in. Promote to a
+        # required check once the signal is trusted.
+        run: |
+          python -m pip install --upgrade pip
+          pip install mobsfscan
+          mobsfscan --sarif --output mobsfscan.sarif . || true
+
+      - name: Upload SARIF to code scanning
+        # Skip on fork pull requests: their read-only token cannot write security
+        # events, so the upload would error. Pushes and same-repo PRs upload fine.
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: mobsfscan.sarif
+          category: mobsfscan
