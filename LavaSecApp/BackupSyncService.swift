@@ -30,6 +30,7 @@ protocol BackupSyncServicing: Sendable {
     func upload(_ envelope: ZeroKnowledgeBackupEnvelope, session: BackupAccountSession) async throws
     func fetchLatest(session: BackupAccountSession) async throws -> ZeroKnowledgeBackupEnvelope?
     func markRestored(session: BackupAccountSession) async throws
+    func deleteRemote(session: BackupAccountSession) async throws
 }
 
 enum BackupSyncServiceError: Error, LocalizedError, Equatable {
@@ -111,6 +112,22 @@ struct SupabaseBackupSyncService: BackupSyncServicing {
         )
         request.httpMethod = "PATCH"
         request.httpBody = try Self.makeJSONEncoder().encode(UserBackupRestorePatch(lastRestoredAt: Date()))
+
+        let (_, response) = try await urlSession.data(for: request)
+        try validateMutationResponse(response)
+    }
+
+    // Hard delete (not a `disabled_at` soft flag): per our zero-knowledge stance,
+    // clearing/disabling backup must remove the stored row entirely so nothing the
+    // server holds can be a decrypting copy. RLS scopes the delete to the row owner.
+    func deleteRemote(session: BackupAccountSession) async throws {
+        var request = try makeRequest(
+            path: "user_backups",
+            queryItems: [URLQueryItem(name: "user_id", value: "eq.\(session.userID)")],
+            session: session
+        )
+        request.httpMethod = "DELETE"
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
 
         let (_, response) = try await urlSession.data(for: request)
         try validateMutationResponse(response)

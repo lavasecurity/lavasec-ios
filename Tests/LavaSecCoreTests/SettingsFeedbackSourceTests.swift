@@ -484,6 +484,20 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(accountBlock.contains("Lava waits 30 minutes after your last settings change before it tries an automatic upload."))
         XCTAssertFalse(accountBlock.contains("LavaDetailRow(\n                            systemImage: \"lock.shield\""))
 
+        // Clear/Disable backup maintenance panel: a destructive pair styled like
+        // "Delete Local Logs" (trash glyph + red), gated behind a confirmation
+        // dialog, placed after the Automatic Backup control.
+        XCTAssertTrue(accountBlock.contains("backupMaintenanceButton(.clear)"))
+        XCTAssertTrue(accountBlock.contains("backupMaintenanceButton(.disable)"))
+        XCTAssertTrue(accountBlock.contains("iconTint: .red, titleTint: .red"))
+        XCTAssertTrue(accountBlock.contains("Image(systemName: \"trash\")"))
+        XCTAssertTrue(accountBlock.contains("Disabling backup also permanently deletes the copy stored for your account."))
+        XCTAssertTrue(accountBlock.containsInOrder([
+            "title: \"Automatic Backup\"",
+            "backupMaintenanceButton(.clear)",
+            "backupMaintenanceButton(.disable)"
+        ]))
+
         let optionControlBlock = try Self.sourceBlock(
             in: source,
             startingAt: "private struct BackupOptionControl: View",

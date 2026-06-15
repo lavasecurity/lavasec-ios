@@ -6,43 +6,40 @@ struct BackupRestoreView: View {
     @State private var recoveryPhrasePaste = ""
     @State private var recoveryWords = Array(repeating: "", count: BackupRecoveryPhrase.wordCount)
     @State private var mode: BackupRestoreMode = .deviceKey
-    @State private var message: String?
-    @State private var isError = false
+    @State private var restoreStatus: RestoreStatus = .choosing
     @State private var isRestoring = false
+    @FocusState private var focusedWord: Int?
 
     var body: some View {
         LavaScreenContent(spacing: 22) {
-            LavaInfoPanel(
-                title: "Restore backup",
-                description: "Unlock happens on this device",
-                systemImage: "arrow.clockwise.icloud.fill"
-            )
+            LavaSectionGroup("Unlock and restore locally") {
+                VStack(alignment: .leading, spacing: 14) {
+                    RestoreStatusPanel(status: restoreStatus)
 
-            LavaSectionGroup("Unlock") {
-                LavaPlainCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Picker("Unlock method", selection: $mode) {
-                            ForEach(BackupRestoreMode.allCases, id: \.self) { mode in
-                                Text(mode.title.lavaLocalized).tag(mode)
+                    LavaPlainCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Picker("Unlock method", selection: $mode) {
+                                ForEach(BackupRestoreMode.allCases, id: \.self) { mode in
+                                    Text(mode.title.lavaLocalized).tag(mode)
+                                }
                             }
-                        }
-                        .pickerStyle(.segmented)
+                            .pickerStyle(.segmented)
+                            // Switching method means the user is re-choosing, so a
+                            // prior success/failure/cancel banner shouldn't linger.
+                            .onChange(of: mode) { _, _ in
+                                if restoreStatus != .restoring {
+                                    restoreStatus = .choosing
+                                }
+                            }
 
-                        switch mode {
-                        case .deviceKey:
-                            Label("Use this device's keychain".lavaLocalized, systemImage: "iphone")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                        case .passkey:
-                            Label("Use your saved passkey".lavaLocalized, systemImage: "person.badge.key")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                        case .recoveryCode:
-                            recoveryPhraseFields
+                            switch mode {
+                            case .deviceKey:
+                                RestoreMethodHint(systemImage: "iphone", title: "Use this device's keychain")
+                            case .passkey:
+                                RestoreMethodHint(systemImage: "person.badge.key", title: "Use your saved passkey")
+                            case .recoveryCode:
+                                recoveryPhraseFields
+                            }
                         }
                     }
                 }
@@ -51,49 +48,51 @@ struct BackupRestoreView: View {
             Button {
                 restore()
             } label: {
-                Label((isRestoring ? "Restoring" : "Restore Backup").lavaLocalized, systemImage: "arrow.clockwise")
+                Label((isRestoring ? "Restoring" : "Restore Backup").lavaLocalized, systemImage: "icloud.and.arrow.down")
             }
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(mode.isUnavailable || (mode.requiresTypedSecret && restoreSecret.isEmpty) || isRestoring)
-
-            if let message {
-                Text(message.lavaLocalized)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(isError ? LavaStyle.lavaOrange : LavaStyle.safeGreen)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            }
         }
         .navigationTitle("Restore Backup".lavaLocalized)
     }
 
     private var recoveryPhraseFields: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            TextField("Paste full phrase".lavaLocalized, text: $recoveryPhrasePaste, axis: .vertical)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...4)
+        VStack(alignment: .leading, spacing: 10) {
+            LavaTextInputPanel {
+                LavaTextEditorInputRow(
+                    title: "Paste full phrase",
+                    text: $recoveryPhrasePaste,
+                    placeholder: "Paste the full recovery phrase",
+                    minHeight: 60
+                )
                 .onChange(of: recoveryPhrasePaste) { _, newValue in
                     recoveryWords = BackupRecoveryPhrase.fillSlots(from: newValue)
                 }
 
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 8),
-                    GridItem(.flexible(), spacing: 8)
-                ],
-                spacing: 8
-            ) {
-                ForEach(0..<BackupRecoveryPhrase.wordCount, id: \.self) { index in
-                    BackupRecoveryWordField(
-                        number: index + 1,
-                        word: recoveryWordBinding(index: index)
-                    )
+                Divider()
+
+                LavaTextInputRow(title: "Words") {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 8),
+                            GridItem(.flexible(), spacing: 8)
+                        ],
+                        spacing: 8
+                    ) {
+                        ForEach(0..<BackupRecoveryPhrase.wordCount, id: \.self) { index in
+                            BackupRecoveryWordField(
+                                number: index + 1,
+                                word: recoveryWordBinding(index: index),
+                                fieldIndex: index,
+                                focusedField: $focusedWord,
+                                onSpace: { advanceFocus(after: index) }
+                            )
+                        }
+                    }
                 }
             }
 
-            Text("Spaces and capitalization do not matter.".lavaLocalized)
+            Text("Spaces and capitalization do not matter. Press space to jump to the next word.".lavaLocalized)
                 .lavaQuietNoteText()
         }
     }
@@ -132,31 +131,131 @@ struct BackupRestoreView: View {
         }
     }
 
+    // A space inside a word field means "I'm done with this word" — strip it and
+    // jump to the next field (or dismiss the keyboard on the last word), so typing
+    // "word1 word2 word3" walks the grid the way a recovery phrase reads.
+    private func advanceFocus(after index: Int) {
+        let next = index + 1
+        if next < BackupRecoveryPhrase.wordCount {
+            focusedWord = next
+        } else {
+            focusedWord = nil
+        }
+    }
+
     private func restore() {
         isRestoring = true
+        restoreStatus = .restoring
         let unlockSecret = restoreSecret
         Task {
             do {
                 try await viewModel.restoreEncryptedBackup(secret: unlockSecret, mode: mode)
                 await MainActor.run {
-                    message = "Backup restored. Lava will use the restored settings on this device."
-                    isError = false
+                    restoreStatus = .success
                     isRestoring = false
                 }
             } catch {
                 await MainActor.run {
-                    message = error.localizedDescription
-                    isError = true
+                    restoreStatus = Self.failureStatus(for: error)
                     isRestoring = false
                 }
             }
         }
+    }
+
+    // A short, mapped reason — not the raw error dump. EncryptedBackupError and
+    // BackupPasskeyError are already friendly one-liners; a user-cancelled passkey
+    // sheet is surfaced as a calm "cancelled", not a failure.
+    private static func failureStatus(for error: Error) -> RestoreStatus {
+        if let passkeyError = error as? BackupPasskeyError, case .canceled = passkeyError {
+            return .cancelled
+        }
+
+        return .failed(reason: error.localizedDescription)
+    }
+}
+
+private enum RestoreStatus: Equatable {
+    case choosing
+    case restoring
+    case success
+    case failed(reason: String)
+    case cancelled
+
+    var title: String {
+        switch self {
+        case .choosing:
+            "Choose a method"
+        case .restoring:
+            "Restoring…"
+        case .success:
+            "Restored successfully"
+        case .failed:
+            "Restore failed"
+        case .cancelled:
+            "Restore cancelled"
+        }
+    }
+
+    // Always one short line so the panel keeps a steady height across states.
+    var detail: String {
+        switch self {
+        case .choosing:
+            "Unlock happens on this device."
+        case .restoring:
+            "Unlocking on this device…"
+        case .success:
+            "Lava will use the restored settings on this device."
+        case .failed(let reason):
+            reason
+        case .cancelled:
+            "No changes were made."
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .choosing, .restoring, .success:
+            LavaStyle.safeGreen
+        case .failed:
+            LavaStyle.lavaOrange
+        case .cancelled:
+            LavaStyle.secondaryText
+        }
+    }
+}
+
+private struct RestoreStatusPanel: View {
+    let status: RestoreStatus
+
+    var body: some View {
+        LavaInfoPanel(
+            title: status.title,
+            description: status.detail,
+            systemImage: "icloud.and.arrow.down.fill",
+            tint: status.tint
+        )
+    }
+}
+
+private struct RestoreMethodHint: View {
+    let systemImage: String
+    let title: String
+
+    var body: some View {
+        Label(title.lavaLocalized, systemImage: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }
 
 private struct BackupRecoveryWordField: View {
     let number: Int
     @Binding var word: String
+    let fieldIndex: Int
+    @FocusState.Binding var focusedField: Int?
+    let onSpace: () -> Void
 
     var body: some View {
         HStack(spacing: 7) {
@@ -166,10 +265,16 @@ private struct BackupRecoveryWordField: View {
                 .frame(width: 18, alignment: .trailing)
 
             TextField("Word \(number)".lavaLocalized, text: $word)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+                .focused($focusedField, equals: fieldIndex)
+                .lavaTextInputBody(submitLabel: .next)
+                .onChange(of: word) { _, newValue in
+                    guard newValue.contains(" ") else {
+                        return
+                    }
+
+                    word = newValue.replacingOccurrences(of: " ", with: "")
+                    onSpace()
+                }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)

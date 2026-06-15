@@ -849,6 +849,11 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isAccountDeletionInProgress = false
     @Published private(set) var encryptedBackupState: EncryptedBackupState = .off
     @Published private(set) var isBackingUpNow = false
+    @Published private(set) var isBackupMaintenanceInProgress = false
+    // Tracks any in-flight server write (manual, automatic, setup, or sign-in
+    // upload) so Clear/Disable never overlap an upload that could resurrect the
+    // row being deleted.
+    private var isUploadingEncryptedBackup = false
     @Published private(set) var isAutomaticBackupEnabled = false
     @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map {
         LavaSecurityPlusOffer(
@@ -4053,7 +4058,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func backUpNow() async {
-        guard !isBackingUpNow else {
+        guard !isBackingUpNow, !isBackupMaintenanceInProgress else {
             return
         }
 
@@ -4113,6 +4118,98 @@ final class AppViewModel: ObservableObject {
             if let session = try await accountAuthService.currentBackupSession() {
                 try? await backupSyncService.markRestored(session: session)
             }
+        }
+    }
+
+    /// Permanently deletes the uploaded backup copy stored for this account while
+    /// keeping encrypted backup configured on this device. Only when the server copy
+    /// is confirmed gone do we forget the upload marker (state returns to "not
+    /// uploaded yet" and the next backup re-uploads a fresh copy). If the delete
+    /// can't be confirmed, nothing local changes and the failure is surfaced — we
+    /// never claim a backup was cleared when it may still exist on the server.
+    func clearEncryptedBackup() async {
+        guard !isBackupMaintenanceInProgress, !isBackingUpNow, !isUploadingEncryptedBackup else {
+            return
+        }
+        isBackupMaintenanceInProgress = true
+        defer { isBackupMaintenanceInProgress = false }
+
+        switch await deleteRemoteEncryptedBackup() {
+        case .deleted:
+            backupEnvelopeStore.clearUploadMarker()
+            loadEncryptedBackupState()
+        case .unconfirmed:
+            encryptedBackupState = .failed(
+                message: "Couldn't delete the backup stored for your account — you may be offline or signed out. The backup was left in place; try again when you're back online."
+            )
+        }
+    }
+
+    /// Turns encrypted backup off on this device: permanently deletes the uploaded
+    /// copy, then tears down every local unlock (device secret, passkey credential,
+    /// recovery code) plus the local envelope, and stops automatic backup. The local
+    /// teardown only runs once the server copy is confirmed gone, so a failed delete
+    /// leaves backup intact rather than silently orphaning the server copy.
+    func disableEncryptedBackup() async {
+        guard !isBackupMaintenanceInProgress, !isBackingUpNow, !isUploadingEncryptedBackup else {
+            return
+        }
+        isBackupMaintenanceInProgress = true
+        defer { isBackupMaintenanceInProgress = false }
+
+        switch await deleteRemoteEncryptedBackup() {
+        case .deleted:
+            try? backupKeychainStore.deleteRecoveryCode()
+            try? backupKeychainStore.deleteDeviceSecret()
+            try? backupKeychainStore.deletePasskeyCredentialID()
+            backupEnvelopeStore.deleteEnvelope()
+            setAutomaticBackupEnabled(false)
+            loadEncryptedBackupState()
+        case .unconfirmed:
+            encryptedBackupState = .failed(
+                message: "Couldn't delete the backup stored for your account — you may be offline or signed out. Backup is still on; try again when you're back online."
+            )
+        }
+    }
+
+    private enum RemoteBackupDeletionOutcome {
+        case deleted        // confirmed gone from the server, or no server copy exists
+        case unconfirmed    // couldn't reach/authorize the server — a copy may remain
+    }
+
+    // Hard-deletes the server copy and reports whether it is confirmed gone, so
+    // callers never claim deletion they couldn't verify. `.deleted` when the row is
+    // removed (or there is no sync service, so no server copy exists); `.unconfirmed`
+    // when signed out or the request fails. Mirrors uploadEncryptedBackup's single
+    // 401 refresh-retry.
+    private func deleteRemoteEncryptedBackup() async -> RemoteBackupDeletionOutcome {
+        guard let backupSyncService else {
+            return .deleted
+        }
+
+        do {
+            guard let session = try await accountAuthService.currentBackupSession() else {
+                accountAuthState = accountAuthService.state
+                return .unconfirmed
+            }
+            accountAuthState = accountAuthService.state
+            try await backupSyncService.deleteRemote(session: session)
+            return .deleted
+        } catch BackupSyncServiceError.requestFailed(let statusCode) where statusCode == 401 {
+            guard let refreshedSession = try? await accountAuthService.refreshCurrentSession() else {
+                accountAuthState = accountAuthService.state
+                return .unconfirmed
+            }
+            accountAuthState = accountAuthService.state
+            do {
+                try await backupSyncService.deleteRemote(session: refreshedSession)
+                return .deleted
+            } catch {
+                return .unconfirmed
+            }
+        } catch {
+            accountAuthState = accountAuthService.state
+            return .unconfirmed
         }
     }
 
@@ -6253,10 +6350,18 @@ final class AppViewModel: ObservableObject {
         _ envelope: ZeroKnowledgeBackupEnvelope,
         estimatedByteSize: Int
     ) async {
+        // Never write to the server while a Clear/Disable is removing it — otherwise
+        // an in-flight upload could re-create the row the user just deleted.
+        guard !isBackupMaintenanceInProgress else {
+            return
+        }
         guard let backupSyncService else {
             encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
             return
         }
+
+        isUploadingEncryptedBackup = true
+        defer { isUploadingEncryptedBackup = false }
 
         do {
             guard let session = try await accountAuthService.currentBackupSession() else {

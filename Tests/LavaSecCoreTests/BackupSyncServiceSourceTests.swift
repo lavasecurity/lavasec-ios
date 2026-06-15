@@ -10,6 +10,20 @@ final class BackupSyncServiceSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("serverRecoveryShare: metadata.serverRecoveryShare"))
     }
 
+    func testDeleteRemoteHardDeletesViaHTTPDelete() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupSyncService.swift")
+
+        XCTAssertTrue(source.contains("func deleteRemote(session: BackupAccountSession) async throws"))
+        XCTAssertTrue(source.contains("request.httpMethod = \"DELETE\""))
+        // Security-critical: the delete must stay scoped to the row owner so it can
+        // never widen to other accounts' backups.
+        XCTAssertTrue(source.contains("path: \"user_backups\""))
+        XCTAssertTrue(source.contains("URLQueryItem(name: \"user_id\", value: \"eq.\\(session.userID)\")"))
+        XCTAssertTrue(source.contains("request.setValue(\"return=minimal\", forHTTPHeaderField: \"Prefer\")"))
+        // Hard delete, not a soft `disabled_at` flag.
+        XCTAssertFalse(source.contains("UserBackupDisablePatch"))
+    }
+
     func testBackupSyncErrorsUseActionableCopy() throws {
         let source = try Self.readAppSource("LavaSecApp/BackupSyncService.swift")
 

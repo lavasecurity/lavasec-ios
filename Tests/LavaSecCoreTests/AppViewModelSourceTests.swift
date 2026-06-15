@@ -893,6 +893,65 @@ final class AppViewModelSourceTests: XCTestCase {
         )
     }
 
+    func testClearAndDisableBackupDivergeOnLocalEnvelopeHandling() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let clearBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func clearEncryptedBackup() async {",
+            endingBefore: "func disableEncryptedBackup() async {"
+        )
+        let disableBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func disableEncryptedBackup() async {",
+            endingBefore: "private enum RemoteBackupDeletionOutcome {"
+        )
+
+        // Clear keeps the local envelope (only forgets the upload marker), so backup
+        // stays configured and can re-upload a fresh copy.
+        XCTAssertTrue(clearBlock.contains("backupEnvelopeStore.clearUploadMarker()"))
+        XCTAssertFalse(clearBlock.contains("backupEnvelopeStore.deleteEnvelope()"))
+        XCTAssertFalse(clearBlock.contains("setAutomaticBackupEnabled(false)"))
+
+        // Disable tears the local envelope down and stops automatic backup.
+        XCTAssertTrue(disableBlock.contains("backupEnvelopeStore.deleteEnvelope()"))
+        XCTAssertTrue(disableBlock.contains("setAutomaticBackupEnabled(false)"))
+        XCTAssertFalse(disableBlock.contains("backupEnvelopeStore.clearUploadMarker()"))
+
+        // Both hard-delete the server copy first and only mutate local state when it
+        // is confirmed gone — never claim a deletion that could not be verified.
+        XCTAssertTrue(clearBlock.contains("await deleteRemoteEncryptedBackup()"))
+        XCTAssertTrue(disableBlock.contains("await deleteRemoteEncryptedBackup()"))
+        XCTAssertTrue(clearBlock.contains("case .unconfirmed:"))
+        XCTAssertTrue(disableBlock.contains("case .unconfirmed:"))
+    }
+
+    func testBackupMaintenanceAndUploadsAreMutuallyExclusive() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let uploadBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func uploadEncryptedBackup(",
+            endingBefore: "private func uploadPendingEncryptedBackupIfPossible("
+        )
+        let clearBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func clearEncryptedBackup() async {",
+            endingBefore: "func disableEncryptedBackup() async {"
+        )
+        let disableBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func disableEncryptedBackup() async {",
+            endingBefore: "private enum RemoteBackupDeletionOutcome {"
+        )
+
+        // Uploads refuse to run while a Clear/Disable is in progress, so an in-flight
+        // upload can never re-create the row maintenance just deleted.
+        XCTAssertTrue(uploadBlock.contains("guard !isBackupMaintenanceInProgress else {"))
+        XCTAssertTrue(uploadBlock.contains("isUploadingEncryptedBackup = true"))
+        // And maintenance refuses to run while any upload is in flight.
+        XCTAssertTrue(clearBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
+        XCTAssertTrue(disableBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
+    }
+
     private static func source(named fileName: String, in directoryName: String) throws -> String {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let packageRootURL = testFileURL

@@ -68,6 +68,41 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertTrue(restoreSource.contains("Use your saved passkey"))
     }
 
+    func testRestoreShowsStatusIndicatorPanelInsteadOfMessageLine() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+
+        XCTAssertTrue(source.contains("\"Unlock and restore locally\""))
+        XCTAssertTrue(source.contains("RestoreStatusPanel"))
+        XCTAssertTrue(source.contains("case failed(reason: String)"))
+        XCTAssertTrue(source.contains("Restored successfully"))
+        XCTAssertTrue(source.contains("Restore failed"))
+        XCTAssertTrue(source.contains("Restore cancelled"))
+        // The crisp status indicator replaces the old free-floating message line.
+        XCTAssertFalse(source.contains("isError ? LavaStyle.lavaOrange : LavaStyle.safeGreen"))
+    }
+
+    func testRecoveryEntryUsesTextInputScaffoldWithSpaceToAdvance() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+
+        XCTAssertTrue(source.contains("LavaTextInputPanel"))
+        XCTAssertTrue(source.contains("LavaTextEditorInputRow("))
+        XCTAssertTrue(source.contains("@FocusState private var focusedWord: Int?"))
+        XCTAssertTrue(source.contains("@FocusState.Binding var focusedField: Int?"))
+        XCTAssertTrue(source.contains("advanceFocus(after:"))
+        XCTAssertTrue(source.contains("replacingOccurrences(of: \" \", with: \"\")"))
+        // Pin the wiring at the call site, not just the declarations: the field must
+        // bind the shared focus state and invoke the advance hook on space.
+        XCTAssertTrue(source.contains(".focused($focusedField, equals: fieldIndex)"))
+        XCTAssertTrue(source.contains("onSpace: { advanceFocus(after: index) }"))
+    }
+
+    func testRestoreCancellationIsDistinctFromFailure() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+
+        XCTAssertTrue(source.contains("if let passkeyError = error as? BackupPasskeyError, case .canceled = passkeyError"))
+        XCTAssertTrue(source.contains("return .cancelled"))
+    }
+
     func testWrongRecoveryPhraseUsesFriendlyMessage() throws {
         let source = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
 

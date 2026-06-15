@@ -82,6 +82,21 @@ public struct BackupEnvelopeStore: Sendable {
         storage.set(uploadedAt, forKey: Keys.lastUploadedAt)
     }
 
+    /// Forgets the recorded upload timestamp while keeping the local envelope.
+    /// After this, `currentState()` reports `.waitingForSignIn` for a still-present
+    /// envelope — used when the uploaded server copy is cleared but encrypted
+    /// backup stays configured on this device and can re-upload.
+    public func clearUploadMarker() {
+        storage.removeObject(forKey: Keys.lastUploadedAt)
+    }
+
+    /// Removes the local envelope and its upload timestamp, so `currentState()`
+    /// reports `.off`. Used when encrypted backup is fully disabled on this device.
+    public func deleteEnvelope() {
+        storage.removeObject(forKey: Keys.envelope)
+        storage.removeObject(forKey: Keys.lastUploadedAt)
+    }
+
     public func lastUploadedAt() -> Date? {
         storage.date(forKey: Keys.lastUploadedAt)
     }

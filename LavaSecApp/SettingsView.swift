@@ -510,6 +510,7 @@ private struct AccountSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
     @State private var isShowingAccountSheet = false
+    @State private var backupMaintenanceTarget: BackupMaintenanceAction?
 
     var body: some View {
         SettingsSubpageContent {
@@ -597,13 +598,13 @@ private struct AccountSettingsView: View {
                                             ProgressView()
                                                 .controlSize(.small)
                                         } else {
-                                            Image(systemName: "arrow.clockwise.icloud.fill")
+                                            Image(systemName: "icloud.and.arrow.up.fill")
                                                 .font(.title3.weight(.semibold))
                                         }
                                     }
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow)
+                                .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
                                 .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
                             } else {
                                 NavigationLink {
@@ -625,7 +626,7 @@ private struct AccountSettingsView: View {
                                 BackupRestoreView()
                             } label: {
                                 SettingsActionRow(title: "Restore Backup") {
-                                    Image(systemName: "arrow.clockwise.icloud.fill")
+                                    Image(systemName: "icloud.and.arrow.down.fill")
                                         .font(.title3.weight(.semibold))
                                 }
                             }
@@ -642,10 +643,78 @@ private struct AccountSettingsView: View {
                     )
                     .disabled(!viewModel.isEncryptedBackupConfigured)
                     .opacity(viewModel.isEncryptedBackupConfigured ? 1 : 0.45)
+
+                    if viewModel.isEncryptedBackupConfigured {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LavaPlainCard {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    backupMaintenanceButton(.clear)
+
+                                    Divider()
+
+                                    backupMaintenanceButton(.disable)
+                                }
+                            }
+
+                            Text("Disabling backup also permanently deletes the copy stored for your account.")
+                                .lavaQuietNoteText()
+                        }
+                    }
                 }
             }
         }
         .navigationTitle("Account & Backup")
+        .alert(
+            backupMaintenanceTarget?.title.lavaLocalized ?? "",
+            isPresented: backupMaintenanceConfirmationBinding,
+            presenting: backupMaintenanceTarget
+        ) { target in
+            Button("Cancel", role: .cancel) {}
+            Button(target.actionTitle.lavaLocalized, role: .destructive) {
+                performBackupMaintenance(target)
+            }
+        } message: { target in
+            Text(target.message.lavaLocalized)
+        }
+    }
+
+    private func backupMaintenanceButton(_ target: BackupMaintenanceAction) -> some View {
+        Button(role: .destructive) {
+            backupMaintenanceTarget = target
+        } label: {
+            SettingsActionRow(title: target.buttonTitle, iconTint: .red, titleTint: .red) {
+                Image(systemName: "trash")
+                    .font(.title3.weight(.semibold))
+            }
+            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isBackupMaintenanceInProgress || viewModel.isBackingUpNow)
+    }
+
+    private var backupMaintenanceConfirmationBinding: Binding<Bool> {
+        Binding {
+            backupMaintenanceTarget != nil
+        } set: { isPresented in
+            if !isPresented {
+                backupMaintenanceTarget = nil
+            }
+        }
+    }
+
+    private func performBackupMaintenance(_ target: BackupMaintenanceAction) {
+        Task {
+            guard await security.requireAuthentication(for: .appSettings, reason: target.authReason) else {
+                return
+            }
+
+            switch target {
+            case .clear:
+                await viewModel.clearEncryptedBackup()
+            case .disable:
+                await viewModel.disableEncryptedBackup()
+            }
+        }
     }
 
     private var automaticBackupBinding: Binding<Bool> {
@@ -665,6 +734,65 @@ private struct AccountSettingsView: View {
             }
 
             action()
+        }
+    }
+}
+
+private enum BackupMaintenanceAction: Identifiable {
+    case clear
+    case disable
+
+    var id: String {
+        switch self {
+        case .clear:
+            return "clear"
+        case .disable:
+            return "disable"
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+        case .clear:
+            return "Clear Backup"
+        case .disable:
+            return "Disable Backup"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .clear:
+            return "Clear backup?"
+        case .disable:
+            return "Disable backup?"
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .clear:
+            return "Clear Backup"
+        case .disable:
+            return "Disable Backup"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .clear:
+            return "This permanently deletes the encrypted backup stored for your account. It cannot be recovered. Encrypted backup stays on for this device and will upload a fresh copy on the next backup."
+        case .disable:
+            return "This turns off encrypted backup on this device and permanently deletes the copy stored for your account. It cannot be recovered. You can set up a new backup later."
+        }
+    }
+
+    var authReason: String {
+        switch self {
+        case .clear:
+            return "Clear encrypted backup"
+        case .disable:
+            return "Disable encrypted backup"
         }
     }
 }

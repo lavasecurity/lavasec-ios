@@ -101,4 +101,30 @@ final class BackupEnvelopeStoreTests: XCTestCase {
             .synced(estimatedByteSize: 2_000 + 1_024, uploadedAt: uploadedAt)
         )
     }
+
+    func testClearUploadMarkerKeepsEnvelopeAndReturnsToWaiting() throws {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        try store.saveEnvelope(makeEnvelope(ciphertextByteSize: 2_000))
+        store.recordUpload(at: Date(timeIntervalSince1970: 1_700_500_000))
+
+        store.clearUploadMarker()
+
+        XCTAssertNotNil(store.loadEnvelope())
+        XCTAssertNil(store.lastUploadedAt())
+        XCTAssertEqual(store.currentState(), .waitingForSignIn(estimatedByteSize: 2_000 + 1_024))
+    }
+
+    func testDeleteEnvelopeRemovesEnvelopeAndMarkerAndReportsOff() throws {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        try store.saveEnvelope(makeEnvelope(ciphertextByteSize: 2_000))
+        store.recordUpload(at: Date(timeIntervalSince1970: 1_700_500_000))
+
+        store.deleteEnvelope()
+
+        XCTAssertNil(store.loadEnvelope())
+        XCTAssertNil(store.lastUploadedAt())
+        XCTAssertEqual(store.currentState(), .off)
+    }
 }
