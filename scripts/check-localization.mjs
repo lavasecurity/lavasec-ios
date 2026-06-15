@@ -117,7 +117,11 @@ const requiredReleaseKeys = [
   "What Happened",
   "Preview",
   "Confirm Send",
-  "Send Bug Report"
+  "Send Bug Report",
+  "Send feedback?",
+  "Send feedback",
+  "Not now",
+  "Looks like you shook your phone. Want to tell us what went wrong?"
 ];
 let failed = false;
 

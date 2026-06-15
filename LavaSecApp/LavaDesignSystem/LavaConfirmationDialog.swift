@@ -8,6 +8,10 @@ import SwiftUI
 ///
 /// Buttons stack vertically: the green primary on top, the neutral "escape" choice
 /// below — so the calm option never competes with the primary for emphasis.
+///
+/// Callers pass plain English copy; the card localizes each string at render via
+/// `.lavaLocalized` (a verbatim `Text(String)` would otherwise skip the catalog),
+/// so the keys must exist in `Localizable.xcstrings`.
 struct LavaConfirmationDialog: View {
     let title: String
     let message: String
@@ -18,20 +22,20 @@ struct LavaConfirmationDialog: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.primaryText)
 
-            Text(message)
+            Text(message.lavaLocalized)
                 .font(.subheadline)
                 .foregroundStyle(LavaStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 8) {
-                Button(confirmTitle, action: onConfirm)
+                Button(confirmTitle.lavaLocalized, action: onConfirm)
                     .buttonStyle(LavaStandaloneActionButtonStyle())
 
-                Button(cancelTitle, action: onCancel)
+                Button(cancelTitle.lavaLocalized, action: onCancel)
                     .buttonStyle(LavaSecondaryActionButtonStyle())
             }
             .padding(.top, 10)
