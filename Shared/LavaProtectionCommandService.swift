@@ -59,7 +59,7 @@ enum LavaProtectionCommandService {
         commandID: String?
     ) throws -> LavaProtectionCommandOutcome {
         try LavaProtectionCommandFileLock.withExclusiveLock {
-            let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+            let defaults = LavaSecAppGroup.sharedDefaults
             // The cross-process file lock is already held, so the stores run with
             // a no-op critical section. The LavaSecCore stores are the single
             // owners of key layout, revisions, dedup, and session binding; this
@@ -246,7 +246,7 @@ enum LavaProtectionCommandService {
     }
 
     private static func updateLiveActivitiesIfCurrent(_ update: LavaProtectionLiveActivityUpdate) async {
-        let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        let defaults = LavaSecAppGroup.sharedDefaults
         let pauseStore = ProtectionPauseStore(
             storage: ProtectionUserDefaultsStorage(defaults: defaults),
             lock: ProtectionNoopCriticalSectionLock()
@@ -268,7 +268,7 @@ enum LavaProtectionCommandService {
         protectionState: LavaActivityAttributes.ProtectionState,
         resumeDate: Date?
     ) async {
-        let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        let defaults = LavaSecAppGroup.sharedDefaults
         let pauseRequiresAuthentication = SecurityProtectedSurfaceStorage.isProtected(
             .protectionPause,
             defaults: defaults

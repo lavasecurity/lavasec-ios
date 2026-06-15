@@ -145,7 +145,7 @@ private final class ProtectionUserNotificationController {
 
     init(
         notificationCenter: UNUserNotificationCenter = .current(),
-        defaults: UserDefaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        defaults: UserDefaults = LavaSecAppGroup.sharedDefaults
     ) {
         self.notificationCenter = notificationCenter
         self.defaults = defaults
@@ -996,7 +996,7 @@ final class AppViewModel: ObservableObject {
     private let usesLiveActivitiesDefaultsKey = "lavasec.customization.liveActivities"
     private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000
     private let defaults = UserDefaults.standard
-    private let appGroupDefaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+    private let appGroupDefaults = LavaSecAppGroup.sharedDefaults
     // Single source of truth for session and pause state, shared with the
     // tunnel and the intents process via the same app-group keys.
     private lazy var protectionSessionStore = ProtectionSessionStore(

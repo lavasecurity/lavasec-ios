@@ -537,7 +537,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(intents.contains("LavaLiveActivityActionRequest.storePendingRequest"))
 
         XCTAssertTrue(commandService.contains("enum LavaProtectionCommandService"))
-        XCTAssertTrue(commandService.contains("UserDefaults(suiteName: LavaSecAppGroup.identifier)"))
+        XCTAssertTrue(commandService.contains("LavaSecAppGroup.sharedDefaults"))
         XCTAssertTrue(
             commandService.contains("ProtectionPauseStore(") && commandService.contains("ProtectionSessionStore("),
             "Pause/resume command state must flow through the LavaSecCore stores, not inline key access."

@@ -42,6 +42,13 @@ enum LavaSecAppGroup {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
     }
 
+    /// The shared app-group `UserDefaults`, falling back to `.standard` if the
+    /// group container is unavailable. Single source so the app, tunnel, intents,
+    /// and command service can't drift onto `.standard` by accident.
+    static var sharedDefaults: UserDefaults {
+        UserDefaults(suiteName: identifier) ?? .standard
+    }
+
     static func protectionNotificationRequestIdentifier(for identifier: String) -> String {
         "\(protectionNotificationRequestIdentifierPrefix)\(identifier)"
     }

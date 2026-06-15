@@ -2638,7 +2638,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func scheduleProtectionNotificationIfNeeded(now: Date = Date()) {
-        let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        let defaults = LavaSecAppGroup.sharedDefaults
         let assessment = ProtectionConnectivityPolicy.assessment(
             isConnected: true,
             health: health,
@@ -2735,7 +2735,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private static func recordProtectionNotificationDelivery(_ notification: ProtectionConnectivityNotification) {
-        let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        let defaults = LavaSecAppGroup.sharedDefaults
 
         defaults.set(
             notification.identifier,
@@ -3505,7 +3505,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func updateLiveActivitiesAfterTemporaryProtectionPauseExpired() {
         Task {
-            let defaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+            let defaults = LavaSecAppGroup.sharedDefaults
             let state = LavaActivityAttributes.ContentState(
                 protectionState: .on,
                 resumeDate: nil,
@@ -3614,7 +3614,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private var protectionPauseDefaults: UserDefaults {
-        UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard
+        LavaSecAppGroup.sharedDefaults
     }
 
     // Single source of truth for session and pause state, shared with the app

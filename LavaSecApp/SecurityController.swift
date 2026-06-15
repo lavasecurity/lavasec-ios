@@ -131,7 +131,7 @@ final class SecurityController: ObservableObject {
 
     private let biometricEnabledDefaultsKey = "securityBiometricEnabled"
     init(
-        defaults: UserDefaults = UserDefaults(suiteName: LavaSecAppGroup.identifier) ?? .standard,
+        defaults: UserDefaults = LavaSecAppGroup.sharedDefaults,
         keychainStore: SecurityPasscodeKeychainStore = SecurityPasscodeKeychainStore()
     ) {
         self.defaults = defaults
