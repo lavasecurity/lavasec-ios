@@ -253,10 +253,14 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testSignedInBackupCopyShowsPendingSetupBeforeBackupExists() throws {
         let source = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        // The view model still routes its summary through the signed-in-aware
+        // copy; the copy itself moved with EncryptedBackupState into LavaSecCore
+        // (asserted behaviorally in EncryptedBackupStateTests).
+        let stateSource = try Self.readAppSource("Sources/LavaSecCore/EncryptedBackupState.swift")
 
         XCTAssertTrue(source.contains("encryptedBackupState.displayText(isAccountSignedIn: isAccountSignedIn)"))
-        XCTAssertTrue(source.contains("Pending setup"))
-        XCTAssertTrue(source.contains("Set up encrypted backup for this account."))
+        XCTAssertTrue(stateSource.contains("Pending setup"))
+        XCTAssertTrue(stateSource.contains("Set up encrypted backup for this account."))
     }
 
     private static func readAppSource(_ relativePath: String) throws -> String {

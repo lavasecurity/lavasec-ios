@@ -498,69 +498,8 @@ private struct BugReportSubmissionError: LocalizedError {
     }
 }
 
-enum EncryptedBackupState: Equatable {
-    case off
-    case waitingForSignIn(estimatedByteSize: Int)
-    case synced(estimatedByteSize: Int, uploadedAt: Date)
-    case failed(message: String)
-
-    var isConfigured: Bool {
-        switch self {
-        case .off:
-            false
-        case .waitingForSignIn,
-             .synced,
-             .failed:
-            true
-        }
-    }
-
-    var summaryText: String {
-        displayText(isAccountSignedIn: false).summary
-    }
-
-    var detailText: String {
-        displayText(isAccountSignedIn: false).detail
-    }
-
-    func displayText(isAccountSignedIn: Bool) -> (summary: String, detail: String) {
-        switch self {
-        case .off:
-            if isAccountSignedIn {
-                return ("Pending setup", "Set up encrypted backup for this account.")
-            }
-            return ("Off", "Sign in to set up encrypted backup.")
-        case .waitingForSignIn:
-            if isAccountSignedIn {
-                return ("Not uploaded yet", "Encrypted locally. Back up now to store a copy online.")
-            }
-            return ("Ready after sign-in", "Encrypted locally. Sign in to upload.")
-        case .synced(_, let uploadedAt):
-            return ("Last uploaded \(Self.formattedUploadDate(uploadedAt))", syncedDetailText)
-        case .failed(let message):
-            return ("Needs attention", message)
-        }
-    }
-
-    private var syncedDetailText: String {
-        switch self {
-        case .synced(let estimatedByteSize, _):
-            return "Latest encrypted settings backup size is \(Self.formattedByteSize(estimatedByteSize))."
-        case .off,
-             .waitingForSignIn,
-             .failed:
-            return ""
-        }
-    }
-
-    private static func formattedByteSize(_ byteSize: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(byteSize), countStyle: .file)
-    }
-
-    private static func formattedUploadDate(_ uploadedAt: Date) -> String {
-        LocalLogTimestampFormatter.string(from: uploadedAt)
-    }
-}
+// EncryptedBackupState moved to LavaSecCore (EncryptedBackupState.swift) so its
+// signed-in/signed-out copy branching is unit-tested rather than source-pinned.
 
 enum EncryptedBackupError: Error, LocalizedError {
     case noBackupAvailable
@@ -931,8 +870,6 @@ final class AppViewModel: ObservableObject {
     private let vpnConfigurationName = LavaTunnelConfigurationIdentity.currentDisplayName
     private let protectionStatusRefreshInterval: TimeInterval = 8
     private let catalogSyncFreshnessInterval: TimeInterval = 7 * 24 * 60 * 60
-    private let encryptedBackupEnvelopeDefaultsKey = "lavasec.encryptedBackupEnvelope.pending"
-    private let encryptedBackupLastUploadedAtDefaultsKey = "lavasec.encryptedBackup.lastUploadedAt"
     private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
     private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
@@ -974,6 +911,10 @@ final class AppViewModel: ObservableObject {
             #endif
         }
     )
+    // Device-local persistence + state derivation for the encrypted backup
+    // envelope (JSON + last-upload timestamp). Crypto, upload, passkey, and the
+    // automatic-backup timer stay in this view model's orchestration.
+    private let backupEnvelopeStore = BackupEnvelopeStore()
     private let backupKeychainStore = BackupKeychainStore()
     private let backupPasskeyCoordinator = BackupPasskeyCoordinator()
     private let backupPasskeyRecoveryService = BackupPasskeyRecoveryService()
@@ -4122,7 +4063,7 @@ final class AppViewModel: ObservableObject {
 
         await uploadEncryptedBackup(
             envelope,
-            estimatedByteSize: envelope.ciphertextByteSize + 1_024
+            estimatedByteSize: backupEnvelopeStore.estimatedByteSize(for: envelope)
         )
     }
 
@@ -6355,7 +6296,7 @@ final class AppViewModel: ObservableObject {
 
         await uploadEncryptedBackup(
             envelope,
-            estimatedByteSize: envelope.ciphertextByteSize + 1_024
+            estimatedByteSize: backupEnvelopeStore.estimatedByteSize(for: envelope)
         )
     }
 
@@ -6385,17 +6326,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadEncryptedBackupState() {
-        guard let envelope = loadLocalEncryptedBackupEnvelope() else {
-            encryptedBackupState = .off
-            return
-        }
-
-        let estimatedByteSize = envelope.ciphertextByteSize + 1_024
-        if let uploadedAt = UserDefaults.standard.object(forKey: encryptedBackupLastUploadedAtDefaultsKey) as? Date {
-            encryptedBackupState = .synced(estimatedByteSize: estimatedByteSize, uploadedAt: uploadedAt)
-        } else {
-            encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-        }
+        encryptedBackupState = backupEnvelopeStore.currentState()
     }
 
     private func loadAutomaticBackupPreference() {
@@ -6481,7 +6412,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func recordEncryptedBackupUpload(uploadedAt: Date) {
-        UserDefaults.standard.set(uploadedAt, forKey: encryptedBackupLastUploadedAtDefaultsKey)
+        backupEnvelopeStore.recordUpload(at: uploadedAt)
     }
 
     private func scheduleAutomaticBackupAfterConfigurationChange() {
@@ -6511,18 +6442,11 @@ final class AppViewModel: ObservableObject {
     }
 
     private func saveLocalEncryptedBackupEnvelope(_ envelope: ZeroKnowledgeBackupEnvelope) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(envelope)
-        UserDefaults.standard.set(data, forKey: encryptedBackupEnvelopeDefaultsKey)
+        try backupEnvelopeStore.saveEnvelope(envelope)
     }
 
     private func loadLocalEncryptedBackupEnvelope() -> ZeroKnowledgeBackupEnvelope? {
-        guard let data = UserDefaults.standard.data(forKey: encryptedBackupEnvelopeDefaultsKey) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(ZeroKnowledgeBackupEnvelope.self, from: data)
+        backupEnvelopeStore.loadEnvelope()
     }
 
     private func notifyTunnelSnapshotUpdated(operationID: LatencyOperationID? = nil) async {

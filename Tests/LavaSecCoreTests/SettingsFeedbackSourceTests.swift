@@ -499,11 +499,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
     func testEncryptedBackupStateRecordsLastUploadAndSchedulesAutomaticBackupAfterChanges() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let stateBlock = try Self.sourceBlock(
-            in: source,
-            startingAt: "enum EncryptedBackupState: Equatable",
-            endingBefore: "enum EncryptedBackupError: Error"
-        )
+        // EncryptedBackupState moved to LavaSecCore (its copy + state derivation
+        // are now covered behaviorally by EncryptedBackupStateTests); pin the
+        // synced-case shape and timestamp formatting against the core file.
+        let stateSource = try Self.source(named: "EncryptedBackupState.swift", in: "Sources/LavaSecCore")
         let preferenceBlock = try Self.sourceBlock(
             in: source,
             startingAt: "func setAutomaticBackupEnabled",
@@ -515,8 +514,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private func uploadPendingEncryptedBackupIfPossible()"
         )
 
-        XCTAssertTrue(stateBlock.contains("case synced(estimatedByteSize: Int, uploadedAt: Date)"))
-        XCTAssertTrue(source.contains("LocalLogTimestampFormatter.string(from: uploadedAt)"))
+        XCTAssertTrue(stateSource.contains("case synced(estimatedByteSize: Int, uploadedAt: Date)"))
+        XCTAssertTrue(stateSource.contains("LocalLogTimestampFormatter.string(from: uploadedAt)"))
         XCTAssertTrue(source.contains("@Published private(set) var isAutomaticBackupEnabled"))
         XCTAssertTrue(source.contains("private var automaticBackupTask: Task<Void, Never>?"))
         XCTAssertTrue(source.contains("private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000"))
