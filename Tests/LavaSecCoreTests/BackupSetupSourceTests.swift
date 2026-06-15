@@ -41,7 +41,9 @@ final class BackupSetupSourceTests: XCTestCase {
     func testPasskeyCopyReferencesSelectedPasswordManager() throws {
         let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
 
-        XCTAssertTrue(source.contains("Saved in your password manager; lets Lava help restore on a new device."))
+        XCTAssertTrue(source.contains("Saved in your password manager and used to restore on a new device"))
+        // The passkey path is zero-knowledge now: copy must not imply Lava assists decryption.
+        XCTAssertFalse(source.contains("lets Lava help restore on a new device"))
         XCTAssertFalse(source.contains("Saved by iOS for lavasecurity.app."))
     }
 
@@ -79,8 +81,10 @@ final class BackupSetupSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
-        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. With your recovery phrase, only you can decrypt them. An optional Passkey makes new-device restore easier — but Lava stores a recovery secret for that path, so it isn't fully private to you."))
+        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."))
         XCTAssertFalse(source.contains("Lava stores only ciphertext"))
+        // The passkey path no longer escrows a recovery secret.
+        XCTAssertFalse(source.contains("stores a recovery secret"))
         XCTAssertFalse(source.contains("Set up passwordless backup"))
         XCTAssertFalse(source.contains("Lava saves a local unlock on this device. New-device restore uses your recovery phrase plus a Lava-held recovery share."))
 

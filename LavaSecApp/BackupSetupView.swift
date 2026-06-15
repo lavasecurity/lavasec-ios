@@ -73,7 +73,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "person.badge.key.fill",
                         title: "Passkey",
-                        detail: "Optional. Saved in your password manager; lets Lava help restore on a new device. The recovery phrase, by contrast, keeps your backup decryptable only by you."
+                        detail: "Optional (iOS 18+). Saved in your password manager and used to restore on a new device — the key is derived on your device, so Lava still can't read your backup."
                     )
 
                     Divider()
@@ -87,26 +87,40 @@ struct BackupSetupView: View {
             }
 
             VStack(spacing: 10) {
-                Button {
-                    selectedPasskeyMode = .withPasskey
-                    beginSetup(with: .withPasskey)
-                } label: {
-                    Label(
-                        (isPreparingPasskey && selectedPasskeyMode == .withPasskey ? "Opening Passkey" : "Set up with Passkey").lavaLocalized,
-                        systemImage: "person.badge.key.fill"
-                    )
-                }
-                .buttonStyle(LavaStandaloneActionButtonStyle())
-                .disabled(isPreparingPasskey)
+                // Zero-knowledge passkey backup needs the WebAuthn PRF extension (iOS 18+). On
+                // iOS 17 there is no passkey option to offer, so the flow is a single entry point
+                // that sets up the device + recovery-phrase backup.
+                if #available(iOS 18.0, *) {
+                    Button {
+                        selectedPasskeyMode = .withPasskey
+                        beginSetup(with: .withPasskey)
+                    } label: {
+                        Label(
+                            (isPreparingPasskey && selectedPasskeyMode == .withPasskey ? "Opening Passkey" : "Set up with Passkey").lavaLocalized,
+                            systemImage: "person.badge.key.fill"
+                        )
+                    }
+                    .buttonStyle(LavaStandaloneActionButtonStyle())
+                    .disabled(isPreparingPasskey)
 
-                Button {
-                    selectedPasskeyMode = .withoutPasskey
-                    beginSetup(with: .withoutPasskey)
-                } label: {
-                    Text("Set up without Passkey".lavaLocalized)
+                    Button {
+                        selectedPasskeyMode = .withoutPasskey
+                        beginSetup(with: .withoutPasskey)
+                    } label: {
+                        Text("Set up without Passkey".lavaLocalized)
+                    }
+                    .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
+                    .disabled(isPreparingPasskey)
+                } else {
+                    Button {
+                        selectedPasskeyMode = .withoutPasskey
+                        beginSetup(with: .withoutPasskey)
+                    } label: {
+                        Text("Begin Setup".lavaLocalized)
+                    }
+                    .buttonStyle(LavaStandaloneActionButtonStyle())
+                    .disabled(isPreparingPasskey)
                 }
-                .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
-                .disabled(isPreparingPasskey)
             }
 
             if let errorMessage {
@@ -301,7 +315,7 @@ private enum BackupSetupStep {
     var subtitle: String {
         switch self {
         case .overview:
-            "Your lists are encrypted on your device before upload. With your recovery phrase, only you can decrypt them. An optional Passkey makes new-device restore easier — but Lava stores a recovery secret for that path, so it isn't fully private to you."
+            "Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."
         case .recoveryPhrase:
             "Save these eight words outside Lava. Copying is optional."
         case .confirm:
