@@ -789,7 +789,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
 	                PRODUCT_NAME = LavaSec;
 					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
@@ -822,7 +822,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
 	                PRODUCT_NAME = LavaSec;
 					SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
@@ -855,7 +855,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
                 PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa;
                 PRODUCT_NAME = LavaSec;
 				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
@@ -880,7 +880,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				OTHER_LDFLAGS = "$(inherited) -lresolv";
                 PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
                 PRODUCT_NAME = LavaSecTunnel;
@@ -906,7 +906,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				OTHER_LDFLAGS = "$(inherited) -lresolv";
                 PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
 					PRODUCT_NAME = LavaSecTunnel;
@@ -932,7 +932,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				OTHER_LDFLAGS = "$(inherited) -lresolv";
                 PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.tunnel;
                 PRODUCT_NAME = LavaSecTunnel;
@@ -957,7 +957,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
@@ -984,7 +984,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
@@ -1011,7 +1011,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.widget;
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
@@ -1030,7 +1030,7 @@
 				DEVELOPMENT_TEAM = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -1048,7 +1048,7 @@
 				DEVELOPMENT_TEAM = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
@@ -1065,7 +1065,7 @@
 				DEVELOPMENT_TEAM = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = "$(inherited)";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG LAVA_QA_TOOLS";

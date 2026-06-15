@@ -39,6 +39,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LavaSourceRevision</key>
+	<string>$(LAVA_SOURCE_REVISION)</string>
 	<key>GIDClientID</key>
 	<string>$(LAVA_GOOGLE_IOS_CLIENT_ID)</string>
 	<key>GIDServerClientID</key>

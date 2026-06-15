@@ -283,7 +283,9 @@ struct SettingsView: View {
     private var appVersionString: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "Lava \(version) (build \(build))"
+        let revision = Bundle.main.infoDictionary?["LavaSourceRevision"] as? String ?? ""
+        let base = "Lava \(version) (build \(build))"
+        return revision.isEmpty ? base : "\(base) · \(revision)"
     }
 }
 
@@ -3913,9 +3915,10 @@ private struct LegalNoticeCard: View {
 private enum VersionInfo {
     static let appVersion = infoValue("CFBundleShortVersionString")
     static let platformVersion = "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+    static let sourceRevision = infoValue("LavaSourceRevision", default: "")
 
-    private static func infoValue(_ key: String) -> String {
-        Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "Unknown"
+    private static func infoValue(_ key: String, default fallback: String = "Unknown") -> String {
+        Bundle.main.object(forInfoDictionaryKey: key) as? String ?? fallback
     }
 }
 
@@ -3949,6 +3952,10 @@ private struct VersionNerdStatsView: View {
                         LabeledContent("Version", value: VersionInfo.appVersion)
                         Divider()
                         LabeledContent("Platform", value: VersionInfo.platformVersion)
+                        if !VersionInfo.sourceRevision.isEmpty {
+                            Divider()
+                            LabeledContent("Source", value: VersionInfo.sourceRevision)
+                        }
                     }
                 }
             }
