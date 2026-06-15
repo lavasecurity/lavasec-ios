@@ -677,6 +677,7 @@ enum ProtectionHapticFeedback {
     case protectionOnSucceeded
     case protectionStartFailed
     case protectionTurnedOff
+    case guardianTapAcknowledged
 
     @MainActor static func play(_ feedback: ProtectionHapticFeedback) {
         switch feedback {
@@ -692,6 +693,10 @@ enum ProtectionHapticFeedback {
             let generator = UINotificationFeedbackGenerator()
             generator.prepare()
             generator.notificationOccurred(.warning)
+        case .guardianTapAcknowledged:
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.prepare()
+            generator.impactOccurred()
         }
     }
 }

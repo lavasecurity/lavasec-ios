@@ -21,16 +21,20 @@ final class AdminQAHapticsSourceTests: XCTestCase {
         XCTAssertTrue(previewBlock.contains("case turnOnSuccess"))
         XCTAssertTrue(previewBlock.contains("case turnOnFailure"))
         XCTAssertTrue(previewBlock.contains("case turnOff"))
+        XCTAssertTrue(previewBlock.contains("case guardianTap"))
         XCTAssertTrue(previewBlock.contains("\"Turn On Success\""))
         XCTAssertTrue(previewBlock.contains("\"Turn On Failure\""))
         XCTAssertTrue(previewBlock.contains("\"Turn Off\""))
+        XCTAssertTrue(previewBlock.contains("\"Guardian Tap\""))
         XCTAssertTrue(previewBlock.contains("\"Notification error\""))
         XCTAssertTrue(previewBlock.contains("\"Notification warning\""))
+        XCTAssertTrue(previewBlock.contains("\"Light impact\""))
         XCTAssertFalse(previewBlock.contains("\"Two light impacts\""))
         XCTAssertFalse(previewBlock.contains("\"Medium impact\""))
         XCTAssertTrue(previewBlock.contains(".protectionOnSucceeded"))
         XCTAssertTrue(previewBlock.contains(".protectionStartFailed"))
         XCTAssertTrue(previewBlock.contains(".protectionTurnedOff"))
+        XCTAssertTrue(previewBlock.contains(".guardianTapAcknowledged"))
     }
 
     private static func source(named fileName: String, in directoryName: String) throws -> String {

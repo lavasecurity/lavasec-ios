@@ -224,6 +224,7 @@ private enum PhoneQAHapticPreview: CaseIterable, Identifiable {
     case turnOnSuccess
     case turnOnFailure
     case turnOff
+    case guardianTap
 
     var id: Self {
         self
@@ -237,6 +238,8 @@ private enum PhoneQAHapticPreview: CaseIterable, Identifiable {
             "Turn On Failure"
         case .turnOff:
             "Turn Off"
+        case .guardianTap:
+            "Guardian Tap"
         }
     }
 
@@ -248,6 +251,8 @@ private enum PhoneQAHapticPreview: CaseIterable, Identifiable {
             "Notification error"
         case .turnOff:
             "Notification warning"
+        case .guardianTap:
+            "Light impact"
         }
     }
 
@@ -259,6 +264,8 @@ private enum PhoneQAHapticPreview: CaseIterable, Identifiable {
             "exclamationmark.circle"
         case .turnOff:
             "power"
+        case .guardianTap:
+            "hand.tap"
         }
     }
 
@@ -270,6 +277,8 @@ private enum PhoneQAHapticPreview: CaseIterable, Identifiable {
             .protectionStartFailed
         case .turnOff:
             .protectionTurnedOff
+        case .guardianTap:
+            .guardianTapAcknowledged
         }
     }
 }

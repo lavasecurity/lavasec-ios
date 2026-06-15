@@ -446,7 +446,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: ".tint(LavaStyle.safeGreen)"
         )
 
-        XCTAssertTrue(guardView.contains("SoftShieldGuardian(size: 96, state: guardianState, shieldStyle: viewModel.lavaGuardLook)"))
+        XCTAssertTrue(guardView.contains("SoftShieldGuardian(\n                    size: 96,\n                    state: guardianOverrideState ?? guardianState,\n                    shieldStyle: viewModel.lavaGuardLook\n                )"))
         XCTAssertTrue(settings.contains("shieldStyle: viewModel.lavaGuardLook"))
         XCTAssertTrue(settings.contains(".foregroundStyle(availability.titleColor(for: look))"))
         XCTAssertTrue(settings.contains("case .cherryQuartz:"))

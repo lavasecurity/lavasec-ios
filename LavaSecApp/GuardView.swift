@@ -69,11 +69,28 @@ struct GuardView: View {
 
 struct ProtectionStatusPanel: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var guardianOverrideState: GuardianMascotState?
+    @State private var isGuardianTapAnimationRunning = false
+    @State private var guardianTapAnimationTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 16) {
-                SoftShieldGuardian(size: 96, state: guardianState, shieldStyle: viewModel.lavaGuardLook)
+                SoftShieldGuardian(
+                    size: 96,
+                    state: guardianOverrideState ?? guardianState,
+                    shieldStyle: viewModel.lavaGuardLook
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { playGuardianTapGratitude() }
+                .onDisappear {
+                    guardianTapAnimationTask?.cancel()
+                    guardianTapAnimationTask = nil
+                    isGuardianTapAnimationRunning = false
+                    guardianOverrideState = nil
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Lava Security")
@@ -124,6 +141,36 @@ struct ProtectionStatusPanel: View {
             return .waking
         default:
             return .sleeping
+        }
+    }
+
+    /// A tap on the awake Lava Guard plays a brief `awake -> grateful -> awake` thank-you
+    /// with one light haptic. It never fires from states that communicate real protection
+    /// status (sleeping/waking/paused/retrying/concerned), and ignores tap-spam while a
+    /// sequence is already running.
+    private func playGuardianTapGratitude() {
+        guard guardianState == .awake, !isGuardianTapAnimationRunning else {
+            return
+        }
+
+        isGuardianTapAnimationRunning = true
+        ProtectionHapticFeedback.play(.guardianTapAcknowledged)
+
+        let dwell = reduceMotion ? 0.20 : 0.35
+        let stateChange = GuardianMascotAnimationPlan.stateChangeDuration
+
+        guardianTapAnimationTask?.cancel()
+        guardianTapAnimationTask = Task { @MainActor in
+            guardianOverrideState = .grateful
+            try? await Task.sleep(for: .seconds(stateChange + dwell))
+            if Task.isCancelled { return }
+
+            // Clear the override so the mascot animates grateful -> the live base state.
+            // If protection status changed mid-tap, this stays honest instead of forcing .awake.
+            guardianOverrideState = nil
+            try? await Task.sleep(for: .seconds(stateChange))
+
+            isGuardianTapAnimationRunning = false
         }
     }
 }
