@@ -113,8 +113,7 @@ struct RootView: View {
             SecurityPasscodeAuthenticationView(request: request)
                 .environmentObject(security)
         }
-        .alert(
-            "Send feedback?",
+        .lavaConfirmationDialog(
             isPresented: Binding(
                 get: { viewModel.pendingRageShakeConfirmation != nil },
                 set: { isPresented in
@@ -122,17 +121,14 @@ struct RootView: View {
                         viewModel.cancelRageShakeFeedback()
                     }
                 }
-            )
-        ) {
-            Button("Not now", role: .cancel) {
-                viewModel.cancelRageShakeFeedback()
-            }
-            Button("Send feedback") {
-                viewModel.confirmRageShakeFeedback()
-            }
-        } message: {
-            Text("Looks like you shook your phone. Want to tell us what went wrong?")
-        }
+            ),
+            title: "Send feedback?",
+            message: "Looks like you shook your phone. Want to tell us what went wrong?",
+            confirmTitle: "Send feedback",
+            cancelTitle: "Not now",
+            onConfirm: { viewModel.confirmRageShakeFeedback() },
+            onCancel: { viewModel.cancelRageShakeFeedback() }
+        )
         .sheet(item: $viewModel.rageShakeDestination) { destination in
             switch destination {
 #if DEBUG || LAVA_QA_TOOLS

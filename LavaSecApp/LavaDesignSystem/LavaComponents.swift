@@ -129,6 +129,35 @@ struct LavaStandaloneActionButtonStyle: ButtonStyle {
     }
 }
 
+/// Neutral "secondary action" companion to `LavaStandaloneActionButtonStyle`.
+/// Same 44pt filled-pill footprint, but in system-neutral colors so it reads as
+/// the calm/escape choice (e.g. a dialog's "Not now") beside the green primary —
+/// never competing with it for emphasis.
+struct LavaSecondaryActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color(uiColor: .secondaryLabel))
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background {
+                RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemFill))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
+                            .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
+                    }
+            }
+            .scaleEffect(configuration.isPressed ? 0.99 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 struct LavaPlainCard<Content: View>: View {
     let content: Content
 
