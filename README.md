@@ -1,5 +1,11 @@
 # Lava Security for iOS
 
+[![iOS CI](https://github.com/lavasecurity/lavasec-ios/actions/workflows/ios.yml/badge.svg)](https://github.com/lavasecurity/lavasec-ios/actions/workflows/ios.yml)
+[![Security](https://github.com/lavasecurity/lavasec-ios/actions/workflows/security.yml/badge.svg)](https://github.com/lavasecurity/lavasec-ios/actions/workflows/security.yml)
+[![Swift 6.0](https://img.shields.io/badge/Swift-6.0-FA7343?logo=swift&logoColor=white)](https://swift.org)
+![Platform: iOS 17+](https://img.shields.io/badge/platform-iOS%2017%2B-000000?logo=apple&logoColor=white)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
 Privacy-first, on-device DNS filtering for iPhone and iPad. Lava runs a local
 `NEPacketTunnelProvider` that resolves DNS over an encrypted transport
 (DoH/DoT/DoQ) and filters domains against on-device blocklists — your browsing
