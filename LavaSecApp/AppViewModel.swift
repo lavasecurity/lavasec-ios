@@ -4681,7 +4681,7 @@ final class AppViewModel: ObservableObject {
             loadTemporaryProtectionPause()
             logVPNDebugEvent("probe-lifecycle-after-pause", details: [
                 "isProtectionTemporarilyPaused": "\(isProtectionTemporarilyPaused)",
-                "pauseUntil": temporaryProtectionPauseUntil.map { ISO8601DateFormatter().string(from: $0) } ?? "nil",
+                "pauseUntil": temporaryProtectionPauseUntil.map { SharedDateFormatting.iso8601.string(from: $0) } ?? "nil",
                 "vpnStatus": vpnStatusDebugDescription(vpnStatus)
             ])
 
@@ -4696,7 +4696,7 @@ final class AppViewModel: ObservableObject {
             await refreshProtectionStatus(force: true)
             logVPNDebugEvent("probe-lifecycle-after-resume", details: [
                 "isProtectionTemporarilyPaused": "\(isProtectionTemporarilyPaused)",
-                "pauseUntil": temporaryProtectionPauseUntil.map { ISO8601DateFormatter().string(from: $0) } ?? "nil",
+                "pauseUntil": temporaryProtectionPauseUntil.map { SharedDateFormatting.iso8601.string(from: $0) } ?? "nil",
                 "vpnStatus": vpnStatusDebugDescription(vpnStatus)
             ])
         } catch {

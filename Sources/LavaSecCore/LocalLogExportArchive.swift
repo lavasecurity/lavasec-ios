@@ -191,7 +191,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
     }
 
     private static func isoString(from date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
+        SharedDateFormatting.iso8601.string(from: date)
     }
 
     private static func dayFormatter(calendar: Calendar) -> DateFormatter {

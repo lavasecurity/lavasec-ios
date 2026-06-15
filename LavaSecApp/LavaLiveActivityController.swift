@@ -170,7 +170,7 @@ final class LavaLiveActivityController {
             "published": publishedProtectionState.rawValue
         ]
         if let resumeDate {
-            details["resumeDate"] = Self.timestampFormatter.string(from: resumeDate)
+            details["resumeDate"] = SharedDateFormatting.iso8601.string(from: resumeDate)
         }
         LavaSecDeviceDebugLog.append(
             component: "live-activity-controller",
@@ -179,8 +179,4 @@ final class LavaLiveActivityController {
         )
         #endif
     }
-
-    #if DEBUG || LAVA_QA_TOOLS
-    nonisolated(unsafe) private static let timestampFormatter = ISO8601DateFormatter()
-    #endif
 }

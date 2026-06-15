@@ -644,7 +644,7 @@ public struct BugReportBundle: Sendable {
             return nil
         }
 
-        return ISO8601DateFormatter().string(from: date)
+        return SharedDateFormatting.iso8601.string(from: date)
     }
 }
 
