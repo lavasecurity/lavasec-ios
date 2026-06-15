@@ -113,6 +113,26 @@ struct RootView: View {
             SecurityPasscodeAuthenticationView(request: request)
                 .environmentObject(security)
         }
+        .alert(
+            "Send feedback?",
+            isPresented: Binding(
+                get: { viewModel.pendingRageShakeConfirmation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        viewModel.cancelRageShakeFeedback()
+                    }
+                }
+            )
+        ) {
+            Button("Not now", role: .cancel) {
+                viewModel.cancelRageShakeFeedback()
+            }
+            Button("Send feedback") {
+                viewModel.confirmRageShakeFeedback()
+            }
+        } message: {
+            Text("Looks like you shook your phone. Want to tell us what went wrong?")
+        }
         .sheet(item: $viewModel.rageShakeDestination) { destination in
             switch destination {
 #if DEBUG || LAVA_QA_TOOLS
@@ -348,6 +368,12 @@ struct RootView: View {
         didHandleDebugLaunchRageShake = true
         hasSeenLavaOnboarding = true
         viewModel.handleRageShake()
+        // The debug launch arg should land directly on the sheet, so bypass the
+        // confirmation dialog the gesture normally shows.
+        if let pending = viewModel.pendingRageShakeConfirmation {
+            viewModel.pendingRageShakeConfirmation = nil
+            viewModel.rageShakeDestination = pending
+        }
         if let destination = viewModel.rageShakeDestination {
             print("LAVA_RAGE_SHAKE_DESTINATION \(destination.id)")
         }

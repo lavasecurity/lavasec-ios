@@ -15,6 +15,76 @@ final class RageShakeQATests: XCTestCase {
         XCTAssertEqual(RageShakeRouter.destination(allowsAdminQA: false), .bugReport)
     }
 
+    func testBugReportRequiresFeedbackConfirmation() {
+        XCTAssertTrue(RageShakeRouter.requiresFeedbackConfirmation(for: .bugReport))
+    }
+
+    func testPhoneQADoesNotRequireFeedbackConfirmation() {
+        XCTAssertFalse(RageShakeRouter.requiresFeedbackConfirmation(for: .phoneQA))
+    }
+
+    func testSingleShakeDoesNotTriggerRageShake() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))
+    }
+
+    func testTwoShakesWithinWindowTriggerOnceThenReset() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))
+        XCTAssertTrue(tracker.registerShake(at: 1.0))
+        // Resets after firing, so a lone follow-up shake must not re-trigger.
+        XCTAssertFalse(tracker.registerShake(at: 1.2))
+    }
+
+    func testShakesOutsideWindowDoNotTrigger() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))
+        // The first shake is evicted before the second one is counted.
+        XCTAssertFalse(tracker.registerShake(at: 2.0))
+    }
+
+    func testRequiringSingleShakeTriggersImmediately() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 1, window: 1.5)
+        XCTAssertTrue(tracker.registerShake(at: 0))
+    }
+
+    func testDefaultTrackerTriggersOnASingleShake() {
+        // UIKit reports `.motionShake` once per gesture, so the default fires on
+        // the first shake and relies on the confirmation dialog as the guard.
+        var tracker = RageShakeIntentTracker()
+        XCTAssertEqual(tracker.requiredShakes, 1)
+        XCTAssertTrue(tracker.registerShake(at: 0))
+    }
+
+    func testShakeExactlyAtWindowBoundaryStillCounts() {
+        // Eviction uses `time - t > window`, so a shake exactly `window` apart
+        // is kept (the boundary is inclusive).
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))
+        XCTAssertTrue(tracker.registerShake(at: 1.5))
+    }
+
+    func testRequiredShakesIsClampedToAtLeastOne() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 0, window: 1.5)
+        XCTAssertEqual(tracker.requiredShakes, 1)
+        XCTAssertTrue(tracker.registerShake(at: 0))
+    }
+
+    func testTrackerReArmsForASecondGesture() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))
+        XCTAssertTrue(tracker.registerShake(at: 0.5))   // fires, then resets
+        XCTAssertFalse(tracker.registerShake(at: 0.7))  // first of next gesture
+        XCTAssertTrue(tracker.registerShake(at: 1.0))   // second -> fires again
+    }
+
+    func testStaleShakeIsEvictedThenAFreshPairTriggers() {
+        var tracker = RageShakeIntentTracker(requiredShakes: 2, window: 1.5)
+        XCTAssertFalse(tracker.registerShake(at: 0))    // stale
+        XCTAssertFalse(tracker.registerShake(at: 2.0))  // evicts 0, count back to 1
+        XCTAssertTrue(tracker.registerShake(at: 2.5))   // pairs with 2.0 -> fires
+    }
+
     func testRageShakeActivationDoesNotStealFocusFromTextInput() {
         XCTAssertFalse(
             RageShakeActivationPolicy.shouldActivate(

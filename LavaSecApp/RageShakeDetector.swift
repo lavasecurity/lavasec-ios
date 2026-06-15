@@ -17,6 +17,7 @@ struct RageShakeDetector: UIViewControllerRepresentable {
 final class RageShakeViewController: UIViewController {
     var onShake: () -> Void
     private var isKeyboardVisible = false
+    private var intentTracker = RageShakeIntentTracker()
 
     init(onShake: @escaping () -> Void) {
         self.onShake = onShake
@@ -79,6 +80,11 @@ final class RageShakeViewController: UIViewController {
 
     override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         guard motion == .motionShake else {
+            return
+        }
+
+        let timestamp = event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        guard intentTracker.registerShake(at: timestamp) else {
             return
         }
 

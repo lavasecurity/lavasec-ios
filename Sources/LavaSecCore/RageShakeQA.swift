@@ -44,6 +44,20 @@ public enum RageShakeRouter {
         return .bugReport
         #endif
     }
+
+    /// Whether reaching `destination` should first ask the user to confirm they
+    /// meant to file feedback. Only the real-user bug report is gated; the admin
+    /// phone-QA tool opens immediately so QA isn't slowed down.
+    public static func requiresFeedbackConfirmation(for destination: RageShakeDestination) -> Bool {
+        switch destination {
+        case .bugReport:
+            return true
+        #if DEBUG || LAVA_QA_TOOLS
+        case .phoneQA:
+            return false
+        #endif
+        }
+    }
 }
 
 public enum RageShakeActivationPolicy {
@@ -53,6 +67,38 @@ public enum RageShakeActivationPolicy {
         isTextInputActive: Bool
     ) -> Bool {
         isViewInWindow && !isDetectorFirstResponder && !isTextInputActive
+    }
+}
+
+/// Collapses raw shake events for a gesture so the shortcut fires once per
+/// deliberate shake. UIKit delivers `.motionShake` only once per gesture (with
+/// a ~1–2s cooldown before it will report the next), so requiring two within a
+/// short window is unreliable — a real single shake would never reach the
+/// threshold. The default therefore triggers on the first shake and leans on
+/// the follow-up confirmation dialog to filter accidental jolts; `window` then
+/// just de-dupes any redundant events. A larger `requiredShakes` remains
+/// available for callers that explicitly want a stricter multi-shake gesture.
+public struct RageShakeIntentTracker: Sendable {
+    public let requiredShakes: Int
+    public let window: TimeInterval
+    private var recentShakeTimes: [TimeInterval] = []
+
+    public init(requiredShakes: Int = 1, window: TimeInterval = 1.5) {
+        self.requiredShakes = max(1, requiredShakes)
+        self.window = window
+    }
+
+    /// Records a shake at `time` (a monotonic timestamp, e.g. `UIEvent.timestamp`)
+    /// and returns `true` exactly once enough shakes fall inside the window. The
+    /// tracker resets after firing so the next gesture starts fresh.
+    public mutating func registerShake(at time: TimeInterval) -> Bool {
+        recentShakeTimes.append(time)
+        recentShakeTimes.removeAll { time - $0 > window }
+        guard recentShakeTimes.count >= requiredShakes else {
+            return false
+        }
+        recentShakeTimes.removeAll()
+        return true
     }
 }
 

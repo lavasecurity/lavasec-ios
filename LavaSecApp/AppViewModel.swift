@@ -914,6 +914,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var filterPreparationState: FilterPreparationState = .idle
     @Published var isFilterPreparationScreenPresented = false
     @Published var rageShakeDestination: RageShakeDestination?
+    @Published var pendingRageShakeConfirmation: RageShakeDestination?
     @Published private(set) var bugReportDraft: BugReportBundle?
     @Published private(set) var bugReportSendState: BugReportSendState = .idle
     #if DEBUG || LAVA_QA_TOOLS
@@ -2924,7 +2925,35 @@ final class AppViewModel: ObservableObject {
     }
 
     func handleRageShake() {
-        rageShakeDestination = RageShakeRouter.destination(allowsAdminQA: canOpenPhoneQAFromRageShake)
+        let destination = RageShakeRouter.destination(allowsAdminQA: canOpenPhoneQAFromRageShake)
+        if RageShakeRouter.requiresFeedbackConfirmation(for: destination) {
+            pendingRageShakeConfirmation = destination
+        } else {
+            rageShakeDestination = destination
+        }
+    }
+
+    func confirmRageShakeFeedback() {
+        guard let destination = pendingRageShakeConfirmation else {
+            return
+        }
+        pendingRageShakeConfirmation = nil
+        // Let the confirmation alert finish dismissing before presenting the
+        // sheet; presenting in the same runloop tick can drop it. Mirrors the
+        // phone-QA -> bug-report hand-off below.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard let self, self.pendingRageShakeConfirmation == nil else {
+                // A fresh shake re-armed the confirmation while we waited; let
+                // that newer gesture win instead of stacking a sheet under it.
+                return
+            }
+            self.rageShakeDestination = destination
+        }
+    }
+
+    func cancelRageShakeFeedback() {
+        pendingRageShakeConfirmation = nil
     }
 
     func dismissRageShakeDestination() {
