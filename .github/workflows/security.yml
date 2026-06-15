@@ -1,15 +1,70 @@
 name: Security
 
-# Delegates to the org-wide reusable security backstop so the scanner policy
-# (gitleaks config trust, pinned image, etc.) lives in one hardened place
-# rather than being copied into every repo.
+# Self-contained secret scan. This repo is public, so it must NOT depend on a
+# reusable workflow in a private org repo (a public repo cannot call a private
+# reusable workflow, and forks could not run it either). Mirrors the canonical
+# job in lavasecurity/.github.
 on:
   push:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  security:
-    uses: lavasecurity/.github/.github/workflows/security.yml@main
-    with:
-      gitleaks: true
+  gitleaks:
+    name: gitleaks (secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so we can read .gitleaks.toml from the PR's base commit.
+          fetch-depth: 0
+      - name: Resolve a trusted gitleaks config
+        id: glcfg
+        # gitleaks auto-loads `<source>/.gitleaks.toml`. On pull_request that working
+        # tree is attacker-controlled, so a fork PR could add a config that allowlists
+        # everything and pass the scan while leaking. We pin --config to a copy taken
+        # from the BASE ref (which the PR cannot change); fall back to the repo's own
+        # config only when the base has none yet, and to the gitleaks default ruleset
+        # when there is no repo config at all.
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/gitleaks-config"
+          mkdir -p "$dest"
+          out="$dest/.gitleaks.toml"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            if git cat-file -e "$base:.gitleaks.toml" 2>/dev/null; then
+              git show "$base:.gitleaks.toml" > "$out"
+            elif [ -f .gitleaks.toml ]; then
+              cp .gitleaks.toml "$out"
+            fi
+          elif [ -f .gitleaks.toml ]; then
+            cp .gitleaks.toml "$out"
+          fi
+          if [ ! -f "$out" ]; then
+            printf '[extend]\nuseDefault = true\n' > "$out"
+          fi
+          echo "dir=$dest" >> "$GITHUB_OUTPUT"
+      - name: Scan git history for secrets
+        env:
+          # renovate: datasource=docker
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.21.2
+        # Scan the full commit HISTORY (git mode), not just the checked-out tree.
+        # A secret added in one commit and removed before the final tree still
+        # lives in history and is exposed once the repo is public, so --no-git
+        # (directory mode) would miss exactly the leak this backstop must catch.
+        # GIT_CONFIG safe.directory avoids git's "dubious ownership" error for the
+        # host-mounted repo inside the container.
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -v "${{ steps.glcfg.outputs.dir }}:/gitleaks-config:ro" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            "$GITLEAKS_IMAGE" \
+            detect --source=/repo --config=/gitleaks-config/.gitleaks.toml \
+            --no-banner --redact --exit-code=1
