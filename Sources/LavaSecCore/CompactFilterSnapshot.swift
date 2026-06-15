@@ -413,14 +413,23 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
     }
 
     public func containsNormalized(_ normalizedDomain: String) -> Bool {
-        if contains(normalizedDomain, in: exactEntries) || contains(normalizedDomain, in: suffixEntries) {
+        // Normalized domains are pure ASCII (`DomainName.normalize` restricts
+        // every label to `[a-z0-9-]`), so byte-lexicographic ordering is
+        // identical to the `String` ordering the entry tables were sorted by.
+        // Comparing the query's UTF8 bytes directly against `domainData` avoids
+        // materializing a `String` per binary-search step (log-N allocations
+        // per query) and a fresh `String` per stripped label — this is the
+        // per-query hot path.
+        let queryBytes = Array(normalizedDomain.utf8)
+
+        if contains(queryBytes[...], in: exactEntries) || contains(queryBytes[...], in: suffixEntries) {
             return true
         }
 
-        var remainder = normalizedDomain
-        while let dotIndex = remainder.firstIndex(of: ".") {
-            remainder = String(remainder[remainder.index(after: dotIndex)...])
-            if contains(remainder, in: suffixEntries) {
+        var searchStart = queryBytes.startIndex
+        while let dotIndex = queryBytes[searchStart...].firstIndex(of: UInt8(ascii: ".")) {
+            searchStart = queryBytes.index(after: dotIndex)
+            if contains(queryBytes[searchStart...], in: suffixEntries) {
                 return true
             }
         }
@@ -460,26 +469,69 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
         data.append(domainData)
     }
 
-    private func contains(_ domain: String, in entries: [Entry]) -> Bool {
-        var low = 0
-        var high = entries.count
-
-        while low < high {
-            let mid = low + ((high - low) / 2)
-            let value = domainString(for: entries[mid])
-
-            if value == domain {
-                return true
-            }
-
-            if value < domain {
-                low = mid + 1
-            } else {
-                high = mid
-            }
+    private func contains(_ query: ArraySlice<UInt8>, in entries: [Entry]) -> Bool {
+        guard !entries.isEmpty else {
+            return false
         }
 
-        return false
+        return query.withUnsafeBufferPointer { queryBuffer in
+            domainData.withUnsafeBytes { table -> Bool in
+                var low = 0
+                var high = entries.count
+
+                while low < high {
+                    let mid = low + ((high - low) / 2)
+                    let entry = entries[mid]
+                    let order = Self.compareEntry(
+                        table,
+                        offset: Int(entry.offset),
+                        length: Int(entry.length),
+                        to: queryBuffer
+                    )
+
+                    if order == 0 {
+                        return true
+                    }
+
+                    if order < 0 {
+                        low = mid + 1
+                    } else {
+                        high = mid
+                    }
+                }
+
+                return false
+            }
+        }
+    }
+
+    /// Lexicographically compares an entry's stored UTF8 bytes (the `length`
+    /// bytes of `table` at `offset`) against the query's UTF8 bytes. Returns a
+    /// negative value if the entry sorts before the query, zero if equal, and a
+    /// positive value if after — reproducing `String`'s ordering for the
+    /// ASCII-only normalized domains stored here, so the table's existing
+    /// `String`-sorted layout stays valid.
+    private static func compareEntry(
+        _ table: UnsafeRawBufferPointer,
+        offset: Int,
+        length: Int,
+        to query: UnsafeBufferPointer<UInt8>
+    ) -> Int {
+        let shared = min(length, query.count)
+        var index = 0
+        while index < shared {
+            let entryByte = table[offset + index]
+            let queryByte = query[index]
+            if entryByte != queryByte {
+                return entryByte < queryByte ? -1 : 1
+            }
+            index += 1
+        }
+
+        if length == query.count {
+            return 0
+        }
+        return length < query.count ? -1 : 1
     }
 
     private func protectionReducingRuleCount(

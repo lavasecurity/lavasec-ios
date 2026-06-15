@@ -490,4 +490,163 @@ final class CompactFilterSnapshotTests: XCTestCase {
             noticeURL: nil
         )
     }
+
+    // MARK: - Byte-level `containsNormalized` equivalence
+
+    /// Reference implementation of the pre-optimization `containsNormalized`
+    /// semantics: exact-or-suffix membership, then strip leading labels checking
+    /// the suffix set. Implemented purely with `String`/`Set`, so it is
+    /// independent of the byte-level binary search under test and serves as the
+    /// verdict oracle.
+    private func referenceContains(
+        _ query: String,
+        exact: Set<String>,
+        suffix: Set<String>
+    ) -> Bool {
+        if exact.contains(query) || suffix.contains(query) {
+            return true
+        }
+        var remainder = query
+        while let dotIndex = remainder.firstIndex(of: ".") {
+            remainder = String(remainder[remainder.index(after: dotIndex)...])
+            if suffix.contains(remainder) {
+                return true
+            }
+        }
+        return false
+    }
+
+    func testByteLevelContainsMatchesReferenceAcrossCuratedDomains() {
+        let exact: Set<String> = [
+            "exact.example.org",
+            "single.test",
+            "a.co",
+            "portal.bank.example",
+            "news.example.com",
+            "x-ray.example.net",
+            "a0.example.net",
+            "ab.example.net"
+        ]
+        let suffix: Set<String> = [
+            "example.com",
+            "ads.net",
+            "tracker.io",
+            "a.co",
+            "deep.nested.example.org",
+            "cdn.example.io",
+            "z.example.com",
+            "abc.example.net"
+        ]
+
+        let ruleSet = CompactDomainRuleSet(
+            exactDomains: Array(exact),
+            suffixDomains: Array(suffix)
+        )
+
+        // Queries span: exact hits, suffix exact hits, single- and multi-label
+        // suffix strips, non-matches, prefix collisions (query is a prefix of an
+        // entry and vice versa), `-`/digit byte-ordering boundaries, and
+        // lexicographic extremes that sort before/after every entry.
+        let queries = [
+            "exact.example.org",
+            "single.test",
+            "www.example.com",
+            "a.b.c.example.com",
+            "example.com",
+            "metrics.ads.net",
+            "ads.net",
+            "tracker.io",
+            "sub.tracker.io",
+            "a.co",
+            "x.a.co",
+            "deep.nested.example.org",
+            "more.deep.nested.example.org",
+            "nested.example.org",
+            "cdn.example.io",
+            "node.cdn.example.io",
+            "example.io",
+            "news.example.com",
+            "ab.example.net",
+            "a0.example.net",
+            "x-ray.example.net",
+            "abc.example.net",
+            "sub.abc.example.net",
+            "abcd.example.net",
+            "aaaaa.example.test",
+            "zzzzz.zzzzz.zzz",
+            "co",
+            "a.co.uk",
+            "portal.bank.example",
+            "other.bank.example",
+            "z.example.com",
+            "really.z.example.com"
+        ]
+
+        for query in queries {
+            XCTAssertEqual(
+                ruleSet.containsNormalized(query),
+                referenceContains(query, exact: exact, suffix: suffix),
+                "containsNormalized mismatch for query \(query)"
+            )
+        }
+    }
+
+    func testByteLevelContainsMatchesReferenceOnGeneratedCorpus() {
+        // Deterministic, reproducible corpus — short labels maximize prefix
+        // collisions (stressing the binary search's comparison boundaries), and
+        // `-`/digit labels exercise byte ordering versus `String` ordering.
+        var rng = SeededGenerator(seed: 0x9E37_79B9_7F4A_7C15)
+        let labels = ["a", "b", "ab", "abc", "z", "a0", "a-b", "x", "00", "m", "node", "cdn", "ads"]
+        let tlds = ["com", "net", "io", "co", "org", "test"]
+
+        func randomDomain() -> String {
+            let labelCount = 2 + Int(rng.next() % 3) // 2...4 labels
+            var parts: [String] = []
+            for _ in 0..<(labelCount - 1) {
+                parts.append(labels[Int(rng.next() % UInt64(labels.count))])
+            }
+            parts.append(tlds[Int(rng.next() % UInt64(tlds.count))])
+            return parts.joined(separator: ".")
+        }
+
+        var exact = Set<String>()
+        var suffix = Set<String>()
+        for _ in 0..<200 {
+            if rng.next() % 2 == 0 {
+                exact.insert(randomDomain())
+            } else {
+                suffix.insert(randomDomain())
+            }
+        }
+
+        let ruleSet = CompactDomainRuleSet(
+            exactDomains: Array(exact),
+            suffixDomains: Array(suffix)
+        )
+
+        for _ in 0..<2_000 {
+            let query = randomDomain()
+            XCTAssertEqual(
+                ruleSet.containsNormalized(query),
+                referenceContains(query, exact: exact, suffix: suffix),
+                "containsNormalized mismatch for generated query \(query)"
+            )
+        }
+    }
+
+    private struct SeededGenerator: RandomNumberGenerator {
+        private var state: UInt64
+
+        init(seed: UInt64) {
+            // xorshift64* requires non-zero state.
+            state = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
+        }
+
+        mutating func next() -> UInt64 {
+            state ^= state >> 12
+            state ^= state << 25
+            state ^= state >> 27
+            return state &* 0x2545_F491_4F6C_DD1D
+        }
+    }
 }
