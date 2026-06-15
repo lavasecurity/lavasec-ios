@@ -2,13 +2,12 @@
 
 ## VPN latency QA suite
 
-Two device tools for the VPN action-latency work (see
-`plans/backlog/2026-06-12-modular-speed-up-plan.md`, Track 0 / Track 5).
+Two device tools for the VPN action-latency work.
 Both read the Debug/QA latency spans written to `vpn-debug-log.jsonl` in the
 app group, so build and install a **Debug or QA** build first — Release emits
 no latency events.
 
-Device defaults target the QA iPhone `QA device` (devicectl
+Device IDs default to placeholders (devicectl
 `YOUR_DEVICE_UUID`, xcodebuild
 `YOUR_DEVICE_UDID`); override with `--device` / `--udid`.
 

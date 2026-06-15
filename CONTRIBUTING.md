@@ -16,7 +16,7 @@ Thanks for your interest in contributing.
 
 ## Development setup
 
-1. `cp Config/Lava.xcconfig.example Config/Lava.xcconfig` and fill in your values
+1. `cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig` and fill in your values
    (see the [README](README.md)).
 2. Open `LavaSec.xcodeproj` in Xcode 26+.
 3. The DNS-filtering core builds without any account configuration.

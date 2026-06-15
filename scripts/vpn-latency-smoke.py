@@ -6,9 +6,8 @@ Builds, installs, and launches the Debug app with the lifecycle smoke probe
 finish, pulls vpn-debug-log.jsonl from the app group, and asserts that the
 required latency spans exist and stay inside their budgets.
 
-Budgets are the plan's initial gates with Debug-build slack; tighten them once
-Phase 0 baseline variance is established (docs/plans/backlog/
-2026-06-12-modular-speed-up-plan.md).
+Budgets are initial gates with Debug-build slack; tighten them once
+baseline variance is established.
 """
 
 import argparse

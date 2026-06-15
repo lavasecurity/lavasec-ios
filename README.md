@@ -33,7 +33,7 @@ infrastructure live in separate (private) repositories.
 | `Shared/` | Code shared across the app and extensions (App Group, guardian, command service) |
 | `Sources/`, `Tests/` | SwiftPM core library + unit tests |
 | `LavaSecUITests/` | UI tests |
-| `Config/` | Build configuration template (`Lava.xcconfig.example`) |
+| `Config/` | Build configuration templates (`Lava.local.xcconfig.example`) |
 | `docs/legal/` | Third-party notices and license-compliance decisions |
 
 ## Building
@@ -43,14 +43,14 @@ Requirements: Xcode 26 or newer, an iOS 18+ device or simulator.
 ```sh
 git clone https://github.com/lavasecurity/lavasec-ios
 cd lavasec-ios
-cp Config/Lava.xcconfig.example Config/Lava.xcconfig   # then fill in your team / Supabase
+cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig   # then fill in your team / Supabase
 open LavaSec.xcodeproj
 ```
 
 - The **local DNS-filtering core** builds and runs with no account configuration.
 - To run on a **physical device** you need your own Apple Developer team and a
   Network Extension provisioning profile (set `DEVELOPMENT_TEAM` and the profile
-  names in `Config/Lava.xcconfig`).
+  names in `Config/Lava.local.xcconfig`).
 - The optional **account / backup** features require your own Supabase project
   (`LAVA_SUPABASE_URL` / `LAVA_SUPABASE_ANON_KEY`).
 
