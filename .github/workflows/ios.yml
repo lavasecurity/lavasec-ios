@@ -30,9 +30,51 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # need the base..head range for the merge-up contamination guard
 
       - name: Check GPL blocklist distribution guardrails
         run: scripts/check-gpl-blocklist-distribution.sh
+
+      - name: Merge-up contamination guard
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          set -euo pipefail
+          # This repo's history was scrubbed to a single canonical identity, and changes from
+          # the PRIVATE internal dev repo are promoted here via content-only PRs. This guard
+          # blocks the ways internal mess could leak into the public AGPL history.
+          range="${BASE}..${HEAD}"
+          fail=0
+
+          # (a) Never accept gitignored-local config or QA-only paths into the public tree.
+          if git diff --name-only "$range" | grep -E '\.local\.xcconfig$|(^|/)QA/'; then
+            echo "::error::PR touches a *.local.xcconfig or QA/ path that must never be public."; fail=1
+          fi
+
+          # (b) The internal-only build flag must never be enabled in tracked public source.
+          #     Exclude .github/ so this guard's own source (which names the flag) isn't a hit.
+          if git diff "$range" -- . ':(exclude).github/' | grep -E '^\+' | grep -q 'LAVA_QA_TOOLS'; then
+            echo "::error::PR introduces the internal-only LAVA_QA_TOOLS flag into tracked source."; fail=1
+          fi
+
+          # (c) Identity: STRICT on promote/* (internal->public) branches; soft on outside forks
+          #     (don't block legitimate AGPL contributors — the secret/path guards still apply).
+          if [ "${IS_FORK}" != "true" ] && printf '%s' "${HEAD_REF}" | grep -q '^promote/'; then
+            bad=$(git log --format='%ae%n%ce' "$range" | sort -u \
+              | grep -vE '@users\.noreply\.github\.com$|^dev@lavasecurity\.app$' || true)
+            if [ -n "$bad" ]; then
+              echo "::error::promotion PR carries non-canonical author/committer identity:"
+              printf '  %s\n' $bad
+              fail=1
+            fi
+          fi
+
+          if [ "$fail" = 0 ]; then echo "contamination guard: clean"; else exit 1; fi
 
   swift-package-tests:
     name: Swift Package Tests
