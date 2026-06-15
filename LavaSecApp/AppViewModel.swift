@@ -532,6 +532,10 @@ enum EncryptedBackupError: Error, LocalizedError {
 
 private struct PendingBackupPasskey: Equatable {
     let credentialID: String
+    /// Non-secret PRF input persisted in the envelope slot.
+    let prfSalt: Data
+    /// Authenticator PRF output captured at setup; transient, never persisted or uploaded.
+    let prfOutput: Data
 }
 
 @MainActor
@@ -927,7 +931,6 @@ final class AppViewModel: ObservableObject {
     private let backupEnvelopeStore = BackupEnvelopeStore()
     private let backupKeychainStore = BackupKeychainStore()
     private let backupPasskeyCoordinator = BackupPasskeyCoordinator()
-    private let backupPasskeyRecoveryService = BackupPasskeyRecoveryService()
     private var pendingBackupPasskeyCredentialID: String?
     private var pendingBackupPasskey: PendingBackupPasskey?
     private let accountAuthService: AccountAuthService
@@ -3967,18 +3970,34 @@ final class AppViewModel: ObservableObject {
         }
         accountAuthState = accountAuthService.state
 
-        let challenge = try await backupPasskeyRecoveryService.registrationChallenge(session: session)
+        // Zero-knowledge passkey backup requires the authenticator PRF extension (iOS 18+,
+        // iCloud Keychain). The passkey is created locally — no server registration — and its
+        // PRF output is captured here to wrap the backup slot at setup time.
+        guard #available(iOS 18.0, *) else {
+            throw BackupPasskeyError.prfUnavailable
+        }
+
         let registration = try await backupPasskeyCoordinator.registerPasskey(
             userID: session.userID,
             name: backupPasskeyAccountName,
-            challenge: challenge.challenge
+            challenge: try BackupPasskeyCoordinator.makeChallengeString()
         )
-        try await backupPasskeyRecoveryService.registerPasskey(
-            session: session,
-            credential: registration.credential
+
+        // Confirm PRF actually works on this provider and capture the output. If the provider
+        // doesn't return a PRF output, surface prfUnavailable so the flow routes to the phrase.
+        let prfSalt = try BackupPasskeyCoordinator.makePRFSalt()
+        let prfOutput = try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
+            credentialID: registration.credentialID,
+            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
+            saltInput: prfSalt
         )
+
         pendingBackupPasskeyCredentialID = registration.credentialID
-        pendingBackupPasskey = PendingBackupPasskey(credentialID: registration.credentialID)
+        pendingBackupPasskey = PendingBackupPasskey(
+            credentialID: registration.credentialID,
+            prfSalt: prfSalt,
+            prfOutput: prfOutput
+        )
         try backupKeychainStore.savePasskeyCredentialID(registration.credentialID)
     }
 
@@ -4002,44 +4021,35 @@ final class AppViewModel: ObservableObject {
         )
         let deviceSecret = try BackupDeviceSecret.generate()
         let serverRecoveryShare = try BackupAssistedRecoverySecret.makeServerShare()
-        let passkey = pendingBackupPasskey
-        let passkeyCredentialID = passkey?.credentialID ?? pendingBackupPasskeyCredentialID
-        let passkeyRecoverySecret: String?
-        let passkeyRecoverySession: BackupAccountSession?
-        if passkeyCredentialID == nil {
-            passkeyRecoverySecret = nil
-            passkeyRecoverySession = nil
-        } else {
-            passkeyRecoverySecret = try BackupDeviceSecret.generate()
-            passkeyRecoverySession = try await accountAuthService.refreshCurrentSession()
-            accountAuthState = accountAuthService.state
-            if passkeyRecoverySession == nil {
-                throw BackupPasskeyError.missingAccount
-            }
-        }
         let normalizedRecoveryPhrase = BackupRecoveryPhrase.phrase(
             from: BackupRecoveryPhrase.words(from: recoveryPhrase)
         )
-        let envelope = try ZeroKnowledgeBackupEnvelope.makePasswordless(
-            payload: payload,
-            deviceSecret: deviceSecret,
-            serverRecoveryShare: serverRecoveryShare,
-            recoveryPhrase: normalizedRecoveryPhrase,
-            passkeySecret: passkeyRecoverySecret,
-            passkeyCredentialID: passkeyCredentialID
-        )
-        if let credentialID = passkeyCredentialID,
-           let passkeyRecoverySecret,
-           let passkeyRecoverySession {
-            try await backupPasskeyRecoveryService.storeRecoverySecret(
-                session: passkeyRecoverySession,
-                credentialID: credentialID,
-                recoverySecret: passkeyRecoverySecret
+
+        // Zero-knowledge: when a PRF-capable passkey was prepared, wrap the backup slot with its
+        // authenticator PRF output (HKDF) — no server-held secret. Otherwise create a passkey-free
+        // envelope (keychain + assisted recovery only). Either way, nothing the server stores can
+        // decrypt the backup.
+        let envelope: ZeroKnowledgeBackupEnvelope
+        if let passkey = pendingBackupPasskey {
+            envelope = try ZeroKnowledgeBackupEnvelope.makeWithPRF(
+                payload: payload,
+                deviceSecret: deviceSecret,
+                serverRecoveryShare: serverRecoveryShare,
+                recoveryPhrase: normalizedRecoveryPhrase,
+                passkeyPRFOutput: passkey.prfOutput,
+                passkeyPRFSalt: passkey.prfSalt,
+                passkeyCredentialID: passkey.credentialID
+            )
+            try? backupKeychainStore.savePasskeyCredentialID(passkey.credentialID)
+        } else {
+            envelope = try ZeroKnowledgeBackupEnvelope.makePasswordless(
+                payload: payload,
+                deviceSecret: deviceSecret,
+                serverRecoveryShare: serverRecoveryShare,
+                recoveryPhrase: normalizedRecoveryPhrase
             )
         }
-        if let credentialID = passkeyCredentialID {
-            try? backupKeychainStore.savePasskeyCredentialID(credentialID)
-        }
+
         let estimatedByteSize = try ZeroKnowledgeBackupEnvelope.estimatedByteSize(
             for: payload,
             keySlotCount: envelope.keySlots.count
@@ -4098,9 +4108,9 @@ final class AppViewModel: ObservableObject {
                 throw EncryptedBackupError.invalidRecoveryPhrase
             }
         case .passkey:
-            let passkeyRecoverySecret = try await authorizePasskeyBackupRestore(envelope: envelope)
+            let prfOutput = try await passkeyPRFOutputForRestore(envelope: envelope)
             do {
-                payload = try envelope.decryptWithPasskeySecret(passkeyRecoverySecret)
+                payload = try envelope.decryptWithPasskeyPRFOutput(prfOutput)
             } catch {
                 throw EncryptedBackupError.invalidPasskeyUnlock
             }
@@ -4244,33 +4254,28 @@ final class AppViewModel: ObservableObject {
         throw lastError
     }
 
-    private func authorizePasskeyBackupRestore(
+    /// Derive the passkey slot's unwrapping material locally: assert the passkey with the slot's
+    /// stored PRF salt and return the authenticator PRF output. No server release of any secret —
+    /// the server never held one. Sign-in already gated the ciphertext download upstream.
+    private func passkeyPRFOutputForRestore(
         envelope: ZeroKnowledgeBackupEnvelope
-    ) async throws -> String {
+    ) async throws -> Data {
         guard let passkeySlot = envelope.keySlots.first(where: { $0.kind == .passkey }),
               let credentialID = passkeySlot.credentialID,
-              !credentialID.isEmpty
+              !credentialID.isEmpty,
+              let saltInput = Data(base64Encoded: passkeySlot.salt)
         else {
             throw EncryptedBackupError.noPasskeyRecovery
         }
 
-        guard let session = try await accountAuthService.refreshCurrentSession() else {
-            accountAuthState = accountAuthService.state
-            throw EncryptedBackupError.passkeyRestoreRequiresSignIn
+        guard #available(iOS 18.0, *) else {
+            throw EncryptedBackupError.invalidPasskeyUnlock
         }
-        accountAuthState = accountAuthService.state
 
-        let challenge = try await backupPasskeyRecoveryService.assertionChallenge(
-            session: session,
-            credentialID: credentialID
-        )
-        let assertion = try await backupPasskeyCoordinator.assertPasskey(
+        return try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
             credentialID: credentialID,
-            challenge: challenge.challenge
-        )
-        return try await backupPasskeyRecoveryService.recover(
-            session: session,
-            credential: assertion.credential
+            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
+            saltInput: saltInput
         )
     }
 

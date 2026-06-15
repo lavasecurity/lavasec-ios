@@ -49,21 +49,20 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertFalse(viewModelSource.contains("decryptWithPassword(trimmedSecret)"))
     }
 
-    func testPasskeyRestoreUsesAuthorizationGateNotPRF() throws {
+    func testPasskeyRestoreUsesPRFNotServerEscrow() throws {
         let coordinatorSource = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
         let restoreSource = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
         let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
-        let recoveryServiceSource = try Self.readAppSource("LavaSecApp/BackupPasskeyRecoveryService.swift")
 
-        XCTAssertTrue(coordinatorSource.contains("func assertPasskey(credentialID: String, challenge: String) async throws"))
-        XCTAssertFalse(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFAssertionInput"))
-        XCTAssertFalse(coordinatorSource.contains("assertion.prf"))
-        XCTAssertTrue(viewModelSource.contains("authorizePasskeyBackupRestore"))
-        XCTAssertTrue(viewModelSource.contains("guard let session = try await accountAuthService.refreshCurrentSession() else"))
-        XCTAssertTrue(viewModelSource.contains("decryptWithPasskeySecret(passkeyRecoverySecret)"))
-        XCTAssertTrue(recoveryServiceSource.contains("path: \"recover\""))
+        // Restore derives the slot key from a local authenticator PRF assertion — no
+        // server-returned recovery secret, no recovery service.
+        XCTAssertTrue(coordinatorSource.contains("func assertPasskeyPRFOutput("))
+        XCTAssertTrue(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFAssertionInput"))
+        XCTAssertTrue(coordinatorSource.contains("assertion.prf"))
+        XCTAssertTrue(viewModelSource.contains("decryptWithPasskeyPRFOutput"))
+        XCTAssertFalse(viewModelSource.contains("decryptWithPasskeySecret"))
+        XCTAssertFalse(viewModelSource.contains("authorizePasskeyBackupRestore"))
         XCTAssertTrue(viewModelSource.contains("decryptWithAssistedRecoveryPhrase"))
-        XCTAssertFalse(viewModelSource.contains("passkeyRestoreUnavailable"))
         XCTAssertTrue(restoreSource.contains("case .passkey"))
         XCTAssertTrue(restoreSource.contains("Use your saved passkey"))
     }

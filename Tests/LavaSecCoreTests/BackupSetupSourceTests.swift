@@ -134,18 +134,22 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("ASAuthorizationPlatformPublicKeyCredentialRegistration"))
     }
 
-    func testPasskeySetupDoesNotRequirePRF() throws {
+    func testPasskeySetupUsesPRFDerivedSlotNotServerEscrow() throws {
         let coordinatorSource = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
         let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
 
-        XCTAssertTrue(coordinatorSource.contains("func registerPasskey(userID: String, name: String, challenge: String) async throws"))
-        XCTAssertFalse(coordinatorSource.contains("request.prf"))
-        XCTAssertFalse(coordinatorSource.contains("registration.prf"))
-        XCTAssertFalse(coordinatorSource.contains("BackupPasskeyError.prfUnavailable"))
-        XCTAssertFalse(coordinatorSource.contains("missingPRFOutput"))
+        // The passkey slot is derived from the authenticator PRF / hmac-secret output (iOS 18+),
+        // not a server-stored secret. The coordinator requests PRF at registration and reads the
+        // output from an assertion.
+        XCTAssertTrue(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFRegistrationInput"))
+        XCTAssertTrue(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFAssertionInput"))
+        XCTAssertTrue(coordinatorSource.contains("func assertPasskeyPRFOutput("))
+        XCTAssertTrue(coordinatorSource.contains("BackupPasskeyError.prfUnavailable"))
+        // Setup wraps the slot with the PRF output and stores no server recovery secret.
+        XCTAssertTrue(viewModelSource.contains("ZeroKnowledgeBackupEnvelope.makeWithPRF"))
         XCTAssertTrue(viewModelSource.contains("pendingBackupPasskeyCredentialID"))
-        XCTAssertFalse(viewModelSource.contains("prfSecret"))
-        XCTAssertFalse(viewModelSource.contains("prfSalt"))
+        XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
+        XCTAssertFalse(viewModelSource.contains("BackupPasskeyRecoveryService"))
     }
 
     func testRecoveryUsesServerShareInsteadOfStandalonePhraseSlot() throws {
@@ -158,40 +162,19 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(viewModelSource.contains("decryptWithPasskeySecret(trimmedSecret)"))
     }
 
-    func testPasskeySetupStoresServerGatedRecoverySecret() throws {
+    func testPasskeyEscrowServiceIsRemoved() throws {
         let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
-        let recoveryServiceSource = try Self.readAppSource("LavaSecApp/BackupPasskeyRecoveryService.swift")
 
-        XCTAssertTrue(viewModelSource.contains("passkeyRecoverySecret = try BackupDeviceSecret.generate()"))
-        XCTAssertTrue(viewModelSource.contains("guard let session = try await accountAuthService.refreshCurrentSession() else"))
-        XCTAssertTrue(viewModelSource.contains("passkeyRecoverySession = try await accountAuthService.refreshCurrentSession()"))
-        XCTAssertFalse(viewModelSource.contains("passkeyRecoverySession = accountAuthState.session"))
-        XCTAssertTrue(viewModelSource.contains("throw BackupPasskeyError.missingAccount"))
-        XCTAssertTrue(viewModelSource.contains("passkeySecret: passkeyRecoverySecret"))
-        XCTAssertTrue(viewModelSource.contains("try await backupPasskeyRecoveryService.storeRecoverySecret"))
-        XCTAssertTrue(recoveryServiceSource.contains("path: \"recovery-secret\""))
-    }
+        // The server-escrow path is gone: no recovery-secret storage, no recovery service.
+        XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
+        XCTAssertFalse(viewModelSource.contains("backupPasskeyRecoveryService"))
 
-    func testPasskeyRecoveryAuthFailuresUseFriendlyCopy() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyRecoveryService.swift")
-
-        XCTAssertTrue(source.contains("case 401:"))
-        XCTAssertTrue(source.contains("Sign in again, then try Passkey."))
-        XCTAssertFalse(source.contains("The passkey recovery server returned HTTP \\(httpResponse.statusCode): \\(serverMessage)"))
-    }
-
-    func testPasskeyRecoveryServerErrorsUseActionableCopy() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyRecoveryService.swift")
-
-        XCTAssertTrue(source.contains("friendlyMessage(forStatusCode statusCode: Int)"))
-        XCTAssertTrue(source.contains("This backup is not available for this account. Sign in with the account that created it."))
-        XCTAssertTrue(source.contains("No Passkey recovery was found. Use Recovery instead."))
-        XCTAssertTrue(source.contains("Passkey setup expired. Try again."))
-        XCTAssertTrue(source.contains("Passkey verification failed. Try again, or use Recovery."))
-        XCTAssertTrue(source.contains("Too many attempts. Wait a minute, then try again."))
-        XCTAssertTrue(source.contains("Lava backup service is temporarily unavailable. Try again later."))
-        XCTAssertTrue(source.contains("Could not reach Lava. Check your connection and try again."))
-        XCTAssertFalse(source.contains("The passkey recovery server returned HTTP \\(httpResponse.statusCode)."))
+        let serviceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("LavaSecApp/BackupPasskeyRecoveryService.swift")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serviceURL.path))
     }
 
     func testPasskeyAssociationFailuresUseActionableCopy() throws {
