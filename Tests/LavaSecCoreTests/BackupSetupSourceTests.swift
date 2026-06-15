@@ -219,22 +219,15 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testPasskeyDomainAssociationIsDeclared() throws {
         let entitlements = try Self.readAppSource("LavaSecApp/LavaSecApp.entitlements")
-        let wellKnownAssociation = try Self.readRepositoryFile("server/site/lavasecurity-app/public/.well-known/apple-app-site-association")
-        let rootAssociation = try Self.readRepositoryFile("server/site/lavasecurity-app/public/apple-app-site-association")
-        let headers = try Self.readRepositoryFile("server/site/lavasecurity-app/public/_headers")
 
+        // The iOS half of the passkey / webcredentials association. The server half
+        // (the apple-app-site-association file + _headers) now lives in lavasec-web
+        // and is validated in that repo.
         XCTAssertTrue(entitlements.contains("webcredentials:lavasecurity.app"))
-        XCTAssertEqual(wellKnownAssociation, rootAssociation)
-        XCTAssertTrue(wellKnownAssociation.contains("\"webcredentials\""))
-        XCTAssertTrue(wellKnownAssociation.contains("\"J5J4WV9KF5.com.lavasec.app\""))
-        XCTAssertTrue(wellKnownAssociation.contains("\"J5J4WV9KF5.com.lavasec.dev.qa\""))
-        XCTAssertTrue(headers.contains("/.well-known/apple-app-site-association"))
-        XCTAssertTrue(headers.contains("/apple-app-site-association"))
     }
 
     func testBundleIdentifiersMatchProductionAndQAApplePlan() throws {
-        let project = try Self.readRepositoryFile("apps/ios/LavaSec.xcodeproj/project.pbxproj")
-        let workflow = try Self.readRepositoryFile(".github/workflows/ios-testflight-preview.yml")
+        let project = try Self.readAppSource("LavaSec.xcodeproj/project.pbxproj")
 
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;"))
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;"))
@@ -244,8 +237,8 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.tunnel;"))
         XCTAssertFalse(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.qa;"))
         XCTAssertFalse(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.qa.tunnel;"))
-        XCTAssertTrue(workflow.contains("LAVASEC_APP_BUNDLE_ID: com.lavasec.app"))
-        XCTAssertTrue(workflow.contains("LAVASEC_TUNNEL_BUNDLE_ID: com.lavasec.app.tunnel"))
+        // The TestFlight release workflow that also pins these bundle ids now lives
+        // in the private lavasec-runner repo, so that cross-check moved there.
     }
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {
@@ -273,18 +266,6 @@ final class BackupSetupSourceTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let fileURL = packageRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: fileURL, encoding: .utf8)
-    }
-
-    private static func readRepositoryFile(_ relativePath: String) throws -> String {
-        let current = URL(fileURLWithPath: #filePath)
-        let repositoryRoot = current
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let fileURL = repositoryRoot.appendingPathComponent(relativePath)
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 
