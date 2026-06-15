@@ -7,52 +7,8 @@ import LavaSecCore
 
 extension NETunnelProviderManager: @retroactive @unchecked Sendable {}
 
-struct FilterEditDraft: Equatable {
-    var enabledBlocklistIDs: Set<String>
-    var customBlocklists: [CustomBlocklistSource]
-    var blockedDomains: Set<String>
-    var allowedDomains: Set<String>
-
-    init(configuration: AppConfiguration) {
-        enabledBlocklistIDs = configuration.enabledBlocklistIDs
-        customBlocklists = configuration.customBlocklists
-        blockedDomains = configuration.blockedDomains
-        allowedDomains = configuration.allowedDomains
-    }
-
-    var selection: FilterConfigurationSelection {
-        FilterConfigurationSelection(
-            enabledBlocklistIDs: enabledBlocklistIDs,
-            blockedDomains: blockedDomains,
-            allowedDomains: allowedDomains
-        )
-    }
-}
-
-struct DomainDraftResult: Equatable {
-    let normalizedDomain: String?
-    let isAccepted: Bool
-    let title: String
-    let message: String
-
-    static func accepted(_ domain: String, message: String) -> DomainDraftResult {
-        DomainDraftResult(
-            normalizedDomain: domain,
-            isAccepted: true,
-            title: "Added \(domain)",
-            message: message
-        )
-    }
-
-    static func rejected(title: String, message: String) -> DomainDraftResult {
-        DomainDraftResult(
-            normalizedDomain: nil,
-            isAccepted: false,
-            title: title,
-            message: message
-        )
-    }
-}
+// FilterEditDraft, DomainDraftResult, and the pure draft-mutation editor live in
+// LavaSecCore (FilterEditDraft.swift) so the mutation logic is unit-tested.
 
 enum ProtectionPauseDuration: CaseIterable, Identifiable {
     case fiveMinutes
@@ -2636,54 +2592,39 @@ final class AppViewModel: ObservableObject {
     }
 
     func addBlockedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return .rejected(title: "Edit first", message: "Tap Edit before changing filters.")
         }
 
-        let normalized: String
-        do {
-            normalized = try DomainName.normalize(rawDomain)
-        } catch {
-            return .rejected(title: "Domain cannot be added", message: error.localizedDescription)
+        let outcome = FilterEditDraftEditor.addBlockedDomain(
+            rawDomain,
+            to: draft,
+            maxBlockedDomains: configuration.limits.maxBlockedDomains
+        )
+        if outcome.result.isAccepted {
+            filterEditDraft = outcome.draft
         }
-
-        guard !draft.blockedDomains.contains(normalized) else {
-            return .rejected(title: "Already blocked", message: "\(normalized) is already in your blocked domains.")
-        }
-
-        guard draft.blockedDomains.count < configuration.limits.maxBlockedDomains else {
-            return .rejected(
-                title: "Blocked domain limit reached",
-                message: "Free protection includes \(configuration.limits.maxBlockedDomains) additional blocked domains."
-            )
-        }
-
-        draft.blockedDomains.insert(normalized)
-        filterEditDraft = draft
-        return .accepted(normalized, message: "This domain will be blocked after you save.")
+        return outcome.result
     }
 
     func removeBlockedDomainFromDraft(_ domain: String) {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return
         }
 
-        draft.blockedDomains.remove(domain)
-        filterEditDraft = draft
+        filterEditDraft = FilterEditDraftEditor.removeBlockedDomain(domain, from: draft)
     }
 
     func undoBlockedDomainDraftChange(_ domain: String) {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return
         }
 
-        if configuration.blockedDomains.contains(domain) {
-            draft.blockedDomains.insert(domain)
-        } else {
-            draft.blockedDomains.remove(domain)
-        }
-
-        filterEditDraft = draft
+        filterEditDraft = FilterEditDraftEditor.undoBlockedDomainChange(
+            domain,
+            in: draft,
+            configuredBlockedDomains: configuration.blockedDomains
+        )
     }
 
     func validateAllowedExceptionDraft(_ rawDomain: String) -> AllowlistValidationResult {
@@ -2691,29 +2632,20 @@ final class AppViewModel: ObservableObject {
     }
 
     func addAllowedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return .rejected(title: "Edit first", message: "Tap Edit before changing filters.")
         }
 
-        let result = validateAllowedExceptionDraft(rawDomain)
-        guard result.isAllowed, let domain = result.normalizedDomain else {
-            return .rejected(title: "Exception cannot be added", message: result.message)
+        let outcome = FilterEditDraftEditor.addAllowedDomain(
+            rawDomain,
+            to: draft,
+            maxAllowedDomains: configuration.limits.maxAllowedDomains,
+            validator: AllowlistValidator(nonAllowableThreatRules: threatGuardrail)
+        )
+        if outcome.result.isAccepted {
+            filterEditDraft = outcome.draft
         }
-
-        guard !draft.allowedDomains.contains(domain) else {
-            return .rejected(title: "Already allowed", message: "\(domain) is already in your allowed exceptions.")
-        }
-
-        guard draft.allowedDomains.count < configuration.limits.maxAllowedDomains else {
-            return .rejected(
-                title: "Allowed exception limit reached",
-                message: "Free protection includes \(configuration.limits.maxAllowedDomains) allowed exceptions."
-            )
-        }
-
-        draft.allowedDomains.insert(domain)
-        filterEditDraft = draft
-        return .accepted(domain, message: "This exception will take effect after you save.")
+        return outcome.result
     }
 
     func stageDomainHistoryDomainAction(_ rawDomain: String, target: DomainHistoryDomainTarget) -> DomainDraftResult {
@@ -2746,26 +2678,23 @@ final class AppViewModel: ObservableObject {
     }
 
     func removeAllowedDomainFromDraft(_ domain: String) {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return
         }
 
-        draft.allowedDomains.remove(domain)
-        filterEditDraft = draft
+        filterEditDraft = FilterEditDraftEditor.removeAllowedDomain(domain, from: draft)
     }
 
     func undoAllowedDomainDraftChange(_ domain: String) {
-        guard var draft = filterEditDraft else {
+        guard let draft = filterEditDraft else {
             return
         }
 
-        if configuration.allowedDomains.contains(domain) {
-            draft.allowedDomains.insert(domain)
-        } else {
-            draft.allowedDomains.remove(domain)
-        }
-
-        filterEditDraft = draft
+        filterEditDraft = FilterEditDraftEditor.undoAllowedDomainChange(
+            domain,
+            in: draft,
+            configuredAllowedDomains: configuration.allowedDomains
+        )
     }
 
     func prepareAndApplyFilterDraft() async {
