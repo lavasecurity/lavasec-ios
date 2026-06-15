@@ -1,0 +1,64 @@
+name: CodeQL
+
+# Static analysis (SAST) for the Swift sources. CodeQL is a compiled-language
+# analyzer, so it must observe a real build — we run the same xcodebuild command
+# as iOS CI under CodeQL's manual build mode. Free for public repos; results land
+# in the Security tab and on pull requests. GitHub-hosted runners only, no secrets,
+# so fork pull requests analyze safely.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  schedule:
+    - cron: '27 4 * * 1' # weekly, Monday 04:27 UTC
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (Swift)
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Show Xcode Version
+        run: xcodebuild -version
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: swift
+          build-mode: manual
+
+      - name: Build LavaSec
+        run: |
+          xcodebuild \
+            -project LavaSec.xcodeproj \
+            -scheme LavaSec \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:swift'
