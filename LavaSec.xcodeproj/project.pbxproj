@@ -30,6 +30,7 @@
 		1A0000010000000000000004 /* FiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001004 /* FiltersView.swift */; };
 		1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101D /* FilterReviewFlowView.swift */; };
 		1A0000010000000000000020 /* SecurityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001020 /* SecurityController.swift */; };
+		1A00000100000000000000A1 /* TemporaryProtectionPauseController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */; };
 		1A0000010000000000000021 /* LavaSecurityPlusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001021 /* LavaSecurityPlusStore.swift */; };
 		1A000003000000000000000D /* LavaLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000001004 /* LavaLiveActivityController.swift */; };
 		1A0000010000000000000005 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001005 /* DiagnosticsView.swift */; };
@@ -137,6 +138,7 @@
 		1A0000010000000000001004 /* FiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersView.swift; sourceTree = "<group>"; };
 		1A000001000000000000101D /* FilterReviewFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterReviewFlowView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001020 /* SecurityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityController.swift; sourceTree = "<group>"; };
+		1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryProtectionPauseController.swift; sourceTree = "<group>"; };
 		1A0000010000000000001021 /* LavaSecurityPlusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecurityPlusStore.swift; sourceTree = "<group>"; };
 		1A0000030000000000001004 /* LavaLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityController.swift; sourceTree = "<group>"; };
 		1A0000010000000000001005 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
@@ -259,6 +261,7 @@
 				1A0000010000000000001004 /* FiltersView.swift */,
 				1A000001000000000000101D /* FilterReviewFlowView.swift */,
 				1A0000010000000000001020 /* SecurityController.swift */,
+				1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */,
 				1A0000010000000000001021 /* LavaSecurityPlusStore.swift */,
 				1A0000030000000000001004 /* LavaLiveActivityController.swift */,
 				1A0000010000000000001005 /* DiagnosticsView.swift */,
@@ -546,6 +549,7 @@
 				1A0000010000000000000004 /* FiltersView.swift in Sources */,
 				1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */,
 				1A0000010000000000000020 /* SecurityController.swift in Sources */,
+				1A00000100000000000000A1 /* TemporaryProtectionPauseController.swift in Sources */,
 				1A0000010000000000000021 /* LavaSecurityPlusStore.swift in Sources */,
 				1A000003000000000000000D /* LavaLiveActivityController.swift in Sources */,
 				1A0000010000000000000005 /* DiagnosticsView.swift in Sources */,

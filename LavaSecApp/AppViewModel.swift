@@ -901,14 +901,6 @@ final class AppViewModel: ObservableObject {
         return "\(days) \(days == 1 ? "day" : "days") ago"
     }
 
-    private static func nanoseconds(for duration: TimeInterval) -> UInt64 {
-        guard duration > 0 else {
-            return 0
-        }
-
-        return UInt64((duration * 1_000_000_000).rounded(.up))
-    }
-
     @Published var configuration = AppConfiguration()
     @Published var diagnostics = DiagnosticsStore()
     @Published private(set) var networkActivityLog = NetworkActivityLog()
@@ -979,7 +971,6 @@ final class AppViewModel: ObservableObject {
     private var tunnelManager: NETunnelProviderManager?
     private var vpnStatusObserver: NSObjectProtocol?
     private var automaticBackupTask: Task<Void, Never>?
-    private var temporaryProtectionResumeTask: Task<Void, Never>?
     private let vpnConfigurationName = LavaTunnelConfigurationIdentity.currentDisplayName
     private let protectionStatusRefreshInterval: TimeInterval = 8
     private let catalogSyncFreshnessInterval: TimeInterval = 7 * 24 * 60 * 60
@@ -987,8 +978,6 @@ final class AppViewModel: ObservableObject {
     private let encryptedBackupLastUploadedAtDefaultsKey = "lavasec.encryptedBackup.lastUploadedAt"
     private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
-    private let temporaryProtectionPauseUntilDefaultsKey = LavaSecAppGroup.protectionTemporaryPauseUntilDefaultsKey
-    private let temporaryProtectionPauseSessionIDDefaultsKey = LavaSecAppGroup.protectionTemporaryPauseSessionIDDefaultsKey
     private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
     private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey
     private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
@@ -1003,10 +992,10 @@ final class AppViewModel: ObservableObject {
         storage: ProtectionUserDefaultsStorage(defaults: appGroupDefaults),
         lock: ProtectionNSLock()
     )
-    private lazy var protectionPauseStore = ProtectionPauseStore(
-        storage: ProtectionUserDefaultsStorage(defaults: appGroupDefaults),
-        lock: ProtectionNSLock()
-    )
+    // The temporary-pause state machine (store + resume timer + legacy mirror
+    // cleanup) lives in TemporaryProtectionPauseController; AppViewModel keeps the
+    // @Published mirror and the pause/resume orchestration.
+    private lazy var pauseController = TemporaryProtectionPauseController(appGroupDefaults: appGroupDefaults)
     // Single-flight gate for protection actions; isConfiguringVPN is the
     // published UI mirror and has no other writers.
     private lazy var protectionActionOrchestrator = ProtectionActionOrchestrator { [weak self] kind in
@@ -1160,7 +1149,7 @@ final class AppViewModel: ObservableObject {
 
     deinit {
         automaticBackupTask?.cancel()
-        temporaryProtectionResumeTask?.cancel()
+        // pauseController cancels its own resume timer in its deinit.
         Task { @MainActor [liveActivityController] in
             liveActivityController.stopObservingAuthorizationChanges()
         }
@@ -5829,12 +5818,8 @@ final class AppViewModel: ObservableObject {
     }
 
     private func clearTemporaryProtectionPause() {
-        temporaryProtectionResumeTask?.cancel()
-        temporaryProtectionResumeTask = nil
         temporaryProtectionPauseUntil = nil
-        try? protectionPauseStore.clearStoredPause()
-        UserDefaults.standard.removeObject(forKey: temporaryProtectionPauseUntilDefaultsKey)
-        UserDefaults.standard.removeObject(forKey: temporaryProtectionPauseSessionIDDefaultsKey)
+        pauseController.clear()
     }
 
     // Manager selection, save/reload, and duplicate cleanup live in
@@ -6509,30 +6494,15 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadTemporaryProtectionPause() {
-        // ProtectionPauseStore applies session binding and expiry; the inline
-        // key reads this replaced live only in the store now.
-        let pauseUntil = (try? protectionPauseStore.currentPauseState())?.pausedUntil
+        // ProtectionPauseStore (owned by pauseController) applies session binding
+        // and expiry; the published value mirrors the store's authoritative state.
+        let pauseUntil = pauseController.currentPauseUntil()
         if temporaryProtectionPauseUntil != pauseUntil {
             temporaryProtectionPauseUntil = pauseUntil
         }
 
         if pauseUntil == nil {
-            temporaryProtectionResumeTask?.cancel()
-            temporaryProtectionResumeTask = nil
-            removeStoredTemporaryPauseStateIfPresent()
-        }
-    }
-
-    // This runs on every status refresh; unconditional removeObject calls were a
-    // per-tick cfprefsd round trip even when no pause key existed.
-    private func removeStoredTemporaryPauseStateIfPresent() {
-        if appGroupDefaults.object(forKey: temporaryProtectionPauseUntilDefaultsKey) != nil
-            || appGroupDefaults.object(forKey: temporaryProtectionPauseSessionIDDefaultsKey) != nil {
-            try? protectionPauseStore.clearStoredPause()
-        }
-        for key in [temporaryProtectionPauseUntilDefaultsKey, temporaryProtectionPauseSessionIDDefaultsKey]
-        where UserDefaults.standard.object(forKey: key) != nil {
-            UserDefaults.standard.removeObject(forKey: key)
+            pauseController.onPauseCleared()
         }
     }
 
@@ -6547,21 +6517,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func scheduleTemporaryProtectionResume(retryDelay: TimeInterval? = nil) {
-        temporaryProtectionResumeTask?.cancel()
-
-        guard let until = temporaryProtectionPauseUntil else {
-            temporaryProtectionResumeTask = nil
-            return
-        }
-
-        let delay = retryDelay ?? max(0, until.timeIntervalSinceNow)
-        temporaryProtectionResumeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.nanoseconds(for: delay))
-            guard !Task.isCancelled else {
-                return
-            }
-
-            self?.temporaryProtectionResumeTask = nil
+        pauseController.scheduleResume(until: temporaryProtectionPauseUntil, retryDelay: retryDelay) { [weak self] in
             await self?.resumeTemporaryProtectionIfExpired()
         }
     }

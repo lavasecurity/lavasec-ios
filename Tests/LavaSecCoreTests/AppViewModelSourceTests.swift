@@ -704,7 +704,7 @@ final class AppViewModelSourceTests: XCTestCase {
 
         XCTAssertTrue(persistLookBlock.contains("appGroupDefaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
         XCTAssertFalse(persistLookBlock.contains("appGroupDefaults.synchronize()"))
-        XCTAssertTrue(loadPauseBlock.contains("protectionPauseStore.currentPauseState()"))
+        XCTAssertTrue(loadPauseBlock.contains("pauseController.currentPauseUntil()"))
         XCTAssertFalse(loadPauseBlock.contains("appGroupDefaults.synchronize()"))
     }
 
@@ -727,11 +727,15 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "private func clearTemporaryProtectionPause()"
         )
 
+        // The @Published mirror + pause/resume orchestration stay in AppViewModel;
+        // the resume timer and legacy pause-key cleanup moved to
+        // TemporaryProtectionPauseController.
+        let pauseController = try Self.source(named: "TemporaryProtectionPauseController.swift", in: "LavaSecApp")
         XCTAssertTrue(source.contains("@Published private(set) var temporaryProtectionPauseUntil: Date?"))
-        XCTAssertTrue(source.contains("private var temporaryProtectionResumeTask: Task<Void, Never>?"))
-        XCTAssertTrue(source.contains("private let temporaryProtectionPauseUntilDefaultsKey"))
+        XCTAssertTrue(pauseController.contains("private var resumeTask: Task<Void, Never>?"))
+        XCTAssertTrue(pauseController.contains("LavaSecAppGroup.protectionTemporaryPauseUntilDefaultsKey"))
         XCTAssertTrue(source.contains("loadTemporaryProtectionPause()"))
-        XCTAssertTrue(source.contains("temporaryProtectionResumeTask?.cancel()"))
+        XCTAssertTrue(pauseController.contains("resumeTask?.cancel()"))
 
         XCTAssertTrue(source.contains("var protectionCommandRequest: LavaLiveActivityActionRequest"))
         XCTAssertTrue(source.contains(".pauseFifteenMinutes"))
@@ -825,7 +829,10 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "private func loadExistingTunnelManager() async throws"
         )
 
-        XCTAssertTrue(source.contains("private let temporaryProtectionPauseSessionIDDefaultsKey = LavaSecAppGroup.protectionTemporaryPauseSessionIDDefaultsKey"))
+        // Session binding + legacy-key cleanup moved into the controller; the
+        // store-routing contract is now enforced there.
+        let pauseController = try Self.source(named: "TemporaryProtectionPauseController.swift", in: "LavaSecApp")
+        XCTAssertTrue(pauseController.contains("LavaSecAppGroup.protectionTemporaryPauseSessionIDDefaultsKey"))
 
         let beginSessionIndex = try XCTUnwrap(enableBlock.range(of: "beginFreshProtectionVPNSession()")?.lowerBound)
         let snapshotIndex = try XCTUnwrap(enableBlock.range(of: "preparedSnapshotForProtectionStartup(")?.lowerBound)
@@ -839,16 +846,17 @@ final class AppViewModelSourceTests: XCTestCase {
         // Session binding and expiry are enforced by ProtectionPauseStore
         // (covered behaviorally in ProtectionPauseStoreTests); the app must
         // route pause reads, session boundaries, and cleanup through the stores.
-        XCTAssertTrue(loadPauseBlock.contains("protectionPauseStore.currentPauseState()"))
+        XCTAssertTrue(loadPauseBlock.contains("pauseController.currentPauseUntil()"))
         XCTAssertFalse(
             loadPauseBlock.contains("temporaryProtectionPauseUntil = appGroupPauseUntil ?? legacyPauseUntil"),
             "Loading pause state must ignore pause dates that are not bound to the active VPN session."
         )
         XCTAssertTrue(source.contains("protectionSessionStore.beginFreshSession()"))
         XCTAssertTrue(source.contains("protectionSessionStore.clearActiveSessionID()"))
-        XCTAssertTrue(clearPauseBlock.contains("protectionPauseStore.clearStoredPause()"))
+        XCTAssertTrue(clearPauseBlock.contains("pauseController.clear()"))
+        XCTAssertTrue(pauseController.contains("store.clearStoredPause()"))
         XCTAssertTrue(
-            clearPauseBlock.contains("temporaryProtectionPauseSessionIDDefaultsKey"),
+            pauseController.contains("pausedSessionIDDefaultsKey"),
             "Legacy standard-defaults pause keys must still be cleared for upgraded installs."
         )
     }
