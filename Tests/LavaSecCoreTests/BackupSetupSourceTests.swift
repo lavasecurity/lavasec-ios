@@ -41,7 +41,7 @@ final class BackupSetupSourceTests: XCTestCase {
     func testPasskeyCopyReferencesSelectedPasswordManager() throws {
         let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
 
-        XCTAssertTrue(source.contains("Saved in your selected password manager and can help restore on a new device."))
+        XCTAssertTrue(source.contains("Saved in your password manager; lets Lava help restore on a new device."))
         XCTAssertFalse(source.contains("Saved by iOS for lavasecurity.app."))
     }
 
@@ -79,7 +79,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
-        XCTAssertTrue(source.contains("Lava uses passwordless mechanisms to protect your backup. Lava cannot see your backup lists - only you can decrypt them."))
+        XCTAssertTrue(source.contains("Your backup is encrypted before it leaves your device — Lava stores only ciphertext and never sees your lists. Your recovery phrase decrypts it; an optional Passkey lets Lava help you restore on a new device."))
         XCTAssertFalse(source.contains("Set up passwordless backup"))
         XCTAssertFalse(source.contains("Lava saves a local unlock on this device. New-device restore uses your recovery phrase plus a Lava-held recovery share."))
 
@@ -99,7 +99,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains("New-device restore can use a Passkey or this recovery phrase with your signed-in Lava account"))
         XCTAssertTrue(source.contains("title: \"I saved the recovery phrase\""))
-        XCTAssertTrue(source.contains("title: \"I understand Lava cannot recover my backup by itself if I lose every unlock method\""))
+        XCTAssertTrue(source.contains("title: \"I understand that if I lose every unlock method, I may not be able to restore my backup\""))
         XCTAssertFalse(source.contains("I saved the recovery phrase."))
         XCTAssertFalse(source.contains("I understand Lava cannot recover it."))
     }

@@ -73,7 +73,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "person.badge.key.fill",
                         title: "Passkey",
-                        detail: "Optional. Saved in your selected password manager and can help restore on a new device."
+                        detail: "Optional. Saved in your password manager; lets Lava help restore on a new device. The recovery phrase, by contrast, keeps your backup decryptable only by you."
                     )
 
                     Divider()
@@ -170,7 +170,7 @@ struct BackupSetupView: View {
                     )
 
                     BackupConfirmationToggle(
-                        title: "I understand Lava cannot recover my backup by itself if I lose every unlock method",
+                        title: "I understand that if I lose every unlock method, I may not be able to restore my backup",
                         isOn: $understandsNoRecovery
                     )
                 }
@@ -301,7 +301,7 @@ private enum BackupSetupStep {
     var subtitle: String {
         switch self {
         case .overview:
-            "Lava uses passwordless mechanisms to protect your backup. Lava cannot see your backup lists - only you can decrypt them."
+            "Your backup is encrypted before it leaves your device — Lava stores only ciphertext and never sees your lists. Your recovery phrase decrypts it; an optional Passkey lets Lava help you restore on a new device."
         case .recoveryPhrase:
             "Save these eight words outside Lava. Copying is optional."
         case .confirm:

@@ -20,7 +20,8 @@ infrastructure live in separate (private) repositories.
 - **Encrypted DNS** — DoH / DoT / DoQ transports.
 - **Memory-bounded** — blocklists are mmap'd to stay within the Network
   Extension memory budget.
-- **Optional account features** — encrypted, zero-knowledge backup via Supabase
+- **Optional account features** — encrypted backup via Supabase: zero-knowledge
+  with your recovery phrase, plus an optional Passkey for server-assisted restore
   (entirely optional; the core filter works with no account).
 
 ## Repository layout
