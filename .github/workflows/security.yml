@@ -1,0 +1,15 @@
+name: Security
+
+# Delegates to the org-wide reusable security backstop so the scanner policy
+# (gitleaks config trust, pinned image, etc.) lives in one hardened place
+# rather than being copied into every repo.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  security:
+    uses: lavasecurity/.github/.github/workflows/security.yml@main
+    with:
+      gitleaks: true

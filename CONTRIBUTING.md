@@ -5,8 +5,13 @@ Thanks for your interest in contributing.
 ## Before you start
 
 - This project is licensed under the **AGPL-3.0**. By contributing you agree
-  your contributions are licensed under the same terms. _(TODO: decide whether a
-  CLA / DCO sign-off is required.)_
+  your contributions are licensed under the same terms.
+- **Sign off your commits (DCO).** Every commit must carry a
+  `Signed-off-by: Your Name <you@example.com>` line — just commit with
+  `git commit -s`. This is a [Developer Certificate of
+  Origin](https://developercertificate.org/) sign-off: it certifies you wrote
+  the change, or otherwise have the right to submit it under the AGPL-3.0. We do
+  **not** require a CLA.
 - For anything beyond a small fix, open an issue first to discuss the approach.
 
 ## Development setup

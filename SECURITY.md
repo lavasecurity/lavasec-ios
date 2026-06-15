@@ -4,8 +4,8 @@
 
 **Please do not open public GitHub issues for security vulnerabilities.**
 
-Report privately to **security@lavasecurity.app** _(TODO: confirm address / enable
-GitHub private vulnerability reporting)_. Include:
+Use GitHub's **[Report a vulnerability](https://github.com/lavasecurity/lavasec-ios/security/advisories/new)**
+(Security → Advisories), or email **security@lavasecurity.app**. Include:
 
 - A description of the issue and its impact.
 - Steps to reproduce or a proof of concept.

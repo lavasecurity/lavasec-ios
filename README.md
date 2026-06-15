@@ -8,8 +8,10 @@ domains are not routinely uploaded anywhere.
 This is the open-source iOS client. The backend, marketing site, and operational
 infrastructure live in separate (private) repositories.
 
-> **Status:** Open-source release in progress. This README is a starting point —
-> sections marked _TODO_ will be filled out before the first tagged release.
+> **Status:** Pre-1.0 and pre-launch. The on-device DNS-filtering core is
+> functional; app surfaces, APIs, and configuration may still change before the
+> first App Store release. Issues and discussion are welcome — see
+> [CONTRIBUTING](CONTRIBUTING.md).
 
 ## Highlights
 
@@ -52,7 +54,27 @@ open LavaSec.xcodeproj
 - The optional **account / backup** features require your own Supabase project
   (`LAVA_SUPABASE_URL` / `LAVA_SUPABASE_ANON_KEY`).
 
-_TODO: scheme names, simulator vs device notes, running the test suite._
+### Schemes & tests
+
+- **Scheme:** `LavaSec` (builds the app, Network Extension, and widget).
+- **Run the core library tests:**
+
+  ```sh
+  swift test --package-path .
+  ```
+
+- **Build for the simulator (no signing required):**
+
+  ```sh
+  xcodebuild -project LavaSec.xcodeproj -scheme LavaSec \
+    -configuration Debug -destination 'generic/platform=iOS Simulator' \
+    CODE_SIGNING_ALLOWED=NO build
+  ```
+
+The simulator build exercises the app and the filter core. The VPN / Network
+Extension itself only runs on a **physical device** — select your Apple
+Developer team in `Config/Lava.xcconfig` and run the `LavaSec` scheme from Xcode.
+These same checks run in CI (`.github/workflows/ios.yml`).
 
 ## License
 
