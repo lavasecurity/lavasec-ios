@@ -63,25 +63,25 @@ struct RootView: View {
                 }
             )
                 .tabItem {
-                    Label("Guard", systemImage: "shield.fill")
+                    Label("Guard", systemImage: LavaIconRole.guardShield.sfSymbolName)
                 }
                 .tag(LavaRootTab.guardPanel)
 
             FiltersView(scrollToTopTrigger: scrollToTopTrigger(for: .filters))
                 .tabItem {
-                    Label("Filters", systemImage: "line.3.horizontal.decrease.circle")
+                    Label("Filters", systemImage: LavaIconRole.filters.sfSymbolName)
                 }
                 .tag(LavaRootTab.filters)
 
             ActivityView(scrollToTopTrigger: scrollToTopTrigger(for: .activity))
                 .tabItem {
-                    Label("Activity", systemImage: "chart.bar.xaxis")
+                    Label("Activity", systemImage: LavaIconRole.activity.sfSymbolName)
                 }
                 .tag(LavaRootTab.activity)
 
             SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))
                 .tabItem {
-                    Label("Settings", systemImage: "gearshape")
+                    Label("Settings", systemImage: LavaIconRole.settings.sfSymbolName)
                 }
                 .tag(LavaRootTab.settings)
         }

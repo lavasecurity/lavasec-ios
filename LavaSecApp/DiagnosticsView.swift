@@ -54,7 +54,7 @@ struct ActivityView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         LavaSectionGroup("Local Logs") {
                             LavaNavigationRow(
-                                systemImage: "clock.arrow.circlepath",
+                                icon: .domainHistory,
                                 title: "Domain History",
                                 summary: viewModel.localHistoryStatusText
                             ) {
@@ -62,7 +62,7 @@ struct ActivityView: View {
                             }
 
                             LavaNavigationRow(
-                                systemImage: "waveform.path.ecg.rectangle",
+                                icon: .networkActivity,
                                 title: "Network Activity",
                                 summary: networkActivitySummary
                             ) {

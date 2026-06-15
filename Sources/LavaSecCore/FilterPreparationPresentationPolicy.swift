@@ -4,17 +4,6 @@ public enum FilterPreparationPhase: String, Codable, Sendable {
     case downloading
     case compiling
     case saving
-
-    public var message: String {
-        switch self {
-        case .downloading:
-            "(1/3) Downloading lists"
-        case .compiling:
-            "(2/3) Compiling the list"
-        case .saving:
-            "(3/3) Saving the list"
-        }
-    }
 }
 
 public struct FilterPreparationPresentationPolicy: Equatable, Sendable {

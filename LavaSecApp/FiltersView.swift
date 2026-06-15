@@ -23,7 +23,7 @@ struct FiltersView: View {
                 LavaSectionGroup("Manage filters") {
                     VStack(spacing: 10) {
                         LavaNavigationRow(
-                            systemImage: "hand.raised.fill",
+                            icon: .blocked,
                             title: "Blocked Domains",
                             summary: viewModel.blockedFiltersSummaryText
                         ) {
@@ -31,7 +31,7 @@ struct FiltersView: View {
                         }
 
                         LavaNavigationRow(
-                            systemImage: "arrow.right.circle.fill",
+                            icon: .allowed,
                             title: "Allowed Exceptions",
                             summary: viewModel.allowedExceptionsSummaryText
                         ) {

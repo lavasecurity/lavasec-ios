@@ -2,10 +2,12 @@ import XCTest
 @testable import LavaSecCore
 
 final class FilterPreparationPresentationPolicyTests: XCTestCase {
-    func testPhaseMessagesMatchFilterPreparationCopy() {
-        XCTAssertEqual(FilterPreparationPhase.downloading.message, "(1/3) Downloading lists")
-        XCTAssertEqual(FilterPreparationPhase.compiling.message, "(2/3) Compiling the list")
-        XCTAssertEqual(FilterPreparationPhase.saving.message, "(3/3) Saving the list")
+    func testPhasesAreStableCodableStates() {
+        // User copy moved app-side (FilterPreparationPresentation); the core enum is a
+        // stable Codable contract.
+        XCTAssertEqual(FilterPreparationPhase.downloading.rawValue, "downloading")
+        XCTAssertEqual(FilterPreparationPhase.compiling.rawValue, "compiling")
+        XCTAssertEqual(FilterPreparationPhase.saving.rawValue, "saving")
     }
 
     func testDefaultMinimumDurationKeepsFastPhasesReadable() {

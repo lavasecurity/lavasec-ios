@@ -177,7 +177,7 @@ struct FilterPreparationScreen: View {
                 switch viewModel.filterPreparationState {
                 case .idle:
                     SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
-                    PreparationTickerTitle(FilterPreparationPhase.downloading.message)
+                    PreparationTickerTitle(FilterPreparationPresentation.message(for: .downloading))
 
                 case .preparing(let progress, let message):
                     if progress >= 1 {

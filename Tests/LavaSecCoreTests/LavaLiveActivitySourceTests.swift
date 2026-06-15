@@ -38,10 +38,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(attributes.contains("case .kiwiCreme:\n            \"AppIconKiwiCreme\""))
 
         XCTAssertTrue(appViewModel.contains("private func syncAppIcon(to look: GuardianShieldStyle)"))
-        XCTAssertTrue(appViewModel.contains("UIApplication.shared.supportsAlternateIcons"))
-        XCTAssertTrue(appViewModel.contains("UIApplication.shared.alternateIconName"))
+        XCTAssertTrue(appViewModel.contains("iconPersonalizer.supportsAppIconPersonalization"))
+        XCTAssertTrue(appViewModel.contains("iconPersonalizer.currentAppIconName"))
         XCTAssertTrue(appViewModel.contains("let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil"))
-        XCTAssertTrue(appViewModel.contains("UIApplication.shared.setAlternateIconName(targetIconName)"))
+        XCTAssertTrue(appViewModel.contains("iconPersonalizer.setAppIcon(targetIconName)"))
         XCTAssertTrue(appViewModel.contains("syncAppIcon(to: look)"))
 
         let alternateIconSetting = "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"\(iconNames.joined(separator: " "))\";"
@@ -453,7 +453,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(settings.contains("case .emerald:"))
         XCTAssertTrue(settings.contains("\"Giveaways should not ask for secrets.\""))
         XCTAssertTrue(settings.contains("\"Make me your web-surfing buddy!\""))
-        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
+        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
         XCTAssertFalse(tabViewBlock.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))
@@ -495,6 +495,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let actionRequest = try readSource("Shared/LavaLiveActivityActionRequest.swift")
         let intents = try readSource("Shared/LavaLiveActivityIntents.swift")
         let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
 
         XCTAssertTrue(attributes.contains("import ActivityKit"))
         XCTAssertTrue(attributes.contains("struct LavaActivityAttributes: ActivityAttributes"))
@@ -502,14 +503,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(attributes.contains("case on"))
         XCTAssertTrue(attributes.contains("case paused"))
         XCTAssertTrue(attributes.contains("var guardianState: GuardianMascotState"))
-        XCTAssertTrue(attributes.contains("var statusSymbolName: String"))
+        XCTAssertTrue(widget.contains("func statusSymbolName(for protectionState:"))
         XCTAssertTrue(attributes.contains("var pauseRequiresAuthentication: Bool"))
         XCTAssertTrue(attributes.contains("var shieldStyle: GuardianShieldStyle"))
         XCTAssertTrue(attributes.contains("decodeIfPresent(GuardianShieldStyle.self, forKey: .shieldStyle) ?? .original"))
-        XCTAssertTrue(attributes.contains("\"checkmark\""))
-        XCTAssertTrue(attributes.contains("\"pause.fill\""))
-        XCTAssertFalse(attributes.contains("\"checkmark.circle.fill\""))
-        XCTAssertFalse(attributes.contains("\"pause.circle.fill\""))
+        XCTAssertTrue(widget.contains("\"checkmark\""))
+        XCTAssertTrue(widget.contains("\"pause.fill\""))
+        XCTAssertFalse(widget.contains("\"checkmark.circle.fill\""))
+        XCTAssertFalse(widget.contains("\"pause.circle.fill\""))
 
         XCTAssertTrue(actionRequest.contains("enum LavaLiveActivityActionRequest: String, Codable, Sendable"))
         XCTAssertTrue(actionRequest.contains("case pauseFiveMinutes = \"pause-5-minutes\""))
@@ -569,7 +570,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
 
         XCTAssertTrue(attributes.contains("case needsReconnect"))
-        XCTAssertTrue(attributes.contains("\"exclamationmark.triangle.fill\""))
+        XCTAssertTrue(widget.contains("\"exclamationmark.triangle.fill\""))
         XCTAssertTrue(attributes.contains("\"Lava Security needs to reconnect\""))
 
         XCTAssertTrue(widget.contains("ReconnectLavaProtectionIntent()"))
@@ -592,8 +593,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // Both states exist with their own glyph + title (not folded into .on).
         XCTAssertTrue(attributes.contains("case networkUnavailable"))
         XCTAssertTrue(attributes.contains("case reconnecting"))
-        XCTAssertTrue(attributes.contains("\"wifi.slash\""))
-        XCTAssertTrue(attributes.contains("\"arrow.triangle.2.circlepath\""))
+        XCTAssertTrue(widget.contains("\"wifi.slash\""))
+        XCTAssertTrue(widget.contains("\"arrow.triangle.2.circlepath\""))
         XCTAssertTrue(attributes.contains("\"Waiting for network\""))
         XCTAssertTrue(attributes.contains("\"Lava Security is reconnecting\""))
 
@@ -748,7 +749,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("pauseRequiresAuthentication: Bool"))
         XCTAssertTrue(controller.contains("pauseRequiresAuthentication: pauseRequiresAuthentication"))
 
-        XCTAssertTrue(appViewModel.contains("private let liveActivityController = LavaLiveActivityController()"))
+        XCTAssertTrue(appViewModel.contains("private let liveActivityController: AmbientProtectionPresenter = LavaLiveActivityController()"))
         XCTAssertTrue(appViewModel.contains("reconcileLiveActivity()"))
         XCTAssertTrue(appViewModel.contains("shieldStyle: lavaGuardLook"))
         XCTAssertTrue(appViewModel.contains("performLiveActivityActionRequest(_ request: LavaLiveActivityActionRequest)"))
@@ -878,7 +879,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("protectionState.guardianState"))
         // The compact guardian (compactLeading) now carries a VoiceOver label, like the trailing glyph.
         XCTAssertTrue(widget.contains(".accessibilityLabel(Self.accessibilityLabel(for: protectionState))"))
-        XCTAssertTrue(widget.contains("Image(systemName: protectionState.statusSymbolName)"))
+        XCTAssertTrue(widget.contains("Image(systemName: statusSymbolName(for: protectionState))"))
         XCTAssertTrue(widget.contains(".font(.system(size: fontSize, weight: .semibold))"))
         XCTAssertFalse(widget.contains(".font(.system(size: fontSize, weight: .bold))"))
         XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state, fontSize: 17)"))

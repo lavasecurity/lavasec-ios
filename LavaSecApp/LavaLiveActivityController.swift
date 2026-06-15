@@ -4,7 +4,7 @@ import LavaSecCore
 import UIKit
 
 @MainActor
-final class LavaLiveActivityController {
+final class LavaLiveActivityController: AmbientProtectionPresenter {
     private let authorizationInfo = ActivityAuthorizationInfo()
     private let appGroupDefaults = UserDefaults(suiteName: LavaSecAppGroup.identifier)
     private var currentActivity: Activity<LavaActivityAttributes>?

@@ -105,20 +105,6 @@ struct LavaActivityAttributes: ActivityAttributes {
             }
         }
 
-        var statusSymbolName: String {
-            switch self {
-            case .on:
-                "checkmark"
-            case .paused:
-                "pause.fill"
-            case .reconnecting:
-                "arrow.triangle.2.circlepath"
-            case .needsReconnect:
-                "exclamationmark.triangle.fill"
-            case .networkUnavailable:
-                "wifi.slash"
-            }
-        }
 
         var expandedTitle: String {
             switch self {

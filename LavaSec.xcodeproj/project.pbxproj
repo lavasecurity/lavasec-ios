@@ -21,6 +21,10 @@
 		1A000001000000000000001B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007004 /* GoogleSignIn */; };
 		1A000001000000000000001C /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101A /* OnboardingFlowView.swift */; };
 		1A0000010000000000000003 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001003 /* RootView.swift */; };
+		1A0000010000000000000030 /* FilterPreparationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001030 /* FilterPreparationPresentation.swift */; };
+		1A0000010000000000000029 /* LavaIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001029 /* LavaIcon.swift */; };
+		1A0000010000000000000028 /* ProtectionPlatformSeams.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001028 /* ProtectionPlatformSeams.swift */; };
+		1A0000010000000000000027 /* ProtectionConnectivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */; };
 		1A0000010000000000000025 /* GuardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001025 /* GuardView.swift */; };
 		1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001026 /* DeveloperPreviewViews.swift */; };
 		1A0000010000000000000022 /* LavaTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001022 /* LavaTokens.swift */; };
@@ -129,6 +133,10 @@
 		1A0000010000000000001017 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
 		1A000001000000000000101A /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001003 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		1A0000010000000000001030 /* FilterPreparationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPreparationPresentation.swift; sourceTree = "<group>"; };
+		1A0000010000000000001029 /* LavaIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaIcon.swift; sourceTree = "<group>"; };
+		1A0000010000000000001028 /* ProtectionPlatformSeams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionPlatformSeams.swift; sourceTree = "<group>"; };
+		1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionConnectivityPresentation.swift; sourceTree = "<group>"; };
 		1A0000010000000000001025 /* GuardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001026 /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
 		1A0000010000000000001022 /* LavaTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaTokens.swift; sourceTree = "<group>"; };
@@ -252,6 +260,10 @@
 				1A0000010000000000001017 /* LavaStrings.swift */,
 				1A000001000000000000101A /* OnboardingFlowView.swift */,
 				1A0000010000000000001003 /* RootView.swift */,
+				1A0000010000000000001030 /* FilterPreparationPresentation.swift */,
+				1A0000010000000000001029 /* LavaIcon.swift */,
+				1A0000010000000000001028 /* ProtectionPlatformSeams.swift */,
+				1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */,
 				1A0000010000000000001025 /* GuardView.swift */,
 				1A0000010000000000001026 /* DeveloperPreviewViews.swift */,
 				1A0000010000000000001022 /* LavaTokens.swift */,
@@ -539,6 +551,10 @@
 				1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */,
 				1A0000010000000000000018 /* LavaStrings.swift in Sources */,
 				1A0000010000000000000003 /* RootView.swift in Sources */,
+				1A0000010000000000000030 /* FilterPreparationPresentation.swift in Sources */,
+				1A0000010000000000000029 /* LavaIcon.swift in Sources */,
+				1A0000010000000000000028 /* ProtectionPlatformSeams.swift in Sources */,
+				1A0000010000000000000027 /* ProtectionConnectivityPresentation.swift in Sources */,
 				1A0000010000000000000025 /* GuardView.swift in Sources */,
 				1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */,
 				1A0000010000000000000022 /* LavaTokens.swift in Sources */,

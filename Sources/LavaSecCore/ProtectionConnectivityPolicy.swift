@@ -14,22 +14,36 @@ public enum ProtectionConnectivityAction: Equatable, Sendable {
     case reconnect
 }
 
+public extension ProtectionConnectivitySeverity {
+    /// Stable, locale-independent identifier for diagnostics/logging. This is the
+    /// only string the core exposes for a severity — user-facing title/subtitle are
+    /// a per-OS presentation concern (iOS: ProtectionConnectivityPresentation).
+    var diagnosticLabel: String {
+        switch self {
+        case .healthy:                "healthy"
+        case .recovering:             "recovering"
+        case .usingDeviceDNSFallback: "device-dns-fallback"
+        case .dnsSlow:                "dns-slow"
+        case .networkUnavailable:     "network-unavailable"
+        case .needsReconnect:         "needs-reconnect"
+        }
+    }
+}
+
+/// The portable result of a connectivity assessment: a semantic severity and the
+/// recommended primary action. User-facing title/subtitle are NOT here — they are a
+/// per-OS presentation concern (iOS: ProtectionConnectivityPresentation), so the
+/// platform-agnostic core stays free of English copy.
 public struct ProtectionConnectivityAssessment: Equatable, Sendable {
     public let severity: ProtectionConnectivitySeverity
     public let primaryAction: ProtectionConnectivityAction
-    public let title: String
-    public let subtitle: String
 
     public init(
         severity: ProtectionConnectivitySeverity,
-        primaryAction: ProtectionConnectivityAction,
-        title: String,
-        subtitle: String
+        primaryAction: ProtectionConnectivityAction
     ) {
         self.severity = severity
         self.primaryAction = primaryAction
-        self.title = title
-        self.subtitle = subtitle
     }
 }
 
@@ -57,60 +71,30 @@ public enum ProtectionConnectivityPolicy {
         }
 
         if !health.networkPathIsSatisfied {
-            return ProtectionConnectivityAssessment(
-                severity: .networkUnavailable,
-                primaryAction: .turnOff,
-                title: "Network Lost",
-                subtitle: "No internet path is available. Lava will resume when the network returns."
-            )
+            return ProtectionConnectivityAssessment(severity: .networkUnavailable, primaryAction: .turnOff)
         }
 
         if hasCurrentRestartWorthyFailure(health) {
-            return ProtectionConnectivityAssessment(
-                severity: .needsReconnect,
-                primaryAction: .reconnect,
-                title: "Reconnect Needed",
-                subtitle: "Lava cannot reach the DNS. Check your network condition and reconnect."
-            )
+            return ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
         }
 
         if isUsingDeviceDNSFallback(health) {
-            return ProtectionConnectivityAssessment(
-                severity: .usingDeviceDNSFallback,
-                primaryAction: .turnOff,
-                title: "Protected",
-                subtitle: "Filtering is on with Device DNS fallback because the selected DNS resolver is unavailable"
-            )
+            return ProtectionConnectivityAssessment(severity: .usingDeviceDNSFallback, primaryAction: .turnOff)
         }
 
         if hasCurrentSlowDNS(health) {
-            return ProtectionConnectivityAssessment(
-                severity: .dnsSlow,
-                primaryAction: .reconnect,
-                title: "DNS Slow",
-                subtitle: "The selected DNS resolver is responding slowly. Reconnect or switch resolver."
-            )
+            return ProtectionConnectivityAssessment(severity: .dnsSlow, primaryAction: .reconnect)
         }
 
         if isRecoveringFromRecentNetworkChange(health, now: now) {
-            return ProtectionConnectivityAssessment(
-                severity: .recovering,
-                primaryAction: .turnOff,
-                title: "Reconnecting",
-                subtitle: "Connection changed, refreshing DNS protection"
-            )
+            return ProtectionConnectivityAssessment(severity: .recovering, primaryAction: .turnOff)
         }
 
         return healthyAssessment
     }
 
     private static var healthyAssessment: ProtectionConnectivityAssessment {
-        ProtectionConnectivityAssessment(
-            severity: .healthy,
-            primaryAction: .turnOff,
-            title: "Protected",
-            subtitle: "Filtering happens locally on this phone"
-        )
+        ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
     }
 
     private static func hasCurrentRestartWorthyFailure(_ health: TunnelHealthSnapshot) -> Bool {

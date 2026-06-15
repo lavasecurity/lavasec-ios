@@ -565,7 +565,7 @@ private final class FilterPreparationProgressPresenter {
             phaseStartedAt = Date()
         }
 
-        setState(.preparing(progress: update.progress, message: update.phase.message))
+        setState(.preparing(progress: update.progress, message: FilterPreparationPresentation.message(for: update.phase)))
     }
 
     func holdCurrentPhaseIfNeeded() async {
@@ -925,7 +925,8 @@ final class AppViewModel: ObservableObject {
     private let lavaSecurityPlusStore = LavaSecurityPlusStore()
     private let lavaSecurityPlusEntitlementSyncClient = LavaSecurityPlusEntitlementSyncClient(urlSession: .shared)
     private let protectionUserNotifications = ProtectionUserNotificationController()
-    private let liveActivityController = LavaLiveActivityController()
+    private let liveActivityController: AmbientProtectionPresenter = LavaLiveActivityController()
+    private let iconPersonalizer: IconPersonalizing = UIKitIconPersonalizer()
     private var isRefreshingProtectionStatus = false
     private var needsProtectionStatusRefresh = false
     private var lastProtectionStatusRefresh: Date?
@@ -1296,21 +1297,23 @@ final class AppViewModel: ObservableObject {
     }
 
     private func syncAppIcon(to look: GuardianShieldStyle) {
-        guard UIApplication.shared.supportsAlternateIcons else {
+        guard iconPersonalizer.supportsAppIconPersonalization else {
             return
         }
 
         let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil
-        guard UIApplication.shared.alternateIconName != targetIconName else {
+        guard iconPersonalizer.currentAppIconName != targetIconName else {
             return
         }
 
-        UIApplication.shared.setAlternateIconName(targetIconName) { error in
-            #if DEBUG
-            if let error {
+        Task {
+            do {
+                try await iconPersonalizer.setAppIcon(targetIconName)
+            } catch {
+                #if DEBUG
                 print("Failed to switch Lava app icon: \(error.localizedDescription)")
+                #endif
             }
-            #endif
         }
     }
 
@@ -1333,7 +1336,7 @@ final class AppViewModel: ObservableObject {
 
         switch vpnStatus {
         case .connected:
-            return protectionConnectivityAssessment.title
+            return ProtectionConnectivityPresentation.title(for: protectionConnectivityAssessment.severity)
         case .connecting, .reasserting:
             return "Turning On"
         case .disconnecting:
@@ -1350,7 +1353,7 @@ final class AppViewModel: ObservableObject {
 
         switch vpnStatus {
         case .connected:
-            return protectionConnectivityAssessment.subtitle
+            return ProtectionConnectivityPresentation.subtitle(for: protectionConnectivityAssessment.severity)
         case .connecting, .reasserting:
             return "iOS is starting the local VPN"
         case .disconnecting:
@@ -1413,28 +1416,24 @@ final class AppViewModel: ObservableObject {
     }
 
     var protectionTint: Color {
+        protectionTintRole.color
+    }
+
+    /// Semantic tint role for the protection surface. Portable (LavaSecCore) and
+    /// resolved to a tuned, dark-mode-adaptive color via `ProtectionTintRole.color`
+    /// on iOS — replaces the prior raw, non-adaptive `.green`/`.orange` returns.
+    var protectionTintRole: ProtectionTintRole {
         if isProtectionTemporarilyPaused {
-            return LavaStyle.lavaOrange
+            return .paused
         }
 
         switch vpnStatus {
         case .connected:
-            switch protectionConnectivityAssessment.severity {
-            case .healthy:
-                return .green
-            case .recovering:
-                return .orange
-            case .usingDeviceDNSFallback:
-                return .green
-            case .networkUnavailable:
-                return LavaStyle.secondaryText
-            case .dnsSlow, .needsReconnect:
-                return LavaStyle.lavaOrange
-            }
+            return .connected(severity: protectionConnectivityAssessment.severity)
         case .connecting, .reasserting, .disconnecting:
-            return .orange
+            return .transitioning
         default:
-            return LavaStyle.secondaryText
+            return .inactive
         }
     }
 
@@ -5847,7 +5846,7 @@ final class AppViewModel: ObservableObject {
             event: event,
             lavaState: LavaStateSnapshot(
                 protectionStatus: protectionTitle,
-                connectivityStatus: protectionConnectivityAssessment.title,
+                connectivityStatus: protectionConnectivityAssessment.severity.diagnosticLabel,
                 networkKind: tunnelHealth.networkKind,
                 networkPathIsSatisfied: tunnelHealth.networkPathIsSatisfied,
                 resolverDisplayName: configuration.resolverPreset.displayName,

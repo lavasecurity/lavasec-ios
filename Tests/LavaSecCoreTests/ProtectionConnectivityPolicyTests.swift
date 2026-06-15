@@ -136,7 +136,6 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
 
         XCTAssertEqual(assessment.severity, .networkUnavailable)
         XCTAssertEqual(assessment.primaryAction, .turnOff)
-        XCTAssertEqual(assessment.title, "Network Lost")
     }
 
     func testRecentDeviceDNSFallbackAfterNetworkChangeReportsAutomaticFallback() {
@@ -158,11 +157,6 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
 
         XCTAssertEqual(assessment.severity, .usingDeviceDNSFallback)
         XCTAssertEqual(assessment.primaryAction, .turnOff)
-        XCTAssertEqual(assessment.title, "Protected")
-        XCTAssertEqual(
-            assessment.subtitle,
-            "Filtering is on with Device DNS fallback because the selected DNS resolver is unavailable"
-        )
     }
 
     func testHistoricalDeviceDNSFallbackTimestampWithoutActiveModeReportsHealthy() {
@@ -225,7 +219,6 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
 
         XCTAssertEqual(assessment.severity, .dnsSlow)
         XCTAssertEqual(assessment.primaryAction, .reconnect)
-        XCTAssertEqual(assessment.title, "DNS Slow")
     }
 
     func testRecentSmokeProbeSuccessAfterNetworkChangeReportsConnectedProtection() {
@@ -247,7 +240,6 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
 
         XCTAssertEqual(assessment.severity, .healthy)
         XCTAssertEqual(assessment.primaryAction, .turnOff)
-        XCTAssertEqual(assessment.title, "Protected")
     }
 
     func testRecentSmokeProbeFailureWithoutFallbackRecommendsReconnect() {

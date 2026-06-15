@@ -2807,7 +2807,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             event: event,
             lavaState: LavaStateSnapshot(
                 protectionStatus: "Connected",
-                connectivityStatus: assessment.title,
+                connectivityStatus: assessment.severity.diagnosticLabel,
                 networkKind: health.networkKind,
                 networkPathIsSatisfied: health.networkPathIsSatisfied,
                 resolverDisplayName: configuration.resolverPreset.displayName,

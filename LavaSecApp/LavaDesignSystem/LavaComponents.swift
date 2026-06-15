@@ -3,18 +3,18 @@ import LavaSecCore
 import UIKit
 
 struct LavaNavigationRow<Destination: View>: View {
-    let systemImage: String?
+    let icon: LavaIconRole?
     let title: String
     let summary: String
     let destination: Destination
 
     init(
-        systemImage: String? = nil,
+        icon: LavaIconRole? = nil,
         title: String,
         summary: String,
         @ViewBuilder destination: () -> Destination
     ) {
-        self.systemImage = systemImage
+        self.icon = icon
         self.title = title
         self.summary = summary
         self.destination = destination()
@@ -25,8 +25,8 @@ struct LavaNavigationRow<Destination: View>: View {
             destination
         } label: {
             HStack(spacing: 12) {
-                if let systemImage {
-                    Image(systemName: systemImage)
+                if let icon {
+                    Image(systemName: icon.sfSymbolName)
                         .font(.headline)
                         .foregroundStyle(LavaStyle.safeGreen)
                         .frame(width: 34, height: 34)

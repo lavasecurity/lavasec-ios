@@ -79,10 +79,25 @@ private struct LavaLiveActivityStatusGlyphView: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
             let protectionState = state.effectiveProtectionState(now: timeline.date)
-            Image(systemName: protectionState.statusSymbolName)
+            Image(systemName: statusSymbolName(for: protectionState))
                 .font(.system(size: fontSize, weight: .semibold))
                 .foregroundStyle(state.shieldStyle.dynamicIslandStatusGlyphColor)
                 .accessibilityLabel(statusAccessibilityLabel(for: protectionState))
+        }
+    }
+
+    private func statusSymbolName(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
+        switch protectionState {
+        case .on:
+            "checkmark"
+        case .paused:
+            "pause.fill"
+        case .reconnecting:
+            "arrow.triangle.2.circlepath"
+        case .needsReconnect:
+            "exclamationmark.triangle.fill"
+        case .networkUnavailable:
+            "wifi.slash"
         }
     }
 

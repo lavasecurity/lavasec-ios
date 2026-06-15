@@ -13,9 +13,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .usingDeviceDNSFallback,
-                primaryAction: .turnOff,
-                title: "Using Device DNS",
-                subtitle: "Network DNS rules changed."
+                primaryAction: .turnOff
             ),
             health: health,
             history: .empty,
@@ -40,9 +38,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .networkUnavailable,
-                primaryAction: .turnOff,
-                title: "Network Lost",
-                subtitle: "No internet path is available."
+                primaryAction: .turnOff
             ),
             health: health,
             history: .empty,
@@ -67,9 +63,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .needsReconnect,
-                primaryAction: .reconnect,
-                title: "Reconnect Needed",
-                subtitle: "DNS smoke test failed."
+                primaryAction: .reconnect
             ),
             health: health,
             history: .empty,
@@ -92,9 +86,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         )
         let recentAssessment = ProtectionConnectivityAssessment(
             severity: .usingDeviceDNSFallback,
-            primaryAction: .turnOff,
-            title: "Using Device DNS",
-            subtitle: "Network DNS rules changed."
+            primaryAction: .turnOff
         )
 
         XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
@@ -120,9 +112,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .networkUnavailable,
-                primaryAction: .turnOff,
-                title: "Network Lost",
-                subtitle: "No internet path is available."
+                primaryAction: .turnOff
             ),
             health: TunnelHealthSnapshot(
                 networkPathIsSatisfied: false,
@@ -146,9 +136,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .networkUnavailable,
-                primaryAction: .turnOff,
-                title: "Network Lost",
-                subtitle: "No internet path is available."
+                primaryAction: .turnOff
             ),
             health: TunnelHealthSnapshot(
                 networkPathIsSatisfied: false,
@@ -172,9 +160,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
                 severity: .networkUnavailable,
-                primaryAction: .turnOff,
-                title: "Network Lost",
-                subtitle: "No internet path is available."
+                primaryAction: .turnOff
             ),
             health: TunnelHealthSnapshot(
                 networkPathIsSatisfied: false,
@@ -216,9 +202,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let successAt = now.addingTimeInterval(-2)
         let assessment = ProtectionConnectivityAssessment(
             severity: .healthy,
-            primaryAction: .turnOff,
-            title: "Protected",
-            subtitle: "Filtering happens locally on this phone"
+            primaryAction: .turnOff
         )
         let health = TunnelHealthSnapshot(
             lastDNSSmokeProbeAt: successAt,
@@ -283,9 +267,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
     private static var healthyAssessment: ProtectionConnectivityAssessment {
         ProtectionConnectivityAssessment(
             severity: .healthy,
-            primaryAction: .turnOff,
-            title: "Protected",
-            subtitle: "Filtering happens locally on this phone"
+            primaryAction: .turnOff
         )
     }
 }
