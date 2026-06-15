@@ -79,7 +79,8 @@ final class BackupSetupSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
-        XCTAssertTrue(source.contains("Your backup is encrypted before it leaves your device — Lava stores only ciphertext and never sees your lists. Your recovery phrase decrypts it; an optional Passkey lets Lava help you restore on a new device."))
+        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. With your recovery phrase, only you can decrypt them. An optional Passkey makes new-device restore easier — but Lava stores a recovery secret for that path, so it isn't fully private to you."))
+        XCTAssertFalse(source.contains("Lava stores only ciphertext"))
         XCTAssertFalse(source.contains("Set up passwordless backup"))
         XCTAssertFalse(source.contains("Lava saves a local unlock on this device. New-device restore uses your recovery phrase plus a Lava-held recovery share."))
 

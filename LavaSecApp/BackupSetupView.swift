@@ -301,7 +301,7 @@ private enum BackupSetupStep {
     var subtitle: String {
         switch self {
         case .overview:
-            "Your backup is encrypted before it leaves your device — Lava stores only ciphertext and never sees your lists. Your recovery phrase decrypts it; an optional Passkey lets Lava help you restore on a new device."
+            "Your lists are encrypted on your device before upload. With your recovery phrase, only you can decrypt them. An optional Passkey makes new-device restore easier — but Lava stores a recovery secret for that path, so it isn't fully private to you."
         case .recoveryPhrase:
             "Save these eight words outside Lava. Copying is optional."
         case .confirm:
