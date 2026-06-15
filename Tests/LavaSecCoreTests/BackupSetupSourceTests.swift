@@ -149,6 +149,10 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFAssertionInput"))
         XCTAssertTrue(coordinatorSource.contains("func assertPasskeyPRFOutput("))
         XCTAssertTrue(coordinatorSource.contains("BackupPasskeyError.prfUnavailable"))
+        // PRF support is detected at registration so non-PRF providers fail with a clear
+        // "not supported" message instead of an ambiguous cancellation at the verify step.
+        XCTAssertTrue(coordinatorSource.contains("registration.prf?.isSupported"))
+        XCTAssertTrue(viewModelSource.contains("registration.supportsPRF"))
         // Setup wraps the slot with the PRF output and stores no server recovery secret.
         XCTAssertTrue(viewModelSource.contains("ZeroKnowledgeBackupEnvelope.makeWithPRF"))
         XCTAssertTrue(viewModelSource.contains("pendingBackupPasskeyCredentialID"))

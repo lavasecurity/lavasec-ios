@@ -3983,8 +3983,14 @@ final class AppViewModel: ObservableObject {
             challenge: try BackupPasskeyCoordinator.makeChallengeString()
         )
 
-        // Confirm PRF actually works on this provider and capture the output. If the provider
-        // doesn't return a PRF output, surface prfUnavailable so the flow routes to the phrase.
+        // Non-PRF providers (e.g. Bitwarden today) can still create the credential, but it can't
+        // back a zero-knowledge slot. Fail here with a clear "not supported" message rather than
+        // letting the verification assertion below surface as an ambiguous cancellation.
+        guard registration.supportsPRF else {
+            throw BackupPasskeyError.prfUnavailable
+        }
+
+        // Capture the PRF output to wrap the backup slot at setup time.
         let prfSalt = try BackupPasskeyCoordinator.makePRFSalt()
         let prfOutput = try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
             credentialID: registration.credentialID,

@@ -17,6 +17,9 @@ struct BackupPasskeyRegistrationRecord: Equatable {
     let credentialID: String
     let relyingPartyIdentifier: String
     let credential: BackupPasskeyRegistrationCredential
+    /// Whether the authenticator/provider reported PRF support at registration. When false, the
+    /// passkey can't back a zero-knowledge slot, so setup must not proceed to PRF derivation.
+    let supportsPRF: Bool
 }
 
 struct BackupPasskeyAssertionRecord: Equatable {
@@ -150,6 +153,13 @@ final class BackupPasskeyCoordinator: NSObject {
         guard let attestationObject = registration.rawAttestationObject else {
             throw BackupPasskeyError.unsupportedCredential
         }
+        // The registration output reports whether this authenticator supports PRF. Capture it so
+        // setup can fail early with a clear "not supported" message for non-PRF providers (e.g.
+        // Bitwarden) instead of surfacing an ambiguous cancellation at the later assertion step.
+        var supportsPRF = false
+        if #available(iOS 18.0, *) {
+            supportsPRF = registration.prf?.isSupported ?? false
+        }
         let credentialID = Self.base64URLEncoded(registration.credentialID)
         let credential = BackupPasskeyRegistrationCredential(
             id: credentialID,
@@ -166,7 +176,8 @@ final class BackupPasskeyCoordinator: NSObject {
         return BackupPasskeyRegistrationRecord(
             credentialID: credentialID,
             relyingPartyIdentifier: BackupPasskeyConfiguration.relyingPartyIdentifier,
-            credential: credential
+            credential: credential,
+            supportsPRF: supportsPRF
         )
     }
 
