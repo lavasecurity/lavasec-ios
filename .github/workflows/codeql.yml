@@ -1,21 +1,24 @@
 name: CodeQL
 
-# Static analysis (SAST) for the Swift sources. CodeQL is a compiled-language
-# analyzer, so it must observe a real build — we run the same xcodebuild command
-# as iOS CI under CodeQL's manual build mode. Free for public repos; results land
-# in the Security tab and on pull requests. GitHub-hosted runners only, no secrets,
-# so fork pull requests analyze safely.
+# Static analysis (SAST) for the Swift sources. CodeQL is a compiled-language analyzer, so it must
+# observe a real build — we run the same xcodebuild command as iOS CI under CodeQL's manual build
+# mode. That build is ~30+ min on macOS, so to keep it off the PR critical path CodeQL is NOT a
+# required check and runs only on main + weekly (it's advisory; the fast per-PR mobile SAST is
+# mobsfscan). Manual runs are available via workflow_dispatch. It analyzes the public lavasec-ios
+# repo only — the internal mirror keeps an identical file but skips the job (see the `if` guard),
+# so the two lanes stay byte-identical for the promotion/contamination guard.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+    # Only when Swift / project / package inputs change — a docs or asset merge shouldn't pay the
+    # macOS build. (The weekly schedule re-scans the whole tree regardless.)
+    paths:
+      - '**/*.swift'
+      - 'LavaSec.xcodeproj/**'
+      - '**/Package.swift'
+      - '**/Package.resolved'
+      - '.github/workflows/codeql.yml'
   schedule:
     - cron: '27 4 * * 1' # weekly, Monday 04:27 UTC
 
@@ -29,6 +32,9 @@ permissions:
 jobs:
   analyze:
     name: CodeQL (Swift)
+    # Public repo only. The internal mirror carries the same file but must not run the (costly)
+    # Swift analysis — the public lane is authoritative for code scanning.
+    if: ${{ github.repository == 'lavasecurity/lavasec-ios' }}
     runs-on: macos-26
     timeout-minutes: 45
     permissions:
@@ -41,6 +47,20 @@ jobs:
 
       - name: Show Xcode Version
         run: xcodebuild -version
+
+      # Cache the resolved SwiftPM checkouts so each run skips re-resolving + re-downloading the
+      # third-party packages (Google Sign-In, AppCheck, etc.). CodeQL still compiles them — it must
+      # observe the build — but the network/resolution cost is removed. Build products are NOT
+      # cached: CodeQL needs to see a real compile to extract its database.
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-codeql-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-codeql-spm-
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -55,6 +75,7 @@ jobs:
             -scheme LavaSec \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -clonedSourcePackagesDirPath SourcePackages \
             CODE_SIGNING_ALLOWED=NO \
             build
 
