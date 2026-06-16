@@ -27,7 +27,8 @@ const allowedUntranslatedValues = new Set([
   "%@. %@",
   "OK",
   "→",
-  "iOS"
+  "iOS",
+  "?"
 ]);
 const requiredReleaseKeys = [
   "Guard",

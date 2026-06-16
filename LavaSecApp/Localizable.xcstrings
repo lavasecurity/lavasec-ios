@@ -1,9 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    " (%@)" : {
-
-    },
     " %@" : {
       "comment" : "Placeholder-only extraction. Preserve the leading space and placeholder.",
       "localizations" : {
@@ -49,16 +46,85 @@
       "comment" : "Release app UI string fragment. Preserve the leading space and keep DNS, HTTPS, TLS, and QUIC unchanged.",
       "extractionState" : "manual",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", um DNS über HTTPS, TLS und QUIC zu nutzen"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : " to use DNS over HTTPS, TLS and QUIC"
           }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " pour utiliser le DNS via HTTPS, TLS et QUIC"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "してHTTPS、TLS、QUICによるDNSを利用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以使用基于 HTTPS、TLS 和 QUIC 的 DNS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即可使用透過 HTTPS、TLS 和 QUIC 加密的 DNS"
+          }
         }
       }
     },
     "?" : {
-
+      "comment" : "Help/info button glyph. Identical in every locale.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "?"
+          }
+        }
+      }
     },
     "... and a pitch for your parent" : {
       "comment" : "Release app UI string. Keep placeholders and product names intact.",
@@ -4290,10 +4356,40 @@
       "comment" : "Release app UI string. Preserve the Markdown link destination.",
       "extractionState" : "manual",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Guard-Fortschritt erfordert lokale Protokolle. [**Datenschutz & Daten prüfen**](lavasecurity://settings/privacy-data)"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La progression de Lava Guard nécessite des journaux locaux. [**Vérifier confidentialité et données**](lavasecurity://settings/privacy-data)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Guardの進捗にはローカルログが必要です。[**プライバシーとデータを確認**](lavasecurity://settings/privacy-data)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Guard 进度需要本地日志。[**查看隐私与数据**](lavasecurity://settings/privacy-data)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Guard 進度需要本機記錄。[**檢閱隱私權與資料**](lavasecurity://settings/privacy-data)"
           }
         }
       }
@@ -7229,10 +7325,40 @@
       "comment" : "Release app UI string. Keep DNS, IP, HTTPS, TLS, and QUIC unchanged.",
       "extractionState" : "manual",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unterstützt DNS über IP, HTTPS, TLS und QUIC"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Supports DNS over IP, HTTPS, TLS and QUIC"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prend en charge le DNS via IP, HTTPS, TLS et QUIC"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP、HTTPS、TLS、QUICによるDNSに対応"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持基于 IP、HTTPS、TLS 和 QUIC 的 DNS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支援透過 IP、HTTPS、TLS 和 QUIC 的 DNS"
           }
         }
       }
@@ -8280,7 +8406,46 @@
       }
     },
     "Unlocked" : {
-
+      "comment" : "Plan-comparison status meaning a paid feature is available/unlocked.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigeschaltet"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlocked"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Débloqué"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "利用可能"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已解锁"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已解鎖"
+          }
+        }
+      }
     },
     "Up-to-date" : {
       "comment" : "Release app UI string or runtime format. Preserve placeholders and review before final release.",
@@ -8328,10 +8493,40 @@
       "comment" : "Release app UI string. Keep DNS, HTTPS, TLS, and QUIC unchanged.",
       "extractionState" : "manual",
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upgraden, um DNS über HTTPS, TLS und QUIC zu nutzen"
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Upgrade to use DNS over HTTPS, TLS and QUIC"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passez à la version supérieure pour utiliser le DNS via HTTPS, TLS et QUIC"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップグレードしてHTTPS、TLS、QUICによるDNSを利用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升级以使用基于 HTTPS、TLS 和 QUIC 的 DNS"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升級即可使用透過 HTTPS、TLS 和 QUIC 加密的 DNS"
           }
         }
       }
@@ -8672,7 +8867,46 @@
       }
     },
     "Your custom DNS draft will be removed." : {
-
+      "comment" : "Body of the 'Discard custom DNS changes?' confirmation alert.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein benutzerdefinierter DNS-Entwurf wird entfernt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your custom DNS draft will be removed."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre brouillon de DNS personnalisé sera supprimé."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムDNSの下書きは削除されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的自定义 DNS 草稿将被移除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的自訂 DNS 草稿將會被移除。"
+          }
+        }
+      }
     },
     "Your draft changes will be removed. The current saved filters will stay active." : {
       "comment" : "Release app UI string. Keep placeholders and product names intact.",
@@ -8752,6 +8986,48 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "意見回饋草稿會被移除。"
+          }
+        }
+      }
+    },
+    "Upgrade" : {
+      "comment" : "Upgrade call-to-action word; also the bold prefix of the encrypted-DNS upgrade line.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upgraden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upgrade"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passez à la version supérieure"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップグレード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升级"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升級"
           }
         }
       }
