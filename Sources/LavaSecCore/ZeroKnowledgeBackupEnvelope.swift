@@ -72,6 +72,8 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
     public static let defaultPasswordIterations = 210_000
     public static let testingPasswordIterations = 8
     private static let supportedKeyDerivationFunction = "PBKDF2-HMAC-SHA256"
+    private static let prfKeyDerivationFunction = "HKDF-SHA256"
+    private static let prfHKDFInfo = Data("LavaSec passkey backup PRF v1".utf8)
 
     public let schemaVersion: Int
     public let envelopeVersion: Int
@@ -201,6 +203,89 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
+    /// Build a passwordless envelope whose passkey slot is wrapped with an authenticator
+    /// **PRF / `hmac-secret`** output (HKDF-derived), not a server-stored secret. The PRF output
+    /// never leaves the client, so this passkey slot is genuinely zero-knowledge: no server-held
+    /// value unwraps it. The `passkeyPRFSalt` is the non-secret PRF input persisted in the slot so
+    /// restore can reproduce the same PRF output.
+    public static func makeWithPRF(
+        payload: BackupConfigurationPayload,
+        deviceSecret: String,
+        serverRecoveryShare: String? = nil,
+        recoveryPhrase: String,
+        passkeyPRFOutput: Data,
+        passkeyPRFSalt: Data,
+        passkeyCredentialID: String,
+        passwordIterations: Int = defaultPasswordIterations,
+        createdAt: Date = Date()
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        let effectiveServerRecoveryShare = try serverRecoveryShare ?? BackupAssistedRecoverySecret.makeServerShare()
+        let assistedRecoverySecret = BackupAssistedRecoverySecret.combinedSecret(
+            recoveryPhrase: recoveryPhrase,
+            serverRecoveryShare: effectiveServerRecoveryShare
+        )
+
+        let payloadData = try makeJSONEncoder().encode(payload)
+        let rawPayloadKey = try randomData(byteCount: 32)
+        let payloadKey = SymmetricKey(data: rawPayloadKey)
+        let sealedPayload = try AES.GCM.seal(payloadData, using: payloadKey)
+
+        guard let payloadCiphertext = sealedPayload.combined else {
+            throw ZeroKnowledgeBackupEnvelopeError.invalidCiphertext
+        }
+
+        let keySlots = [
+            try makeKeySlot(
+                kind: .keychain,
+                secret: deviceSecret,
+                rawPayloadKey: rawPayloadKey,
+                iterations: passwordIterations
+            ),
+            try makeKeySlot(
+                kind: .assistedRecovery,
+                secret: assistedRecoverySecret,
+                rawPayloadKey: rawPayloadKey,
+                iterations: passwordIterations
+            ),
+            try makePRFKeySlot(
+                rawPayloadKey: rawPayloadKey,
+                prfOutput: passkeyPRFOutput,
+                salt: passkeyPRFSalt,
+                credentialID: passkeyCredentialID
+            )
+        ]
+
+        return ZeroKnowledgeBackupEnvelope(
+            payloadCiphertext: payloadCiphertext.base64EncodedString(),
+            keySlots: keySlots,
+            serverRecoveryShare: effectiveServerRecoveryShare,
+            ciphertextByteSize: payloadCiphertext.count,
+            createdAt: createdAt
+        )
+    }
+
+    public static func makeWithPRFForTesting(
+        payload: BackupConfigurationPayload,
+        deviceSecret: String,
+        serverRecoveryShare: String? = nil,
+        recoveryPhrase: String,
+        passkeyPRFOutput: Data,
+        passkeyPRFSalt: Data,
+        passkeyCredentialID: String
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        try makeWithPRF(
+            payload: payload,
+            deviceSecret: deviceSecret,
+            serverRecoveryShare: serverRecoveryShare,
+            recoveryPhrase: recoveryPhrase,
+            passkeyPRFOutput: passkeyPRFOutput,
+            passkeyPRFSalt: passkeyPRFSalt,
+            passkeyCredentialID: passkeyCredentialID,
+            passwordIterations: testingPasswordIterations,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
     public func decryptWithPassword(_ password: String) throws -> BackupConfigurationPayload {
         try decrypt(using: password, slotKind: .password)
     }
@@ -227,6 +312,35 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
 
     public func decryptWithPasskeySecret(_ secret: String) throws -> BackupConfigurationPayload {
         try decrypt(using: secret, slotKind: .passkey)
+    }
+
+    /// Decrypt the PRF-derived passkey slot using the authenticator's PRF output. The slot's stored
+    /// salt is the PRF input; the caller obtains `prfOutput` from a passkey assertion with that
+    /// salt. No server-held value participates.
+    public func decryptWithPasskeyPRFOutput(_ prfOutput: Data) throws -> BackupConfigurationPayload {
+        guard envelopeVersion == Self.currentEnvelopeVersion else {
+            throw ZeroKnowledgeBackupEnvelopeError.unsupportedEnvelopeVersion(envelopeVersion)
+        }
+
+        guard let slot = keySlots.first(where: { $0.kind == .passkey }) else {
+            throw ZeroKnowledgeBackupEnvelopeError.missingKeySlot
+        }
+
+        guard slot.kdf == Self.prfKeyDerivationFunction else {
+            throw ZeroKnowledgeBackupEnvelopeError.unsupportedKeyDerivationFunction(slot.kdf)
+        }
+
+        let salt = try decodeBase64(slot.salt)
+        let wrappedPayloadKey = try decodeBase64(slot.wrappedKey)
+        let wrappingKey = Self.derivePRFKey(prfOutput: prfOutput, salt: salt)
+        let wrappedKeyBox = try AES.GCM.SealedBox(combined: wrappedPayloadKey)
+        let rawPayloadKey = try AES.GCM.open(wrappedKeyBox, using: wrappingKey)
+        let payloadKey = SymmetricKey(data: rawPayloadKey)
+        let payloadCiphertextData = try decodeBase64(payloadCiphertext)
+        let payloadBox = try AES.GCM.SealedBox(combined: payloadCiphertextData)
+        let payloadData = try AES.GCM.open(payloadBox, using: payloadKey)
+
+        return try Self.makeJSONDecoder().decode(BackupConfigurationPayload.self, from: payloadData)
     }
 
     private static func make(
@@ -307,6 +421,38 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
             iterations: iterations,
             wrappedKey: wrappedKey.base64EncodedString(),
             credentialID: credentialID
+        )
+    }
+
+    private static func makePRFKeySlot(
+        rawPayloadKey: Data,
+        prfOutput: Data,
+        salt: Data,
+        credentialID: String
+    ) throws -> ZeroKnowledgeBackupKeySlot {
+        let wrappingKey = derivePRFKey(prfOutput: prfOutput, salt: salt)
+        let sealedKey = try AES.GCM.seal(rawPayloadKey, using: wrappingKey)
+
+        guard let wrappedKey = sealedKey.combined else {
+            throw ZeroKnowledgeBackupEnvelopeError.invalidCiphertext
+        }
+
+        return ZeroKnowledgeBackupKeySlot(
+            kind: .passkey,
+            kdf: prfKeyDerivationFunction,
+            salt: salt.base64EncodedString(),
+            iterations: 0,
+            wrappedKey: wrappedKey.base64EncodedString(),
+            credentialID: credentialID
+        )
+    }
+
+    private static func derivePRFKey(prfOutput: Data, salt: Data) -> SymmetricKey {
+        HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: prfOutput),
+            salt: salt,
+            info: prfHKDFInfo,
+            outputByteCount: 32
         )
     }
 
