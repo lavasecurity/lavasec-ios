@@ -36,6 +36,24 @@ final class DefaultCatalogTests: XCTestCase {
         )
     }
 
+    func testRecommendedDefaultsAreDerivedFromDefaultEnabledFlag() {
+        // Single source of truth: the recommended default is whatever the catalog
+        // marks `defaultEnabled`, not a hardcoded list. Phishing + Scam are on;
+        // Basic is off — mirroring the backend `default_enabled` column.
+        XCTAssertTrue(DefaultCatalog.blockListProjectPhishing.defaultEnabled)
+        XCTAssertTrue(DefaultCatalog.blockListProjectScam.defaultEnabled)
+        XCTAssertFalse(DefaultCatalog.blockListProjectBasic.defaultEnabled)
+
+        XCTAssertEqual(
+            DefaultCatalog.recommendedDefaultSourceIDs,
+            ["blocklistproject-phishing", "blocklistproject-scam"]
+        )
+        XCTAssertEqual(
+            AppConfiguration.lavaRecommendedDefaults.enabledBlocklistIDs,
+            DefaultCatalog.recommendedDefaultSourceIDs
+        )
+    }
+
     func testPhishingDatabaseActiveIsSelectable() {
         let ids = Set(DefaultCatalog.curatedSources.map(\.id))
         XCTAssertTrue(ids.contains(DefaultCatalog.phishingDatabaseActive.id))

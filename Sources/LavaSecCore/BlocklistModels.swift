@@ -136,6 +136,7 @@ public enum DefaultCatalog {
         name: "Block List Project Phishing",
         sourceURL: URL(string: "https://blocklistproject.github.io/Lists/phishing.txt")!,
         licenseName: "Unlicense",
+        defaultEnabled: true,
         warningLevel: .advanced
     )
 
@@ -144,6 +145,7 @@ public enum DefaultCatalog {
         name: "Block List Project Scam",
         sourceURL: URL(string: "https://blocklistproject.github.io/Lists/scam.txt")!,
         licenseName: "Unlicense",
+        defaultEnabled: true,
         warningLevel: .advanced
     )
 
@@ -239,6 +241,15 @@ public enum DefaultCatalog {
         hageziMultiPro,
         oisdSmall
     ]
+
+    /// The recommended default blocklist set, derived from each curated source's
+    /// `defaultEnabled` flag — the single source of truth for the fresh-install
+    /// default. Mirrors the backend catalog's `default_enabled` column (see the
+    /// `blocklist_sources` migration). To change the default, flip the flag on the
+    /// source; do not hardcode a list elsewhere.
+    public static var recommendedDefaultSourceIDs: Set<String> {
+        Set(curatedSources.filter(\.defaultEnabled).map(\.id))
+    }
 
     public static let guardrailSources: [BlocklistSource] = []
 
