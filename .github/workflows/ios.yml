@@ -51,24 +51,36 @@ jobs:
           range="${BASE}..${HEAD}"
           fail=0
 
-          # (a) Never accept gitignored-local config or QA-only paths into the public tree.
-          if git diff --name-only "$range" | grep -E '\.local\.xcconfig$|(^|/)QA/'; then
-            echo "::error::PR touches a *.local.xcconfig or QA/ path that must never be public."; fail=1
+          # Cover BOTH transient and persistent forbidden files: UNION the per-commit file
+          # lists (git log --name-only — catches files added then deleted within the range)
+          # with the net endpoint diff (git diff — catches the final tree, INCLUDING files
+          # introduced only by a merge commit's resolution, which git log omits by default). (Codex P1)
+
+          # (a) gitignored-local config / QA-only paths must never appear in any commit OR the net tree.
+          touched=$(
+            { git log "$range" --name-only --pretty=format:; git diff --name-only "$range"; } \
+              | sort -u | grep -v '^$' || true
+          )
+          if printf '%s\n' "$touched" | grep -E '\.local\.xcconfig$|(^|/)QA/'; then
+            echo "::error::a commit in this PR touches a *.local.xcconfig or QA/ path that must never be public."; fail=1
           fi
 
-          # (b) The internal-only build flag must never be enabled in tracked public source.
+          # (b) The internal-only build flag must never be enabled in any commit's tracked source.
           #     Exclude .github/ so this guard's own source (which names the flag) isn't a hit.
-          if git diff "$range" -- . ':(exclude).github/' | grep -E '^\+' | grep -q 'LAVA_QA_TOOLS'; then
-            echo "::error::PR introduces the internal-only LAVA_QA_TOOLS flag into tracked source."; fail=1
+          if { git log "$range" -p -- . ':(exclude).github/'; git diff "$range" -- . ':(exclude).github/'; } \
+               | grep -E '^\+' | grep -q 'LAVA_QA_TOOLS'; then
+            echo "::error::a commit in this PR enables the internal-only LAVA_QA_TOOLS flag in tracked source."; fail=1
           fi
 
-          # (c) Identity: STRICT on promote/* (internal->public) branches; soft on outside forks
-          #     (don't block legitimate AGPL contributors — the secret/path guards still apply).
+          # (c) Identity: STRICT on promote/* (internal->public). Allow ONLY the canonical
+          #     lavasecurity account (+ GitHub's web-merge committer) — NOT the whole noreply
+          #     domain, so a different contributor's private email can't publish into the
+          #     scrubbed history. (Codex P1) Soft on outside forks (path/flag guards still apply).
           if [ "${IS_FORK}" != "true" ] && printf '%s' "${HEAD_REF}" | grep -q '^promote/'; then
-            bad=$(git log --format='%ae%n%ce' "$range" | sort -u \
-              | grep -vE '@users\.noreply\.github\.com$|^dev@lavasecurity\.app$' || true)
+            canonical='^(285110054\+lavasecurity@users\.noreply\.github\.com|noreply@github\.com)$'
+            bad=$(git log "$range" --format='%ae%n%ce' | sort -u | grep -vE "$canonical" || true)
             if [ -n "$bad" ]; then
-              echo "::error::promotion PR carries non-canonical author/committer identity:"
+              echo "::error::promotion PR carries non-canonical author/committer identity (expected only the lavasecurity account):"
               printf '  %s\n' $bad
               fail=1
             fi
