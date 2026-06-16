@@ -3993,12 +3993,14 @@ final class AppViewModel: ObservableObject {
             challenge: try BackupPasskeyCoordinator.makeChallengeString()
         )
 
-        // Non-PRF providers (e.g. Bitwarden today) can still create the credential, but it can't
-        // back a zero-knowledge slot. Fail here with a clear "not supported" message — before the
-        // validation step — rather than as an ambiguous cancellation later.
-        guard registration.supportsPRF else {
-            throw BackupPasskeyError.prfUnavailable
-        }
+        // Do NOT hard-gate on registration-time PRF support. ASAuthorization reports
+        // `prf.isSupported` unreliably at credential *creation* for the platform authenticator —
+        // iCloud Keychain frequently reports false even though PRF works at assertion — so gating
+        // here regressed the iCloud Keychain happy path ("can't start passkey"). The validation
+        // assertion is the reliable authority: `validateBackupPasskey()` throws `.prfUnavailable`
+        // when a provider genuinely returns no PRF output (e.g. Bitwarden), surfacing a clear
+        // "not supported" message on the validation step. (`registration.supportsPRF` remains
+        // available as a non-blocking hint only.)
 
         pendingBackupPasskeyCredentialID = registration.credentialID
         pendingBackupPasskey = nil
