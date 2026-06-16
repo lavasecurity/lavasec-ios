@@ -9241,6 +9241,48 @@
           }
         }
       }
+    },
+    " to Lava Security Plus to bring your own list" : {
+      "comment" : "Bring-your-own-list upgrade fragment rendered in gray after a bold \"Upgrade\" (FiltersView). Keep \"Lava Security Plus\" unchanged; preserve the leading space.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " auf Lava Security Plus, um deine eigene Liste zu verwenden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " to Lava Security Plus to bring your own list"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " Lava Security Plus pour utiliser votre propre liste"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "してLava Security Plusで独自のリストを利用"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到 Lava Security Plus 即可使用你自己的拦截列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到 Lava Security Plus 即可使用你自己的封鎖清單"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
