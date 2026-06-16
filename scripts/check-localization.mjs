@@ -23,11 +23,13 @@ const allowedUntranslatedValues = new Set([
   "LavaSec",
   "%@",
   " %@",
+  " (%@)",
   "%1$@ %2$@",
   "%@. %@",
   "OK",
   "→",
-  "iOS"
+  "iOS",
+  "?"
 ]);
 const requiredReleaseKeys = [
   "Guard",
