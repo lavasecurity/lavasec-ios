@@ -96,7 +96,10 @@ jobs:
       - name: Upload SARIF to code scanning
         # Skip on fork pull requests: their read-only token cannot write security
         # events, so the upload would error. Pushes and same-repo PRs upload fine.
-        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) }}
+        # Also skip on private repos (e.g. the internal mirror): code scanning needs
+        # GitHub Advanced Security there, so upload-sarif 403s ("Resource not accessible
+        # by integration") and fails the job. Public repos get code scanning for free.
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && github.event.repository.visibility == 'public' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: mobsfscan.sarif
