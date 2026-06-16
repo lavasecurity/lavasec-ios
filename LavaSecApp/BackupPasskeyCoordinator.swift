@@ -17,6 +17,9 @@ struct BackupPasskeyRegistrationRecord: Equatable {
     let credentialID: String
     let relyingPartyIdentifier: String
     let credential: BackupPasskeyRegistrationCredential
+    /// Whether the authenticator/provider reported PRF support at registration. When false, the
+    /// passkey can't back a zero-knowledge slot, so setup must not proceed to PRF derivation.
+    let supportsPRF: Bool
 }
 
 struct BackupPasskeyAssertionRecord: Equatable {
@@ -79,6 +82,7 @@ enum BackupPasskeyError: Error, LocalizedError {
     case invalidCredentialID
     case missingAccount
     case noMatchingCredential
+    case prfUnavailable
     case randomBytesFailed(OSStatus)
     case unsupportedCredential
     case webCredentialsAssociationUnavailable
@@ -99,6 +103,8 @@ enum BackupPasskeyError: Error, LocalizedError {
             "Sign in before creating a passkey."
         case .noMatchingCredential:
             "No matching passkey was found. Use Recovery or set up Passkey again."
+        case .prfUnavailable:
+            "This passkey can't be used for zero-knowledge backup. Use a passkey provider that supports PRF (iCloud Keychain on iOS 18+), or set up without Passkey and keep your recovery phrase."
         case .randomBytesFailed(let status):
             "Could not prepare a secure passkey challenge. Security returned status \(status)."
         case .unsupportedCredential:
@@ -137,10 +143,22 @@ final class BackupPasskeyCoordinator: NSObject {
             name: name,
             userID: userIDData
         )
+        // Create the credential as PRF-capable so the backup slot can be derived from its
+        // hmac-secret output. The PRF output itself is read during assertion, never here.
+        if #available(iOS 18.0, *) {
+            request.prf = ASAuthorizationPublicKeyCredentialPRFRegistrationInput.checkForSupport
+        }
 
         let registration = try await performRegistration(request)
         guard let attestationObject = registration.rawAttestationObject else {
             throw BackupPasskeyError.unsupportedCredential
+        }
+        // The registration output reports whether this authenticator supports PRF. Capture it so
+        // setup can fail early with a clear "not supported" message for non-PRF providers (e.g.
+        // Bitwarden) instead of surfacing an ambiguous cancellation at the later assertion step.
+        var supportsPRF = false
+        if #available(iOS 18.0, *) {
+            supportsPRF = registration.prf?.isSupported ?? false
         }
         let credentialID = Self.base64URLEncoded(registration.credentialID)
         let credential = BackupPasskeyRegistrationCredential(
@@ -158,11 +176,17 @@ final class BackupPasskeyCoordinator: NSObject {
         return BackupPasskeyRegistrationRecord(
             credentialID: credentialID,
             relyingPartyIdentifier: BackupPasskeyConfiguration.relyingPartyIdentifier,
-            credential: credential
+            credential: credential,
+            supportsPRF: supportsPRF
         )
     }
 
-    func assertPasskey(credentialID: String, challenge: String) async throws -> BackupPasskeyAssertionRecord {
+    /// Assert the passkey requesting the WebAuthn PRF extension with `saltInput`, and return the
+    /// authenticator's PRF / `hmac-secret` output. This output never leaves the device and is the
+    /// only material that unwraps the zero-knowledge passkey backup slot. Throws `prfUnavailable`
+    /// if the authenticator/provider does not return a PRF output.
+    @available(iOS 18.0, *)
+    func assertPasskeyPRFOutput(credentialID: String, challenge: String, saltInput: Data) async throws -> Data {
         guard activeRequest == nil else {
             throw BackupPasskeyError.alreadyInProgress
         }
@@ -182,30 +206,35 @@ final class BackupPasskeyCoordinator: NSObject {
         request.allowedCredentials = [
             ASAuthorizationPlatformPublicKeyCredentialDescriptor(credentialID: credentialIDData)
         ]
+        let prfInputValues = ASAuthorizationPublicKeyCredentialPRFAssertionInput.InputValues(
+            saltInput1: saltInput,
+            saltInput2: nil
+        )
+        request.prf = .inputValues(prfInputValues)
 
         let assertion = try await performAssertion(request)
-        let assertedCredentialID = Self.base64URLEncoded(assertion.credentialID)
-        let userHandle = assertion.userID.isEmpty ? nil : Self.base64URLEncoded(assertion.userID)
-        let credential = BackupPasskeyAssertionCredential(
-            id: assertedCredentialID,
-            rawID: assertedCredentialID,
-            response: BackupPasskeyAssertionCredentialResponse(
-                clientDataJSON: Self.base64URLEncoded(assertion.rawClientDataJSON),
-                authenticatorData: Self.base64URLEncoded(assertion.rawAuthenticatorData),
-                signature: Self.base64URLEncoded(assertion.signature),
-                userHandle: userHandle
-            ),
-            clientExtensionResults: BackupPasskeyCredentialClientExtensionResults(),
-            type: "public-key"
-        )
+        guard let prf = assertion.prf else {
+            throw BackupPasskeyError.prfUnavailable
+        }
 
-        return BackupPasskeyAssertionRecord(
-            credentialID: assertedCredentialID,
-            credential: credential
-        )
+        // The authenticator returns the PRF result as a SymmetricKey; HKDF over its raw bytes
+        // produces the slot-wrapping key (see ZeroKnowledgeBackupEnvelope.makeWithPRF).
+        return prf.first.withUnsafeBytes { Data($0) }
     }
 
     static func makeChallenge() throws -> Data {
+        try randomBytes(count: 32)
+    }
+
+    /// A base64url challenge for the local-only passkey ceremonies. There is no server to verify
+    /// it; the security of the backup slot comes from the PRF output, not challenge attestation.
+    static func makeChallengeString() throws -> String {
+        base64URLEncoded(try randomBytes(count: 32))
+    }
+
+    /// The non-secret PRF input (salt) persisted in the envelope's passkey slot so a new device
+    /// reproduces the same PRF output.
+    static func makePRFSalt() throws -> Data {
         try randomBytes(count: 32)
     }
 

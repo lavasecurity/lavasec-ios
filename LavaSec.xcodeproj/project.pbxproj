@@ -15,7 +15,6 @@
 		1A0000010000000000000014 /* BackupSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001014 /* BackupSetupView.swift */; };
 		1A0000010000000000000015 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001015 /* BackupRestoreView.swift */; };
 		1A000001000000000000001D /* BackupPasskeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101B /* BackupPasskeyCoordinator.swift */; };
-		1A000001000000000000001E /* BackupPasskeyRecoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101C /* BackupPasskeyRecoveryService.swift */; };
 		1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001016 /* AccountSessionKeychainStore.swift */; };
 		1A0000010000000000000018 /* LavaStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001017 /* LavaStrings.swift */; };
 		1A000001000000000000001B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007004 /* GoogleSignIn */; };
@@ -129,7 +128,6 @@
 		1A0000010000000000001014 /* BackupSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSetupView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001015 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
 		1A000001000000000000101B /* BackupPasskeyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasskeyCoordinator.swift; sourceTree = "<group>"; };
-		1A000001000000000000101C /* BackupPasskeyRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasskeyRecoveryService.swift; sourceTree = "<group>"; };
 		1A0000010000000000001016 /* AccountSessionKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSessionKeychainStore.swift; sourceTree = "<group>"; };
 		1A0000010000000000001017 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
 		1A000001000000000000101A /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
@@ -257,7 +255,6 @@
 				1A0000010000000000001014 /* BackupSetupView.swift */,
 				1A0000010000000000001015 /* BackupRestoreView.swift */,
 				1A000001000000000000101B /* BackupPasskeyCoordinator.swift */,
-				1A000001000000000000101C /* BackupPasskeyRecoveryService.swift */,
 				1A0000010000000000001016 /* AccountSessionKeychainStore.swift */,
 				1A0000010000000000001017 /* LavaStrings.swift */,
 				1A000001000000000000101A /* OnboardingFlowView.swift */,
@@ -550,7 +547,6 @@
 				1A0000010000000000000014 /* BackupSetupView.swift in Sources */,
 				1A0000010000000000000015 /* BackupRestoreView.swift in Sources */,
 				1A000001000000000000001D /* BackupPasskeyCoordinator.swift in Sources */,
-				1A000001000000000000001E /* BackupPasskeyRecoveryService.swift in Sources */,
 				1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */,
 				1A0000010000000000000018 /* LavaStrings.swift in Sources */,
 				1A0000010000000000000003 /* RootView.swift in Sources */,
