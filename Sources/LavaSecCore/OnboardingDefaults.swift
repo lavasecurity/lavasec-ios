@@ -4,10 +4,7 @@ public extension AppConfiguration {
     static var lavaRecommendedDefaults: AppConfiguration {
         AppConfiguration(
             protectionEnabled: false,
-            enabledBlocklistIDs: [
-                DefaultCatalog.blockListProjectPhishing.id,
-                DefaultCatalog.blockListProjectScam.id,
-            ],
+            enabledBlocklistIDs: DefaultCatalog.recommendedDefaultSourceIDs,
             resolverPresetID: DNSResolverPreset.google.id,
             fallbackToDeviceDNS: true,
             keepFilteringCounts: true,
