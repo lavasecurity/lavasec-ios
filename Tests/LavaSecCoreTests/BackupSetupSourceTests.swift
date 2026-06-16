@@ -7,16 +7,31 @@ final class BackupSetupSourceTests: XCTestCase {
         let keychainSource = try Self.readAppSource("LavaSecApp/BackupKeychainStore.swift")
 
         XCTAssertTrue(setupSource.contains("BackupRecoveryPhrase.generate()"))
-        XCTAssertTrue(setupSource.contains("try await viewModel.prepareBackupPasskey()"))
+        XCTAssertTrue(setupSource.contains("try await viewModel.registerBackupPasskey()"))
         XCTAssertTrue(setupSource.contains("try await viewModel.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)"))
         XCTAssertFalse(setupSource.contains("BackupPasswordField"))
         XCTAssertFalse(setupSource.contains("BackupPasswordPolicy.validate"))
         XCTAssertTrue(viewModelSource.contains("BackupDeviceSecret.generate()"))
         XCTAssertTrue(viewModelSource.contains("ZeroKnowledgeBackupEnvelope.makePasswordless"))
         XCTAssertTrue(viewModelSource.contains("backupKeychainStore.saveDeviceSecret(deviceSecret)"))
-        XCTAssertTrue(viewModelSource.contains("func prepareBackupPasskey() async throws"))
+        XCTAssertTrue(viewModelSource.contains("func registerBackupPasskey() async throws"))
         XCTAssertTrue(keychainSource.contains("func saveDeviceSecret"))
         XCTAssertTrue(keychainSource.contains("func loadDeviceSecret"))
+    }
+
+    func testPasskeySetupSplitsRegistrationAndValidationIntoSteps() throws {
+        let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+
+        // The two authenticator ceremonies are split across explicit steps: registration on
+        // "Set up with Passkey", then a separate "Validate the passkey" step that captures PRF.
+        XCTAssertTrue(viewModelSource.contains("func registerBackupPasskey() async throws"))
+        XCTAssertTrue(viewModelSource.contains("func validateBackupPasskey() async throws"))
+        XCTAssertFalse(viewModelSource.contains("func prepareBackupPasskey"))
+        XCTAssertTrue(setupSource.contains("case validatePasskey"))
+        XCTAssertTrue(setupSource.contains("try await viewModel.validateBackupPasskey()"))
+        XCTAssertTrue(setupSource.contains("Validate the passkey"))
+        XCTAssertTrue(setupSource.contains("step = .validatePasskey"))
     }
 
     func testRestoreUsesSavedDeviceSecretAndRecoveryPhraseFallback() throws {
