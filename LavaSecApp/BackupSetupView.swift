@@ -14,6 +14,7 @@ struct BackupSetupView: View {
     @State private var savedRecoveryPhrase = false
     @State private var understandsNoRecovery = false
     @State private var isPreparingPasskey = false
+    @State private var isValidatingPasskey = false
     @State private var isFinishingSetup = false
     @State private var errorMessage: String?
 
@@ -51,6 +52,8 @@ struct BackupSetupView: View {
         switch step {
         case .overview:
             overviewStep
+        case .validatePasskey:
+            validatePasskeyStep
         case .recoveryPhrase:
             recoveryPhraseStep
         case .confirm:
@@ -132,6 +135,48 @@ struct BackupSetupView: View {
         }
     }
 
+    private var validatePasskeyStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            LavaPlainCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    BackupSetupFactRow(
+                        systemImage: "checkmark.shield.fill",
+                        title: "How restore works",
+                        detail: "You'll use your passkey once more. This is the same step a new device runs to unlock your backup, so it confirms restore will work."
+                    )
+                }
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    validatePasskey()
+                } label: {
+                    Label(
+                        (isValidatingPasskey ? "Checking Passkey" : "Validate the passkey").lavaLocalized,
+                        systemImage: "person.badge.key.fill"
+                    )
+                }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(isValidatingPasskey)
+
+                Button {
+                    cancelPasskeyValidation()
+                } label: {
+                    Text("Cancel".lavaLocalized)
+                }
+                .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
+                .disabled(isValidatingPasskey)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var recoveryPhraseStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             LavaPlainCard {
@@ -201,7 +246,7 @@ struct BackupSetupView: View {
 
     @ViewBuilder
     private var footer: some View {
-        if step == .overview {
+        if step == .overview || step == .validatePasskey {
             EmptyView()
         } else {
         HStack(spacing: 12) {
@@ -229,6 +274,8 @@ struct BackupSetupView: View {
         switch step {
         case .overview:
             selectedPasskeyMode != nil && !recoveryPhrase.isEmpty
+        case .validatePasskey:
+            false
         case .recoveryPhrase:
             !recoveryPhrase.isEmpty
         case .confirm:
@@ -249,8 +296,8 @@ struct BackupSetupView: View {
         isPreparingPasskey = true
         Task {
             do {
-                try await viewModel.prepareBackupPasskey()
-                step = .recoveryPhrase
+                try await viewModel.registerBackupPasskey()
+                step = .validatePasskey
             } catch {
                 selectedPasskeyMode = nil
                 errorMessage = error.localizedDescription
@@ -259,10 +306,33 @@ struct BackupSetupView: View {
         }
     }
 
+    private func validatePasskey() {
+        errorMessage = nil
+        isValidatingPasskey = true
+        Task {
+            do {
+                try await viewModel.validateBackupPasskey()
+                step = .recoveryPhrase
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isValidatingPasskey = false
+        }
+    }
+
+    private func cancelPasskeyValidation() {
+        viewModel.clearPendingBackupPasskey()
+        selectedPasskeyMode = nil
+        errorMessage = nil
+        step = .overview
+    }
+
     private func advance() {
         switch step {
         case .overview:
             step = .recoveryPhrase
+        case .validatePasskey:
+            break
         case .recoveryPhrase:
             step = .confirm
         case .confirm:
@@ -298,6 +368,7 @@ struct BackupSetupView: View {
 
 private enum BackupSetupStep {
     case overview
+    case validatePasskey
     case recoveryPhrase
     case confirm
 
@@ -305,6 +376,8 @@ private enum BackupSetupStep {
         switch self {
         case .overview:
             "Set Up Encrypted Backup"
+        case .validatePasskey:
+            "Confirm your passkey"
         case .recoveryPhrase:
             "Save your recovery phrase"
         case .confirm:
@@ -316,6 +389,8 @@ private enum BackupSetupStep {
         switch self {
         case .overview:
             "Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."
+        case .validatePasskey:
+            "Use your passkey once more so Lava can confirm it unlocks this backup, then save your recovery phrase."
         case .recoveryPhrase:
             "Save these eight words outside Lava. Copying is optional."
         case .confirm:
@@ -325,7 +400,7 @@ private enum BackupSetupStep {
 
     var primaryButtonTitle: String {
         switch self {
-        case .overview, .recoveryPhrase:
+        case .overview, .validatePasskey, .recoveryPhrase:
             "Continue"
         case .confirm:
             "Turn On Backup"
@@ -334,7 +409,7 @@ private enum BackupSetupStep {
 
     var previous: BackupSetupStep {
         switch self {
-        case .overview, .recoveryPhrase:
+        case .overview, .validatePasskey, .recoveryPhrase:
             .overview
         case .confirm:
             .recoveryPhrase

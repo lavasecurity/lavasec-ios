@@ -538,6 +538,13 @@ private struct PendingBackupPasskey: Equatable {
     let prfOutput: Data
 }
 
+/// A registered (PRF-capable) passkey awaiting the explicit validation step that captures its
+/// PRF output. Holds only the credential ID and the non-secret salt — no key material yet.
+private struct RegisteredBackupPasskey: Equatable {
+    let credentialID: String
+    let prfSalt: Data
+}
+
 @MainActor
 private final class FilterPreparationProgressPresenter {
     private let policy: FilterPreparationPresentationPolicy
@@ -933,6 +940,7 @@ final class AppViewModel: ObservableObject {
     private let backupPasskeyCoordinator = BackupPasskeyCoordinator()
     private var pendingBackupPasskeyCredentialID: String?
     private var pendingBackupPasskey: PendingBackupPasskey?
+    private var registeredBackupPasskey: RegisteredBackupPasskey?
     private let accountAuthService: AccountAuthService
     private let backupSyncService: (any BackupSyncServicing)?
     private let lavaSecurityPlusStore = LavaSecurityPlusStore()
@@ -3963,7 +3971,10 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func prepareBackupPasskey() async throws {
+    /// Step 1 of passkey setup: create the passkey (first authenticator ceremony) and confirm it
+    /// supports PRF. The PRF output is captured separately in `validateBackupPasskey()` so the two
+    /// biometric ceremonies are split across explicit UI steps rather than fired back-to-back.
+    func registerBackupPasskey() async throws {
         guard let session = try await accountAuthService.refreshCurrentSession() else {
             accountAuthState = accountAuthService.state
             throw BackupPasskeyError.missingAccount
@@ -3971,8 +3982,7 @@ final class AppViewModel: ObservableObject {
         accountAuthState = accountAuthService.state
 
         // Zero-knowledge passkey backup requires the authenticator PRF extension (iOS 18+,
-        // iCloud Keychain). The passkey is created locally — no server registration — and its
-        // PRF output is captured here to wrap the backup slot at setup time.
+        // iCloud Keychain). The passkey is created locally — no server registration.
         guard #available(iOS 18.0, *) else {
             throw BackupPasskeyError.prfUnavailable
         }
@@ -3984,32 +3994,49 @@ final class AppViewModel: ObservableObject {
         )
 
         // Non-PRF providers (e.g. Bitwarden today) can still create the credential, but it can't
-        // back a zero-knowledge slot. Fail here with a clear "not supported" message rather than
-        // letting the verification assertion below surface as an ambiguous cancellation.
+        // back a zero-knowledge slot. Fail here with a clear "not supported" message — before the
+        // validation step — rather than as an ambiguous cancellation later.
         guard registration.supportsPRF else {
             throw BackupPasskeyError.prfUnavailable
         }
 
-        // Capture the PRF output to wrap the backup slot at setup time.
-        let prfSalt = try BackupPasskeyCoordinator.makePRFSalt()
-        let prfOutput = try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
-            credentialID: registration.credentialID,
-            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
-            saltInput: prfSalt
-        )
-
         pendingBackupPasskeyCredentialID = registration.credentialID
-        pendingBackupPasskey = PendingBackupPasskey(
+        pendingBackupPasskey = nil
+        registeredBackupPasskey = RegisteredBackupPasskey(
             credentialID: registration.credentialID,
-            prfSalt: prfSalt,
-            prfOutput: prfOutput
+            prfSalt: try BackupPasskeyCoordinator.makePRFSalt()
         )
         try backupKeychainStore.savePasskeyCredentialID(registration.credentialID)
+    }
+
+    /// Step 2 of passkey setup: assert the registered passkey (second authenticator ceremony) to
+    /// capture the PRF output that wraps the backup slot. This is the same operation a new-device
+    /// restore performs, so it doubles as a validation that the passkey can unlock the backup.
+    func validateBackupPasskey() async throws {
+        guard #available(iOS 18.0, *) else {
+            throw BackupPasskeyError.prfUnavailable
+        }
+        guard let registered = registeredBackupPasskey else {
+            throw BackupPasskeyError.invalidCredentialID
+        }
+
+        let prfOutput = try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
+            credentialID: registered.credentialID,
+            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
+            saltInput: registered.prfSalt
+        )
+
+        pendingBackupPasskey = PendingBackupPasskey(
+            credentialID: registered.credentialID,
+            prfSalt: registered.prfSalt,
+            prfOutput: prfOutput
+        )
     }
 
     func clearPendingBackupPasskey() {
         pendingBackupPasskeyCredentialID = nil
         pendingBackupPasskey = nil
+        registeredBackupPasskey = nil
     }
 
     private var backupPasskeyAccountName: String {
