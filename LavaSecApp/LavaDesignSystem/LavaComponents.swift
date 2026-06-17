@@ -174,18 +174,25 @@ struct LavaPlainCard<Content: View>: View {
 }
 
 extension View {
-    /// Wraps a single control (toggle, segmented picker, lone action) in its own card at
-    /// the shared `LavaRowMetrics` height. Use instead of `LavaPlainCard` for one-control
-    /// rows: `LavaPlainCard`'s blanket 16pt pad inflated single rows to ~63pt, whereas this
-    /// uses the shared `verticalInset`/`minHeight` so a toggle row lines up with
-    /// `LavaCondensedListItem` rows and `LavaInfoPanel`. `LavaPlainCard` stays the right
-    /// choice for genuinely multi-content cards (text-input panels, stacked action groups).
-    func lavaControlRowCard() -> some View {
+    /// The shared body of every full-width row: horizontal/vertical insets plus the
+    /// tap-target floor, content vertically centered. One definition so a toggle row, an
+    /// action row, a condensed-list item, and an info row all share the same rhythm. The
+    /// surface is applied separately — a row inside a `LavaCondensedList` inherits the
+    /// list's card; a standalone row uses `lavaControlRowCard()`.
+    func lavaRow() -> some View {
         self
             .padding(.horizontal, LavaRowMetrics.horizontalInset)
             .padding(.vertical, LavaRowMetrics.verticalInset)
             .frame(maxWidth: .infinity, minHeight: LavaRowMetrics.minHeight, alignment: .leading)
-            .lavaSurface(.card)
+            .contentShape(Rectangle())
+    }
+
+    /// A standalone single control (toggle, segmented picker, lone action) in its own
+    /// card at the shared row height. Use instead of `LavaPlainCard` for one-control
+    /// rows; `LavaPlainCard` stays the right choice for genuinely multi-content cards
+    /// (text-input panels). Multi-row groups belong in a `LavaCondensedList` of `lavaRow`s.
+    func lavaControlRowCard() -> some View {
+        lavaRow().lavaSurface(.card)
     }
 }
 

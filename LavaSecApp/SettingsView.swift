@@ -479,29 +479,27 @@ private struct SettingsSystemSettingsRow: View {
     let title: String
 
     var body: some View {
-        LavaPlainCard {
-            Button {
-                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
-                    return
-                }
-
-                UIApplication.shared.open(settingsURL)
-            } label: {
-                HStack(spacing: 12) {
-                    Text(title.lavaLocalized)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "arrow.up.right")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
+        Button {
+            guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
+                return
             }
-            .buttonStyle(.plain)
+
+            UIApplication.shared.open(settingsURL)
+        } label: {
+            HStack(spacing: 12) {
+                Text(title.lavaLocalized)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .lavaControlRowCard()
         }
+        .buttonStyle(.plain)
         .hoverEffect(.highlight)
     }
 }
@@ -518,52 +516,52 @@ private struct AccountSettingsView: View {
                 "Account",
                 footer: "Account login is only needed for encrypted backup upload, support history, or paid account management."
             ) {
-                LavaPlainCard {
-                    VStack(spacing: 12) {
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                if viewModel.isAppleAccountConnected {
-                                    isShowingAccountSheet = true
-                                } else {
-                                    viewModel.beginSignInWithApple()
-                                }
-                            }
-                        } label: {
-                            SettingsActionRow(
-                                title: viewModel.appleSignInActionTitle,
-                                iconTint: LavaStyle.primaryText
-                            ) {
-                                AppleSignInStatusIcon(
-                                    isSigningIn: viewModel.isAppleSignInInProgress
-                                )
+                LavaCondensedList {
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            if viewModel.isAppleAccountConnected {
+                                isShowingAccountSheet = true
+                            } else {
+                                viewModel.beginSignInWithApple()
                             }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountSignInInProgress)
-
-                        Divider()
-
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                if viewModel.isGoogleAccountConnected {
-                                    isShowingAccountSheet = true
-                                } else {
-                                    viewModel.beginSignInWithGoogle()
-                                }
-                            }
-                        } label: {
-                            SettingsActionRow(title: viewModel.googleSignInActionTitle) {
-                                if viewModel.isGoogleSignInInProgress {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    GoogleSignInIcon()
-                                }
-                            }
+                    } label: {
+                        SettingsActionRow(
+                            title: viewModel.appleSignInActionTitle,
+                            iconTint: LavaStyle.primaryText
+                        ) {
+                            AppleSignInStatusIcon(
+                                isSigningIn: viewModel.isAppleSignInInProgress
+                            )
                         }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountSignInInProgress)
+                        .lavaRow()
                     }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountSignInInProgress)
+
+                    LavaCondensedDivider()
+
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            if viewModel.isGoogleAccountConnected {
+                                isShowingAccountSheet = true
+                            } else {
+                                viewModel.beginSignInWithGoogle()
+                            }
+                        }
+                    } label: {
+                        SettingsActionRow(title: viewModel.googleSignInActionTitle) {
+                            if viewModel.isGoogleSignInInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                GoogleSignInIcon()
+                            }
+                        }
+                        .lavaRow()
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountSignInInProgress)
                 }
             }
             .sheet(isPresented: $isShowingAccountSheet) {
@@ -578,62 +576,63 @@ private struct AccountSettingsView: View {
                         systemImage: "lock.shield.fill"
                     )
 
-                    LavaPlainCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            if viewModel.isEncryptedBackupConfigured {
-                                Button {
-                                    Task {
-                                        guard await security.requireAuthentication(
-                                            for: .appSettings,
-                                            reason: "Back up settings"
-                                        ) else {
-                                            return
-                                        }
+                    LavaCondensedList {
+                        if viewModel.isEncryptedBackupConfigured {
+                            Button {
+                                Task {
+                                    guard await security.requireAuthentication(
+                                        for: .appSettings,
+                                        reason: "Back up settings"
+                                    ) else {
+                                        return
+                                    }
 
-                                        await viewModel.backUpNow()
-                                    }
-                                } label: {
-                                    SettingsActionRow(title: viewModel.isBackingUpNow ? "Backing Up" : "Back Up Now") {
-                                        if viewModel.isBackingUpNow {
-                                            ProgressView()
-                                                .controlSize(.small)
-                                        } else {
-                                            Image(systemName: "icloud.and.arrow.up.fill")
-                                                .font(.title3.weight(.semibold))
-                                        }
-                                    }
+                                    await viewModel.backUpNow()
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
-                                .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
-                            } else {
-                                NavigationLink {
-                                    BackupSetupView()
-                                } label: {
-                                    SettingsActionRow(title: "Set Up Encrypted Backup") {
-                                        Image(systemName: "key.fill")
+                            } label: {
+                                SettingsActionRow(title: viewModel.isBackingUpNow ? "Backing Up" : "Back Up Now") {
+                                    if viewModel.isBackingUpNow {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "icloud.and.arrow.up.fill")
                                             .font(.title3.weight(.semibold))
                                     }
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(!viewModel.isAccountSignedIn)
-                                .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                                .lavaRow()
                             }
-
-                            Divider()
-
+                            .buttonStyle(.plain)
+                            .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
+                            .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                        } else {
                             NavigationLink {
-                                BackupRestoreView()
+                                BackupSetupView()
                             } label: {
-                                SettingsActionRow(title: "Restore Backup") {
-                                    Image(systemName: "icloud.and.arrow.down.fill")
+                                SettingsActionRow(title: "Set Up Encrypted Backup") {
+                                    Image(systemName: "key.fill")
                                         .font(.title3.weight(.semibold))
                                 }
+                                .lavaRow()
                             }
                             .buttonStyle(.plain)
                             .disabled(!viewModel.isAccountSignedIn)
                             .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
                         }
+
+                        LavaCondensedDivider()
+
+                        NavigationLink {
+                            BackupRestoreView()
+                        } label: {
+                            SettingsActionRow(title: "Restore Backup") {
+                                Image(systemName: "icloud.and.arrow.down.fill")
+                                    .font(.title3.weight(.semibold))
+                            }
+                            .lavaRow()
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!viewModel.isAccountSignedIn)
+                        .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
                     }
 
                     BackupOptionControl(
@@ -646,14 +645,12 @@ private struct AccountSettingsView: View {
 
                     if viewModel.isEncryptedBackupConfigured {
                         VStack(alignment: .leading, spacing: 8) {
-                            LavaPlainCard {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    backupMaintenanceButton(.clear)
+                            LavaCondensedList {
+                                backupMaintenanceButton(.clear)
 
-                                    Divider()
+                                LavaCondensedDivider()
 
-                                    backupMaintenanceButton(.disable)
-                                }
+                                backupMaintenanceButton(.disable)
                             }
 
                             Text("Disabling backup also permanently deletes the copy stored for your account.")
@@ -686,7 +683,7 @@ private struct AccountSettingsView: View {
                 Image(systemName: "trash")
                     .font(.title3.weight(.semibold))
             }
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isBackupMaintenanceInProgress || viewModel.isBackingUpNow)
@@ -861,55 +858,56 @@ private struct AccountSheet: View {
 
         NavigationStack {
             LavaSheetScaffold(spacing: 14, scrolls: false) {
-                LavaPlainCard {
-                    VStack(spacing: 12) {
-                        ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
-                            AccountConnectionRow(connection: connection)
+                LavaCondensedList {
+                    ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
+                        AccountConnectionRow(connection: connection)
+                            .lavaRow()
 
-                            if index < accountConnections.count - 1 {
-                                Divider()
-                            }
+                        if index < accountConnections.count - 1 {
+                            LavaCondensedDivider()
                         }
+                    }
 
-                        Divider()
+                    LavaCondensedDivider()
 
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                viewModel.signOutAccount()
-                                dismiss()
-                            }
-                        } label: {
-                            SettingsActionRow(title: "Sign out of all accounts", iconTint: LavaStyle.secondaryText) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            viewModel.signOutAccount()
+                            dismiss()
+                        }
+                    } label: {
+                        SettingsActionRow(title: "Sign out of all accounts", iconTint: LavaStyle.secondaryText) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.title3.weight(.semibold))
+                        }
+                        .lavaRow()
+                    }
+                    .buttonStyle(.plain)
+
+                    LavaCondensedDivider()
+
+                    Button(role: .destructive) {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            isConfirmingAccountDeletion = true
+                        }
+                    } label: {
+                        SettingsActionRow(
+                            title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
+                            iconTint: .red,
+                            titleTint: .red
+                        ) {
+                            if viewModel.isAccountDeletionInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "trash")
                                     .font(.title3.weight(.semibold))
                             }
                         }
-                        .buttonStyle(.plain)
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                isConfirmingAccountDeletion = true
-                            }
-                        } label: {
-                            SettingsActionRow(
-                                title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
-                                iconTint: .red,
-                                titleTint: .red
-                            ) {
-                                if viewModel.isAccountDeletionInProgress {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "trash")
-                                        .font(.title3.weight(.semibold))
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountDeletionInProgress)
+                        .lavaRow()
                     }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountDeletionInProgress)
                 }
             }
             .navigationTitle("Account")
@@ -1383,16 +1381,15 @@ private struct CustomizationSettingsView: View {
     var body: some View {
         SettingsSubpageContent {
             LavaSectionGroup("Appearance") {
-                LavaPlainCard {
-                    Picker("Appearance", selection: appearanceBinding) {
-                        ForEach(LavaAppearancePreference.allCases) { preference in
-                            Text(preference.displayName.lavaLocalized)
-                                .tag(preference)
-                        }
+                Picker("Appearance", selection: appearanceBinding) {
+                    ForEach(LavaAppearancePreference.allCases) { preference in
+                        Text(preference.displayName.lavaLocalized)
+                            .tag(preference)
                     }
-                    .pickerStyle(.segmented)
-                    .tint(LavaStyle.safeGreen)
                 }
+                .pickerStyle(.segmented)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
             }
 
             if viewModel.canOfferLiveActivities {
@@ -2392,11 +2389,7 @@ private struct CustomDNSResolverRow: View {
 
             Spacer(minLength: 6)
         }
-        .padding(.horizontal, LavaRowMetrics.horizontalInset)
-        .padding(.vertical, LavaRowMetrics.verticalInset)
-        .frame(minHeight: LavaRowMetrics.minHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .lavaRow()
     }
 
     @ViewBuilder
@@ -2493,11 +2486,6 @@ private struct ResolverSelectionIndicator: View {
     }
 }
 
-private enum LocalLogSettingsRowMetrics {
-    static let groupedRowSpacing: CGFloat = 14
-    static let rowMinHeight: CGFloat = 32
-}
-
 struct PrivacyDataSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
@@ -2519,34 +2507,31 @@ struct PrivacyDataSettingsView: View {
                         systemImage: "lock.shield.fill"
                     )
 
-                    LavaPlainCard {
-                        VStack(spacing: LocalLogSettingsRowMetrics.groupedRowSpacing) {
-                            localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
+                    LavaCondensedList {
+                        localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Domain History", isOn: keepDomainHistoryBinding)
+                        localLogToggle("Domain History", isOn: keepDomainHistoryBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Network Activity", isOn: keepNetworkActivityBinding)
+                        localLogToggle("Network Activity", isOn: keepNetworkActivityBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Lava Guard Progress", isOn: keepLavaGuardProgressBinding)
-                        }
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
+                        localLogToggle("Lava Guard Progress", isOn: keepLavaGuardProgressBinding)
                     }
+                    .font(.headline)
+                    .tint(LavaStyle.safeGreen)
 
-                    LavaPlainCard {
-                        Button {
-                            exportLocalLogs()
-                        } label: {
-                            ExportLocalLogsRow()
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        exportLocalLogs()
+                    } label: {
+                        ExportLocalLogsRow()
+                            .lavaControlRowCard()
                     }
+                    .buttonStyle(.plain)
 
                     if let localLogExportErrorMessage {
                         Text(localLogExportErrorMessage)
@@ -2558,27 +2543,24 @@ struct PrivacyDataSettingsView: View {
 
             LavaSectionGroup("Delete Local Logs") {
                 VStack(spacing: 10) {
-                    LavaPlainCard {
-                        Toggle("Show Delete Options", isOn: $showsClearOptions)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Show Delete Options", isOn: $showsClearOptions)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
 
                     if showsClearOptions {
                         VStack(spacing: 10) {
-                            LavaPlainCard {
-                                VStack(spacing: LocalLogSettingsRowMetrics.groupedRowSpacing) {
-                                    localLogClearButton(.filteringCounts)
-                                    Divider()
-                                    localLogClearButton(.domainHistory)
-                                    Divider()
-                                    localLogClearButton(.networkActivity)
-                                    Divider()
-                                    localLogClearButton(.lavaGuardProgress)
-                                }
+                            LavaCondensedList {
+                                localLogClearButton(.filteringCounts)
+                                LavaCondensedDivider()
+                                localLogClearButton(.domainHistory)
+                                LavaCondensedDivider()
+                                localLogClearButton(.networkActivity)
+                                LavaCondensedDivider()
+                                localLogClearButton(.lavaGuardProgress)
                             }
 
-                            LavaPlainCard {
+                            LavaCondensedList {
                                 localLogClearButton(.all)
                             }
                         }
@@ -2714,7 +2696,7 @@ struct PrivacyDataSettingsView: View {
 
     private func localLogToggle(_ title: String, isOn: Binding<Bool>) -> some View {
         Toggle(title, isOn: isOn)
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
     }
 
     private func localLogClearButton(_ target: LocalLogClearTarget) -> some View {
@@ -2729,7 +2711,7 @@ struct PrivacyDataSettingsView: View {
                 Image(systemName: target.systemImage)
                     .font(.title3.weight(.semibold))
             }
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
         }
         .buttonStyle(.plain)
     }
@@ -2797,48 +2779,30 @@ private struct SecuritySettingsView: View {
     var body: some View {
         SettingsSubpageContent {
             LavaSectionGroup("Authentication") {
-                LavaPlainCard {
-                    VStack(spacing: 14) {
-                        Toggle("Passcode", isOn: passcodeBinding)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
+                LavaCondensedList {
+                    Toggle("Passcode", isOn: passcodeBinding)
+                        .lavaRow()
 
-                        if security.shouldShowBiometricToggle {
-                            Divider()
+                    if security.shouldShowBiometricToggle {
+                        LavaCondensedDivider()
 
-                            Toggle(security.biometricToggleTitle, isOn: biometricBinding)
-                                .font(.headline)
-                                .tint(LavaStyle.safeGreen)
-                                .disabled(!security.canEnableBiometrics)
-                        }
+                        Toggle(security.biometricToggleTitle, isOn: biometricBinding)
+                            .lavaRow()
+                            .disabled(!security.canEnableBiometrics)
                     }
                 }
+                .font(.headline)
+                .tint(LavaStyle.safeGreen)
             }
 
             LavaSectionGroup("Use authentication for") {
-                LavaPlainCard {
-                    VStack(spacing: 14) {
-                        securitySurfaceToggle("App Unlock", surface: .appUnlock)
+                LavaCondensedList {
+                    ForEach(Array(authenticationSurfaces.enumerated()), id: \.offset) { index, item in
+                        securitySurfaceToggle(item.title, surface: item.surface)
 
-                        Divider()
-
-                        securitySurfaceToggle("Turn on/off Lava", surface: .protectionControl)
-
-                        Divider()
-
-                        securitySurfaceToggle("Pause Lava", surface: .protectionPause)
-
-                        Divider()
-
-                        securitySurfaceToggle("Update domains and lists", surface: .filterEditing)
-
-                        Divider()
-
-                        securitySurfaceToggle("View Activities", surface: .activityViewing)
-
-                        Divider()
-
-                        securitySurfaceToggle("Update App Settings", surface: .appSettings)
+                        if index < authenticationSurfaces.count - 1 {
+                            LavaCondensedDivider()
+                        }
                     }
                 }
                 .disabled(!security.hasAuthenticationMethod)
@@ -2894,6 +2858,17 @@ private struct SecuritySettingsView: View {
         }
     }
 
+    private var authenticationSurfaces: [(title: String, surface: SecurityProtectedSurface)] {
+        [
+            ("App Unlock", .appUnlock),
+            ("Turn on/off Lava", .protectionControl),
+            ("Pause Lava", .protectionPause),
+            ("Update domains and lists", .filterEditing),
+            ("View Activities", .activityViewing),
+            ("Update App Settings", .appSettings),
+        ]
+    }
+
     private func securitySurfaceToggle(_ title: String, surface: SecurityProtectedSurface) -> some View {
         Toggle(title, isOn: Binding {
             security.hasAuthenticationMethod && security.isProtected(surface)
@@ -2909,6 +2884,7 @@ private struct SecuritySettingsView: View {
         })
         .font(.headline)
         .tint(LavaStyle.safeGreen)
+        .lavaRow()
     }
 }
 
@@ -3396,10 +3372,10 @@ struct BugReportSettingsView: View {
                         }
                     }
 
-                    LavaPlainCard {
-                        Toggle("Include optional diagnostic", isOn: $includeDiagnostics)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Include optional diagnostic", isOn: $includeDiagnostics)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
                 }
             }
 

@@ -32,16 +32,16 @@ final class LavaDesignTokensSourceTests: XCTestCase {
             XCTAssertTrue(tokens.contains(line), "LavaRowMetrics missing \(line)")
         }
 
-        // Single-control rows wrap in the shared row card instead of the blanket-16pt
-        // `LavaPlainCard` that inflated them.
+        // Every row shares one body: `lavaRow()` carries the insets + tap-target floor,
+        // and `lavaControlRowCard()` is just that plus a card surface.
         let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
+        XCTAssertTrue(components.contains("func lavaRow() -> some View"))
         XCTAssertTrue(components.contains("func lavaControlRowCard() -> some View"))
         XCTAssertTrue(components.contains(".frame(maxWidth: .infinity, minHeight: LavaRowMetrics.minHeight, alignment: .leading)"))
 
-        // The condensed list ("table") rows resolve to the same shared metrics.
+        // The condensed list ("table") rows resolve to the same shared row body.
         let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")
-        XCTAssertTrue(listSource.contains(".padding(.vertical, LavaRowMetrics.verticalInset)"))
-        XCTAssertTrue(listSource.contains(".frame(minHeight: LavaRowMetrics.minHeight)"))
+        XCTAssertTrue(listSource.contains(".lavaRow()"))
 
         // Info panels floor to the shared row height so single-line panels line up with rows.
         XCTAssertTrue(components.contains("LavaInfoCard(borderTint: borderTint, minHeight: LavaRowMetrics.minHeight)"))

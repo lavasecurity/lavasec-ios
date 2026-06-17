@@ -154,11 +154,7 @@ struct LavaCondensedListItem<Leading: View>: View {
                 .accessibilityLabel(trailingAction.title.lavaLocalized)
             }
         }
-        .padding(.horizontal, LavaRowMetrics.horizontalInset)
-        .padding(.vertical, LavaRowMetrics.verticalInset)
-        .frame(minHeight: LavaRowMetrics.minHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .lavaRow()
         .opacity(isInactive ? 0.68 : 1)
     }
 }
