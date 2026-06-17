@@ -25,7 +25,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         let tokens = try Self.tokens()
         XCTAssertTrue(tokens.contains("enum LavaRowMetrics"))
         for line in [
-            "static let minHeight: CGFloat = 56",
+            "static let minHeight: CGFloat = 52",
             "static let horizontalInset: CGFloat = 16",
             "static let verticalInset: CGFloat = 11",
         ] {

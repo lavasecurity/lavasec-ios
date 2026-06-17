@@ -183,22 +183,22 @@ enum LavaSpacing {
 
 // MARK: - Row metrics
 
-/// The one height for full-width rows — single controls, list items, and info rows —
-/// so they share a vertical rhythm instead of each inheriting whatever padding its
-/// wrapper happened to use. Converges the prior 52/54/60/63 spread to one value.
+/// The shared height contract for full-width rows — single controls, list items,
+/// and info rows. Each row is `content + 2·verticalInset`, floored at `minHeight`,
+/// so heights are content-driven (lean) rather than padded up to an arbitrary value.
 ///
-/// The earlier inconsistency was an *air-to-content ratio* problem, not just a height
-/// one: single rows wrapped a tall control in a blanket 16pt card pad (too much air →
-/// ~63pt), while condensed list items packed two text lines into a 9pt pad (too little
-/// air → felt tight). `verticalInset` is the shared breathing room that fixes both, and
-/// `minHeight` is the tap-target floor for short single rows.
+/// `minHeight` is deliberately the existing condensed-list height (52): the smallest
+/// value that is still a comfortable tap target *and* tall enough that a one-line info
+/// row sits level with the taller controls (a 31pt switch + inset lands ~53pt) instead
+/// of reading as shorter. A higher floor would only re-inflate the real rows — which is
+/// the "single rows feel too tall" problem. `verticalInset` is the shared breathing room
+/// that replaces the old blanket 16pt card pad (too tall) and 9pt list pad (too tight).
 enum LavaRowMetrics {
-    /// Minimum height for a single full-width row (one tap target).
-    static let minHeight: CGFloat = 56
+    /// Tap-target floor for a row. Reuses the condensed-list height rather than inventing one.
+    static let minHeight: CGFloat = 52
     /// Horizontal inset for row content.
     static let horizontalInset: CGFloat = 16
-    /// Vertical breathing room above and below row content. Replaces the blanket 16pt
-    /// card pad on single controls (too tall) and the 9pt list pad (too tight).
+    /// Vertical breathing room above and below row content; the lever that sets real heights.
     static let verticalInset: CGFloat = 11
 }
 
