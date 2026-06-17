@@ -181,6 +181,27 @@ enum LavaSpacing {
     static let screenBottom: CGFloat = 96
 }
 
+// MARK: - Row metrics
+
+/// The one height for full-width rows — single controls, list items, and info rows —
+/// so they share a vertical rhythm instead of each inheriting whatever padding its
+/// wrapper happened to use. Converges the prior 52/54/60/63 spread to one value.
+///
+/// The earlier inconsistency was an *air-to-content ratio* problem, not just a height
+/// one: single rows wrapped a tall control in a blanket 16pt card pad (too much air →
+/// ~63pt), while condensed list items packed two text lines into a 9pt pad (too little
+/// air → felt tight). `verticalInset` is the shared breathing room that fixes both, and
+/// `minHeight` is the tap-target floor for short single rows.
+enum LavaRowMetrics {
+    /// Minimum height for a single full-width row (one tap target).
+    static let minHeight: CGFloat = 56
+    /// Horizontal inset for row content.
+    static let horizontalInset: CGFloat = 16
+    /// Vertical breathing room above and below row content. Replaces the blanket 16pt
+    /// card pad on single controls (too tall) and the 9pt list pad (too tight).
+    static let verticalInset: CGFloat = 11
+}
+
 // MARK: - Depth semantics
 
 /// The product's three depths, made legible in the design system — the code

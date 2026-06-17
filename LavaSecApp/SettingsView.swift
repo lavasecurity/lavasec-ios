@@ -804,12 +804,10 @@ private struct BackupOptionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                Toggle(title, isOn: isOn)
-                    .font(.headline)
-                    .tint(LavaStyle.safeGreen)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Toggle(title, isOn: isOn)
+                .font(.headline)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()
@@ -1400,11 +1398,10 @@ private struct CustomizationSettingsView: View {
             if viewModel.canOfferLiveActivities {
                 LavaSectionGroup("Live Activities") {
                     VStack(alignment: .leading, spacing: 8) {
-                        LavaPlainCard {
-                            Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
-                                .font(.headline)
-                                .tint(LavaStyle.safeGreen)
-                        }
+                        Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
+                            .font(.headline)
+                            .tint(LavaStyle.safeGreen)
+                            .lavaControlRowCard()
 
                         Text("Shows Lava status on the Lock Screen and Dynamic Island when available.".lavaLocalized)
                             .lavaQuietNoteText()
@@ -1425,11 +1422,10 @@ private struct CustomizationSettingsView: View {
                 )
                 .lavaTier(.celebratory)
 
-                LavaPlainCard {
-                    Toggle("Match App Icon to Lava Guard", isOn: updatesAppIconBinding)
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                }
+                Toggle("Match App Icon to Lava Guard", isOn: updatesAppIconBinding)
+                    .font(.headline)
+                    .tint(LavaStyle.safeGreen)
+                    .lavaControlRowCard()
 
                 if !viewModel.configuration.hasLavaSecurityPlus {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1770,11 +1766,10 @@ struct DNSResolverSettingsView: View {
         SettingsSubpageContent {
             LavaSectionGroup("Device DNS") {
                 VStack(alignment: .leading, spacing: 8) {
-                    LavaPlainCard {
-                        Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
 
                     Text(viewModel.deviceDNSResolverDetailText.lavaLocalized)
                         .lavaQuietNoteText()
@@ -2383,7 +2378,7 @@ private struct CustomDNSResolverRow: View {
         HStack(alignment: .center, spacing: 10) {
             ResolverSelectionIndicator(isSelected: isSelected)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Custom DNS".lavaLocalized)
                     .font(.subheadline.weight(.medium))
                     .lavaInactiveText(!isEnabled)
@@ -2397,9 +2392,9 @@ private struct CustomDNSResolverRow: View {
 
             Spacer(minLength: 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .frame(minHeight: 52)
+        .padding(.horizontal, LavaRowMetrics.horizontalInset)
+        .padding(.vertical, LavaRowMetrics.verticalInset)
+        .frame(minHeight: LavaRowMetrics.minHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
@@ -2432,16 +2427,15 @@ private struct ResolverTransportControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                Picker("DNS Transport", selection: $selection) {
-                    ForEach(selectedBaseResolver.availableTransports, id: \.self) { transport in
-                        Text(transport.menuTitle.lavaLocalized)
-                            .tag(transport)
-                    }
+            Picker("DNS Transport", selection: $selection) {
+                ForEach(selectedBaseResolver.availableTransports, id: \.self) { transport in
+                    Text(transport.menuTitle.lavaLocalized)
+                        .tag(transport)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()
@@ -2469,9 +2463,8 @@ private struct ResolverOptionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                ResolverToggleRow(title: title, isOn: $isOn)
-            }
+            ResolverToggleRow(title: title, isOn: $isOn)
+                .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()

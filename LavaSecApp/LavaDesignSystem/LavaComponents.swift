@@ -173,6 +173,22 @@ struct LavaPlainCard<Content: View>: View {
     }
 }
 
+extension View {
+    /// Wraps a single control (toggle, segmented picker, lone action) in its own card at
+    /// the shared `LavaRowMetrics` height. Use instead of `LavaPlainCard` for one-control
+    /// rows: `LavaPlainCard`'s blanket 16pt pad inflated single rows to ~63pt, whereas this
+    /// uses the shared `verticalInset`/`minHeight` so a toggle row lines up with
+    /// `LavaCondensedListItem` rows and `LavaInfoPanel`. `LavaPlainCard` stays the right
+    /// choice for genuinely multi-content cards (text-input panels, stacked action groups).
+    func lavaControlRowCard() -> some View {
+        self
+            .padding(.horizontal, LavaRowMetrics.horizontalInset)
+            .padding(.vertical, LavaRowMetrics.verticalInset)
+            .frame(maxWidth: .infinity, minHeight: LavaRowMetrics.minHeight, alignment: .leading)
+            .lavaSurface(.card)
+    }
+}
+
 struct LavaTextInputPanel<Content: View>: View {
     let spacing: CGFloat
     let content: Content
@@ -338,16 +354,18 @@ struct LavaMetricPill: View {
 struct LavaInfoCard<Content: View>: View {
     let content: Content
     let borderTint: Color?
+    let minHeight: CGFloat?
 
-    init(borderTint: Color? = nil, @ViewBuilder content: () -> Content) {
+    init(borderTint: Color? = nil, minHeight: CGFloat? = nil, @ViewBuilder content: () -> Content) {
         self.borderTint = borderTint
+        self.minHeight = minHeight
         self.content = content()
     }
 
     var body: some View {
         content
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
             .lavaPanelBackground(cornerRadius: 20, borderTint: borderTint)
     }
 }
@@ -460,7 +478,10 @@ struct LavaInfoPanel: View {
     }
 
     var body: some View {
-        LavaInfoCard(borderTint: borderTint) {
+        // Floor to the shared row height so a single-line panel (e.g. a status row like
+        // "Ready after sign-in") lines up with the action rows beside it instead of
+        // sitting shorter. Multi-line panels already exceed this, so it's a no-op there.
+        LavaInfoCard(borderTint: borderTint, minHeight: LavaRowMetrics.minHeight) {
             VStack(alignment: .leading, spacing: description == nil ? 0 : 10) {
                 header
 

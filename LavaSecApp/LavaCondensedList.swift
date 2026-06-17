@@ -108,7 +108,7 @@ struct LavaCondensedListItem<Leading: View>: View {
         HStack(alignment: .center, spacing: 10) {
             leading
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title.lavaLocalized)
                     .font(titleFont)
                     .lavaInactiveText(isInactive)
@@ -154,9 +154,9 @@ struct LavaCondensedListItem<Leading: View>: View {
                 .accessibilityLabel(trailingAction.title.lavaLocalized)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .frame(minHeight: 52)
+        .padding(.horizontal, LavaRowMetrics.horizontalInset)
+        .padding(.vertical, LavaRowMetrics.verticalInset)
+        .frame(minHeight: LavaRowMetrics.minHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .opacity(isInactive ? 0.68 : 1)
