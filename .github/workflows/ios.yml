@@ -17,10 +17,21 @@ concurrency:
   group: ios-ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Public CI: build + unit tests on GitHub-hosted runners only. No secrets, no
-# signing — so pull requests from forks run the full suite safely. The official
-# TestFlight release pipeline and the automation loop live in the private infra
-# tooling, not here.
+# Shared CI lane — kept BYTE-IDENTICAL in the private dev repo (lavasec-ios-internal)
+# and the public OSS repo (lavasec-ios). The export pipeline ships this file
+# verbatim and the Merge-up contamination guard (below) depends on the two lanes
+# matching; see lavasec-infra/docs/engineering/release-and-propagation.md §1.2.
+#
+# Cost split (public Actions minutes are free; private macOS minutes are billed):
+# the Linux repo-checks and the `swift test` core suite run on BOTH lanes, but the
+# full `xcodebuild` app/extension compile (ios-simulator-build) is gated to the
+# PUBLIC repo via `github.repository` — so the private lane skips it for $0 while
+# the public lane runs it on every PR (incl. forks). The private lane's owned-
+# hardware app compile lives in light-build.yml (internal-only, never exported).
+#
+# Runners: GitHub-hosted only (ubuntu-latest / macos-26), NEVER self-hosted — the
+# public lane runs untrusted fork code, so no owned hardware here. The signed
+# TestFlight/release pipeline lives in the private infra/runner tooling, not here.
 
 jobs:
   repo-checks:
@@ -104,6 +115,11 @@ jobs:
 
   ios-simulator-build:
     name: iOS Simulator Build
+    # Gated to the public repo: the full xcodebuild compile burns billed macOS
+    # minutes, which are free on public but cost real money on the private lane.
+    # The private lane gets app-compile coverage from light-build.yml on owned
+    # hardware instead, so it skips this job for $0.
+    if: ${{ github.repository == 'lavasecurity/lavasec-ios' }}
     runs-on: macos-26
     timeout-minutes: 30
     steps:
