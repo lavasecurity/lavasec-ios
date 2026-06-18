@@ -9,25 +9,22 @@ private enum ProtectionStatusMetrics {
 
 struct GuardView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @Binding var navigationPath: [GuardDestination]
     let scrollToTopTrigger: Int
     let refreshesProtectionState: Bool
-    let openFilters: () -> Void
-    let openDNSResolver: () -> Void
 
     init(
+        navigationPath: Binding<[GuardDestination]> = .constant([]),
         scrollToTopTrigger: Int = 0,
-        refreshesProtectionState: Bool = true,
-        openFilters: @escaping () -> Void = {},
-        openDNSResolver: @escaping () -> Void = {}
+        refreshesProtectionState: Bool = true
     ) {
+        self._navigationPath = navigationPath
         self.scrollToTopTrigger = scrollToTopTrigger
         self.refreshesProtectionState = refreshesProtectionState
-        self.openFilters = openFilters
-        self.openDNSResolver = openDNSResolver
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             LavaPrimaryTabScreenContent(
                 title: "Guard",
                 scrollToTopTrigger: scrollToTopTrigger
@@ -36,10 +33,10 @@ struct GuardView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             } content: {
-                GuardProtectionFlowPanel(
-                    openDNSResolver: openDNSResolver,
-                    openFilters: openFilters
-                )
+                GuardExploreSection()
+            }
+            .navigationDestination(for: GuardDestination.self) { destination in
+                GuardDestinationView(destination: destination)
             }
             .task {
                 guard refreshesProtectionState else {
@@ -145,16 +142,25 @@ struct ProtectionStatusPanel: View {
     }
 
     /// A tap on the awake Lava Guard plays a brief `awake -> grateful -> awake` thank-you
-    /// with one light haptic. It never fires from states that communicate real protection
-    /// status (sleeping/waking/paused/retrying/concerned), and ignores tap-spam while a
-    /// sequence is already running.
+    /// animation. The light haptic fires on *every* awake tap — it is intentionally NOT gated
+    /// by the animation, so rapid repeated taps keep returning tactile feedback. The visual
+    /// sequence is still de-duped (ignored while one is already running) so it doesn't restart
+    /// and stutter. Neither fires from states that communicate real protection status
+    /// (sleeping/waking/paused/retrying/concerned).
     private func playGuardianTapGratitude() {
-        guard guardianState == .awake, !isGuardianTapAnimationRunning else {
+        guard guardianState == .awake else {
+            return
+        }
+
+        // Haptic first and ungated: a tap during an in-flight animation still gives feedback.
+        ProtectionHapticFeedback.play(.guardianTapAcknowledged)
+
+        // Only the visual thank-you is rate-limited — ignore tap-spam while it's already running.
+        guard !isGuardianTapAnimationRunning else {
             return
         }
 
         isGuardianTapAnimationRunning = true
-        ProtectionHapticFeedback.play(.guardianTapAcknowledged)
 
         let dwell = reduceMotion ? 0.20 : 0.35
         let stateChange = GuardianMascotAnimationPlan.stateChangeDuration
@@ -253,244 +259,57 @@ private struct ProtectionPrimaryActionButton: View {
     }
 }
 
-private struct GuardProtectionFlowPanel: View {
+enum GuardDestination: Hashable {
+    case filters
+    case activity
+}
+
+private struct GuardDestinationView: View {
+    let destination: GuardDestination
+
+    var body: some View {
+        switch destination {
+        case .filters:
+            FiltersView(embedsNavigationStack: false)
+        case .activity:
+            ActivityView(embedsNavigationStack: false)
+        }
+    }
+}
+
+/// The two explainer rows that replace the old internet-flow graph: a quick way
+/// to understand — and jump into — how Lava filters and what it has caught, now
+/// that Filters and Activity no longer live in the tab bar. Each row carries a
+/// short live stat instead of a paragraph, so it reads at a glance.
+///
+/// Wrapped in a `LavaSectionGroup` like every other content screen (e.g. Filters'
+/// "Manage filters"): the header is the visual break that makes the scaffold's
+/// 18pt panel→section gap and the 10pt row→row gap read as one intentional
+/// rhythm rather than two mismatched gaps.
+private struct GuardExploreSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
-    let openDNSResolver: () -> Void
-    let openFilters: () -> Void
 
     var body: some View {
-        LavaInfoCard {
-            VStack(alignment: .leading, spacing: 0) {
-                GuardFlowStepRow(
-                    systemImage: "globe",
-                    title: "Internet",
-                    status: viewModel.guardEndpointFlowStepStatus
-                )
+        LavaSectionGroup("Learn more") {
+            VStack(spacing: 10) {
+                LavaNavigationRow(
+                    icon: .filters,
+                    title: "How Lava filters",
+                    summary: viewModel.guardFiltersRowStat
+                ) {
+                    GuardDestinationView(destination: .filters)
+                }
 
-                GuardFlowConnectorRow(
-                    upperStatus: viewModel.guardEndpointFlowStepStatus,
-                    lowerStatus: viewModel.guardDNSFlowStepStatus
-                )
-
-                GuardFlowStepRow(
-                    systemImage: "network",
-                    title: "DNS",
-                    detail: viewModel.guardDNSFlowStepDetailComponents.name,
-                    detailSuffix: viewModel.guardDNSFlowStepDetailComponents.transportAnnotation,
-                    status: viewModel.guardDNSFlowStepStatus,
-                    action: openDNSResolver,
-                    accessibilityLabel: "Open DNS Resolver settings"
-                )
-
-                GuardFlowConnectorRow(
-                    upperStatus: viewModel.guardDNSFlowStepStatus,
-                    lowerStatus: viewModel.guardFilterFlowStepStatus
-                )
-
-                GuardFlowStepRow(
-                    systemImage: "line.3.horizontal.decrease.circle.fill",
-                    title: "Local filters",
-                    detail: filterStatus,
-                    status: viewModel.guardFilterFlowStepStatus,
-                    action: openFilters,
-                    accessibilityLabel: "Open Filters"
-                )
-
-                GuardFlowConnectorRow(
-                    upperStatus: viewModel.guardFilterFlowStepStatus,
-                    lowerStatus: viewModel.guardEndpointFlowStepStatus
-                )
-
-                GuardFlowStepRow(
-                    systemImage: "iphone",
-                    title: "Phone",
-                    status: viewModel.guardEndpointFlowStepStatus
-                )
-            }
-        }
-    }
-
-    private var filterStatus: String {
-        viewModel.configuration.enabledBlocklistIDs.isEmpty && viewModel.configuration.blockedDomains.isEmpty
-            ? "Not configured"
-            : "Configured"
-    }
-}
-
-private enum GuardFlowMetrics {
-    static let iconSize: CGFloat = 38
-    static let chevronSlotSize: CGFloat = 30
-    static let horizontalSpacing: CGFloat = 12
-    static let rowMinimumHeight: CGFloat = 42
-    static let connectorWidth: CGFloat = 2
-    static let connectorLineHeight: CGFloat = 12
-    static let connectorVerticalInset: CGFloat = 3
-    static let connectorHorizontalInset: CGFloat = (iconSize - connectorWidth) / 2
-}
-
-private struct GuardFlowStepRow: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    let systemImage: String
-    let title: String
-    var detail: String?
-    // Rendered as a non-truncating suffix so a long detail (custom resolver
-    // names) can truncate without losing the transport annotation.
-    var detailSuffix: String?
-    var status: GuardFlowStepStatus = .healthy
-    var action: (() -> Void)?
-    var accessibilityLabel: String?
-
-    var body: some View {
-        if let action {
-            Button(action: action) {
-                rowContent(showsChevron: true)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel((accessibilityLabel ?? "Open \(title)").lavaLocalized)
-        } else {
-            rowContent(showsChevron: false)
-        }
-    }
-
-    private func rowContent(showsChevron: Bool) -> some View {
-        let palette = GuardFlowStepPalette(status: status)
-        let statusAnimation = GuardFlowAnimation.statusColor(for: status, reduceMotion: reduceMotion)
-
-        return HStack(spacing: GuardFlowMetrics.horizontalSpacing) {
-            Image(systemName: systemImage)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(palette.iconTint)
-                .frame(width: GuardFlowMetrics.iconSize, height: GuardFlowMetrics.iconSize)
-                .background(palette.iconBackground, in: Circle())
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 0) {
-                    Text(labelText)
-                        .font(.headline)
-                        .foregroundStyle(palette.titleForeground)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .minimumScaleFactor(0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let detailSuffix {
-                        Text(" (\(detailSuffix))")
-                            .font(.headline)
-                            .foregroundStyle(palette.titleForeground)
-                            .lineLimit(1)
-                            .layoutPriority(1)
-                    }
+                LavaNavigationRow(
+                    icon: .activity,
+                    title: "What Lava has caught",
+                    summary: viewModel.guardActivityRowStat
+                ) {
+                    GuardDestinationView(destination: .activity)
                 }
             }
-
-            Spacer(minLength: 8)
-
-            chevronSlot(showsChevron: showsChevron)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: GuardFlowMetrics.rowMinimumHeight)
-        .contentShape(Rectangle())
-        .animation(statusAnimation, value: status)
-    }
-
-    @ViewBuilder
-    private func chevronSlot(showsChevron: Bool) -> some View {
-        ZStack {
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(LavaStyle.safeGreen)
-                    .frame(width: GuardFlowMetrics.chevronSlotSize, height: GuardFlowMetrics.chevronSlotSize)
-                    .background(LavaStyle.softGreen, in: Circle())
-            }
-        }
-        .frame(width: GuardFlowMetrics.chevronSlotSize, height: GuardFlowMetrics.chevronSlotSize)
-        .accessibilityHidden(true)
-    }
-
-    private var labelText: String {
-        guard let detail else {
-            return title.lavaLocalized
-        }
-
-        return "\(title.lavaLocalized): \(detail.lavaLocalized)"
-    }
-}
-
-private enum GuardFlowAnimation {
-    static func statusColor(for status: GuardFlowStepStatus, reduceMotion: Bool) -> Animation? {
-        guard !reduceMotion else {
-            return nil
-        }
-
-        let duration = status == .healthy
-            ? GuardianMascotAnimationPlan.wakeDuration
-            : GuardianMascotAnimationPlan.stateChangeDuration
-        return .easeInOut(duration: duration)
-    }
-}
-
-private struct GuardFlowStepPalette {
-    let iconTint: Color
-    let iconBackground: Color
-    let titleForeground: Color
-    let connectorFill: Color
-
-    init(status: GuardFlowStepStatus) {
-        switch status {
-        case .healthy:
-            iconTint = LavaStyle.safeGreen
-            iconBackground = LavaStyle.softGreen
-            titleForeground = LavaStyle.ink
-            connectorFill = LavaStyle.safeGreen.opacity(0.35)
-        case .inactive:
-            iconTint = LavaStyle.secondaryText
-            iconBackground = LavaStyle.secondaryText.opacity(0.12)
-            titleForeground = LavaStyle.secondaryText
-            connectorFill = LavaStyle.secondaryText.opacity(0.24)
-        case .issue:
-            iconTint = LavaStyle.lavaOrange
-            iconBackground = LavaStyle.lavaOrangeSoft
-            titleForeground = LavaStyle.secondaryText
-            connectorFill = LavaStyle.lavaOrange.opacity(0.35)
-        }
-    }
-}
-
-private struct GuardFlowConnectorRow: View {
-    // A connector joins the step above it to the step below it. It reads red
-    // when a neighbor has an issue (a red step turns the bar above AND below it
-    // red), grey only when both neighbors are inactive (protection off), and
-    // green otherwise — a lone inactive step is a passthrough that still carries
-    // traffic, so its bars stay green.
-    let upperStatus: GuardFlowStepStatus
-    let lowerStatus: GuardFlowStepStatus
-
-    private var status: GuardFlowStepStatus {
-        GuardFlowStepStatus.linkStatus(upperStatus, lowerStatus)
-    }
-
-    var body: some View {
-        let palette = GuardFlowStepPalette(status: status)
-
-        return HStack(alignment: .top, spacing: GuardFlowMetrics.horizontalSpacing) {
-            Rectangle()
-                .fill(palette.connectorFill)
-                .frame(width: GuardFlowMetrics.connectorWidth, height: GuardFlowMetrics.connectorLineHeight)
-                .padding(.leading, GuardFlowMetrics.connectorHorizontalInset)
-                .padding(.trailing, GuardFlowMetrics.connectorHorizontalInset)
-                .padding(.vertical, GuardFlowMetrics.connectorVerticalInset)
-                .accessibilityHidden(true)
-
-            Spacer(minLength: 8)
-
-            Color.clear
-                .frame(width: GuardFlowMetrics.chevronSlotSize, height: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: GuardFlowMetrics.connectorLineHeight + (GuardFlowMetrics.connectorVerticalInset * 2), alignment: .top)
+        .frame(maxWidth: .infinity)
     }
 }
 

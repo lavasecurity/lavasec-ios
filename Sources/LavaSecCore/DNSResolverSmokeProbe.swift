@@ -3,6 +3,27 @@ import Foundation
 public enum DNSResolverSmokeProbe {
     public static let defaultDomain = "example.com"
 
+    /// Diverse, globally-resolvable canary domains rotated across successive health
+    /// probes (keyed off the probe generation). A single domain that a network
+    /// blocks or hijacks then can't sustain a false "unhealthy" verdict: the next
+    /// probe uses a different domain whose success resets the consecutive-failure
+    /// count. A genuinely broken / off-network resolver fails them all and still
+    /// escalates. Chosen to be unlikely to be blocked together and to reliably
+    /// return NOERROR + answers on a functioning resolver.
+    public static let rotatingProbeDomains = ["example.com", "apple.com", "cloudflare.com"]
+
+    /// The canary domain for a given probe sequence number (e.g. the smoke-probe
+    /// generation), rotating deterministically so consecutive probes use different
+    /// domains.
+    public static func probeDomain(forSequence sequence: Int) -> String {
+        let count = rotatingProbeDomains.count
+        guard count > 0 else {
+            return defaultDomain
+        }
+
+        return rotatingProbeDomains[((sequence % count) + count) % count]
+    }
+
     public static func query(
         transactionID: UInt16 = 0x4C56,
         domain: String = defaultDomain,
@@ -51,6 +72,31 @@ public enum DNSResolverSmokeProbe {
         }
 
         return query[queryQuestionRange] == response[responseQuestionRange]
+    }
+
+    /// Forwarding-path classifier (NOT for smoke probes): does this resolver reply
+    /// indicate the resolver itself failed, rather than a legitimate answer?
+    ///
+    /// A reachable-but-stale resolver (e.g. an off-network captured Device-DNS
+    /// address) answers queries with SERVFAIL/REFUSED instead of dropping them, so
+    /// the wire outcome is `.success` and a non-nil packet comes back. That packet
+    /// is useless to the client, but the forwarding fallback guard keys off
+    /// `response == nil`, so without this check the failing reply is handed back and
+    /// the encrypted fallback never engages (the stale off-network wedge).
+    ///
+    /// Only server-side failure rcodes count: NOERROR (incl. NODATA) and NXDOMAIN
+    /// are authoritative answers that MUST pass through untouched — we must not
+    /// reroute every "does not exist" reply to the fallback resolver.
+    public static func indicatesResolverFailure(_ response: Data?) -> Bool {
+        guard let response, response.count >= 12 else {
+            return false
+        }
+
+        let responseFlags = readUInt16(response, at: 2)
+        let isResponse = responseFlags & 0x8000 != 0
+        let responseCode = responseFlags & 0x000F
+        // SERVFAIL (2) and REFUSED (5): the resolver could not / would not serve.
+        return isResponse && (responseCode == 2 || responseCode == 5)
     }
 
     private static func questionSectionRange(in data: Data) -> Range<Int>? {

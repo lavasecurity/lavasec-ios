@@ -71,6 +71,10 @@ public struct DNSResolutionResult: Sendable {
     public var deviceDNSFallbackAttempted: Bool
     public var deviceDNSFallbackSucceeded: Bool
     public var deviceDNSUnavailable: Bool
+    // Set when the encrypted (Mullvad DoH) fallback produced this response because
+    // a Device-DNS primary was wedged. Observable so the provider can log/diagnose
+    // that the fallback engaged; distinct from the device-DNS-fallback flags.
+    public var usedEncryptedFallback: Bool
     public var durationMilliseconds: Int?
 
     public init(
@@ -84,6 +88,7 @@ public struct DNSResolutionResult: Sendable {
         deviceDNSFallbackAttempted: Bool = false,
         deviceDNSFallbackSucceeded: Bool = false,
         deviceDNSUnavailable: Bool = false,
+        usedEncryptedFallback: Bool = false,
         durationMilliseconds: Int? = nil
     ) {
         self.response = response
@@ -96,6 +101,7 @@ public struct DNSResolutionResult: Sendable {
         self.deviceDNSFallbackAttempted = deviceDNSFallbackAttempted
         self.deviceDNSFallbackSucceeded = deviceDNSFallbackSucceeded
         self.deviceDNSUnavailable = deviceDNSUnavailable
+        self.usedEncryptedFallback = usedEncryptedFallback
         self.durationMilliseconds = durationMilliseconds
     }
 
@@ -127,6 +133,31 @@ public struct DNSResolutionResult: Sendable {
             deviceDNSFallbackAttempted: deviceDNSFallbackAttempted,
             deviceDNSFallbackSucceeded: deviceDNSFallbackSucceeded,
             deviceDNSUnavailable: deviceDNSUnavailable,
+            usedEncryptedFallback: usedEncryptedFallback,
+            durationMilliseconds: durationMilliseconds
+        )
+    }
+
+    /// Combine a primary result with an *encrypted* fallback (Device-DNS primary →
+    /// Mullvad DoH). Unlike withDeviceDNSFallback this does NOT set the
+    /// deviceDNSFallback flags — the encrypted fallback is a per-query safety net,
+    /// not the device-DNS-fallback *mode* — so on success the result just looks
+    /// like a normal resolution on the fallback's (DoH) transport.
+    public func withEncryptedFallback(_ fallbackResult: DNSResolutionResult) -> DNSResolutionResult {
+        DNSResolutionResult(
+            response: fallbackResult.response,
+            successfulResolverAddress: fallbackResult.response == nil
+                ? successfulResolverAddress
+                : fallbackResult.successfulResolverAddress,
+            attempts: attempts + fallbackResult.attempts,
+            transport: fallbackResult.response == nil ? transport : fallbackResult.transport,
+            udpTruncated: udpTruncated,
+            tcpFallbackAttempted: tcpFallbackAttempted,
+            tcpFallbackSucceeded: tcpFallbackSucceeded,
+            deviceDNSFallbackAttempted: deviceDNSFallbackAttempted,
+            deviceDNSFallbackSucceeded: deviceDNSFallbackSucceeded,
+            deviceDNSUnavailable: deviceDNSUnavailable,
+            usedEncryptedFallback: usedEncryptedFallback || fallbackResult.response != nil,
             durationMilliseconds: durationMilliseconds
         )
     }
@@ -143,6 +174,7 @@ public struct DNSResolutionResult: Sendable {
             deviceDNSFallbackAttempted: true,
             deviceDNSFallbackSucceeded: fallbackResult.response != nil,
             deviceDNSUnavailable: fallbackResult.deviceDNSUnavailable,
+            usedEncryptedFallback: usedEncryptedFallback,
             durationMilliseconds: durationMilliseconds
         )
     }
@@ -160,6 +192,7 @@ public struct DNSResolutionResult: Sendable {
             deviceDNSFallbackAttempted: deviceDNSFallbackAttempted,
             deviceDNSFallbackSucceeded: deviceDNSFallbackSucceeded,
             deviceDNSUnavailable: deviceDNSUnavailable,
+            usedEncryptedFallback: usedEncryptedFallback,
             durationMilliseconds: elapsedMilliseconds
         )
     }
@@ -197,9 +230,12 @@ public struct ResolverOrchestrator: Sendable {
         self.executors = executors
     }
 
-    // Primary resolution then device-DNS fallback, mirroring the tunnel's
-    // long-standing sequencing: fallback runs only when the primary produced
-    // no response and the plan allows it.
+    // Primary resolution then a single fallback, run only when the primary
+    // produced no response and the plan allows it. The fallback direction depends
+    // on the primary: an encrypted primary falls back to Device DNS
+    // (shouldFallbackToDeviceDNS); a Device-DNS primary falls back to an encrypted
+    // resolver (shouldFallbackToEncrypted, Mullvad DoH). The two are mutually
+    // exclusive.
     public func resolveUpstream(
         _ query: Data,
         plan: DNSResolverRuntimePlan,
@@ -212,15 +248,50 @@ public struct ResolverOrchestrator: Sendable {
             plan: plan,
             usesIsolatedEncryptedConnections: usesIsolatedEncryptedConnections
         ) { primaryResult in
-            guard primaryResult.response == nil,
-                  plan.shouldFallbackToDeviceDNS
-            else {
-                completion(primaryResult)
-                return
-            }
+            let hasResponse = primaryResult.response != nil
 
-            let fallbackResult = executors.resolveDevice(query, plan.deviceDNSFallbackAddresses)
-            completion(primaryResult.withDeviceDNSFallback(fallbackResult))
+            if plan.shouldFallbackToDeviceDNS {
+                // Encrypted primary → Device DNS, but ONLY when there was no response
+                // at all. A resolver-declared SERVFAIL/REFUSED (e.g. a DNSSEC
+                // validation or policy failure from a configured encrypted resolver)
+                // is an authoritative verdict; silently retrying it on the
+                // less-filtered Device DNS would change/leak the answer, so the
+                // device-fallback contract stays "no response only".
+                guard !hasResponse else {
+                    completion(primaryResult)
+                    return
+                }
+                let fallbackResult = executors.resolveDevice(query, plan.deviceDNSFallbackAddresses)
+                completion(primaryResult.withDeviceDNSFallback(fallbackResult))
+            } else if plan.shouldFallbackToEncrypted, let fallbackPlan = plan.encryptedFallback?.plan {
+                // Device-DNS primary → encrypted fallback resolved through the
+                // user-selected fallback resolver and its transport. The primary
+                // produced no usable answer when it returned nothing, OR returned a
+                // server-side failure (SERVFAIL/REFUSED) *while the resolver is already
+                // health-confirmed as broadly wedged*. The latter is the stale
+                // off-network resolver case (a reachable-but-stale Device-DNS address
+                // refuses every query) — a bare `response == nil` guard would hand that
+                // failing reply back. But a refusal on an otherwise-healthy resolver is
+                // an authoritative per-domain verdict (a managed-network block or a
+                // DNSSEC failure) and must pass through untouched, so the rejection
+                // path is gated on `treatsResolverRejectionAsFallbackTrigger`.
+                // NOERROR/NODATA/NXDOMAIN are always legitimate answers.
+                let isWedgeRejection = plan.treatsResolverRejectionAsFallbackTrigger
+                    && DNSResolverSmokeProbe.indicatesResolverFailure(primaryResult.response)
+                let deviceUsable = hasResponse && !isWedgeRejection
+                guard !deviceUsable else {
+                    completion(primaryResult)
+                    return
+                }
+                // Route the per-query fallback through the selected resolver's transport.
+                // resolvePrimaryUpstream/resolveEndpoints already applies the backoff gate
+                // for DoH/DoT/DoQ, so the old manual isEndpointBackedOff check is dropped.
+                resolvePrimaryUpstream(query, plan: fallbackPlan, usesIsolatedEncryptedConnections: usesIsolatedEncryptedConnections) { fallbackResult in
+                    completion(primaryResult.withEncryptedFallback(fallbackResult))
+                }
+            } else {
+                completion(primaryResult)
+            }
         }
     }
 

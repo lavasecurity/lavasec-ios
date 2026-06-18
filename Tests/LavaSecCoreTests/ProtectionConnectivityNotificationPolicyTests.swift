@@ -173,7 +173,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertNil(notification)
     }
 
-    func testResolvedProblemDoesNotSurfaceReconnectedAcknowledgementAfterVerifiedDNSSuccess() {
+    func testResolvedProblemSurfacesReconnectedAcknowledgementAfterRealForwardingSuccess() {
         let now = Date(timeIntervalSince1970: 700)
         let successAt = now.addingTimeInterval(-4)
         let history = ProtectionConnectivityNotificationHistory(
@@ -186,15 +186,169 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: Self.healthyAssessment,
             health: TunnelHealthSnapshot(
-                lastDNSSmokeProbeAt: successAt,
-                lastDNSSmokeProbeSucceeded: true,
-                lastNetworkChangeAt: now.addingTimeInterval(-20)
+                lastNetworkChangeAt: now.addingTimeInterval(-20),
+                lastPrimaryUpstreamSuccessAt: successAt
             ),
             history: history,
             now: now
         )
 
-        XCTAssertNil(notification)
+        // A "reconnect needed" the user was warned about gets a positive recovery
+        // confirmation once a real client query resolves through the tunnel,
+        // superseding the problem banner so the user knows it's actually back.
+        XCTAssertEqual(notification?.kind, .reconnected)
+        XCTAssertEqual(notification?.identifier, "reconnected:reconnect-needed:600")
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["reconnect-needed:600"])
+    }
+
+    func testSmokeProbeOnlyRecoveryDoesNotAcknowledgeOrClearTheProblem() {
+        // The smoke probe validates only the provider→resolver upstream leg. If it
+        // succeeds but no real client query has resolved, neither the confirmation
+        // nor the silent banner-clear fires — so we never tell the user "you're back"
+        // (or drop the "reconnect" banner) while their device still isn't resolving.
+        let now = Date(timeIntervalSince1970: 720)
+        let probeAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: now.addingTimeInterval(-90),
+            unresolvedProblemNotificationID: "reconnect-needed:600",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+        let upstreamOnlyHealth = TunnelHealthSnapshot(
+            lastDNSSmokeProbeAt: probeAt,
+            lastDNSSmokeProbeSucceeded: true
+        )
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: upstreamOnlyHealth,
+            history: history,
+            now: now
+        ))
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+            for: Self.healthyAssessment,
+            health: upstreamOnlyHealth,
+            history: history,
+            now: now
+        ).isEmpty)
+    }
+
+    func testEncryptedFallbackOnlyRecoveryDoesNotAcknowledgeOrClearTheProblem() {
+        // The encrypted Device-DNS safety net carried this query while the PRIMARY
+        // resolver is still wedged. The tunnel records such successes under
+        // `lastUpstreamSuccessAt` but NOT `lastPrimaryUpstreamSuccessAt`, so recovery
+        // must not fire: neither the confirmation nor the silent banner-clear — every
+        // subsequent query still depends on the fallback, so claiming "you're back"
+        // (or dropping the "reconnect" banner) would be a lie.
+        let now = Date(timeIntervalSince1970: 720)
+        let fallbackSuccessAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: now.addingTimeInterval(-90),
+            unresolvedProblemNotificationID: "reconnect-needed:600",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+        // Fallback success postdates the problem and is fresh, but the primary signal
+        // stays nil — only the safety net is carrying traffic.
+        let fallbackOnlyHealth = TunnelHealthSnapshot(lastUpstreamSuccessAt: fallbackSuccessAt)
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: fallbackOnlyHealth,
+            history: history,
+            now: now
+        ))
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+            for: Self.healthyAssessment,
+            health: fallbackOnlyHealth,
+            history: history,
+            now: now
+        ).isEmpty)
+    }
+
+    func testPreOutageForwardingSuccessDoesNotAcknowledgeRecovery() {
+        // A client query that succeeded shortly BEFORE the problem (id epoch 600) can
+        // still be within the 120s freshness window, but it isn't evidence the outage
+        // is over. Recovery must wait for a forwarding success that postdates the
+        // problem — so neither the confirmation nor the banner-clear fires here.
+        let now = Date(timeIntervalSince1970: 700)
+        let staleSuccessAt = Date(timeIntervalSince1970: 595) // before the problem, still fresh
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: now.addingTimeInterval(-90),
+            unresolvedProblemNotificationID: "reconnect-needed:600",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+        let health = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: staleSuccessAt)
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: health,
+            history: history,
+            now: now
+        ))
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+            for: Self.healthyAssessment,
+            health: health,
+            history: history,
+            now: now
+        ).isEmpty)
+    }
+
+    func testSameSecondPreOutageSuccessDoesNotAcknowledgeRecovery() {
+        // The problem id encodes a whole-second epoch (600), but the true event can be
+        // anywhere in [600, 601). A forwarding success at 600.2 — earlier in that same
+        // second — must NOT count as postdating it, so recovery requires reaching 601.
+        let now = Date(timeIntervalSince1970: 660)
+        let sameSecondSuccessAt = Date(timeIntervalSince1970: 600.2)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: now.addingTimeInterval(-90),
+            unresolvedProblemNotificationID: "reconnect-needed:600",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+        let health = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: sameSecondSuccessAt)
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: health,
+            history: history,
+            now: now
+        ))
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+            for: Self.healthyAssessment,
+            health: health,
+            history: history,
+            now: now
+        ).isEmpty)
+    }
+
+    func testReconnectedAcknowledgementFiresOnceAndOnlyForADeliveredProblem() {
+        let now = Date(timeIntervalSince1970: 700)
+        let successAt = now.addingTimeInterval(-4)
+        let recoveredHealth = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: successAt)
+
+        // No problem was ever delivered → no recovery confirmation (auto-recoveries the
+        // user never saw a warning for stay silent).
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: recoveredHealth,
+            history: .empty,
+            now: now
+        ))
+
+        // Already acknowledged (lastDelivered is the reconnected id) → fires only once.
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: Self.healthyAssessment,
+            health: recoveredHealth,
+            history: ProtectionConnectivityNotificationHistory(
+                lastDeliveredNotificationID: "reconnected:reconnect-needed:600",
+                lastDeliveredAt: now.addingTimeInterval(-5),
+                unresolvedProblemNotificationID: "reconnect-needed:600",
+                unresolvedProblemKind: .reconnectNeeded
+            ),
+            now: now
+        ))
     }
 
     func testResolvedProblemIdentifiersSkipMissingUnresolvedCases() {
@@ -207,7 +361,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         let health = TunnelHealthSnapshot(
             lastDNSSmokeProbeAt: successAt,
             lastDNSSmokeProbeSucceeded: true,
-            lastUpstreamSuccessAt: successAt
+            lastPrimaryUpstreamSuccessAt: successAt
         )
 
         XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
@@ -230,7 +384,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         ).isEmpty)
     }
 
-    func testResolvedProblemIdentifiersReturnPreviousProblemWithoutSurfacingNotification() {
+    func testResolvedProblemPostsReconnectedConfirmationAndClearsTheProblemBanner() {
         let now = Date(timeIntervalSince1970: 900)
         let successAt = now.addingTimeInterval(-2)
         let history = ProtectionConnectivityNotificationHistory(
@@ -239,24 +393,22 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             unresolvedProblemNotificationID: "network-unavailable:870",
             unresolvedProblemKind: .networkUnavailable
         )
+        let recoveredHealth = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: successAt)
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: Self.healthyAssessment,
-            health: TunnelHealthSnapshot(
-                lastDNSSmokeProbeAt: successAt,
-                lastDNSSmokeProbeSucceeded: true
-            ),
+            health: recoveredHealth,
             history: history,
             now: now
         )
 
-        XCTAssertNil(notification)
+        // Recovery now posts the confirmation AND still reports the problem banner to
+        // clear — the two run together (the confirmation supersedes the banner too).
+        XCTAssertEqual(notification?.kind, .reconnected)
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["network-unavailable:870"])
         XCTAssertEqual(
             ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
                 for: Self.healthyAssessment,
-                health: TunnelHealthSnapshot(
-                    lastDNSSmokeProbeAt: successAt,
-                    lastDNSSmokeProbeSucceeded: true
-                ),
+                health: recoveredHealth,
                 history: history,
                 now: now
             ),

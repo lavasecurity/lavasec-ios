@@ -106,11 +106,15 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(securityBlock.contains(".activityViewing"))
         XCTAssertTrue(securityBlock.contains(".appSettings"))
 
+        // The per-surface rows are now driven by the `authenticationSurfaces` table and
+        // rendered through a single `securitySurfaceToggle(item.title, surface: item.surface)`
+        // call in a ForEach, so order is asserted on the table entries.
+        XCTAssertTrue(securityBlock.contains("securitySurfaceToggle(item.title, surface: item.surface)"))
         let protectionControlIndex = try XCTUnwrap(
-            securityBlock.range(of: "securitySurfaceToggle(\"Turn on/off Lava\", surface: .protectionControl)")?.lowerBound
+            securityBlock.range(of: "(\"Turn on/off Lava\", .protectionControl)")?.lowerBound
         )
         let protectionPauseIndex = try XCTUnwrap(
-            securityBlock.range(of: "securitySurfaceToggle(\"Pause Lava\", surface: .protectionPause)")?.lowerBound
+            securityBlock.range(of: "(\"Pause Lava\", .protectionPause)")?.lowerBound
         )
         XCTAssertLessThan(protectionControlIndex, protectionPauseIndex)
     }
@@ -123,10 +127,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
             endingBefore: "private enum SecurityPasscodeSetupPhase"
         )
 
-        XCTAssertTrue(securityBlock.contains("securitySurfaceToggle(\"Update domains and lists\", surface: .filterEditing)"))
-        XCTAssertTrue(securityBlock.contains("securitySurfaceToggle(\"Update App Settings\", surface: .appSettings)"))
-        XCTAssertFalse(securityBlock.contains("securitySurfaceToggle(\"Edit domains and lists\""))
-        XCTAssertFalse(securityBlock.contains("securitySurfaceToggle(\"Edit App Settings\""))
+        XCTAssertTrue(securityBlock.contains("(\"Update domains and lists\", .filterEditing)"))
+        XCTAssertTrue(securityBlock.contains("(\"Update App Settings\", .appSettings)"))
+        XCTAssertFalse(securityBlock.contains("\"Edit domains and lists\""))
+        XCTAssertFalse(securityBlock.contains("\"Edit App Settings\""))
     }
 
     func testDisablingAuthenticationMethodsRequiresSameMethodAuthentication() throws {
@@ -215,7 +219,6 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(root.contains("@EnvironmentObject private var security: SecurityController"))
         XCTAssertTrue(root.contains("guardedRootTabSelection"))
         XCTAssertTrue(root.contains("security.requireAuthentication"))
-        XCTAssertTrue(root.contains(".activityViewing"))
         XCTAssertTrue(root.contains(".appSettings"))
         XCTAssertTrue(guardSource.contains(".protectionControl"))
         XCTAssertTrue(root.contains("security.resetForegroundSession()"))
@@ -242,10 +245,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
             endingBefore: "private struct ActivityOverviewPanel"
         )
 
-        // Ungated tabs (Activity, and the .readOnly Guard/Filters) select
-        // synchronously in the binding — no async auth round-trip — so the tab
-        // switch never lags the tap. Activity is gated inline in its own view.
-        XCTAssertTrue(tabSelectionBlock.contains("nextTab == .activity"))
+        // The ungated root tab (Guard is .readOnly) selects synchronously in the
+        // binding — no async auth round-trip — so the tab switch never lags the
+        // tap; only the gated Settings tab takes the async path. Activity is no
+        // longer a root tab: it lives under the Guard nav and is gated inline.
         XCTAssertTrue(tabSelectionBlock.contains("nextTab.securityPolicy.requiredSurface == nil"))
         XCTAssertTrue(tabSelectionBlock.contains("selectedRootTab = nextTab"))
         XCTAssertTrue(selectRootTabBlock.contains("guard await canAccess(tab.securityPolicy"))

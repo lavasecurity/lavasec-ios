@@ -70,6 +70,55 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("emberObsidian"))
     }
 
+    func testArchiveIncludesRedactedDeviceDebugLogWhenProvided() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 18, hour: 14, minute: 12)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        // Pre-redacted entries (as produced by parseJSONLines): a co-located
+        // queried domain must already be stripped, and the new wedge-recovery /
+        // suppression diagnostics must survive into the local export.
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data("""
+        {"component":"tunnel","event":"self-reconnect-suppressed","timestamp":"2026-06-18T05:09:14Z","decision":"throttled","onDemandConfirmed":"false","reason":"send-failed","privateDomain":"checkout.example"}
+        {"component":"tunnel","event":"device-dns-captured","timestamp":"2026-06-18T05:09:20Z","reason":"network-settled","count":"2","activeCount":"2"}
+        """.utf8))
+
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: DiagnosticsStore(startedAt: generatedAt),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            deviceDebugLog: entries,
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        let archiveText = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertTrue(archiveText.contains("device-debug-log-2026-06-18-1412.jsonl"))
+        XCTAssertTrue(archiveText.contains("self-reconnect-suppressed"))
+        XCTAssertTrue(archiveText.contains("device-dns-captured"))
+        XCTAssertTrue(archiveText.contains("network-settled"))
+        // Redaction holds in the export path too: a queried domain never ships.
+        XCTAssertFalse(archiveText.contains("checkout.example"))
+    }
+
+    func testArchiveOmitsDeviceDebugLogFileWhenEmpty() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 18, hour: 14, minute: 12)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: DiagnosticsStore(startedAt: generatedAt),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        XCTAssertFalse(String(decoding: archive.data, as: UTF8.self).contains("device-debug-log-"))
+    }
+
     private static func date(
         year: Int,
         month: Int,

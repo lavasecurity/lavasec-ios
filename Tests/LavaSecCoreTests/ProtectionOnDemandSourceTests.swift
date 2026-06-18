@@ -47,7 +47,7 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             startingAt: "private func disableProtection(operationID:",
             endingBefore: "private func reconnectProtectionNow"
         )
-        let disableOnDemandIndex = try XCTUnwrap(disableBlock.range(of: "setManagerOnDemand(false")?.lowerBound)
+        let disableOnDemandIndex = try XCTUnwrap(disableBlock.range(of: "disableOnDemandWithRetry(on:")?.lowerBound)
         let stopIndex = try XCTUnwrap(disableBlock.range(of: "manager?.connection.stopVPNTunnel()")?.lowerBound)
         XCTAssertLessThan(
             disableOnDemandIndex, stopIndex,
@@ -62,9 +62,35 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             startingAt: "vpnMessage = \"Reconnecting local protection...\"",
             endingBefore: "await enableProtection(logUserAction: false"
         )
-        let disableOnDemandIndex = try XCTUnwrap(reconnectBlock.range(of: "setManagerOnDemand(false")?.lowerBound)
+        let disableOnDemandIndex = try XCTUnwrap(reconnectBlock.range(of: "disableOnDemandWithRetry(on:")?.lowerBound)
         let stopIndex = try XCTUnwrap(reconnectBlock.range(of: "manager?.connection.stopVPNTunnel()")?.lowerBound)
         XCTAssertLessThan(disableOnDemandIndex, stopIndex)
+    }
+
+    func testTurnOffRetriesOnDemandDisableBeforeFallingThrough() throws {
+        // Hardening for UR-31/UR-32: a transient on-demand-disable failure is what
+        // wedges turn-off, so the disable retries before the stop instead of
+        // swallowing the first error. The helper still delegates to the
+        // set+persist helper and only gives up after retrying.
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        XCTAssertTrue(source.contains("private func disableOnDemandWithRetry("))
+        let helperBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func disableOnDemandWithRetry(",
+            endingBefore: "private func reloadManagerFromPreferences"
+        )
+        XCTAssertTrue(
+            helperBlock.contains("try await setManagerOnDemand(false, on: manager)"),
+            "Retry wrapper must delegate to the set+persist on-demand helper."
+        )
+        XCTAssertTrue(
+            helperBlock.contains("Task.sleep"),
+            "Retry wrapper must back off between attempts."
+        )
+        XCTAssertTrue(
+            helperBlock.contains("reloadManagerFromPreferences(manager)"),
+            "Retry must refresh the manager from preferences between attempts — a stale configuration would otherwise make every retry repeat the same failing save."
+        )
     }
 
     func testSetManagerOnDemandHelperSetsAndPersistsTheFlag() throws {
@@ -225,6 +251,50 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             endingBefore: "private func neutralizeInheritedProtectionDuringOnboarding"
         )
         XCTAssertTrue(block.contains("UserDefaults.standard.bool(forKey: \"hasSeenLavaOnboarding\")"))
+    }
+
+    func testTurnOffRecoversWhenStopDoesNotComplete() throws {
+        // Regression for UR-31/UR-32: if the tunnel never reaches a stopped state
+        // (e.g. on-demand could not be disabled and iOS keeps reasserting a dead
+        // tunnel), turn-off must not dead-end at "Could not stop protection" and
+        // leave the user offline. It must attempt to delete the stuck profile to
+        // restore connectivity before surfacing the failure.
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let disableBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func disableProtection(operationID:",
+            endingBefore: "private func reconnectProtectionNow"
+        )
+        let recoveryIndex = try XCTUnwrap(
+            disableBlock.range(of: "forceRemoveStuckProtectionProfile()")?.lowerBound,
+            "Turn-off must attempt profile-removal recovery when the stop does not complete."
+        )
+        let throwIndex = try XCTUnwrap(
+            disableBlock.range(of: "throw LavaSecAppError.vpnStillStopping")?.lowerBound
+        )
+        XCTAssertLessThan(
+            recoveryIndex, throwIndex,
+            "Recovery must be attempted before giving up with vpnStillStopping."
+        )
+    }
+
+    func testForceRemoveRecoveryDeletesProfileAndClearsState() throws {
+        // The recovery helper must actually delete the profile (removeManager) so
+        // the stuck on-demand rules are cleared, and reset protection to stopped.
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let helperBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func forceRemoveStuckProtectionProfile()",
+            endingBefore: "private func resumeTemporaryProtectionIfExpired"
+        )
+        XCTAssertTrue(
+            helperBlock.contains("vpnLifecycleController.removeManager(manager)"),
+            "Recovery must delete the tunnel profile to clear stuck on-demand rules."
+        )
+        XCTAssertTrue(
+            helperBlock.contains("vpnStatus = .disconnected"),
+            "Recovery must reset protection to a stopped state."
+        )
     }
 
     private static func source(named fileName: String, in directoryName: String) throws -> String {

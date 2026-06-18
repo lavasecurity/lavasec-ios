@@ -479,29 +479,27 @@ private struct SettingsSystemSettingsRow: View {
     let title: String
 
     var body: some View {
-        LavaPlainCard {
-            Button {
-                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
-                    return
-                }
-
-                UIApplication.shared.open(settingsURL)
-            } label: {
-                HStack(spacing: 12) {
-                    Text(title.lavaLocalized)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "arrow.up.right")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
+        Button {
+            guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
+                return
             }
-            .buttonStyle(.plain)
+
+            UIApplication.shared.open(settingsURL)
+        } label: {
+            HStack(spacing: 12) {
+                Text(title.lavaLocalized)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .lavaControlRowCard()
         }
+        .buttonStyle(.plain)
         .hoverEffect(.highlight)
     }
 }
@@ -510,6 +508,8 @@ private struct AccountSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
     @State private var isShowingAccountSheet = false
+    @State private var isSettingUpBackup = false
+    @State private var isRestoringBackup = false
     @State private var backupMaintenanceTarget: BackupMaintenanceAction?
 
     var body: some View {
@@ -518,56 +518,67 @@ private struct AccountSettingsView: View {
                 "Account",
                 footer: "Account login is only needed for encrypted backup upload, support history, or paid account management."
             ) {
-                LavaPlainCard {
-                    VStack(spacing: 12) {
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                if viewModel.isAppleAccountConnected {
-                                    isShowingAccountSheet = true
-                                } else {
-                                    viewModel.beginSignInWithApple()
-                                }
-                            }
-                        } label: {
-                            SettingsActionRow(
-                                title: viewModel.appleSignInActionTitle,
-                                iconTint: LavaStyle.primaryText
-                            ) {
-                                AppleSignInStatusIcon(
-                                    isSigningIn: viewModel.isAppleSignInInProgress
-                                )
+                LavaCondensedList {
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            if viewModel.isAppleAccountConnected {
+                                isShowingAccountSheet = true
+                            } else {
+                                viewModel.beginSignInWithApple()
                             }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountSignInInProgress)
-
-                        Divider()
-
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                if viewModel.isGoogleAccountConnected {
-                                    isShowingAccountSheet = true
-                                } else {
-                                    viewModel.beginSignInWithGoogle()
-                                }
-                            }
-                        } label: {
-                            SettingsActionRow(title: viewModel.googleSignInActionTitle) {
-                                if viewModel.isGoogleSignInInProgress {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    GoogleSignInIcon()
-                                }
-                            }
+                    } label: {
+                        SettingsActionRow(
+                            title: viewModel.appleSignInActionTitle,
+                            iconTint: LavaStyle.primaryText
+                        ) {
+                            AppleSignInStatusIcon(
+                                isSigningIn: viewModel.isAppleSignInInProgress
+                            )
                         }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountSignInInProgress)
+                        .lavaRow()
                     }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountSignInInProgress)
+
+                    LavaCondensedDivider()
+
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            if viewModel.isGoogleAccountConnected {
+                                isShowingAccountSheet = true
+                            } else {
+                                viewModel.beginSignInWithGoogle()
+                            }
+                        }
+                    } label: {
+                        SettingsActionRow(title: viewModel.googleSignInActionTitle) {
+                            if viewModel.isGoogleSignInInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                GoogleSignInIcon()
+                            }
+                        }
+                        .lavaRow()
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountSignInInProgress)
                 }
             }
             .sheet(isPresented: $isShowingAccountSheet) {
                 AccountSheet()
+                    .environmentObject(viewModel)
+            }
+            // The backup setup/restore flows present as full bottom sheets (like
+            // Import filters) so they cover the tab bar and put their actions on the
+            // sheet's footer bar.
+            .sheet(isPresented: $isSettingUpBackup) {
+                BackupSetupView()
+                    .environmentObject(viewModel)
+            }
+            .sheet(isPresented: $isRestoringBackup) {
+                BackupRestoreView()
                     .environmentObject(viewModel)
             }
 
@@ -578,62 +589,63 @@ private struct AccountSettingsView: View {
                         systemImage: "lock.shield.fill"
                     )
 
-                    LavaPlainCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            if viewModel.isEncryptedBackupConfigured {
-                                Button {
-                                    Task {
-                                        guard await security.requireAuthentication(
-                                            for: .appSettings,
-                                            reason: "Back up settings"
-                                        ) else {
-                                            return
-                                        }
+                    LavaCondensedList {
+                        if viewModel.isEncryptedBackupConfigured {
+                            Button {
+                                Task {
+                                    guard await security.requireAuthentication(
+                                        for: .appSettings,
+                                        reason: "Back up settings"
+                                    ) else {
+                                        return
+                                    }
 
-                                        await viewModel.backUpNow()
-                                    }
-                                } label: {
-                                    SettingsActionRow(title: viewModel.isBackingUpNow ? "Backing Up" : "Back Up Now") {
-                                        if viewModel.isBackingUpNow {
-                                            ProgressView()
-                                                .controlSize(.small)
-                                        } else {
-                                            Image(systemName: "icloud.and.arrow.up.fill")
-                                                .font(.title3.weight(.semibold))
-                                        }
-                                    }
+                                    await viewModel.backUpNow()
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
-                                .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
-                            } else {
-                                NavigationLink {
-                                    BackupSetupView()
-                                } label: {
-                                    SettingsActionRow(title: "Set Up Encrypted Backup") {
-                                        Image(systemName: "key.fill")
+                            } label: {
+                                SettingsActionRow(title: viewModel.isBackingUpNow ? "Backing Up" : "Back Up Now") {
+                                    if viewModel.isBackingUpNow {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "icloud.and.arrow.up.fill")
                                             .font(.title3.weight(.semibold))
                                     }
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(!viewModel.isAccountSignedIn)
-                                .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                                .lavaRow()
                             }
-
-                            Divider()
-
-                            NavigationLink {
-                                BackupRestoreView()
+                            .buttonStyle(.plain)
+                            .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
+                            .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                        } else {
+                            Button {
+                                isSettingUpBackup = true
                             } label: {
-                                SettingsActionRow(title: "Restore Backup") {
-                                    Image(systemName: "icloud.and.arrow.down.fill")
+                                SettingsActionRow(title: "Set Up Encrypted Backup") {
+                                    Image(systemName: "key.fill")
                                         .font(.title3.weight(.semibold))
                                 }
+                                .lavaRow()
                             }
                             .buttonStyle(.plain)
                             .disabled(!viewModel.isAccountSignedIn)
                             .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
                         }
+
+                        LavaCondensedDivider()
+
+                        Button {
+                            isRestoringBackup = true
+                        } label: {
+                            SettingsActionRow(title: "Restore Backup") {
+                                Image(systemName: "icloud.and.arrow.down.fill")
+                                    .font(.title3.weight(.semibold))
+                            }
+                            .lavaRow()
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!viewModel.isAccountSignedIn)
+                        .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
                     }
 
                     BackupOptionControl(
@@ -646,14 +658,12 @@ private struct AccountSettingsView: View {
 
                     if viewModel.isEncryptedBackupConfigured {
                         VStack(alignment: .leading, spacing: 8) {
-                            LavaPlainCard {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    backupMaintenanceButton(.clear)
+                            LavaCondensedList {
+                                backupMaintenanceButton(.clear)
 
-                                    Divider()
+                                LavaCondensedDivider()
 
-                                    backupMaintenanceButton(.disable)
-                                }
+                                backupMaintenanceButton(.disable)
                             }
 
                             Text("Disabling backup also permanently deletes the copy stored for your account.")
@@ -664,17 +674,19 @@ private struct AccountSettingsView: View {
             }
         }
         .navigationTitle("Account & Backup")
-        .alert(
-            backupMaintenanceTarget?.title.lavaLocalized ?? "",
-            isPresented: backupMaintenanceConfirmationBinding,
-            presenting: backupMaintenanceTarget
-        ) { target in
-            Button("Cancel", role: .cancel) {}
-            Button(target.actionTitle.lavaLocalized, role: .destructive) {
-                performBackupMaintenance(target)
+        .lavaConfirmationAlert { host in
+            host.alert(
+                backupMaintenanceTarget?.title.lavaLocalized ?? "",
+                isPresented: backupMaintenanceConfirmationBinding,
+                presenting: backupMaintenanceTarget
+            ) { target in
+                Button("Cancel", role: .cancel) {}
+                Button(target.actionTitle.lavaLocalized, role: .destructive) {
+                    performBackupMaintenance(target)
+                }
+            } message: { target in
+                Text(target.message.lavaLocalized)
             }
-        } message: { target in
-            Text(target.message.lavaLocalized)
         }
     }
 
@@ -686,7 +698,7 @@ private struct AccountSettingsView: View {
                 Image(systemName: "trash")
                     .font(.title3.weight(.semibold))
             }
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isBackupMaintenanceInProgress || viewModel.isBackingUpNow)
@@ -804,12 +816,10 @@ private struct BackupOptionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                Toggle(title, isOn: isOn)
-                    .font(.headline)
-                    .tint(LavaStyle.safeGreen)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Toggle(title, isOn: isOn)
+                .font(.headline)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()
@@ -863,55 +873,56 @@ private struct AccountSheet: View {
 
         NavigationStack {
             LavaSheetScaffold(spacing: 14, scrolls: false) {
-                LavaPlainCard {
-                    VStack(spacing: 12) {
-                        ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
-                            AccountConnectionRow(connection: connection)
+                LavaCondensedList {
+                    ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
+                        AccountConnectionRow(connection: connection)
+                            .lavaRow()
 
-                            if index < accountConnections.count - 1 {
-                                Divider()
-                            }
+                        if index < accountConnections.count - 1 {
+                            LavaCondensedDivider()
                         }
+                    }
 
-                        Divider()
+                    LavaCondensedDivider()
 
-                        Button {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                viewModel.signOutAccount()
-                                dismiss()
-                            }
-                        } label: {
-                            SettingsActionRow(title: "Sign out of all accounts", iconTint: LavaStyle.secondaryText) {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    Button {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            viewModel.signOutAccount()
+                            dismiss()
+                        }
+                    } label: {
+                        SettingsActionRow(title: "Sign out of all accounts", iconTint: LavaStyle.secondaryText) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.title3.weight(.semibold))
+                        }
+                        .lavaRow()
+                    }
+                    .buttonStyle(.plain)
+
+                    LavaCondensedDivider()
+
+                    Button(role: .destructive) {
+                        performAppSettingsMutation(reason: "Edit Account settings") {
+                            isConfirmingAccountDeletion = true
+                        }
+                    } label: {
+                        SettingsActionRow(
+                            title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
+                            iconTint: .red,
+                            titleTint: .red
+                        ) {
+                            if viewModel.isAccountDeletionInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "trash")
                                     .font(.title3.weight(.semibold))
                             }
                         }
-                        .buttonStyle(.plain)
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            performAppSettingsMutation(reason: "Edit Account settings") {
-                                isConfirmingAccountDeletion = true
-                            }
-                        } label: {
-                            SettingsActionRow(
-                                title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
-                                iconTint: .red,
-                                titleTint: .red
-                            ) {
-                                if viewModel.isAccountDeletionInProgress {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "trash")
-                                        .font(.title3.weight(.semibold))
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isAccountDeletionInProgress)
+                        .lavaRow()
                     }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isAccountDeletionInProgress)
                 }
             }
             .navigationTitle("Account")
@@ -924,20 +935,22 @@ private struct AccountSheet: View {
         }
         .presentationDetents([.height(accountSheetHeight)])
         .presentationDragIndicator(.visible)
-        .alert(
-            "Delete your Lava account?",
-            isPresented: $isConfirmingAccountDeletion
-        ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    if await viewModel.deleteAccount() {
-                        dismiss()
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Delete your Lava account?",
+                isPresented: $isConfirmingAccountDeletion
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task {
+                        if await viewModel.deleteAccount() {
+                            dismiss()
+                        }
                     }
                 }
+            } message: {
+                Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
             }
-        } message: {
-            Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
         }
     }
 
@@ -1385,26 +1398,24 @@ private struct CustomizationSettingsView: View {
     var body: some View {
         SettingsSubpageContent {
             LavaSectionGroup("Appearance") {
-                LavaPlainCard {
-                    Picker("Appearance", selection: appearanceBinding) {
-                        ForEach(LavaAppearancePreference.allCases) { preference in
-                            Text(preference.displayName.lavaLocalized)
-                                .tag(preference)
-                        }
+                Picker("Appearance", selection: appearanceBinding) {
+                    ForEach(LavaAppearancePreference.allCases) { preference in
+                        Text(preference.displayName.lavaLocalized)
+                            .tag(preference)
                     }
-                    .pickerStyle(.segmented)
-                    .tint(LavaStyle.safeGreen)
                 }
+                .pickerStyle(.segmented)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
             }
 
             if viewModel.canOfferLiveActivities {
                 LavaSectionGroup("Live Activities") {
                     VStack(alignment: .leading, spacing: 8) {
-                        LavaPlainCard {
-                            Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
-                                .font(.headline)
-                                .tint(LavaStyle.safeGreen)
-                        }
+                        Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
+                            .font(.headline)
+                            .tint(LavaStyle.safeGreen)
+                            .lavaControlRowCard()
 
                         Text("Shows Lava status on the Lock Screen and Dynamic Island when available.".lavaLocalized)
                             .lavaQuietNoteText()
@@ -1425,11 +1436,10 @@ private struct CustomizationSettingsView: View {
                 )
                 .lavaTier(.celebratory)
 
-                LavaPlainCard {
-                    Toggle("Match App Icon to Lava Guard", isOn: updatesAppIconBinding)
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                }
+                Toggle("Match App Icon to Lava Guard", isOn: updatesAppIconBinding)
+                    .font(.headline)
+                    .tint(LavaStyle.safeGreen)
+                    .lavaControlRowCard()
 
                 if !viewModel.configuration.hasLavaSecurityPlus {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1770,16 +1780,64 @@ struct DNSResolverSettingsView: View {
         SettingsSubpageContent {
             LavaSectionGroup("Device DNS") {
                 VStack(alignment: .leading, spacing: 8) {
-                    LavaPlainCard {
-                        Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
 
                     Text(viewModel.deviceDNSResolverDetailText.lavaLocalized)
                         .lavaQuietNoteText()
                         .padding(.horizontal, 10)
+
+                    // The fallback toggle sits directly under the Device DNS detail in
+                    // both states. When an encrypted primary is selected it offers the
+                    // Device-DNS safety net; when Device DNS is the primary it offers an
+                    // encrypted alternative resolver instead. The toggle + its detail now
+                    // carry the disclosure that previously lived in static copy.
+                    if usesDeviceDNSSetting {
+                        ResolverOptionControl(
+                            title: "Fallback to alternative DNS",
+                            detail: "If your device's DNS stops responding, Lava routes allowed lookups through a chosen alternative resolver, then returns to your device's DNS automatically.",
+                            isOn: usesEncryptedDeviceDNSFallbackBinding
+                        )
+                    } else {
+                        ResolverOptionControl(
+                            title: "Fallback to Device DNS",
+                            detail: viewModel.deviceDNSFallbackDetailText,
+                            isOn: fallbackToDeviceDNSBinding
+                        )
+                    }
                 }
+            }
+
+            if usesDeviceDNSSetting && viewModel.configuration.usesEncryptedDeviceDNSFallback {
+                ResolverPickerSections(
+                    selectedPreset: viewModel.configuration.fallbackResolverPreset,
+                    configuredCustomAddress: viewModel.configuration.fallbackCustomResolverAddress,
+                    configuredCustomSecondaryAddress: viewModel.configuration.fallbackCustomResolverSecondaryAddress,
+                    configuredCustomName: viewModel.configuration.fallbackCustomResolverName,
+                    allowsCustomDNS: viewModel.configuration.limits.allowsCustomDNS,
+                    supportsDNSOverQUIC: viewModel.supportsDNSOverQUIC,
+                    selectPreset: { preset in
+                        performAppSettingsMutation(reason: "Edit DNS settings") {
+                            viewModel.setFallbackResolver(preset)
+                        }
+                    },
+                    saveCustom: { name, primary, secondary in
+                        performAppSettingsMutation(reason: "Edit DNS settings") {
+                            viewModel.setFallbackCustomResolverName(name)
+                            viewModel.setFallbackCustomResolverAddresses(primary: primary, secondary: secondary)
+                        }
+                    },
+                    clearCustom: { fallback in
+                        performAppSettingsMutation(reason: "Edit DNS settings") {
+                            viewModel.clearFallbackCustomResolver(fallback: fallback)
+                        }
+                    },
+                    requestUpgrade: {
+                        showUpgradePage = true
+                    }
+                )
             }
 
             if !usesDeviceDNSSetting {
@@ -1886,16 +1944,6 @@ struct DNSResolverSettingsView: View {
                         )
                     }
                 }
-
-                if showsResolverOptions || showsCustomResolverOptions {
-                    LavaSectionGroup("DNS Fallback") {
-                        ResolverOptionControl(
-                            title: "Fallback to Device DNS",
-                            detail: viewModel.deviceDNSFallbackDetailText,
-                            isOn: fallbackToDeviceDNSBinding
-                        )
-                    }
-                }
             }
         }
         .navigationTitle("DNS Resolver")
@@ -1907,15 +1955,17 @@ struct DNSResolverSettingsView: View {
                 }
             }
         }
-        .alert("Discard custom DNS changes?", isPresented: $showingCustomResolverDiscardConfirmation) {
-            Button("Cancel", role: .cancel) {
-                pendingCustomResolverDiscardAction = nil
+        .lavaConfirmationAlert { host in
+            host.alert("Discard custom DNS changes?", isPresented: $showingCustomResolverDiscardConfirmation) {
+                Button("Cancel", role: .cancel) {
+                    pendingCustomResolverDiscardAction = nil
+                }
+                Button("Discard", role: .destructive) {
+                    discardPendingCustomResolverDraft()
+                }
+            } message: {
+                Text("Your custom DNS draft will be removed.")
             }
-            Button("Discard", role: .destructive) {
-                discardPendingCustomResolverDraft()
-            }
-        } message: {
-            Text("Your custom DNS draft will be removed.")
         }
         .navigationDestination(isPresented: $showUpgradePage) {
             LavaPlusUpgradeDestination()
@@ -1986,7 +2036,12 @@ struct DNSResolverSettingsView: View {
                 viewModel.setResolver(.device)
                 resetCustomResolverDrafts()
             } else {
-                viewModel.setResolver(DNSResolverPreset.google.resolverVariant(for: selectedMenuTransport))
+                // Leaving Device DNS: there is no prior non-device transport to restore
+                // (`selectedMenuTransport` is forced to `.plainDNS` while Device DNS is
+                // selected), so adopt the app's default/top resolver — Mullvad DoH — to
+                // match onboarding and the AppConfiguration default, rather than dropping
+                // the user onto Google plain IP.
+                viewModel.setResolver(.mullvadDoH)
             }
         }
     }
@@ -2008,6 +2063,16 @@ struct DNSResolverSettingsView: View {
         } set: { newValue in
             performAppSettingsMutation(reason: "Edit DNS settings") {
                 viewModel.setFallbackToDeviceDNS(newValue)
+            }
+        }
+    }
+
+    private var usesEncryptedDeviceDNSFallbackBinding: Binding<Bool> {
+        Binding {
+            viewModel.configuration.usesEncryptedDeviceDNSFallback
+        } set: { newValue in
+            performAppSettingsMutation(reason: "Edit DNS settings") {
+                viewModel.setUsesEncryptedDeviceDNSFallback(newValue)
             }
         }
     }
@@ -2315,6 +2380,385 @@ private enum CustomResolverDiscardAction {
     case dismiss
 }
 
+// Reusable DNS provider list + Custom-resolver editor + transport selector. The
+// primary resolver picker is rendered inline in DNSResolverSettingsView (it owns a
+// page-level discard-confirmation flow that also guards the Device-DNS toggle and
+// page dismissal). This component is used for the encrypted Device-DNS *fallback*
+// selection: it owns its own draft state and applies edits immediately through the
+// supplied closures, mirroring the primary's provider/transport/custom layout.
+private struct ResolverPickerSections: View {
+    let selectedPreset: DNSResolverPreset
+    let configuredCustomAddress: String?
+    let configuredCustomSecondaryAddress: String?
+    let configuredCustomName: String?
+    let allowsCustomDNS: Bool
+    let supportsDNSOverQUIC: Bool
+    let selectPreset: (DNSResolverPreset) -> Void
+    let saveCustom: (_ name: String, _ primary: String, _ secondary: String) -> Void
+    let clearCustom: (_ fallback: DNSResolverPreset) -> Void
+    let requestUpgrade: () -> Void
+
+    @State private var customResolverDraft = ""
+    @State private var customResolverSecondaryDraft = ""
+    @State private var customResolverNameDraft = ""
+    @State private var isEditingCustomResolver = false
+    @State private var customResolverValidationMessage: String?
+    @FocusState private var focusedCustomResolverField: CustomResolverFocusField?
+
+    var body: some View {
+        Group {
+            LavaSectionGroup("DNS Providers") {
+                LavaCondensedList {
+                    ForEach(Array(DNSResolverPreset.settingsPresets.filter { $0.id != DNSResolverPreset.device.id }.enumerated()), id: \.element.id) { _, preset in
+                        Button {
+                            selectBaseResolver(preset)
+                        } label: {
+                            LavaCondensedListItem(
+                                title: preset.displayName,
+                                metadata: metadata(for: preset)
+                            ) {
+                                ResolverSelectionIndicator(isSelected: !isCustomResolverSelected && selectedBaseResolver.id == preset.id)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .tint(LavaStyle.safeGreen)
+
+                        LavaCondensedDivider(leadingInset: 50)
+                    }
+
+                    Button {
+                        selectCustomResolver()
+                    } label: {
+                        CustomDNSResolverRow(
+                            isSelected: isCustomResolverSelected,
+                            isEnabled: allowsCustomDNS,
+                            metadata: customResolverMetadata
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .tint(LavaStyle.safeGreen)
+                }
+            }
+
+            if showsCustomResolverOptions {
+                LavaSectionGroup("Custom Resolver") {
+                    VStack(spacing: 12) {
+                        LavaTextInputPanel {
+                            CustomResolverTextField(
+                                title: "Name (optional)",
+                                placeholder: "Custom DNS",
+                                text: $customResolverNameDraft,
+                                focus: $focusedCustomResolverField,
+                                focusField: .name,
+                                onChange: { customResolverValidationMessage = nil }
+                            )
+
+                            Divider()
+
+                            CustomResolverTextField(
+                                title: "Primary DNS",
+                                placeholder: "IPv4/6, https://, tls://, doq://, quic://, or sdns://",
+                                text: $customResolverDraft,
+                                keyboardType: .URL,
+                                axis: .vertical,
+                                focus: $focusedCustomResolverField,
+                                focusField: .primaryAddress,
+                                onChange: { customResolverValidationMessage = nil }
+                            )
+
+                            Divider()
+
+                            CustomResolverTextField(
+                                title: "Secondary DNS (optional)",
+                                placeholder: "Same transport as Primary",
+                                text: $customResolverSecondaryDraft,
+                                keyboardType: .URL,
+                                axis: .vertical,
+                                focus: $focusedCustomResolverField,
+                                focusField: .secondaryAddress,
+                                onChange: { customResolverValidationMessage = nil }
+                            )
+                        }
+
+                        HStack(spacing: 12) {
+                            Button(action: clearCustomResolverDrafts) {
+                                Text("Clear".lavaLocalized)
+                            }
+                            .buttonStyle(FeedbackSecondaryActionButtonStyle())
+                            .disabled(!canClearCustomResolver)
+
+                            Button(action: saveCustomResolver) {
+                                Text(customResolverSaveButtonTitle.lavaLocalized)
+                            }
+                            .buttonStyle(CustomResolverSaveButtonStyle(isSaved: customResolverSaveButtonTitle == "Saved"))
+                            .disabled(!canSaveCustomResolver)
+                        }
+
+                        if let customResolverValidationMessage {
+                            DomainRejectPanel(title: "Custom DNS cannot be saved", message: customResolverValidationMessage)
+                        }
+                    }
+                }
+            }
+
+            if showsResolverOptions {
+                LavaSectionGroup("DNS Transport") {
+                    ResolverTransportControl(
+                        detail: transportDetailText,
+                        selectedBaseResolver: selectedBaseResolver,
+                        selection: transportBinding
+                    )
+                }
+            }
+        }
+        .onAppear(perform: resetCustomResolverDrafts)
+        .onDisappear(perform: resetCustomResolverDrafts)
+    }
+
+    private var selectedBaseResolver: DNSResolverPreset {
+        selectedPreset.settingsBasePreset
+    }
+
+    private var selectedTransport: DNSResolverTransport {
+        selectedPreset.transport
+    }
+
+    private var selectedMenuTransport: DNSResolverTransport {
+        selectedTransport == .deviceDNS ? .plainDNS : selectedTransport
+    }
+
+    private var isCustomResolverSelected: Bool {
+        isEditingCustomResolver || selectedPreset.id == DNSResolverPreset.customID
+    }
+
+    private var showsResolverOptions: Bool {
+        !showsCustomResolverOptions
+            && selectedBaseResolver.id != DNSResolverPreset.device.id
+            && selectedBaseResolver.id != DNSResolverPreset.customID
+    }
+
+    private var showsCustomResolverOptions: Bool {
+        (isEditingCustomResolver || isCustomResolverSelected) && allowsCustomDNS
+    }
+
+    private var transportBinding: Binding<DNSResolverTransport> {
+        Binding {
+            selectedTransport
+        } set: { newValue in
+            selectPreset(selectedBaseResolver.resolverVariant(for: newValue))
+        }
+    }
+
+    private var transportDetailText: String {
+        "IP uses standard DNS. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) encrypt allowed lookups to the resolver."
+    }
+
+    private var customResolverMetadata: String {
+        guard allowsCustomDNS else {
+            return "Upgrade to use DNS over HTTPS, TLS and QUIC"
+        }
+
+        let configuredValue = configuredCustomAddress ?? ""
+        let configuredSecondaryValue = configuredCustomSecondaryAddress ?? ""
+        guard let preset = DNSResolverPreset.custom(
+            primaryRawValue: configuredValue,
+            secondaryRawValue: configuredSecondaryValue
+        ) else {
+            return "Supports DNS over IP, HTTPS, TLS and QUIC"
+        }
+
+        return resolverAddressSummary(for: preset)
+    }
+
+    private var trimmedCustomResolverDraft: String {
+        customResolverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedCustomResolverSecondaryDraft: String {
+        customResolverSecondaryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedCustomResolverNameDraft: String? {
+        let trimmedValue = customResolverNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedValue.isEmpty ? nil : trimmedValue
+    }
+
+    private var normalizedConfiguredCustomResolverName: String? {
+        let trimmedValue = configuredCustomName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedValue?.isEmpty == true ? nil : trimmedValue
+    }
+
+    private var normalizedConfiguredCustomResolverAddress: String {
+        configuredCustomAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var normalizedConfiguredCustomResolverSecondaryAddress: String {
+        configuredCustomSecondaryAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var customResolverDraftIsValid: Bool {
+        DNSResolverPreset.customValidationMessage(
+            primaryRawValue: trimmedCustomResolverDraft,
+            secondaryRawValue: trimmedCustomResolverSecondaryDraft,
+            supportsDNSOverQUIC: supportsDNSOverQUIC
+        ) == nil
+    }
+
+    private var customResolverDraftMatchesSavedEntry: Bool {
+        normalizedConfiguredCustomResolverAddress == trimmedCustomResolverDraft
+            && normalizedConfiguredCustomResolverSecondaryAddress == trimmedCustomResolverSecondaryDraft
+            && normalizedConfiguredCustomResolverName == normalizedCustomResolverNameDraft
+    }
+
+    private var customResolverDraftIsCleared: Bool {
+        trimmedCustomResolverDraft.isEmpty
+            && trimmedCustomResolverSecondaryDraft.isEmpty
+            && normalizedCustomResolverNameDraft == nil
+    }
+
+    private var customResolverClearFallbackPreset: DNSResolverPreset {
+        let fallbackBasePreset = selectedBaseResolver.id == DNSResolverPreset.customID ? DNSResolverPreset.mullvad : selectedBaseResolver
+        let variant = fallbackBasePreset.resolverVariant(for: selectedMenuTransport)
+        // The encrypted fallback must stay encrypted. A custom DoQ alternative has no
+        // built-in QUIC variant, so resolverVariant degrades to plain Mullvad IP —
+        // clearing it would silently drop the safety net from encrypted to unencrypted.
+        // Coerce that unsupported-QUIC case to the encrypted default/top resolver.
+        if selectedMenuTransport == .dnsOverQUIC, variant.transport != .dnsOverQUIC {
+            return .mullvadDoH
+        }
+        return variant
+    }
+
+    private var customResolverHasChanges: Bool {
+        !customResolverDraftMatchesSavedEntry
+    }
+
+    private var canSaveCustomResolver: Bool {
+        customResolverHasChanges
+            && (!trimmedCustomResolverDraft.isEmpty || customResolverDraftIsCleared)
+    }
+
+    private var canClearCustomResolver: Bool {
+        !customResolverDraft.isEmpty || !customResolverSecondaryDraft.isEmpty || !customResolverNameDraft.isEmpty
+    }
+
+    private var customResolverSaveButtonTitle: String {
+        if !customResolverHasChanges && customResolverDraftIsValid {
+            return "Saved"
+        }
+
+        return "Save"
+    }
+
+    private func selectBaseResolver(_ preset: DNSResolverPreset) {
+        // Selecting a built-in provider always leaves custom-editing. Set that
+        // explicitly and reset the draft text inline — do NOT call
+        // resetCustomResolverDrafts() here: the config change via selectPreset is
+        // deferred (the parent wraps it in an authenticated mutation), so
+        // `selectedPreset` is still the old Custom value at this point, and
+        // re-deriving isEditingCustomResolver from it would flip the editor back on
+        // and keep the Custom row selected until the page is recreated.
+        isEditingCustomResolver = false
+        customResolverDraft = configuredCustomAddress ?? ""
+        customResolverSecondaryDraft = configuredCustomSecondaryAddress ?? ""
+        customResolverNameDraft = configuredCustomName ?? ""
+        customResolverValidationMessage = nil
+        selectPreset(preset.resolverVariant(for: selectedMenuTransport))
+    }
+
+    private func selectCustomResolver() {
+        guard allowsCustomDNS else {
+            requestUpgrade()
+            return
+        }
+
+        isEditingCustomResolver = true
+        customResolverDraft = configuredCustomAddress ?? ""
+        customResolverSecondaryDraft = configuredCustomSecondaryAddress ?? ""
+        customResolverNameDraft = configuredCustomName ?? ""
+        customResolverValidationMessage = nil
+    }
+
+    private func resetCustomResolverDrafts() {
+        customResolverDraft = configuredCustomAddress ?? ""
+        customResolverSecondaryDraft = configuredCustomSecondaryAddress ?? ""
+        customResolverNameDraft = configuredCustomName ?? ""
+        customResolverValidationMessage = nil
+        isEditingCustomResolver = selectedPreset.id == DNSResolverPreset.customID
+    }
+
+    private func saveCustomResolver() {
+        guard canSaveCustomResolver else {
+            return
+        }
+
+        if customResolverDraftIsCleared {
+            focusedCustomResolverField = nil
+            clearCustom(customResolverClearFallbackPreset)
+            customResolverDraft = ""
+            customResolverSecondaryDraft = ""
+            customResolverNameDraft = ""
+            customResolverValidationMessage = nil
+            isEditingCustomResolver = false
+            return
+        }
+
+        if let validationMessage = DNSResolverPreset.customValidationMessage(
+            primaryRawValue: trimmedCustomResolverDraft,
+            secondaryRawValue: trimmedCustomResolverSecondaryDraft,
+            supportsDNSOverQUIC: supportsDNSOverQUIC
+        ) {
+            customResolverValidationMessage = validationMessage
+            return
+        }
+
+        let trimmedValue = trimmedCustomResolverDraft
+        let trimmedSecondaryValue = trimmedCustomResolverSecondaryDraft
+        focusedCustomResolverField = nil
+        saveCustom(customResolverNameDraft, trimmedValue, trimmedSecondaryValue)
+        customResolverDraft = trimmedValue
+        customResolverSecondaryDraft = trimmedSecondaryValue.isEmpty ? "" : trimmedSecondaryValue
+        customResolverNameDraft = normalizedCustomResolverNameDraft ?? ""
+        customResolverValidationMessage = nil
+        isEditingCustomResolver = true
+    }
+
+    private func clearCustomResolverDrafts() {
+        customResolverDraft = ""
+        customResolverSecondaryDraft = ""
+        customResolverNameDraft = ""
+        customResolverValidationMessage = nil
+    }
+
+    private func metadata(for preset: DNSResolverPreset) -> String {
+        resolverAddressSummary(for: preset.resolverVariant(for: selectedMenuTransport))
+    }
+
+    private func resolverAddressSummary(for preset: DNSResolverPreset) -> String {
+        let dohEndpointAddresses = preset.dohEndpoints.map { $0.url.absoluteString }
+        if !dohEndpointAddresses.isEmpty {
+            return dohEndpointAddresses.joined(separator: ", ")
+        }
+
+        let dotEndpointAddresses = preset.dotEndpoints.map(\.displayAddress)
+        if !dotEndpointAddresses.isEmpty {
+            return dotEndpointAddresses.joined(separator: ", ")
+        }
+
+        let doqEndpointAddresses = preset.doqEndpoints.map(\.displayAddress)
+        if !doqEndpointAddresses.isEmpty {
+            return doqEndpointAddresses.joined(separator: ", ")
+        }
+
+        let servers = preset.allServers
+        if !servers.isEmpty {
+            return servers.joined(separator: ", ")
+        }
+
+        return "Supports DNS over IP, HTTPS, TLS and QUIC"
+    }
+}
+
 private enum CustomResolverFocusField {
     case name
     case primaryAddress
@@ -2333,7 +2777,7 @@ private struct CustomResolverSaveButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.82)
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(isSaved ? LavaStyle.quietControl : LavaStyle.safeControlGreen)
@@ -2432,16 +2876,15 @@ private struct ResolverTransportControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                Picker("DNS Transport", selection: $selection) {
-                    ForEach(selectedBaseResolver.availableTransports, id: \.self) { transport in
-                        Text(transport.menuTitle.lavaLocalized)
-                            .tag(transport)
-                    }
+            Picker("DNS Transport", selection: $selection) {
+                ForEach(selectedBaseResolver.availableTransports, id: \.self) { transport in
+                    Text(transport.menuTitle.lavaLocalized)
+                        .tag(transport)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()
@@ -2469,9 +2912,8 @@ private struct ResolverOptionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LavaPlainCard {
-                ResolverToggleRow(title: title, isOn: $isOn)
-            }
+            ResolverToggleRow(title: title, isOn: $isOn)
+                .lavaControlRowCard()
 
             Text(detail)
                 .lavaQuietNoteText()
@@ -2500,11 +2942,6 @@ private struct ResolverSelectionIndicator: View {
     }
 }
 
-private enum LocalLogSettingsRowMetrics {
-    static let groupedRowSpacing: CGFloat = 14
-    static let rowMinHeight: CGFloat = 32
-}
-
 struct PrivacyDataSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
@@ -2526,34 +2963,31 @@ struct PrivacyDataSettingsView: View {
                         systemImage: "lock.shield.fill"
                     )
 
-                    LavaPlainCard {
-                        VStack(spacing: LocalLogSettingsRowMetrics.groupedRowSpacing) {
-                            localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
+                    LavaCondensedList {
+                        localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Domain History", isOn: keepDomainHistoryBinding)
+                        localLogToggle("Domain History", isOn: keepDomainHistoryBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Network Activity", isOn: keepNetworkActivityBinding)
+                        localLogToggle("Network Activity", isOn: keepNetworkActivityBinding)
 
-                            Divider()
+                        LavaCondensedDivider()
 
-                            localLogToggle("Lava Guard Progress", isOn: keepLavaGuardProgressBinding)
-                        }
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
+                        localLogToggle("Lava Guard Progress", isOn: keepLavaGuardProgressBinding)
                     }
+                    .font(.headline)
+                    .tint(LavaStyle.safeGreen)
 
-                    LavaPlainCard {
-                        Button {
-                            exportLocalLogs()
-                        } label: {
-                            ExportLocalLogsRow()
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        exportLocalLogs()
+                    } label: {
+                        ExportLocalLogsRow()
+                            .lavaControlRowCard()
                     }
+                    .buttonStyle(.plain)
 
                     if let localLogExportErrorMessage {
                         Text(localLogExportErrorMessage)
@@ -2565,27 +2999,24 @@ struct PrivacyDataSettingsView: View {
 
             LavaSectionGroup("Delete Local Logs") {
                 VStack(spacing: 10) {
-                    LavaPlainCard {
-                        Toggle("Show Delete Options", isOn: $showsClearOptions)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Show Delete Options", isOn: $showsClearOptions)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
 
                     if showsClearOptions {
                         VStack(spacing: 10) {
-                            LavaPlainCard {
-                                VStack(spacing: LocalLogSettingsRowMetrics.groupedRowSpacing) {
-                                    localLogClearButton(.filteringCounts)
-                                    Divider()
-                                    localLogClearButton(.domainHistory)
-                                    Divider()
-                                    localLogClearButton(.networkActivity)
-                                    Divider()
-                                    localLogClearButton(.lavaGuardProgress)
-                                }
+                            LavaCondensedList {
+                                localLogClearButton(.filteringCounts)
+                                LavaCondensedDivider()
+                                localLogClearButton(.domainHistory)
+                                LavaCondensedDivider()
+                                localLogClearButton(.networkActivity)
+                                LavaCondensedDivider()
+                                localLogClearButton(.lavaGuardProgress)
                             }
 
-                            LavaPlainCard {
+                            LavaCondensedList {
                                 localLogClearButton(.all)
                             }
                         }
@@ -2602,29 +3033,33 @@ struct PrivacyDataSettingsView: View {
         ) { result in
             handleLocalLogExportCompletion(result)
         }
-        .alert(
-            disableTarget?.disableTitle.lavaLocalized ?? "",
-            isPresented: disableConfirmationBinding,
-            presenting: disableTarget
-        ) { target in
-            Button("Cancel", role: .cancel) {}
-            Button(target.disableActionTitle.lavaLocalized, role: .destructive) {
-                disable(target)
+        .lavaConfirmationAlert { host in
+            host.alert(
+                disableTarget?.disableTitle.lavaLocalized ?? "",
+                isPresented: disableConfirmationBinding,
+                presenting: disableTarget
+            ) { target in
+                Button("Cancel", role: .cancel) {}
+                Button(target.disableActionTitle.lavaLocalized, role: .destructive) {
+                    disable(target)
+                }
+            } message: { target in
+                Text(target.disableMessage.lavaLocalized)
             }
-        } message: { target in
-            Text(target.disableMessage.lavaLocalized)
         }
-        .alert(
-            clearTarget?.clearTitle.lavaLocalized ?? "",
-            isPresented: clearConfirmationBinding,
-            presenting: clearTarget
-        ) { target in
-            Button("Cancel", role: .cancel) {}
-            Button(target.clearActionTitle.lavaLocalized, role: .destructive) {
-                clear(target)
+        .lavaConfirmationAlert { host in
+            host.alert(
+                clearTarget?.clearTitle.lavaLocalized ?? "",
+                isPresented: clearConfirmationBinding,
+                presenting: clearTarget
+            ) { target in
+                Button("Cancel", role: .cancel) {}
+                Button(target.clearActionTitle.lavaLocalized, role: .destructive) {
+                    clear(target)
+                }
+            } message: { target in
+                Text(target.clearMessage.lavaLocalized)
             }
-        } message: { target in
-            Text(target.clearMessage.lavaLocalized)
         }
     }
 
@@ -2721,7 +3156,7 @@ struct PrivacyDataSettingsView: View {
 
     private func localLogToggle(_ title: String, isOn: Binding<Bool>) -> some View {
         Toggle(title, isOn: isOn)
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
     }
 
     private func localLogClearButton(_ target: LocalLogClearTarget) -> some View {
@@ -2736,7 +3171,7 @@ struct PrivacyDataSettingsView: View {
                 Image(systemName: target.systemImage)
                     .font(.title3.weight(.semibold))
             }
-            .frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)
+            .lavaRow()
         }
         .buttonStyle(.plain)
     }
@@ -2804,48 +3239,30 @@ private struct SecuritySettingsView: View {
     var body: some View {
         SettingsSubpageContent {
             LavaSectionGroup("Authentication") {
-                LavaPlainCard {
-                    VStack(spacing: 14) {
-                        Toggle("Passcode", isOn: passcodeBinding)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
+                LavaCondensedList {
+                    Toggle("Passcode", isOn: passcodeBinding)
+                        .lavaRow()
 
-                        if security.shouldShowBiometricToggle {
-                            Divider()
+                    if security.shouldShowBiometricToggle {
+                        LavaCondensedDivider()
 
-                            Toggle(security.biometricToggleTitle, isOn: biometricBinding)
-                                .font(.headline)
-                                .tint(LavaStyle.safeGreen)
-                                .disabled(!security.canEnableBiometrics)
-                        }
+                        Toggle(security.biometricToggleTitle, isOn: biometricBinding)
+                            .lavaRow()
+                            .disabled(!security.canEnableBiometrics)
                     }
                 }
+                .font(.headline)
+                .tint(LavaStyle.safeGreen)
             }
 
             LavaSectionGroup("Use authentication for") {
-                LavaPlainCard {
-                    VStack(spacing: 14) {
-                        securitySurfaceToggle("App Unlock", surface: .appUnlock)
+                LavaCondensedList {
+                    ForEach(Array(authenticationSurfaces.enumerated()), id: \.offset) { index, item in
+                        securitySurfaceToggle(item.title, surface: item.surface)
 
-                        Divider()
-
-                        securitySurfaceToggle("Turn on/off Lava", surface: .protectionControl)
-
-                        Divider()
-
-                        securitySurfaceToggle("Pause Lava", surface: .protectionPause)
-
-                        Divider()
-
-                        securitySurfaceToggle("Update domains and lists", surface: .filterEditing)
-
-                        Divider()
-
-                        securitySurfaceToggle("View Activities", surface: .activityViewing)
-
-                        Divider()
-
-                        securitySurfaceToggle("Update App Settings", surface: .appSettings)
+                        if index < authenticationSurfaces.count - 1 {
+                            LavaCondensedDivider()
+                        }
                     }
                 }
                 .disabled(!security.hasAuthenticationMethod)
@@ -2901,6 +3318,17 @@ private struct SecuritySettingsView: View {
         }
     }
 
+    private var authenticationSurfaces: [(title: String, surface: SecurityProtectedSurface)] {
+        [
+            ("App Unlock", .appUnlock),
+            ("Turn on/off Lava", .protectionControl),
+            ("Pause Lava", .protectionPause),
+            ("Update domains and lists", .filterEditing),
+            ("View Activities", .activityViewing),
+            ("Update App Settings", .appSettings),
+        ]
+    }
+
     private func securitySurfaceToggle(_ title: String, surface: SecurityProtectedSurface) -> some View {
         Toggle(title, isOn: Binding {
             security.hasAuthenticationMethod && security.isProtected(surface)
@@ -2916,6 +3344,7 @@ private struct SecuritySettingsView: View {
         })
         .font(.headline)
         .tint(LavaStyle.safeGreen)
+        .lavaRow()
     }
 }
 
@@ -3303,13 +3732,15 @@ struct BugReportSettingsView: View {
                 }
             }
         }
-        .alert("Discard feedback?", isPresented: $isShowingDiscardConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Discard", role: .destructive) {
-                discardAndDismiss()
+        .lavaConfirmationAlert { host in
+            host.alert("Discard feedback?", isPresented: $isShowingDiscardConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Discard", role: .destructive) {
+                    discardAndDismiss()
+                }
+            } message: {
+                Text("Your feedback draft will be removed.")
             }
-        } message: {
-            Text("Your feedback draft will be removed.")
         }
         .task {
             await viewModel.sampleReports()
@@ -3384,15 +3815,23 @@ struct BugReportSettingsView: View {
                             LavaTextInputRow(title: "Site or domain") {
                                 TextField("Site or domain".lavaLocalized, text: $affectedSite)
                                     .lavaTextInputBody(keyboardType: .URL)
+                                    // Implicit cap for the URL field — enforced silently, no counter (UR-29).
+                                    .onChange(of: affectedSite) { _, newValue in
+                                        if newValue.count > BugReportInputLimits.affectedSite {
+                                            affectedSite = String(newValue.prefix(BugReportInputLimits.affectedSite))
+                                        }
+                                    }
                             }
 
                             Divider()
                         }
 
+                        // Details carries an explicit live counter; the others stay implicit (UR-29).
                         LavaTextEditorInputRow(
                             title: "Details",
                             text: $details,
-                            placeholder: "What were you trying to do? What did Lava do instead?"
+                            placeholder: "What were you trying to do? What did Lava do instead?",
+                            characterLimit: BugReportInputLimits.details
                         )
 
                         Divider()
@@ -3400,13 +3839,19 @@ struct BugReportSettingsView: View {
                         LavaTextInputRow(title: "Email for follow-up (optional)") {
                             TextField("Email for follow-up (optional)".lavaLocalized, text: $contactEmail)
                                 .lavaTextInputBody(keyboardType: .emailAddress)
+                                // Implicit cap for the email field — enforced silently, no counter (UR-29).
+                                .onChange(of: contactEmail) { _, newValue in
+                                    if newValue.count > BugReportInputLimits.contactEmail {
+                                        contactEmail = String(newValue.prefix(BugReportInputLimits.contactEmail))
+                                    }
+                                }
                         }
                     }
 
-                    LavaPlainCard {
-                        Toggle("Include optional diagnostic", isOn: $includeDiagnostics)
-                            .tint(LavaStyle.safeGreen)
-                    }
+                    Toggle("Include optional diagnostic", isOn: $includeDiagnostics)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
                 }
             }
 
@@ -3432,25 +3877,28 @@ struct BugReportSettingsView: View {
         VStack(spacing: 18) {
             LavaSectionGroup("Review and submit") {
                 VStack(spacing: 10) {
-                    LavaPlainCard {
+                    // Mirror the "Tell us more" panel layout (stacked label-above-value rows in
+                    // a single card) so the review reads as a read-only echo of what was typed,
+                    // instead of every field claiming its own fixed-width header column (UR-26).
+                    LavaTextInputPanel {
                         BugReportReviewRow(label: "Topic", value: selectedIssueType?.title ?? "Not selected")
-                    }
 
-                    if selectedIssueType == .websiteAccess {
-                        LavaPlainCard {
+                        if selectedIssueType == .websiteAccess {
+                            Divider()
+
                             BugReportReviewRow(label: "Site or domain", value: normalizedAffectedSite)
                         }
-                    }
 
-                    LavaPlainCard {
-                        BugReportReviewRow(label: "Details", value: normalizedDetails)
-                    }
+                        Divider()
 
-                    LavaPlainCard {
+                        BugReportReviewRow(label: "Details", value: normalizedDetails.isEmpty ? "Not provided" : normalizedDetails)
+
+                        Divider()
+
                         BugReportReviewRow(label: "Email", value: normalizedContactEmail.isEmpty ? "Not provided" : normalizedContactEmail)
-                    }
 
-                    LavaPlainCard {
+                        Divider()
+
                         BugReportReviewRow(label: "Diagnostics", value: includeDiagnostics ? "Sent" : "Not sent")
                     }
                 }
@@ -3500,7 +3948,7 @@ struct BugReportSettingsView: View {
                         .contentTransition(.identity)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
+                .buttonStyle(LavaPanelActionButtonStyle())
                 .disabled(submittedReportID.isEmpty)
 
                 Button {
@@ -3674,7 +4122,10 @@ struct BugReportSettingsView: View {
 
     private func reportInputChanged() {
         viewModel.resetBugReportSendState()
-        refreshDraft()
+        // Typing only changes the user-entered context; reuse the environment
+        // snapshot captured on appear/step-change instead of rebuilding the
+        // whole diagnostics bundle on every keystroke (UR-5: Feedback typing lag).
+        refreshDraftContext()
         syncReportDirtyState()
     }
 
@@ -3730,16 +4181,20 @@ struct BugReportSettingsView: View {
             && (selectedIssueType != .websiteAccess || !normalizedAffectedSite.isEmpty)
     }
 
+    // Route through the same BugReportContext normalization used by makeRequestBody so the
+    // review screen and the continue/submit validation reflect exactly what will be sent —
+    // including the sanitization that strips zero-width / control / bidi characters. Trimming
+    // alone would let an all-zero-width "Details" look non-empty here yet submit empty (UR-29).
     private var normalizedAffectedSite: String {
-        affectedSite.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentContext.normalizedAffectedSite
     }
 
     private var normalizedDetails: String {
-        details.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentContext.normalizedDetails
     }
 
     private var normalizedContactEmail: String {
-        contactEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentContext.normalizedContactEmail ?? ""
     }
 
     private var diagnosticPreviewSections: [BugReportPreviewSection] {
@@ -3777,6 +4232,10 @@ struct BugReportSettingsView: View {
         viewModel.prepareBugReport(context: currentContext)
     }
 
+    private func refreshDraftContext() {
+        viewModel.refreshBugReportDraftContext(context: currentContext)
+    }
+
     private func syncReportDirtyState() {
         externalIsReportDirty = isReportDirty
     }
@@ -3810,7 +4269,7 @@ private struct FeedbackSecondaryActionButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.82)
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(uiColor: .secondarySystemFill))
@@ -3856,14 +4315,11 @@ private struct BugReportReviewRow: View {
     let value: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(label.lavaLocalized)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(LavaStyle.secondaryText)
-                .frame(width: 116, alignment: .leading)
-
+        // Reuse the editable screen's row scaffold (label stacked above the value) so the
+        // review echo lines up pixel-for-pixel with "Tell us more", just read-only (UR-26).
+        LavaTextInputRow(title: label) {
             Text(value)
-                .font(.subheadline)
+                .font(.body)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)

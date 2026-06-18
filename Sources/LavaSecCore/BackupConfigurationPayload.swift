@@ -10,6 +10,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     public let customResolverSecondaryAddress: String?
     public let customResolverName: String?
     public let fallbackToDeviceDNS: Bool
+    public let usesEncryptedDeviceDNSFallback: Bool
+    public let fallbackResolverPresetID: String
+    public let fallbackCustomResolverAddress: String?
+    public let fallbackCustomResolverSecondaryAddress: String?
+    public let fallbackCustomResolverName: String?
     public let keepFilteringCounts: Bool
     public let keepDomainDiagnostics: Bool
     public let keepNetworkActivity: Bool
@@ -29,6 +34,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         case customResolverSecondaryAddress
         case customResolverName
         case fallbackToDeviceDNS
+        case usesEncryptedDeviceDNSFallback
+        case fallbackResolverPresetID
+        case fallbackCustomResolverAddress
+        case fallbackCustomResolverSecondaryAddress
+        case fallbackCustomResolverName
         case keepFilteringCounts
         case keepDomainDiagnostics
         case keepNetworkActivity
@@ -49,6 +59,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         customResolverSecondaryAddress: String? = nil,
         customResolverName: String? = nil,
         fallbackToDeviceDNS: Bool = false,
+        usesEncryptedDeviceDNSFallback: Bool = false,
+        fallbackResolverPresetID: String = DNSResolverPreset.mullvadDoH.id,
+        fallbackCustomResolverAddress: String? = nil,
+        fallbackCustomResolverSecondaryAddress: String? = nil,
+        fallbackCustomResolverName: String? = nil,
         keepFilteringCounts: Bool = true,
         keepDomainDiagnostics: Bool,
         keepNetworkActivity: Bool = true,
@@ -67,6 +82,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.customResolverSecondaryAddress = customResolverSecondaryAddress
         self.customResolverName = customResolverName
         self.fallbackToDeviceDNS = fallbackToDeviceDNS
+        self.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback
+        self.fallbackResolverPresetID = fallbackResolverPresetID
+        self.fallbackCustomResolverAddress = fallbackCustomResolverAddress
+        self.fallbackCustomResolverSecondaryAddress = fallbackCustomResolverSecondaryAddress
+        self.fallbackCustomResolverName = fallbackCustomResolverName
         self.keepFilteringCounts = keepFilteringCounts
         self.keepDomainDiagnostics = keepDomainDiagnostics
         self.keepNetworkActivity = keepNetworkActivity
@@ -88,6 +108,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.customResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .customResolverSecondaryAddress)
         self.customResolverName = try container.decodeIfPresent(String.self, forKey: .customResolverName)
         self.fallbackToDeviceDNS = try container.decodeIfPresent(Bool.self, forKey: .fallbackToDeviceDNS) ?? false
+        self.usesEncryptedDeviceDNSFallback = try container.decodeIfPresent(Bool.self, forKey: .usesEncryptedDeviceDNSFallback) ?? false
+        self.fallbackResolverPresetID = DNSResolverPreset.migratedPresetID(try container.decodeIfPresent(String.self, forKey: .fallbackResolverPresetID) ?? DNSResolverPreset.mullvadDoH.id)
+        self.fallbackCustomResolverAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverAddress)
+        self.fallbackCustomResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverSecondaryAddress)
+        self.fallbackCustomResolverName = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverName)
         self.keepFilteringCounts = try container.decodeIfPresent(Bool.self, forKey: .keepFilteringCounts) ?? true
         self.keepDomainDiagnostics = try container.decode(Bool.self, forKey: .keepDomainDiagnostics)
         self.keepNetworkActivity = try container.decodeIfPresent(Bool.self, forKey: .keepNetworkActivity) ?? true
@@ -111,6 +136,11 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             customResolverSecondaryAddress: configuration.customResolverSecondaryAddress,
             customResolverName: configuration.customResolverName,
             fallbackToDeviceDNS: configuration.fallbackToDeviceDNS,
+            usesEncryptedDeviceDNSFallback: configuration.usesEncryptedDeviceDNSFallback,
+            fallbackResolverPresetID: configuration.fallbackResolverPresetID,
+            fallbackCustomResolverAddress: configuration.fallbackCustomResolverAddress,
+            fallbackCustomResolverSecondaryAddress: configuration.fallbackCustomResolverSecondaryAddress,
+            fallbackCustomResolverName: configuration.fallbackCustomResolverName,
             keepFilteringCounts: configuration.keepFilteringCounts,
             keepDomainDiagnostics: configuration.keepDomainDiagnostics,
             keepNetworkActivity: configuration.keepNetworkActivity,
@@ -128,11 +158,16 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             enabledBlocklistIDs: enabledBlocklistIDs,
             allowedDomains: allowedDomains,
             blockedDomains: blockedDomains,
-            resolverPresetID: resolverPresetID,
+            resolverPresetID: DNSResolverPreset.migratedPresetID(resolverPresetID),
             customResolverAddress: customResolverAddress,
             customResolverSecondaryAddress: customResolverSecondaryAddress,
             customResolverName: customResolverName,
             fallbackToDeviceDNS: fallbackToDeviceDNS,
+            usesEncryptedDeviceDNSFallback: usesEncryptedDeviceDNSFallback,
+            fallbackResolverPresetID: fallbackResolverPresetID,
+            fallbackCustomResolverAddress: fallbackCustomResolverAddress,
+            fallbackCustomResolverSecondaryAddress: fallbackCustomResolverSecondaryAddress,
+            fallbackCustomResolverName: fallbackCustomResolverName,
             keepFilteringCounts: keepFilteringCounts,
             keepDomainDiagnostics: keepDomainDiagnostics,
             keepNetworkActivity: keepNetworkActivity,

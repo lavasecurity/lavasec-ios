@@ -5,7 +5,7 @@ public extension AppConfiguration {
         AppConfiguration(
             protectionEnabled: false,
             enabledBlocklistIDs: DefaultCatalog.recommendedDefaultSourceIDs,
-            resolverPresetID: DNSResolverPreset.google.id,
+            resolverPresetID: DNSResolverPreset.device.id,
             fallbackToDeviceDNS: true,
             keepFilteringCounts: true,
             keepDomainDiagnostics: true,

@@ -198,7 +198,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "Toggle(\"Include optional diagnostic\", isOn: $includeDiagnostics)"
         ]))
         XCTAssertEqual(contextPageBlock.occurrences(of: "LavaTextInputPanel"), 1)
-        XCTAssertEqual(contextPageBlock.occurrences(of: "LavaPlainCard"), 1)
+        // The diagnostic toggle is now a standalone control row, not a LavaPlainCard-wrapped one.
+        XCTAssertEqual(contextPageBlock.occurrences(of: "LavaPlainCard"), 0)
+        XCTAssertTrue(contextPageBlock.contains(".lavaControlRowCard()"))
         XCTAssertFalse(contextPageBlock.contains("LavaCondensedList"))
         XCTAssertFalse(contextPageBlock.contains("BugReportDetailsTextEditor"))
         XCTAssertFalse(contextPageBlock.contains("Label(\"See what information is sent\""))
@@ -216,6 +218,47 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("Text(\"Review\".lavaLocalized)"))
         XCTAssertFalse(feedbackBlock.contains("Label(\""))
         XCTAssertFalse(feedbackBlock.contains("nextSystemImage"))
+    }
+
+    func testFeedbackInputsHaveExplicitDetailsCounterAndImplicitCaps() throws {
+        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
+        let feedbackBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let contextPageBlock = try Self.sourceBlock(
+            in: feedbackBlock,
+            startingAt: "private var contextPage: some View",
+            endingBefore: "private var reviewPage: some View"
+        )
+
+        // Details: explicit live counter wired through the shared input-limit constant.
+        XCTAssertTrue(contextPageBlock.contains("characterLimit: BugReportInputLimits.details"))
+        // Email + URL: implicit caps enforced on input, no visible counter.
+        XCTAssertTrue(contextPageBlock.contains("if newValue.count > BugReportInputLimits.affectedSite"))
+        XCTAssertTrue(contextPageBlock.contains("if newValue.count > BugReportInputLimits.contactEmail"))
+
+        let editorRowBlock = try Self.sourceBlock(
+            in: components,
+            startingAt: "struct LavaTextEditorInputRow: View",
+            endingBefore: "extension View"
+        )
+        XCTAssertTrue(editorRowBlock.contains("var characterLimit: Int? = nil"))
+        XCTAssertTrue(editorRowBlock.contains("Text(\"\\(text.count)/\\(characterLimit)\")"))
+        XCTAssertTrue(editorRowBlock.contains("text = String(newValue.prefix(characterLimit))"))
+
+        // The review/validation normalized values must be the SAME sanitized values that are
+        // sent (BugReportContext), not a trim-only copy — otherwise all-zero-width input could
+        // pass validation / show in review but submit empty (Codex P2 on UR-29).
+        // Scope to the normalized-property definitions: they must delegate to currentContext
+        // (the sanitized values that are sent), not re-trim raw state. isReportDirty elsewhere
+        // in the block legitimately uses trimmingCharacters for dirty-detection, so a
+        // block-wide negative check would be wrong (Codex P1).
+        XCTAssertTrue(feedbackBlock.contains("private var normalizedAffectedSite: String {\n        currentContext.normalizedAffectedSite\n    }"))
+        XCTAssertTrue(feedbackBlock.contains("private var normalizedDetails: String {\n        currentContext.normalizedDetails\n    }"))
+        XCTAssertTrue(feedbackBlock.contains("private var normalizedContactEmail: String {\n        currentContext.normalizedContactEmail ?? \"\"\n    }"))
     }
 
     func testFeedbackReviewStepUsesSeparatePanelsAndBackAction() throws {
@@ -239,14 +282,20 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(reviewPageBlock.containsInOrder([
             "LavaSectionGroup(\"Review and submit\")",
             "VStack(spacing: 10)",
+            "LavaTextInputPanel",
             "BugReportReviewRow(label: \"Topic\"",
+            "Divider()",
             "BugReportReviewRow(label: \"Site or domain\"",
+            "Divider()",
             "BugReportReviewRow(label: \"Details\"",
+            "Divider()",
             "BugReportReviewRow(label: \"Email\"",
+            "Divider()",
             "BugReportReviewRow(label: \"Diagnostics\""
         ]))
-        XCTAssertEqual(reviewPageBlock.occurrences(of: "LavaPlainCard"), 5)
-        XCTAssertFalse(reviewPageBlock.contains("Divider()"))
+        // Review now echoes the "Tell us more" panel: one card, stacked rows, no per-field cards.
+        XCTAssertEqual(reviewPageBlock.occurrences(of: "LavaTextInputPanel"), 1)
+        XCTAssertEqual(reviewPageBlock.occurrences(of: "LavaPlainCard"), 0)
         XCTAssertFalse(reviewPageBlock.contains("Optional diagnostics"))
         XCTAssertTrue(bottomActionsBlock.containsInOrder([
             "case .review:",
@@ -265,7 +314,63 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             startingAt: "private struct BugReportReviewRow: View",
             endingBefore: "private struct BugReportDiagnosticsInfoView"
         )
-        XCTAssertTrue(reviewRowBlock.contains("HStack(alignment: .center, spacing: 12)"))
+        XCTAssertTrue(reviewRowBlock.contains("LavaTextInputRow(title: label)"))
+        XCTAssertFalse(reviewRowBlock.contains("HStack(alignment: .center, spacing: 12)"))
+        XCTAssertFalse(reviewRowBlock.contains(".frame(width: 116"))
+    }
+
+    func testDeviceDNSPresetOffersSelectableEncryptedFallback() throws {
+        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let resolverBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "struct DNSResolverSettingsView: View",
+            endingBefore: "struct PrivacyDataSettingsView: View"
+        )
+
+        // The Device DNS preset now exposes a selectable encrypted fallback. A
+        // "Fallback to alternative DNS" toggle (bound to setUsesEncryptedDeviceDNSFallback)
+        // replaces the old static disclosure copy, and the provider/transport/custom
+        // picker is revealed only when that opt-in is on.
+        XCTAssertFalse(resolverBlock.contains("static let encryptedFallbackDisclosureText"))
+        XCTAssertFalse(resolverBlock.contains("encryptedFallbackDisclosureText"))
+        XCTAssertFalse(resolverBlock.contains("Mullvad DNS (DNS over HTTPS)"))
+
+        // The fallback toggle is gated on usesDeviceDNSSetting and drives the opt-in flag.
+        XCTAssertTrue(resolverBlock.contains("if usesDeviceDNSSetting {"))
+        XCTAssertTrue(resolverBlock.contains("title: \"Fallback to alternative DNS\""))
+        XCTAssertTrue(resolverBlock.contains("isOn: usesEncryptedDeviceDNSFallbackBinding"))
+        XCTAssertTrue(resolverBlock.contains("viewModel.setUsesEncryptedDeviceDNSFallback(newValue)"))
+        XCTAssertTrue(resolverBlock.contains("viewModel.configuration.usesEncryptedDeviceDNSFallback"))
+
+        // The shared picker is revealed only when the encrypted fallback is enabled and
+        // is wired to the fallback setters.
+        XCTAssertTrue(resolverBlock.contains("if usesDeviceDNSSetting && viewModel.configuration.usesEncryptedDeviceDNSFallback {"))
+        XCTAssertTrue(resolverBlock.contains("ResolverPickerSections("))
+        XCTAssertTrue(resolverBlock.contains("selectedPreset: viewModel.configuration.fallbackResolverPreset"))
+        XCTAssertTrue(resolverBlock.contains("viewModel.setFallbackResolver(preset)"))
+        XCTAssertTrue(resolverBlock.contains("viewModel.setFallbackCustomResolverAddresses(primary: primary, secondary: secondary)"))
+        XCTAssertTrue(resolverBlock.contains("viewModel.clearFallbackCustomResolver(fallback: fallback)"))
+
+        // Custom DNS for the fallback stays gated by Plus, like the primary.
+        XCTAssertTrue(resolverBlock.contains("allowsCustomDNS: viewModel.configuration.limits.allowsCustomDNS"))
+    }
+
+    func testClearingCustomDoQFallbackKeepsEncryptedDefault() throws {
+        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        // The fallback picker's clear preset uses a Mullvad base (the primary section's
+        // uses Google), so this start marker uniquely targets the fallback clear path.
+        let clearBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "DNSResolverPreset.customID ? DNSResolverPreset.mullvad : selectedBaseResolver",
+            endingBefore: "private var customResolverHasChanges"
+        )
+
+        // Clearing a Custom DoQ fallback must stay encrypted: Mullvad has no QUIC
+        // variant, so resolverVariant(.dnsOverQUIC) degrades to plain IP — coerce that
+        // unsupported case to the DoH default instead of silently dropping encryption.
+        XCTAssertTrue(clearBlock.contains("selectedMenuTransport == .dnsOverQUIC"))
+        XCTAssertTrue(clearBlock.contains("variant.transport != .dnsOverQUIC"))
+        XCTAssertTrue(clearBlock.contains("return .mullvadDoH"))
     }
 
     func testFeedbackSubmittingStateStaysInsideSubmitButton() throws {
@@ -327,7 +432,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("@State private var didCopySubmittedReportID = false"))
         XCTAssertTrue(feedbackBlock.contains("Text((didCopySubmittedReportID ? \"Copied!\" : \"Copy ID\").lavaLocalized)"))
         XCTAssertTrue(feedbackBlock.contains(".contentTransition(.identity)"))
-        XCTAssertTrue(feedbackBlock.contains(".buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))"))
+        XCTAssertTrue(feedbackBlock.contains(".buttonStyle(LavaPanelActionButtonStyle())"))
         XCTAssertTrue(feedbackBlock.contains("copySubmittedReportID()"))
         XCTAssertTrue(feedbackBlock.contains("UIPasteboard.general.string = submittedReportID"))
         XCTAssertTrue(feedbackBlock.contains("transaction.disablesAnimations = true"))
@@ -351,7 +456,52 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("Color(uiColor: .secondarySystemFill)"))
         XCTAssertTrue(feedbackBlock.contains("Text(\"Back\".lavaLocalized)"))
         XCTAssertEqual(feedbackBlock.occurrences(of: ".buttonStyle(FeedbackSecondaryActionButtonStyle())"), 2)
-        XCTAssertTrue(feedbackBlock.contains(".buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))"))
+        XCTAssertTrue(feedbackBlock.contains(".buttonStyle(LavaPanelActionButtonStyle())"))
+    }
+
+    func testFeedbackTypingReusesPreparedDiagnosticsInsteadOfRebuildingPerKeystroke() throws {
+        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let feedbackBlock = try Self.sourceBlock(
+            in: settingsSource,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let inputChangedBlock = try Self.sourceBlock(
+            in: feedbackBlock,
+            startingAt: "private func reportInputChanged()",
+            endingBefore: "private func submitReport()"
+        )
+
+        // Per-keystroke text changes take the cheap context-only refresh, never
+        // the heavy prepare that re-reads files and rebuilds the blocklist union.
+        XCTAssertTrue(inputChangedBlock.contains("refreshDraftContext()"))
+        XCTAssertFalse(inputChangedBlock.contains("refreshDraft()"))
+        XCTAssertTrue(feedbackBlock.contains("private func refreshDraftContext()"))
+        XCTAssertTrue(feedbackBlock.contains("viewModel.refreshBugReportDraftContext(context: currentContext)"))
+        XCTAssertTrue(feedbackBlock.contains(".onChange(of: details) { _, _ in reportInputChanged() }"))
+        XCTAssertTrue(feedbackBlock.contains(".onChange(of: affectedSite) { _, _ in reportInputChanged() }"))
+
+        // The view model captures the heavy inputs once in prepareBugReport and
+        // the cheap path reuses them without another refreshReports()/file read.
+        let prepareBlock = try Self.sourceBlock(
+            in: appViewModelSource,
+            startingAt: "func prepareBugReport(context: BugReportContext)",
+            endingBefore: "func refreshBugReportDraftContext(context: BugReportContext)"
+        )
+        let refreshContextBlock = try Self.sourceBlock(
+            in: appViewModelSource,
+            startingAt: "func refreshBugReportDraftContext(context: BugReportContext)",
+            endingBefore: "func sendBugReport(context: BugReportContext) async"
+        )
+        XCTAssertTrue(prepareBlock.contains("refreshReports()"))
+        XCTAssertTrue(prepareBlock.contains("preparedBugReportInputs = inputs"))
+        XCTAssertTrue(prepareBlock.contains("makeBugReportBundle(context: context, inputs: inputs)"))
+        XCTAssertTrue(refreshContextBlock.contains("guard let inputs = preparedBugReportInputs else"))
+        XCTAssertTrue(refreshContextBlock.contains("makeBugReportBundle(context: context, inputs: inputs)"))
+        XCTAssertFalse(refreshContextBlock.contains("refreshReports()"))
+        XCTAssertTrue(appViewModelSource.contains("private struct PreparedBugReportInputs"))
+        XCTAssertTrue(appViewModelSource.contains("debugLogEntries: inputs.debugLogEntries"))
     }
 
     func testFeedbackStepProgressUsesClickableSimpleNumberText() throws {
@@ -504,8 +654,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private struct AppleSignInStatusIcon: View"
         )
         XCTAssertTrue(optionControlBlock.containsInOrder([
-            "LavaPlainCard",
             "Toggle(title, isOn: isOn)",
+            ".lavaControlRowCard()",
             "Text(detail)",
             ".lavaQuietNoteText()"
         ]))
@@ -597,10 +747,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(privacyBlock.contains("VStack(spacing: 10)"))
         XCTAssertTrue(privacyBlock.contains("if showsClearOptions {\n                        VStack(spacing: 10) {"))
         XCTAssertTrue(privacyBlock.contains("if showsClearOptions"))
-        XCTAssertTrue(source.contains("private enum LocalLogSettingsRowMetrics"))
-        XCTAssertTrue(source.contains("static let groupedRowSpacing: CGFloat = 14"))
-        XCTAssertTrue(source.contains("static let rowMinHeight: CGFloat = 32"))
-        XCTAssertTrue(privacyBlock.contains("VStack(spacing: LocalLogSettingsRowMetrics.groupedRowSpacing)"))
+        // The ad-hoc LocalLogSettingsRowMetrics (groupedRowSpacing/rowMinHeight) was retired;
+        // the log rows now live in a LavaCondensedList and share the LavaRowHeight floor.
+        XCTAssertFalse(source.contains("private enum LocalLogSettingsRowMetrics"))
+        XCTAssertTrue(privacyBlock.contains("LavaCondensedList {"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Filtering Counts\", isOn: keepFilteringCountsBinding)"))
         XCTAssertTrue(privacyBlock.containsInOrder([
             "localLogClearButton(.filteringCounts)",
@@ -610,7 +760,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "localLogClearButton(.all)"
         ]))
         XCTAssertTrue(privacyBlock.contains("localLogClearButton(.all)"))
-        XCTAssertTrue(privacyBlock.contains(".frame(minHeight: LocalLogSettingsRowMetrics.rowMinHeight)"))
+        XCTAssertTrue(privacyBlock.contains(".lavaRow()"))
         XCTAssertFalse(privacyBlock.contains("topPadding:"))
         XCTAssertFalse(privacyBlock.contains("bottomPadding:"))
         XCTAssertTrue(source.contains("return \"Clear filtering counts\""))
@@ -762,7 +912,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverBlock.contains("focus.wrappedValue = nil"))
         XCTAssertTrue(resolverBlock.contains("private struct CustomResolverSaveButtonStyle: ButtonStyle"))
         XCTAssertTrue(resolverBlock.contains("LavaStyle.quietControl"))
-        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"DNS Fallback\")"))
+        // The "DNS Fallback" section wrapper was removed; the fallback toggle now sits
+        // directly under the Device DNS detail text inside the "Device DNS" group.
+        XCTAssertFalse(resolverBlock.contains("LavaSectionGroup(\"DNS Fallback\")"))
         XCTAssertTrue(resolverBlock.contains("Fallback to Device DNS"))
         XCTAssertTrue(resolverBlock.contains("Same transport as Primary"))
         XCTAssertTrue(resolverBlock.contains("fallbackToDeviceDNSBinding"))
@@ -772,14 +924,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverBlock.contains("IP uses standard DNS. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) encrypt allowed lookups to the resolver."))
         XCTAssertTrue(resolverBlock.containsInOrder([
             "LavaSectionGroup(\"Device DNS\")",
+            "title: \"Fallback to Device DNS\"",
+            "detail: viewModel.deviceDNSFallbackDetailText",
             "if !usesDeviceDNSSetting",
             "LavaSectionGroup(\"DNS Providers\")",
             "LavaSectionGroup(\"Custom Resolver\")",
             "LavaSectionGroup(\"DNS Transport\")",
-            "detail: transportDetailText",
-            "LavaSectionGroup(\"DNS Fallback\")",
-            "title: \"Fallback to Device DNS\"",
-            "detail: viewModel.deviceDNSFallbackDetailText"
+            "detail: transportDetailText"
         ]))
         XCTAssertFalse(resolverBlock.contains("Use DNS over HTTPS"))
         XCTAssertFalse(resolverBlock.contains("dnsOverHTTPSBinding"))
@@ -846,8 +997,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private struct ResolverSelectionIndicator: View"
         )
         XCTAssertTrue(optionControlBlock.containsInOrder([
-            "LavaPlainCard",
             "ResolverToggleRow",
+            ".lavaControlRowCard()",
             "Text(detail)",
             ".lavaQuietNoteText()"
         ]))
@@ -891,36 +1042,40 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(summaryBlock.contains("+ Device Fallback"))
     }
 
-    func testDNSResolverCatalogAddsDNSSBBaseAndEncryptedVariants() throws {
+    func testDNSResolverCatalogAddsMullvadBaseAndEncryptedVariants() throws {
         XCTAssertEqual(DNSResolverPreset.settingsPresets.map(\.id), [
             "device-dns",
-            "google-public-dns",
+            "mullvad",
             "cloudflare-1111",
             "quad9-secure",
-            "dns-sb"
+            "google-public-dns"
         ])
-        XCTAssertEqual(DNSResolverPreset.dnsSB.ipv4Servers, ["185.222.222.222", "45.11.45.11"])
-        XCTAssertEqual(DNSResolverPreset.dnsSB.ipv6Servers, ["2a09::", "2a11::"])
-        XCTAssertEqual(DNSResolverPreset.dnsSBDoH.dohEndpoint?.url.absoluteString, "https://doh.dns.sb/dns-query")
-        XCTAssertEqual(DNSResolverPreset.dnsSBDoT.dotEndpoint?.hostname, "dot.sb")
+        XCTAssertEqual(DNSResolverPreset.mullvad.ipv4Servers, ["194.242.2.2"])
+        XCTAssertEqual(DNSResolverPreset.mullvad.ipv6Servers, ["2a07:e340::2"])
+        XCTAssertEqual(DNSResolverPreset.mullvadDoH.dohEndpoint?.url.absoluteString, "https://dns.mullvad.net/dns-query")
+        XCTAssertEqual(DNSResolverPreset.mullvadDoT.dotEndpoint?.hostname, "dns.mullvad.net")
     }
 
     func testResolverPresetMapsTransportSelectorToBaseSelection() throws {
         XCTAssertEqual(DNSResolverPreset.googleDoH.settingsBasePreset, .google)
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.settingsBasePreset, .cloudflare)
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.settingsBasePreset, .quad9Secure)
-        XCTAssertEqual(DNSResolverPreset.dnsSBDoH.settingsBasePreset, .dnsSB)
+        XCTAssertEqual(DNSResolverPreset.mullvadDoH.settingsBasePreset, .mullvad)
         XCTAssertEqual(DNSResolverPreset.googleDoT.settingsBasePreset, .google)
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.settingsBasePreset, .cloudflare)
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.settingsBasePreset, .quad9Secure)
-        XCTAssertEqual(DNSResolverPreset.dnsSBDoT.settingsBasePreset, .dnsSB)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.dnsOverHTTPSVariant, .dnsSBDoH)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.dnsOverTLSVariant, .dnsSBDoT)
-        XCTAssertEqual(DNSResolverPreset.dnsSBDoH.plainDNSVariant, .dnsSB)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.resolverVariant(for: .plainDNS), .dnsSB)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.resolverVariant(for: .dnsOverHTTPS), .dnsSBDoH)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.resolverVariant(for: .dnsOverTLS), .dnsSBDoT)
-        XCTAssertEqual(DNSResolverPreset.dnsSB.availableTransports, [.plainDNS, .dnsOverHTTPS, .dnsOverTLS])
+        XCTAssertEqual(DNSResolverPreset.mullvadDoT.settingsBasePreset, .mullvad)
+        XCTAssertEqual(DNSResolverPreset.mullvad.dnsOverHTTPSVariant, .mullvadDoH)
+        XCTAssertEqual(DNSResolverPreset.mullvad.dnsOverTLSVariant, .mullvadDoT)
+        XCTAssertEqual(DNSResolverPreset.mullvadDoH.plainDNSVariant, .mullvad)
+        XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .plainDNS), .mullvad)
+        XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverHTTPS), .mullvadDoH)
+        XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverTLS), .mullvadDoT)
+        XCTAssertEqual(DNSResolverPreset.mullvad.availableTransports, [.plainDNS, .dnsOverHTTPS, .dnsOverTLS])
+        // Root cause for the Custom-DoQ clear coercion: Mullvad has no QUIC variant, so
+        // resolverVariant(.dnsOverQUIC) degrades to the plain preset (transport != DoQ).
+        XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverQUIC), .mullvad)
+        XCTAssertNotEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverQUIC).transport, .dnsOverQUIC)
     }
 
     func testDomainHistoryAddsPullToRefreshUsingActivitySampling() throws {

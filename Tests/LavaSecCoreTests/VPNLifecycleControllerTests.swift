@@ -44,6 +44,42 @@ final class VPNLifecycleControllerTests: XCTestCase {
         XCTAssertTrue(fixture.repository.savedManagers.contains { $0 === existing })
     }
 
+    func testLoadOrCreateRetriesTransientEmptyLoadBeforeCreating() async throws {
+        let fixture = Fixture()
+        let existing = FakeVPNManager(displayName: "Lava Security", bundleID: Self.providerBundleID, status: .disconnected)
+        // iOS returns an empty list on the first query (transient, e.g. during a
+        // network handoff), then the saved profile reappears.
+        var loads = 0
+        fixture.repository.onLoadAll = {
+            loads += 1
+            if loads >= 2 {
+                fixture.repository.managers = [existing]
+            }
+        }
+
+        let manager = try await fixture.controller.loadOrCreateManager()
+
+        XCTAssertTrue(manager === existing, "A transient empty load must reuse the existing profile, not mint a new one.")
+        XCTAssertTrue(
+            fixture.repository.madeManagers.isEmpty,
+            "No new manager (and so no VPN-permission re-prompt) when the profile reappears on retry."
+        )
+        XCTAssertEqual(fixture.sleepRequests, [0.4], "One retry delay before the profile reappeared on the second load.")
+        XCTAssertTrue(fixture.events.contains { $0.0 == "load-existing-manager-recovered-after-empty" })
+        XCTAssertFalse(fixture.events.contains { $0.0 == "load-or-create-creating-new-manager" })
+    }
+
+    func testLoadOrCreateCreatesNewManagerOnlyAfterRetriesStayEmpty() async throws {
+        let fixture = Fixture()
+
+        let manager = try await fixture.controller.loadOrCreateManager()
+
+        XCTAssertTrue(fixture.repository.madeManagers.first === manager)
+        // Exhausts the configured retries (each with a delay) before creating.
+        XCTAssertEqual(fixture.sleepRequests, [0.4, 0.4])
+        XCTAssertTrue(fixture.events.contains { $0.0 == "load-or-create-creating-new-manager" })
+    }
+
     func testDuplicateCleanupRemovesOnlyLavaDuplicatesAndKeepsForeignManagers() async throws {
         let fixture = Fixture()
         let kept = FakeVPNManager(displayName: "Lava Security", bundleID: Self.providerBundleID, status: .connected)
@@ -239,12 +275,16 @@ private final class Fixture {
     let waiter = FakeStatusChangeWaiter()
     let clock = FakeWaitClock()
     private(set) var events: [(String, [String: String])] = []
+    private(set) var sleepRequests: [TimeInterval] = []
     private(set) lazy var controller = VPNLifecycleController(
         repository: repository,
         statusWaiter: waiter,
         expectedProviderBundleIdentifier: "com.lavasec.app.tunnel",
         waitPolicy: .init(statusPollInterval: 0.5),
+        reloadBeforeCreatePolicy: .init(retryCount: 2, retryDelay: 0.4),
         now: { [clock] in clock.now },
+        // Keep retry waits instant and observable in tests.
+        sleep: { [weak self] seconds in self?.sleepRequests.append(seconds) },
         emitEvent: { [weak self] event, details in self?.events.append((event, details)) }
     )
 }

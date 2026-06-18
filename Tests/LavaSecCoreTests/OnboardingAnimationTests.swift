@@ -187,7 +187,7 @@ final class OnboardingAnimationTests: XCTestCase {
         let animationBlock = try Self.sourceBlock(
             in: onboardingSource,
             startingAt: "private func prepareAnimations(for nextPage: OnboardingPage)",
-            endingBefore: "private func onOffText"
+            endingBefore: "private enum OnboardingPage"
         )
         let heroBlock = try Self.sourceBlock(
             in: onboardingSource,
@@ -221,7 +221,7 @@ final class OnboardingAnimationTests: XCTestCase {
         let notificationsPage = try Self.sourceBlock(
             in: onboardingSource,
             startingAt: "private var notificationsPage: some View",
-            endingBefore: "private var settingsPage"
+            endingBefore: "private var donePage"
         )
         let stepLayout = try Self.sourceBlock(
             in: onboardingSource,

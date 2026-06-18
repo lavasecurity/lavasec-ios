@@ -1,6 +1,44 @@
 import XCTest
 
 final class AppViewModelSourceTests: XCTestCase {
+    func testRecoveryAcknowledgementUsesPreClearHistoryAndDoesNotExtendProblemThrottle() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+
+        // The app notifier must evaluate notification(for:) against the captured
+        // pre-clear `history`, not a re-read (which would have dropped the
+        // unresolved-problem marker and never posted the .reconnected confirmation).
+        let scheduleBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func scheduleIfNeeded(",
+            endingBefore: "func requestAuthorization()"
+        )
+        XCTAssertTrue(scheduleBlock.contains("clearResolvedProblemNotifications(resolvedNotificationIdentifiers)"))
+        XCTAssertFalse(
+            scheduleBlock.contains("history: notificationHistory,"),
+            "Recovery acknowledgement must use the pre-clear `history`, not a re-read."
+        )
+
+        // The 600s problem throttle keys off the delivered-at timestamp, so only a
+        // problem delivery may advance it — a .reconnected delivery must not.
+        let recordBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func recordDelivery(of notification:",
+            endingBefore: "private func removeSupersededNotifications("
+        )
+        let prefix = try Self.sourceBlock(
+            in: recordBlock,
+            startingAt: "defaults.set(",
+            endingBefore: "if notification.kind.isProblem {"
+        )
+        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        let problemBranch = try Self.sourceBlock(
+            in: recordBlock,
+            startingAt: "if notification.kind.isProblem {",
+            endingBefore: "} else if notification.kind == .reconnected {"
+        )
+        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+    }
+
     func testLiveDNSSmokeCanForceResolverPresetFromLaunchArguments() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let runtimeSupportBlock = try Self.sourceBlock(
@@ -240,6 +278,63 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(clearCustomResolverBlock.contains("if configuration.resolverPresetID == DNSResolverPreset.customID"))
         XCTAssertTrue(clearCustomResolverBlock.contains("configuration.resolverPresetID = fallbackPreset.id"))
         XCTAssertTrue(clearCustomResolverBlock.contains("persistResolverSettings(activity: .changeResolver)"))
+    }
+
+    func testFallbackResolverSettersMirrorPrimaryAndTargetFallbackFields() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+
+        let toggleBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func setUsesEncryptedDeviceDNSFallback(_ usesEncryptedDeviceDNSFallback: Bool)",
+            endingBefore: "func setFallbackResolver(_ preset: DNSResolverPreset)"
+        )
+        XCTAssertTrue(toggleBlock.contains("guard configuration.usesEncryptedDeviceDNSFallback != usesEncryptedDeviceDNSFallback else"))
+        XCTAssertTrue(toggleBlock.contains("configuration.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback"))
+        XCTAssertTrue(toggleBlock.contains("try persistConfigurationOnly()"))
+        XCTAssertTrue(toggleBlock.contains("appendAppNetworkActivity(.toggleDeviceDNSFallback)"))
+        XCTAssertTrue(toggleBlock.contains("sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"))
+
+        let setResolverBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func setFallbackResolver(_ preset: DNSResolverPreset)",
+            endingBefore: "func setFallbackCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)"
+        )
+        XCTAssertTrue(setResolverBlock.contains("guard configuration.fallbackResolverPresetID != preset.id else"))
+        XCTAssertTrue(setResolverBlock.contains("configuration.fallbackResolverPresetID = preset.id"))
+        XCTAssertTrue(setResolverBlock.contains("persistResolverSettings(activity: .changeResolver)"))
+
+        let setAddressesBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func setFallbackCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)",
+            endingBefore: "func clearFallbackCustomResolver(fallback preset: DNSResolverPreset)"
+        )
+        XCTAssertTrue(setAddressesBlock.contains("supportsDNSOverQUIC: supportsDNSOverQUIC"))
+        XCTAssertTrue(setAddressesBlock.contains("configuration.fallbackResolverPresetID = DNSResolverPreset.customID"))
+        XCTAssertTrue(setAddressesBlock.contains("configuration.fallbackCustomResolverAddress = trimmedPrimaryValue"))
+        XCTAssertTrue(setAddressesBlock.contains("configuration.fallbackCustomResolverSecondaryAddress = normalizedSecondaryValue"))
+        XCTAssertTrue(setAddressesBlock.contains("persistResolverSettings(activity: .changeResolver)"))
+
+        let clearBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func clearFallbackCustomResolver(fallback preset: DNSResolverPreset)",
+            endingBefore: "func setFallbackCustomResolverAddress(_ rawValue: String)"
+        )
+        XCTAssertTrue(clearBlock.contains("configuration.fallbackCustomResolverAddress = nil"))
+        XCTAssertTrue(clearBlock.contains("configuration.fallbackCustomResolverSecondaryAddress = nil"))
+        XCTAssertTrue(clearBlock.contains("configuration.fallbackCustomResolverName = nil"))
+        XCTAssertTrue(clearBlock.contains("if configuration.fallbackResolverPresetID == DNSResolverPreset.customID"))
+        XCTAssertTrue(clearBlock.contains("configuration.fallbackResolverPresetID = fallbackPreset.id"))
+        XCTAssertTrue(clearBlock.contains("persistResolverSettings(activity: .changeResolver)"))
+
+        let nameBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func setFallbackCustomResolverName(_ rawValue: String)",
+            endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
+        )
+        XCTAssertTrue(nameBlock.contains("configuration.fallbackCustomResolverName = nextValue"))
+        XCTAssertTrue(nameBlock.contains("try persistConfigurationOnly()"))
+        XCTAssertFalse(nameBlock.contains("persistResolverSettings(activity: .changeResolver)"))
+        XCTAssertFalse(nameBlock.contains("sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"))
     }
 
     func testCustomBlocklistDisplayKeepsSavedSourcesWhileEditing() throws {
@@ -634,7 +729,11 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
         )
 
-        XCTAssertTrue(disableBlock.contains("guard await waitForProtectionToStop() else"))
+        // On a stuck stop, turn-off now attempts profile-removal recovery
+        // (UR-31/UR-32) and only throws the actionable vpnStillStopping error if
+        // that recovery also fails — it must never silently clear the message.
+        XCTAssertTrue(disableBlock.contains("await waitForProtectionToStop() == false"))
+        XCTAssertTrue(disableBlock.contains("guard await forceRemoveStuckProtectionProfile() else"))
         XCTAssertTrue(disableBlock.contains("throw LavaSecAppError.vpnStillStopping"))
         XCTAssertTrue(disableBlock.contains("vpnMessage = Self.vpnErrorMessage(prefix: \"Could not stop protection\", error: error)"))
         // The timeout-path manager reload (wait-for-stop-timeout-manager-reloaded)

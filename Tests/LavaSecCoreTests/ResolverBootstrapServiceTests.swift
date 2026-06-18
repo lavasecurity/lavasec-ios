@@ -113,6 +113,68 @@ final class ResolverBootstrapServiceTests: XCTestCase {
         XCTAssertNotNil(service.cachedAddresses(forHostname: "doq.example"))
     }
 
+    func testInvalidateAllDiscardsResultOfInFlightLookup() {
+        let spy = ResolverSpy()
+        let gate = DispatchSemaphore(value: 0)
+        spy.gate = gate
+        let queue = DispatchQueue(label: "test.bootstrap")
+        let service = makeService(spy: spy, queue: queue)
+
+        // Kick a lookup and hold it mid-flight (blocked in resolve) on the gate.
+        service.prewarm(hostname: "doq.example")
+        // Invalidate while that lookup is still running — e.g. a network change or
+        // wake landed before the pre-sleep lookup returned.
+        service.invalidateAll()
+        // Let the stale lookup finish; its previous-network result must be dropped.
+        gate.signal()
+        queue.sync {}
+
+        XCTAssertEqual(spy.count, 1, "The in-flight lookup still ran.")
+        XCTAssertNil(
+            service.cachedAddresses(forHostname: "doq.example"),
+            "A lookup kicked before invalidateAll() must not repopulate the freshly-cleared cache."
+        )
+
+        // A fresh pre-warm after invalidation resolves on the new generation and caches.
+        spy.gate = nil
+        service.prewarm(hostname: "doq.example")
+        queue.sync {}
+
+        XCTAssertEqual(spy.count, 2)
+        XCTAssertNotNil(service.cachedAddresses(forHostname: "doq.example"))
+    }
+
+    func testReprewarmAfterInvalidationKicksFreshLookupWhilePriorStillInFlight() {
+        let spy = ResolverSpy()
+        let gate = DispatchSemaphore(value: 0)
+        spy.gate = gate
+        let queue = DispatchQueue(label: "test.bootstrap")
+        let service = makeService(spy: spy, queue: queue)
+
+        // Lookup A is kicked and held mid-flight on the gate.
+        service.prewarm(hostname: "doq.example")
+        // A network change / wake invalidates while A is still running...
+        service.invalidateAll()
+        // ...and re-prewarms. The superseded in-flight A must not suppress this
+        // fresh lookup B, or the freshly-cleared cache would stay empty after the
+        // handoff until a later cold-miss query.
+        service.prewarm(hostname: "doq.example")
+        // Release both queued lookups (serial queue runs A then B).
+        gate.signal()
+        gate.signal()
+        queue.sync {}
+
+        XCTAssertEqual(
+            spy.count,
+            2,
+            "The post-invalidation prewarm must kick a fresh lookup, not coalesce into the superseded one."
+        )
+        XCTAssertNotNil(
+            service.cachedAddresses(forHostname: "doq.example"),
+            "The fresh lookup repopulates the cache after the handoff."
+        )
+    }
+
     func testHostnamesAreCachedIndependently() {
         let spy = ResolverSpy()
         let queue = DispatchQueue(label: "test.bootstrap")

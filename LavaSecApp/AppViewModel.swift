@@ -124,10 +124,13 @@ private final class ProtectionUserNotificationController {
             clearResolvedProblemNotifications(resolvedNotificationIdentifiers)
         }
 
+        // Use the pre-clear `history`: clearResolvedProblemNotifications wipes the
+        // unresolved-problem markers, but the recovery acknowledgement (.reconnected)
+        // needs to see the outstanding problem to fire. Re-reading would always miss it.
         guard let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: assessment,
             health: health,
-            history: notificationHistory,
+            history: history,
             now: now
         ), !pendingNotificationIDs.contains(notification.identifier) else {
             return
@@ -220,9 +223,13 @@ private final class ProtectionUserNotificationController {
             notification.identifier,
             forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
         )
-        defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
 
         if notification.kind.isProblem {
+            // Only problem deliveries advance the throttle clock; the 600s
+            // minimum-problem-interval keys off this timestamp, so a recovery
+            // acknowledgement must not extend it (a fresh problem after a flappy
+            // recovery would otherwise be suppressed for another full window).
+            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
             defaults.set(
                 notification.identifier,
                 forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
@@ -887,6 +894,7 @@ final class AppViewModel: ObservableObject {
     private var currentCatalog: BlocklistCatalog?
     private var tunnelManager: NETunnelProviderManager?
     private var vpnStatusObserver: NSObjectProtocol?
+    private var tunnelHealthNudgeObserver: DarwinNotificationObserver?
     private var automaticBackupTask: Task<Void, Never>?
     private let vpnConfigurationName = LavaTunnelConfigurationIdentity.currentDisplayName
     private let protectionStatusRefreshInterval: TimeInterval = 8
@@ -1043,6 +1051,20 @@ final class AppViewModel: ObservableObject {
                     } else {
                         await self.refreshProtectionStatus(force: true)
                     }
+                }
+            }
+
+            // The tunnel posts this Darwin nudge when its connectivity-relevant
+            // health changes (reconnecting / network lost / needs-reconnect).
+            // NEVPNStatus stays `.connected` through those, so without the nudge
+            // the Dynamic Island only caught up on the next status poll. Pull the
+            // fresh health over the reliable provider-message channel in response
+            // (UR-6).
+            tunnelHealthNudgeObserver = DarwinNotificationObserver(
+                name: TunnelHealthSignal.darwinNotificationName
+            ) { [weak self] in
+                Task { @MainActor in
+                    self?.handleTunnelHealthNudge()
                 }
             }
 
@@ -1795,6 +1817,35 @@ final class AppViewModel: ObservableObject {
         }
 
         return "\(allowed.formatted()) allowed locally. All local logs stay on this phone."
+    }
+
+    /// Glanceable stat under the Guard "How Lava filters" row — the number of
+    /// rules currently compiled into protection. Uses `compiledRuleCount` (the
+    /// same total the Filters screen headlines as "rules in effect"), so manual
+    /// blocked domains count even when no curated blocklist is enabled.
+    var guardFiltersRowStat: String {
+        let count = compiledRuleCount
+        guard count > 0 else {
+            return "No filters active yet"
+        }
+
+        return count == 1
+            ? "%@ rule active".lavaLocalizedFormat(count.formatted())
+            : "%@ rules active".lavaLocalizedFormat(count.formatted())
+    }
+
+    /// Glanceable stat under the Guard "What Lava has caught" row — how many
+    /// domains Lava has blocked on this phone today.
+    var guardActivityRowStat: String {
+        let blocked = diagnostics.summary.blockedCount
+        guard blocked > 0 else {
+            return "Nothing blocked yet today"
+        }
+
+        let percent = diagnostics.summary.blockRate.formatted(
+            .percent.precision(.fractionLength(0))
+        )
+        return "%@ blocked today".lavaLocalizedFormat("\(blocked.formatted()) (\(percent))")
     }
 
     var localHistoryStatusText: String {
@@ -2724,6 +2775,87 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Shareable filters
+
+    /// The security-reviewed, shareable slice of the current setup (blocklists +
+    /// blocked domains only — never allowlist exceptions or resolver details).
+    var shareableFilterConfiguration: ShareableFilterConfiguration {
+        ShareableFilterConfiguration(configuration: configuration)
+    }
+
+    /// The tamper-evident text/QR token that encodes ``shareableFilterConfiguration``.
+    var shareableFilterConfigurationCode: String {
+        shareableFilterConfiguration.encodedConfigurationCode()
+    }
+
+    /// Reconciles a shared config against this device's catalog and plan so the
+    /// import sheet can preview exactly what will apply and what can't.
+    func importPlan(for shared: ShareableFilterConfiguration) -> ShareableFilterImportPlan {
+        let curatedIDs = Set(DefaultCatalog.curatedSources.map(\.id))
+        let availableCuratedIDs = curatedIDs.union(catalogSourcesByID.keys)
+        // An imported custom list may not claim any built-in list ID (curated or
+        // guardrail), so a crafted code can't shadow a trusted list.
+        let reservedIDs = curatedIDs
+            .union(catalogSourcesByID.keys)
+            .union(DefaultCatalog.guardrailSources.map(\.id))
+        // Known per-list rule counts so the plan can trim over-budget selections
+        // (e.g. a Plus setup imported on Free) before they fail at compile time.
+        var ruleCounts: [String: Int] = [:]
+        for (id, source) in catalogSourcesByID where source.entryCount > 0 {
+            ruleCounts[id] = source.entryCount
+        }
+        for (id, ruleSet) in cachedBlockRuleSets where ruleCounts[id] == nil {
+            ruleCounts[id] = ruleSet.count
+        }
+        let capabilities = ShareableFilterImportCapabilities(
+            availableCuratedBlocklistIDs: availableCuratedIDs,
+            reservedBlocklistIDs: reservedIDs,
+            allowsCustomBlocklists: configuration.limits.allowsCustomBlocklists,
+            maxBlockedDomains: configuration.limits.maxBlockedDomains,
+            maxFilterRules: configuration.limits.maxFilterRules,
+            blocklistRuleCounts: ruleCounts,
+            // Import preserves the recipient's allowlist, which also counts
+            // against the tier rule budget at snapshot-prep time.
+            preservedRuleCount: configuration.allowedDomains.count
+        )
+        return shared.importPlan(capabilities: capabilities)
+    }
+
+    /// Replaces the block-side filter fields with an already-planned subset and
+    /// rebuilds/persists the local snapshot. Allowlist exceptions, resolver,
+    /// logging, and the protection toggle are preserved.
+    func applyImportedShareableConfiguration(
+        _ applied: ShareableFilterConfiguration
+    ) async -> ShareableFilterImportResult {
+        // Never let an import that reconciled to nothing wipe the existing setup.
+        guard !applied.isEmpty else {
+            return .failure(message: "There's nothing this device can import from that code.")
+        }
+
+        let nextConfiguration = configuration.applyingImportedShareableConfiguration(applied)
+
+        let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
+
+        do {
+            let prepared = try await prepareFilterSnapshot(for: nextConfiguration)
+            configuration = nextConfiguration
+            updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
+            applyCatalogSyncResult(prepared.catalogResult)
+            try await persistSharedState(preparedSnapshot: prepared.snapshot)
+            appendAppNetworkActivity(.changeFilters)
+
+            await notifyTunnelSnapshotUpdated()
+            await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
+
+            let ruleLabel = protectedRuleCount == 1 ? "rule" : "rules"
+            catalogStatusMessage = "Imported \(protectedRuleCount.formatted()) \(ruleLabel) for local protection."
+            catalogStatusIsError = false
+            return .success(ruleCount: protectedRuleCount)
+        } catch {
+            return .failure(message: Self.filterPreparationFailureMessage(for: error))
+        }
+    }
+
     private static func filterPreparationFailureMessage(for error: Error) -> String {
         let prefix = "Previous filters are still active. "
 
@@ -2951,6 +3083,21 @@ final class AppViewModel: ObservableObject {
                     defaults: appGroupDefaults
                 )
             )
+        }
+    }
+
+    /// Responds to the tunnel's connectivity-health Darwin nudge: pull the fresh
+    /// health over the reliable provider-message channel, then let
+    /// `refreshTunnelHealth` reconcile the Live Activity if the derived Dynamic
+    /// Island state changed (UR-6).
+    func handleTunnelHealthNudge() {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.requestTunnelHealthFlush()
+            self.refreshTunnelHealth(force: true)
         }
     }
 
@@ -3432,6 +3579,101 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func setUsesEncryptedDeviceDNSFallback(_ usesEncryptedDeviceDNSFallback: Bool) {
+        guard configuration.usesEncryptedDeviceDNSFallback != usesEncryptedDeviceDNSFallback else {
+            return
+        }
+
+        configuration.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback
+        do {
+            try persistConfigurationOnly()
+            appendAppNetworkActivity(.toggleDeviceDNSFallback)
+            Task {
+                await self.sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)
+            }
+        } catch {
+            vpnMessage = error.localizedDescription
+            vpnMessageIsError = true
+        }
+    }
+
+    func setFallbackResolver(_ preset: DNSResolverPreset) {
+        guard configuration.fallbackResolverPresetID != preset.id else {
+            return
+        }
+
+        configuration.fallbackResolverPresetID = preset.id
+        persistResolverSettings(activity: .changeResolver)
+    }
+
+    func setFallbackCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String) {
+        let trimmedPrimaryValue = rawPrimaryValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSecondaryValue = rawSecondaryValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSecondaryValue = trimmedSecondaryValue.isEmpty ? nil : trimmedSecondaryValue
+        if let validationMessage = DNSResolverPreset.customValidationMessage(
+            primaryRawValue: trimmedPrimaryValue,
+            secondaryRawValue: trimmedSecondaryValue,
+            supportsDNSOverQUIC: supportsDNSOverQUIC
+        ) {
+            vpnMessage = validationMessage
+            vpnMessageIsError = true
+            return
+        }
+
+        guard configuration.fallbackResolverPresetID != DNSResolverPreset.customID
+            || configuration.fallbackCustomResolverAddress != trimmedPrimaryValue
+            || configuration.fallbackCustomResolverSecondaryAddress != normalizedSecondaryValue
+        else {
+            return
+        }
+
+        configuration.fallbackResolverPresetID = DNSResolverPreset.customID
+        configuration.fallbackCustomResolverAddress = trimmedPrimaryValue
+        configuration.fallbackCustomResolverSecondaryAddress = normalizedSecondaryValue
+        persistResolverSettings(activity: .changeResolver)
+    }
+
+    func clearFallbackCustomResolver(fallback preset: DNSResolverPreset) {
+        let fallbackPreset = preset.id == DNSResolverPreset.customID ? DNSResolverPreset.mullvadDoH : preset
+        let hasSavedCustomResolver = configuration.fallbackCustomResolverAddress != nil
+            || configuration.fallbackCustomResolverSecondaryAddress != nil
+            || configuration.fallbackCustomResolverName != nil
+        let resolverNeedsFallback = configuration.fallbackResolverPresetID == DNSResolverPreset.customID
+        guard hasSavedCustomResolver || resolverNeedsFallback else {
+            return
+        }
+
+        configuration.fallbackCustomResolverAddress = nil
+        configuration.fallbackCustomResolverSecondaryAddress = nil
+        configuration.fallbackCustomResolverName = nil
+        if configuration.fallbackResolverPresetID == DNSResolverPreset.customID {
+            configuration.fallbackResolverPresetID = fallbackPreset.id
+        }
+        persistResolverSettings(activity: .changeResolver)
+    }
+
+    func setFallbackCustomResolverAddress(_ rawValue: String) {
+        setFallbackCustomResolverAddresses(primary: rawValue, secondary: configuration.fallbackCustomResolverSecondaryAddress ?? "")
+    }
+
+    func setFallbackCustomResolverName(_ rawValue: String) {
+        let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextValue = trimmedValue.isEmpty ? nil : trimmedValue
+        let currentValue = configuration.fallbackCustomResolverName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCurrentValue = currentValue?.isEmpty == true ? nil : currentValue
+        guard normalizedCurrentValue != nextValue else {
+            return
+        }
+
+        configuration.fallbackCustomResolverName = nextValue
+        do {
+            try persistConfigurationOnly()
+        } catch {
+            vpnMessage = error.localizedDescription
+            vpnMessageIsError = true
+        }
+    }
+
     #if DEBUG || LAVA_QA_TOOLS
     func applyHostedQAProbeSet() {
         configuration.qaProbeSet = .hosted
@@ -3731,8 +3973,23 @@ final class AppViewModel: ObservableObject {
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: configuration.lavaGuardUnlocks,
+            deviceDebugLog: loadDeviceDebugLogEntriesForExport(),
             generatedAt: generatedAt
         )
+    }
+
+    // The local export carries far more debug-log history than the Feedback
+    // report (which caps at 40 to bound its upload payload): the export is a
+    // local, user-controlled diagnostic file, so a deep trace is the point.
+    // Same redaction (BugReportDebugLogEntry keeps only allowlisted detail keys).
+    private func loadDeviceDebugLogEntriesForExport() -> [BugReportDebugLogEntry] {
+        guard let url = LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename),
+              let data = try? Data(contentsOf: url)
+        else {
+            return []
+        }
+
+        return BugReportDebugLogEntry.parseJSONLines(data, limit: 5_000)
     }
 
     func refreshNetworkActivityLog(force: Bool = false) {
@@ -4376,7 +4633,29 @@ final class AppViewModel: ObservableObject {
 
     func prepareBugReport(context: BugReportContext) {
         refreshReports()
-        bugReportDraft = makeBugReportBundle(context: context)
+        let inputs = PreparedBugReportInputs(
+            snapshot: currentSnapshot(),
+            debugLogEntries: loadBugReportDebugLogEntries()
+        )
+        preparedBugReportInputs = inputs
+        bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
+        bugReportSendState = .idle
+    }
+
+    /// Cheap per-keystroke draft refresh: re-wrap the user-entered `context`
+    /// around the environment snapshot captured by the last `prepareBugReport`,
+    /// instead of re-reading the diagnostics/health/debug-log files and
+    /// rebuilding the full blocklist union on every keystroke (UR-5: Feedback
+    /// typing lag). Only the affected-site decision is recomputed, and that is a
+    /// lookup against the already-built snapshot. Falls back to a full prepare
+    /// when no snapshot has been captured yet.
+    func refreshBugReportDraftContext(context: BugReportContext) {
+        guard let inputs = preparedBugReportInputs else {
+            prepareBugReport(context: context)
+            return
+        }
+
+        bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
         bugReportSendState = .idle
     }
 
@@ -4448,9 +4727,22 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        let previousHealth = tunnelHealth
         tunnelHealthReadGate.markRead(modifiedAt: modifiedAt)
         tunnelHealth = snapshot
         scheduleProtectionNotificationIfNeeded()
+
+        // The Live Activity / Dynamic Island transient states (reconnecting,
+        // networkUnavailable, needsReconnect) are derived from tunnel health, not
+        // from NEVPNStatus — which stays `.connected` straight through a
+        // reconnect. Reconcile whenever the health content actually changes so
+        // the Dynamic Island reflects those states promptly instead of waiting
+        // for the next status transition (UR-6: Dynamic Island lag during
+        // retry/reconnect). `reconcile` dedupes by published content, so this is
+        // a no-op when the derived DI state is unchanged.
+        if snapshot != previousHealth {
+            reconcileLiveActivity()
+        }
     }
 
     // The tunnel already persists health on its own 30s cadence; the UI poll only
@@ -4817,7 +5109,31 @@ final class AppViewModel: ObservableObject {
         #endif
     }
 
+    /// The heavy, user-input-independent inputs to a bug-report bundle: the
+    /// compiled filter snapshot (the full blocklist union) and the parsed
+    /// lifecycle debug-log entries. Captured once per `prepareBugReport` so the
+    /// per-keystroke draft refresh can reuse them (UR-5).
+    private struct PreparedBugReportInputs {
+        let snapshot: FilterSnapshot
+        let debugLogEntries: [BugReportDebugLogEntry]
+    }
+
+    private var preparedBugReportInputs: PreparedBugReportInputs?
+
     private func makeBugReportBundle(context: BugReportContext) -> BugReportBundle {
+        makeBugReportBundle(
+            context: context,
+            inputs: PreparedBugReportInputs(
+                snapshot: currentSnapshot(),
+                debugLogEntries: loadBugReportDebugLogEntries()
+            )
+        )
+    }
+
+    private func makeBugReportBundle(
+        context: BugReportContext,
+        inputs: PreparedBugReportInputs
+    ) -> BugReportBundle {
         let identity = PreparedFilterSnapshotIdentity.make(
             configuration: configuration,
             catalog: currentCatalog
@@ -4825,7 +5141,7 @@ final class AppViewModel: ObservableObject {
         let snapshotVersion = String(identity.fingerprint.prefix(12))
         let affectedSiteDecision = BugReportAffectedSiteFilterDecision.make(
             rawAffectedSite: context.normalizedAffectedSite,
-            snapshot: currentSnapshot()
+            snapshot: inputs.snapshot
         )
 
         return BugReportBundle(
@@ -4858,7 +5174,7 @@ final class AppViewModel: ObservableObject {
             ),
             diagnostics: diagnostics,
             localHistoryEnabled: configuration.keepDomainDiagnostics,
-            debugLogEntries: loadBugReportDebugLogEntries()
+            debugLogEntries: inputs.debugLogEntries
         )
     }
 
@@ -5666,6 +5982,10 @@ final class AppViewModel: ObservableObject {
         vpnMessage = "Stopping local protection..."
         vpnMessageIsError = false
 
+        // Set when the normal stop did not complete and we had to delete the VPN
+        // profile to restore connectivity (see forceRemoveStuckProtectionProfile).
+        var stoppedViaProfileRemoval = false
+
         do {
             let manager: NETunnelProviderManager?
             if let tunnelManager {
@@ -5680,15 +6000,12 @@ final class AppViewModel: ObservableObject {
 
             // Disable Connect-On-Demand and persist it before stopping, or iOS
             // would immediately reconnect the tunnel and the user could not turn
-            // protection off. Best-effort: a stop is still attempted if this fails.
+            // protection off. A failed disable is exactly what wedges turn-off,
+            // so retry briefly (disableOnDemandWithRetry) rather than swallowing
+            // the first error; a persistent failure still falls through to the
+            // stop, backstopped by forceRemoveStuckProtectionProfile().
             if let manager {
-                do {
-                    try await setManagerOnDemand(false, on: manager)
-                } catch {
-                    #if DEBUG || LAVA_QA_TOOLS
-                    logVPNDebugEvent("turn-off-ondemand-disable-failed", details: errorDebugDetails(error))
-                    #endif
-                }
+                await disableOnDemandWithRetry(on: manager)
             }
 
             manager?.connection.stopVPNTunnel()
@@ -5697,15 +6014,26 @@ final class AppViewModel: ObservableObject {
                 endProtectionVPNSession()
                 tunnelManager = nil
                 vpnStatus = .disconnected
-            } else {
-                guard await waitForProtectionToStop() else {
+            } else if await waitForProtectionToStop() == false {
+                // The tunnel never reached a stopped state. The usual cause is
+                // that Connect-On-Demand could not be disabled above (that step
+                // is best-effort), so iOS keeps reasserting the tunnel — and if
+                // the provider has already exited, the device is left with a dead
+                // tunnel, no working internet, and no in-app way out (UR-31/UR-32:
+                // "couldn't connect to the internet and Lava wouldn't turn off
+                // either, showing 'Couldn't stop protection'"). Last resort:
+                // delete the VPN profile so its on-demand rules go away and
+                // connectivity is restored. The profile (and the system VPN
+                // permission prompt) is recreated next time protection is enabled.
+                guard await forceRemoveStuckProtectionProfile() else {
                     throw LavaSecAppError.vpnStillStopping
                 }
+                stoppedViaProfileRemoval = true
             }
             lastProtectionStatusRefresh = Date()
             configuration.protectionEnabled = false
             appendAppNetworkActivity(.turnProtectionOff)
-            vpnMessage = nil
+            vpnMessage = stoppedViaProfileRemoval ? Self.protectionForceStoppedMessage : nil
             vpnMessageIsError = false
             awaitsProtectionOnHaptic = false
             ProtectionHapticFeedback.play(.protectionTurnedOff)
@@ -5741,7 +6069,7 @@ final class AppViewModel: ObservableObject {
             // mid-wait (which would make waitForProtectionToStop time out);
             // enableProtection re-applies on-demand afterward.
             if let manager {
-                try? await setManagerOnDemand(false, on: manager)
+                await disableOnDemandWithRetry(on: manager)
             }
             manager?.connection.stopVPNTunnel()
             updateProtectionStatus(from: manager)
@@ -5784,6 +6112,46 @@ final class AppViewModel: ObservableObject {
         await vpnLifecycleController.waitForStop(timeout: timeout, initialManager: tunnelManager) { [weak self] manager in
             self?.tunnelManager = manager
             self?.updateProtectionStatus(from: manager)
+        }
+    }
+
+    static let protectionForceStoppedMessage =
+        "Protection was force-stopped to restore your connection. You may need to allow the VPN again the next time you turn it on."
+
+    /// Last-resort recovery for a turn-off that did not complete: deletes every
+    /// matching tunnel profile so its Connect-On-Demand rules are removed and the
+    /// device's internet path is restored, then resets local protection state.
+    ///
+    /// This exists because Connect-On-Demand is disabled best-effort before a
+    /// stop; if that save fails (or the provider has already exited while the
+    /// rules remain installed), iOS keeps reasserting a dead tunnel and the user
+    /// is stranded offline with no way to turn protection off (UR-31/UR-32).
+    /// Removing the profile is heavier than a normal stop — the system VPN
+    /// permission is re-requested when protection is next enabled — but it is the
+    /// only in-app action that reliably clears stuck on-demand rules.
+    ///
+    /// Returns `true` once no matching profile remains (including the case where
+    /// the profile was already gone), `false` if removal itself failed.
+    private func forceRemoveStuckProtectionProfile() async -> Bool {
+        do {
+            let managers = try await matchingTunnelManagers()
+            for manager in managers {
+                manager.connection.stopVPNTunnel()
+                try await vpnLifecycleController.removeManager(manager)
+            }
+            // The profile (and its on-demand arming) is gone — drop the confirmed
+            // signal so a later recreate can't inherit a stale `true`.
+            Self.setOnDemandConfirmedEnabled(false)
+            endProtectionVPNSession()
+            tunnelManager = nil
+            vpnStatus = .disconnected
+            updateProtectionStatus(from: nil)
+            return true
+        } catch {
+            #if DEBUG || LAVA_QA_TOOLS
+            logVPNDebugEvent("turn-off-force-remove-failed", details: errorDebugDetails(error))
+            #endif
+            return false
         }
     }
 
@@ -5889,8 +6257,94 @@ final class AppViewModel: ObservableObject {
             manager.onDemandRules = [connectRule]
         }
         manager.isOnDemandEnabled = enabled
+        // Invalidate the confirmed-armed signal up front, then re-assert it only
+        // once the save is confirmed below. enableProtection swallows a
+        // setManagerOnDemand(true) failure but still persists
+        // protectionEnabled = true, so clearing first guarantees a swallowed save
+        // failure can never leave a stale `true` from a previous profile — the
+        // tunnel would otherwise self-cancel with no on-demand to recover it.
+        Self.setOnDemandConfirmedEnabled(false)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             manager.saveToPreferences { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+        Self.setOnDemandConfirmedEnabled(enabled)
+    }
+
+    /// Records whether Connect-On-Demand is confirmed armed for the *current*
+    /// profile, read by the tunnel to gate self-reconnect (a self-cancel only
+    /// recovers if on-demand will bring the tunnel back). Cleared whenever the
+    /// profile is removed or an arming save is in flight so the bit can't outlive
+    /// the manager it describes.
+    private static func setOnDemandConfirmedEnabled(_ enabled: Bool) {
+        LavaSecAppGroup.sharedDefaults.set(
+            enabled,
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+        )
+    }
+
+    /// Seeds the confirmed-on-demand bit from a freshly loaded manager's actual
+    /// `isOnDemandEnabled` only when it has never been written. This backfills the
+    /// common upgrade/auto-start case — an existing profile whose protection is
+    /// already running, where `setManagerOnDemand` never runs — so self-reconnect
+    /// isn't suppressed until the user manually toggles protection. Once the bit
+    /// exists, `setManagerOnDemand` owns it (seeding here would otherwise race a
+    /// pre-clear during an in-flight arming save).
+    private static func seedOnDemandConfirmedIfAbsent(from manager: NETunnelProviderManager) {
+        guard LavaSecAppGroup.sharedDefaults.object(
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+        ) == nil else {
+            return
+        }
+        setOnDemandConfirmedEnabled(manager.isOnDemandEnabled)
+    }
+
+    private static let onDemandDisableRetryDelayNanoseconds: UInt64 = 200_000_000
+
+    /// Disables Connect-On-Demand with a few retries before falling through.
+    /// `saveToPreferences` can fail transiently (e.g. a racing configuration
+    /// change), and a failed disable is precisely what wedges turn-off: iOS
+    /// keeps reasserting the tunnel and, if the provider has already exited, the
+    /// user is stranded offline with no way to stop protection (UR-31/UR-32).
+    /// Retrying lets the common transient failure self-heal; a persistent
+    /// failure still falls through to the stop, which is backstopped by
+    /// forceRemoveStuckProtectionProfile(). Returns true once on-demand is
+    /// confirmed disabled.
+    @discardableResult
+    private func disableOnDemandWithRetry(on manager: NETunnelProviderManager, attempts: Int = 3) async -> Bool {
+        for attempt in 1...max(1, attempts) {
+            do {
+                try await setManagerOnDemand(false, on: manager)
+                return true
+            } catch {
+                #if DEBUG || LAVA_QA_TOOLS
+                logVPNDebugEvent("turn-off-ondemand-disable-failed", details: errorDebugDetails(error))
+                #endif
+                if attempt < attempts {
+                    try? await Task.sleep(nanoseconds: Self.onDemandDisableRetryDelayNanoseconds)
+                    // The common transient failure is a stale in-memory
+                    // configuration: saveToPreferences rejects an out-of-date
+                    // manager (NEVPNError.configurationStale). Reload it from
+                    // on-disk preferences so the next attempt saves against the
+                    // current configuration version — retrying the same stale
+                    // object would just repeat the same failure.
+                    try? await reloadManagerFromPreferences(manager)
+                }
+            }
+        }
+        return false
+    }
+
+    /// Refreshes an `NETunnelProviderManager` in place from on-disk preferences,
+    /// so a subsequent save targets the current configuration version.
+    private func reloadManagerFromPreferences(_ manager: NETunnelProviderManager) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            manager.loadFromPreferences { error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -5909,6 +6363,13 @@ final class AppViewModel: ObservableObject {
         let previousStatus = vpnStatus
         let isInstalled = manager != nil
         let installedStateChanged = isVPNConfigurationInstalled != isInstalled
+
+        // Backfill the confirmed-on-demand signal for an already-installed profile
+        // (upgrade / auto-start) the first time we observe its manager, so the
+        // tunnel's self-reconnect isn't gated off until the user re-toggles.
+        if let manager {
+            Self.seedOnDemandConfirmedIfAbsent(from: manager)
+        }
 
         // The status poll repeats with identical state; published properties only
         // change on real transitions so idle ticks stop invalidating SwiftUI.

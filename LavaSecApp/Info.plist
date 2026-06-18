@@ -59,6 +59,8 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Lava uses the camera to scan a shared filter setup QR code</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Lava uses Face ID to unlock protected app surfaces you choose</string>
 	<key>NSSupportsLiveActivities</key>

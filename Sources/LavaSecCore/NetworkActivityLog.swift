@@ -43,6 +43,7 @@ public enum NetworkActivityEvent: Codable, Equatable, Sendable {
     case deviceDNSFallbackActivated(reason: String)
     case deviceDNSFallbackRecovered
     case reconnectNeeded(reason: String)
+    case connectivityRecovered(reason: String)
     case networkSettingsReapplyFailed(reason: String)
 
     fileprivate var displayLine: String {
@@ -71,6 +72,12 @@ public enum NetworkActivityEvent: Codable, Equatable, Sendable {
             return "Device DNS fallback recovered"
         case .reconnectNeeded(let reason):
             return "Reconnect needed: \(reason.privacySafeLogText(fallback: "DNS is not resolving"))"
+        case .connectivityRecovered(let reason):
+            // Closes the "Reconnect needed" → recovery pair in the activity log:
+            // recovery via an organic query was previously silent, so the log
+            // showed a wedge with no resolution. Reason is a transport label
+            // (e.g. "device-dns"); privacy-safe, never a queried domain.
+            return "Connectivity recovered: \(reason.privacySafeLogText(fallback: "DNS resolving again"))"
         case .networkSettingsReapplyFailed(let reason):
             return "Network settings refresh failed: \(reason.privacySafeLogText(fallback: "iOS did not apply tunnel settings"))"
         }

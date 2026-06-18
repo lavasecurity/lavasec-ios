@@ -209,6 +209,12 @@ final class NetworkActivityLogTests: XCTestCase {
         XCTAssertEqual(entry.eventLine, "Network settings refresh failed: network-path-changed")
     }
 
+    func testConnectivityRecoveredHasDisplayLine() {
+        let entry = Self.entry(event: .connectivityRecovered(reason: "backed-off via device-dns"))
+
+        XCTAssertEqual(entry.eventLine, "Connectivity recovered: backed-off via device-dns")
+    }
+
     func testPersistenceAppendUsesExclusiveFileLock() throws {
         let source = try Self.source(named: "NetworkActivityLog.swift")
         let appendBlock = try Self.sourceBlock(

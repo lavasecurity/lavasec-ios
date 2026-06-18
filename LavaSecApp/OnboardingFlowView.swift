@@ -3,6 +3,9 @@ import LavaSecCore
 
 struct LavaOnboardingView: View {
     @Binding var hasSeenOnboarding: Bool
+    /// Invoked when the user finishes setup via "Go to Settings" so the host can
+    /// land them on the Settings tab instead of Guard.
+    var onRequestOpenSettings: () -> Void = {}
     @EnvironmentObject private var viewModel: AppViewModel
 
     @State private var page: OnboardingPage = .lava
@@ -12,7 +15,7 @@ struct LavaOnboardingView: View {
     @State private var guardHeroBlinkTrigger = 0
     @State private var isInstallingVPN = false
     @State private var isRequestingNotifications = false
-    @State private var activePickerSheet: OnboardingPickerSheet?
+    @State private var isShowingAdditionalSetup = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -43,8 +46,17 @@ struct LavaOnboardingView: View {
             }
         }
         .interactiveDismissDisabled()
-        .sheet(item: $activePickerSheet) { sheet in
-            pickerSheet(for: sheet)
+        .sheet(isPresented: $isShowingAdditionalSetup) {
+            OnboardingAdditionalSetupSheet(
+                onGoToSettings: {
+                    onRequestOpenSettings()
+                    hasSeenOnboarding = true
+                },
+                onFinish: {
+                    hasSeenOnboarding = true
+                }
+            )
+            .environmentObject(viewModel)
         }
         .onAppear {
             prepareAnimations(for: page)
@@ -83,10 +95,6 @@ struct LavaOnboardingView: View {
             vpnPage
         case .notifications:
             notificationsPage
-        case .settings:
-            settingsPage
-        case .customize:
-            customizePage
         case .done:
             donePage
         }
@@ -186,100 +194,6 @@ struct LavaOnboardingView: View {
         }
     }
 
-    private var settingsPage: some View {
-        let defaults = AppConfiguration.lavaRecommendedDefaults
-        let summary = OnboardingDefaultsSummary(
-            configuration: defaults,
-            catalog: DefaultCatalog.curatedSources
-        )
-
-        return OnboardingStepLayout(
-            step: "Step 3",
-            title: "Decide how Lava works",
-            description: "You can also change these later in Settings"
-        ) {
-            OnboardingSettingsSection(title: "Filtering") {
-                OnboardingSettingsRow(title: "Blocklist", value: summary.blocklistText)
-                OnboardingSettingsRow(title: "DNS resolver", value: summary.resolverText)
-                OnboardingSettingsRow(title: "Device DNS fallback", value: summary.deviceDNSFallbackText)
-            }
-
-            OnboardingSettingsSection(title: "Local logging") {
-                OnboardingSettingsRow(title: "Domain counts", value: onOffText(defaults.keepFilteringCounts))
-                OnboardingSettingsRow(title: "Domain history", value: onOffText(defaults.keepDomainDiagnostics))
-                OnboardingSettingsRow(title: "Network activity", value: onOffText(defaults.keepNetworkActivity))
-            }
-
-            OnboardingSettingsSection(title: "Account & Backup") {
-                OnboardingSettingsRow(title: "Account", value: viewModel.accountStatusText)
-            }
-        }
-    }
-
-    private var customizePage: some View {
-        OnboardingStepLayout(
-            step: "Step 3",
-            title: "Customize Lava",
-            description: "Choose the filter, resolver, local logging, and backup options before you finish"
-        ) {
-            OnboardingSettingsSection(title: "Filtering") {
-                Button {
-                    activePickerSheet = .blocklist
-                } label: {
-                    OnboardingMenuRowContent(
-                        title: "Blocklist",
-                        value: selectedBlocklistText
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    activePickerSheet = .dnsResolver
-                } label: {
-                    OnboardingMenuRowContent(
-                        title: "DNS resolver",
-                        value: viewModel.configuration.resolverPreset.displayName
-                    )
-                }
-                .buttonStyle(.plain)
-
-                OnboardingToggleRow(
-                    title: "Device DNS fallback",
-                    isOn: fallbackToDeviceDNSBinding
-                )
-            }
-
-            OnboardingSettingsSection(title: "Local logging") {
-                OnboardingToggleRow(
-                    title: "Domain counts",
-                    isOn: keepFilteringCountsBinding
-                )
-                OnboardingToggleRow(
-                    title: "Domain history",
-                    isOn: keepDomainDiagnosticsBinding
-                )
-                OnboardingToggleRow(
-                    title: "Network activity",
-                    isOn: keepNetworkActivityBinding
-                )
-            }
-
-            OnboardingSettingsSection(title: "Account & Backup") {
-                Button {
-                    activePickerSheet = .account
-                } label: {
-                    OnboardingMenuRowContent(
-                        title: "Sign in for encrypted backup",
-                        value: viewModel.accountStatusText
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isAccountSignInInProgress)
-                .opacity(viewModel.isAccountSignInInProgress ? 0.55 : 1)
-            }
-        }
-    }
-
     private var donePage: some View {
         VStack(spacing: 22) {
             Spacer(minLength: 54)
@@ -367,33 +281,16 @@ struct LavaOnboardingView: View {
                     requestNotificationsThenContinue()
                 }
             }
-        case .settings:
-            HStack(spacing: 12) {
-                OnboardingSecondaryButton(title: "Customize") {
-                    viewModel.applyOnboardingRecommendedDefaults()
-                    go(to: .customize)
-                }
-                OnboardingPrimaryButton(title: "Use Default") {
-                    viewModel.applyOnboardingRecommendedDefaults()
-                    go(to: .done)
-                }
-            }
-        case .customize:
-            OnboardingPrimaryButton(title: "Finish Setup") {
-                go(to: .done)
-            }
         case .done:
-            OnboardingPrimaryButton(title: "Open Guard") {
-                hasSeenOnboarding = true
+            VStack(spacing: 12) {
+                OnboardingPrimaryButton(title: "Open Guard") {
+                    hasSeenOnboarding = true
+                }
+                OnboardingSecondaryButton(title: "Additional setup") {
+                    isShowingAdditionalSetup = true
+                }
             }
         }
-    }
-
-    private var selectedBlocklistText: String {
-        OnboardingDefaultsSummary(
-            configuration: viewModel.configuration,
-            catalog: DefaultCatalog.curatedSources
-        ).blocklistText
     }
 
     private var activeDotColor: Color {
@@ -402,62 +299,6 @@ struct LavaOnboardingView: View {
 
     private var inactiveDotColor: Color {
         page == .lava ? .white.opacity(0.28) : LavaStyle.secondaryText.opacity(0.22)
-    }
-
-    @ViewBuilder
-    private func pickerSheet(for sheet: OnboardingPickerSheet) -> some View {
-        switch sheet {
-        case .blocklist:
-            AddBlocklistSheet(
-                usage: .onboardingSelection,
-                initialSelection: viewModel.configuration.enabledBlocklistIDs
-            ) { selectedIDs in
-                viewModel.selectOnboardingBlocklists(selectedIDs)
-            }
-            .environmentObject(viewModel)
-        case .dnsResolver:
-            NavigationStack {
-                DNSResolverSettingsView()
-            }
-            .environmentObject(viewModel)
-            .presentationDetents([.fraction(0.68), .large])
-            .presentationDragIndicator(.visible)
-        case .account:
-            OnboardingAccountSheet()
-                .environmentObject(viewModel)
-        }
-    }
-
-    private var fallbackToDeviceDNSBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.fallbackToDeviceDNS
-        } set: { newValue in
-            viewModel.setFallbackToDeviceDNS(newValue)
-        }
-    }
-
-    private var keepFilteringCountsBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepFilteringCounts
-        } set: { newValue in
-            viewModel.setKeepFilteringCounts(newValue)
-        }
-    }
-
-    private var keepDomainDiagnosticsBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepDomainDiagnostics
-        } set: { newValue in
-            viewModel.setKeepDomainDiagnostics(newValue)
-        }
-    }
-
-    private var keepNetworkActivityBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepNetworkActivity
-        } set: { newValue in
-            viewModel.setKeepNetworkActivity(newValue)
-        }
     }
 
     private func goForward() {
@@ -474,6 +315,12 @@ struct LavaOnboardingView: View {
 
         if nextPage == .features {
             featureTransitionElapsed = 0
+        }
+
+        // The standalone "Decide how Lava works" step is gone, so its recommended
+        // defaults are applied silently as setup wraps up on the final page.
+        if nextPage == .done {
+            viewModel.applyOnboardingRecommendedDefaults()
         }
 
         pageHistory.append(page)
@@ -551,10 +398,6 @@ struct LavaOnboardingView: View {
             featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
         }
     }
-
-    private func onOffText(_ isOn: Bool) -> String {
-        isOn ? "On" : "Off"
-    }
 }
 
 private enum OnboardingPage: Int, CaseIterable, Identifiable {
@@ -563,8 +406,6 @@ private enum OnboardingPage: Int, CaseIterable, Identifiable {
     case features
     case vpn
     case notifications
-    case settings
-    case customize
     case done
 
     var id: Int { rawValue }
@@ -572,14 +413,6 @@ private enum OnboardingPage: Int, CaseIterable, Identifiable {
     var next: OnboardingPage? {
         OnboardingPage(rawValue: rawValue + 1)
     }
-}
-
-private enum OnboardingPickerSheet: String, Identifiable {
-    case blocklist
-    case dnsResolver
-    case account
-
-    var id: String { rawValue }
 }
 
 private struct OnboardingGuardHero: View {
@@ -909,20 +742,22 @@ private struct OnboardingAccountSheet: View {
         }
         .presentationDetents([.height(viewModel.isAccountSignedIn && accountConnections.count > 1 ? 354 : viewModel.isAccountSignedIn ? 310 : 248)])
         .presentationDragIndicator(.visible)
-        .alert(
-            "Delete your Lava account?",
-            isPresented: $isConfirmingAccountDeletion
-        ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    if await viewModel.deleteAccount() {
-                        dismiss()
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Delete your Lava account?",
+                isPresented: $isConfirmingAccountDeletion
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    Task {
+                        if await viewModel.deleteAccount() {
+                            dismiss()
+                        }
                     }
                 }
+            } message: {
+                Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
             }
-        } message: {
-            Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
         }
     }
 }
@@ -996,105 +831,6 @@ private struct OnboardingAccountActionRow: View {
     }
 }
 
-private struct OnboardingSettingsSection<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(LavaStyle.secondaryText)
-                .textCase(.uppercase)
-
-            VStack(spacing: 10) {
-                content
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct OnboardingSettingsRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-
-            Spacer(minLength: 12)
-
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(LavaStyle.secondaryText)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-                .minimumScaleFactor(0.82)
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 56)
-        .lavaSurface(.panel, cornerRadius: 14)
-    }
-}
-
-private struct OnboardingMenuRowContent: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(LavaStyle.ink)
-
-                Text(value)
-                    .font(.subheadline)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.84)
-            }
-
-            Spacer(minLength: 12)
-
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(LavaStyle.secondaryText)
-        }
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 62)
-        .lavaSurface(.panel, cornerRadius: 14)
-    }
-}
-
-private struct OnboardingToggleRow: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-        }
-        .tint(LavaStyle.safeGreen)
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 58)
-        .lavaSurface(.panel, cornerRadius: 14)
-    }
-}
-
 private struct OnboardingPrimaryButton: View {
     let title: String
     var isLoading = false
@@ -1142,6 +878,91 @@ private struct OnboardingSecondaryButton: View {
                 .background(LavaStyle.panelActionFill, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The branch off the final "Lava is ready" screen: bring in a shared setup by
+/// code or QR, or jump straight to Settings. "Skip" anywhere finishes setup and
+/// opens Guard as usual.
+private struct OnboardingAdditionalSetupSheet: View {
+    let onGoToSettings: () -> Void
+    let onFinish: () -> Void
+
+    @EnvironmentObject private var viewModel: AppViewModel
+    @State private var route: Route?
+
+    private enum Route {
+        case enterCode
+        case scanCode
+    }
+
+    var body: some View {
+        switch route {
+        case .none:
+            chooser
+        case .enterCode:
+            ImportFiltersFlow(
+                startMode: .enterCode,
+                showsSkip: true,
+                onRootBack: { route = nil },
+                onSkip: onFinish,
+                onImported: onFinish
+            )
+            .environmentObject(viewModel)
+        case .scanCode:
+            ImportFiltersFlow(
+                startMode: .scanCode,
+                showsSkip: true,
+                onRootBack: { route = nil },
+                onSkip: onFinish,
+                onImported: onFinish
+            )
+            .environmentObject(viewModel)
+        }
+    }
+
+    private var chooser: some View {
+        NavigationStack {
+            LavaSheetScaffold(spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Have a setup to use? Bring it in, or open Settings to fine-tune everything yourself.")
+                        .lavaSupportingText()
+
+                    ImportOptionRow(
+                        systemImage: "qrcode.viewfinder",
+                        title: "Scan a QR code",
+                        subtitle: "Use a setup someone shared with you"
+                    ) {
+                        route = .scanCode
+                    }
+
+                    ImportOptionRow(
+                        systemImage: "character.cursor.ibeam",
+                        title: "Enter a code",
+                        subtitle: "Paste or type a config code"
+                    ) {
+                        route = .enterCode
+                    }
+
+                    ImportOptionRow(
+                        systemImage: "gearshape",
+                        title: "Go to Settings",
+                        subtitle: "Open Lava's settings instead of Guard"
+                    ) {
+                        onGoToSettings()
+                    }
+                }
+            }
+            .navigationTitle("Additional setup".lavaLocalized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Skip", action: onFinish)
+                        .font(.headline)
+                        .foregroundStyle(LavaStyle.panelActionGreen)
+                }
+            }
+        }
     }
 }
 

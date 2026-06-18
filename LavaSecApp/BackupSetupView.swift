@@ -20,31 +20,76 @@ struct BackupSetupView: View {
 
     var body: some View {
         LavaSheetScaffold {
+            header
+        } content: {
             VStack(alignment: .leading, spacing: 14) {
-                stepHeader
+                Text(step.subtitle.lavaLocalized)
+                    .lavaSupportingText()
+
                 stepContent
             }
         } footer: {
             footer
         }
-        .navigationTitle("Set Up Encrypted Backup".lavaLocalized)
-        .navigationBarTitleDisplayMode(.inline)
+        // Block the sheet's interactive swipe-to-dismiss while a passkey/setup
+        // task is awaiting, and on .validatePasskey — that step holds a
+        // registered-but-unvalidated passkey that only the Cancel/Back path
+        // (cancelPasskeyValidation) cleans up, so a drag-dismiss there would
+        // leave orphaned pending passkey state in the view model. The disabled
+        // chevron only covers the button; without this the gesture reintroduces
+        // the same race.
+        .interactiveDismissDisabled(blocksInteractiveDismiss)
         .onAppear {
             ensureRecoveryPhrase()
         }
     }
 
-    private var stepHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(step.title.lavaLocalized)
-                .font(.title2.bold())
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+    // Mirror the import-filters sheet chrome: a chevron-back / centered-title bar on
+    // the sheet's material header instead of a pushed navigation bar, so the flow
+    // covers the tab bar.
+    private var header: some View {
+        HStack {
+            // Disabled while a passkey/setup task is awaiting, matching the footer
+            // buttons — otherwise Back could fire cancelPasskeyValidation() mid
+            // validation and let the in-flight task still advance the flow.
+            LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: headerBack)
+                .disabled(isStepActionInFlight)
 
-            Text(step.subtitle.lavaLocalized)
-                .lavaBodySupportingText()
+            Spacer()
+
+            Text(step.title.lavaLocalized)
+                .font(.headline)
+                .foregroundStyle(LavaStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer()
+
+            Color.clear.frame(width: 44, height: 44)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var isStepActionInFlight: Bool {
+        isPreparingPasskey || isValidatingPasskey || isFinishingSetup
+    }
+
+    // Swipe-to-dismiss is blocked while a task is in flight and on the
+    // validatePasskey step, whose pending passkey only the Cancel/Back path
+    // cleans up. The chevron stays enabled on validatePasskey (it routes through
+    // cancelPasskeyValidation), so leaving that step still runs cleanup.
+    private var blocksInteractiveDismiss: Bool {
+        isStepActionInFlight || step == .validatePasskey
+    }
+
+    private func headerBack() {
+        switch step {
+        case .overview:
+            dismiss()
+        case .validatePasskey:
+            cancelPasskeyValidation()
+        case .recoveryPhrase, .confirm:
+            step = step.previous
+        }
     }
 
     @ViewBuilder
@@ -89,43 +134,6 @@ struct BackupSetupView: View {
                 }
             }
 
-            VStack(spacing: 10) {
-                // Zero-knowledge passkey backup needs the WebAuthn PRF extension (iOS 18+). On
-                // iOS 17 there is no passkey option to offer, so the flow is a single entry point
-                // that sets up the device + recovery-phrase backup.
-                if #available(iOS 18.0, *) {
-                    Button {
-                        selectedPasskeyMode = .withPasskey
-                        beginSetup(with: .withPasskey)
-                    } label: {
-                        Label(
-                            (isPreparingPasskey && selectedPasskeyMode == .withPasskey ? "Opening Passkey" : "Set up with Passkey").lavaLocalized,
-                            systemImage: "person.badge.key.fill"
-                        )
-                    }
-                    .buttonStyle(LavaStandaloneActionButtonStyle())
-                    .disabled(isPreparingPasskey)
-
-                    Button {
-                        selectedPasskeyMode = .withoutPasskey
-                        beginSetup(with: .withoutPasskey)
-                    } label: {
-                        Text("Set up without Passkey".lavaLocalized)
-                    }
-                    .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
-                    .disabled(isPreparingPasskey)
-                } else {
-                    Button {
-                        selectedPasskeyMode = .withoutPasskey
-                        beginSetup(with: .withoutPasskey)
-                    } label: {
-                        Text("Begin Setup".lavaLocalized)
-                    }
-                    .buttonStyle(LavaStandaloneActionButtonStyle())
-                    .disabled(isPreparingPasskey)
-                }
-            }
-
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
@@ -145,27 +153,6 @@ struct BackupSetupView: View {
                         detail: "You'll use your passkey once more. This is the same step a new device runs to unlock your backup, so it confirms restore will work."
                     )
                 }
-            }
-
-            VStack(spacing: 10) {
-                Button {
-                    validatePasskey()
-                } label: {
-                    Label(
-                        (isValidatingPasskey ? "Checking Passkey" : "Validate the passkey").lavaLocalized,
-                        systemImage: "person.badge.key.fill"
-                    )
-                }
-                .buttonStyle(LavaStandaloneActionButtonStyle())
-                .disabled(isValidatingPasskey)
-
-                Button {
-                    cancelPasskeyValidation()
-                } label: {
-                    Text("Cancel".lavaLocalized)
-                }
-                .buttonStyle(LavaPanelActionButtonStyle(height: 44, cornerRadius: 12))
-                .disabled(isValidatingPasskey)
             }
 
             if let errorMessage {
@@ -244,25 +231,85 @@ struct BackupSetupView: View {
         }
     }
 
+    // Every step's actions live on the sheet's grey footer bar (back is the header
+    // chevron, matching the import-filters flow).
     @ViewBuilder
     private var footer: some View {
-        if step == .overview || step == .validatePasskey {
-            EmptyView()
-        } else {
-        HStack(spacing: 12) {
-            if step != .overview {
-                Button("Back") {
-                    step = step.previous
-                }
-                .buttonStyle(LavaPanelActionButtonStyle())
-            }
-
+        switch step {
+        case .overview:
+            overviewActions
+        case .validatePasskey:
+            validatePasskeyActions
+        case .recoveryPhrase, .confirm:
             Button(step.primaryButtonTitle.lavaLocalized) {
                 advance()
             }
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(!canAdvance || isFinishingSetup)
         }
+    }
+
+    @ViewBuilder
+    private var overviewActions: some View {
+        VStack(spacing: 10) {
+            // Zero-knowledge passkey backup needs the WebAuthn PRF extension (iOS 18+). On
+            // iOS 17 there is no passkey option to offer, so the flow is a single entry point
+            // that sets up the device + recovery-phrase backup.
+            if #available(iOS 18.0, *) {
+                Button {
+                    selectedPasskeyMode = .withPasskey
+                    beginSetup(with: .withPasskey)
+                } label: {
+                    Label(
+                        (isPreparingPasskey && selectedPasskeyMode == .withPasskey ? "Opening Passkey" : "Set up with Passkey").lavaLocalized,
+                        systemImage: "person.badge.key.fill"
+                    )
+                }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(isPreparingPasskey)
+
+                Button {
+                    selectedPasskeyMode = .withoutPasskey
+                    beginSetup(with: .withoutPasskey)
+                } label: {
+                    Text("Set up without Passkey".lavaLocalized)
+                }
+                .buttonStyle(LavaPanelActionButtonStyle())
+                .disabled(isPreparingPasskey)
+            } else {
+                Button {
+                    selectedPasskeyMode = .withoutPasskey
+                    beginSetup(with: .withoutPasskey)
+                } label: {
+                    Text("Begin Setup".lavaLocalized)
+                }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(isPreparingPasskey)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var validatePasskeyActions: some View {
+        VStack(spacing: 10) {
+            Button {
+                validatePasskey()
+            } label: {
+                Label(
+                    (isValidatingPasskey ? "Checking Passkey" : "Validate the passkey").lavaLocalized,
+                    systemImage: "person.badge.key.fill"
+                )
+            }
+            .buttonStyle(LavaStandaloneActionButtonStyle())
+            .disabled(isValidatingPasskey)
+
+            Button {
+                cancelPasskeyValidation()
+            } label: {
+                Text("Cancel".lavaLocalized)
+            }
+            .buttonStyle(LavaPanelActionButtonStyle())
+            .disabled(isValidatingPasskey)
         }
     }
 
@@ -310,13 +357,24 @@ struct BackupSetupView: View {
         errorMessage = nil
         isValidatingPasskey = true
         Task {
+            let failure: String?
             do {
                 try await viewModel.validateBackupPasskey()
-                step = .recoveryPhrase
+                failure = nil
             } catch {
-                errorMessage = error.localizedDescription
+                failure = error.localizedDescription
             }
             isValidatingPasskey = false
+            // Ignore a result that lands after the user already left this step, so a
+            // canceled validation can't advance the flow or surface a stale error.
+            guard step == .validatePasskey else {
+                return
+            }
+            if let failure {
+                errorMessage = failure
+            } else {
+                step = .recoveryPhrase
+            }
         }
     }
 
