@@ -9,6 +9,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
+        deviceDebugLog: [BugReportDebugLogEntry] = [],
         generatedAt: Date = Date(),
         calendar: Calendar = .current
     ) throws -> LocalLogExportArchive {
@@ -18,6 +19,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: lavaGuardUnlocks,
+            deviceDebugLog: deviceDebugLog,
             generatedAt: generatedAt,
             timestamp: timestamp,
             calendar: calendar
@@ -34,12 +36,13 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
+        deviceDebugLog: [BugReportDebugLogEntry],
         generatedAt: Date,
         timestamp: ExportTimestamp,
         calendar: Calendar
     ) -> [StoredZIPArchive.Entry] {
         let generatedAtString = isoString(from: generatedAt)
-        let files: [(String, Data)] = [
+        var files: [(String, Data)] = [
             (
                 "filtering-counts-\(timestamp.filename).csv",
                 filteringCountsCSV(diagnostics: diagnostics, generatedAt: generatedAt, calendar: calendar)
@@ -61,6 +64,20 @@ public struct LocalLogExportArchive: Equatable, Sendable {
                 lavaGuardUnlocksCSV(lavaGuardUnlocks)
             )
         ]
+
+        // The device debug log (the granular tunnel/VPN trace — device-dns-captured,
+        // self-reconnect-suppressed, resolver outcomes) previously shipped only in
+        // the Feedback report (→ Supabase). Including the same already-redacted
+        // entries here makes the local export a true superset, so the on-device
+        // VPN-recovery story can be self-diagnosed without backend access. Entries
+        // arrive pre-redacted by BugReportDebugLogEntry (allowlisted detail keys
+        // only — never a queried domain).
+        if !deviceDebugLog.isEmpty {
+            files.append((
+                "device-debug-log-\(timestamp.filename).jsonl",
+                deviceDebugLogJSONL(deviceDebugLog)
+            ))
+        }
 
         var entries = files.map { name, data in
             StoredZIPArchive.Entry(name: name, data: data)
@@ -151,6 +168,19 @@ public struct LocalLogExportArchive: Equatable, Sendable {
                 ]
             }
         return csvData(rows)
+    }
+
+    private static func deviceDebugLogJSONL(_ entries: [BugReportDebugLogEntry]) -> Data {
+        let lines = entries.compactMap { entry -> String? in
+            guard let data = try? JSONSerialization.data(
+                withJSONObject: entry.dictionary,
+                options: [.sortedKeys]
+            ) else {
+                return nil
+            }
+            return String(decoding: data, as: UTF8.self)
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
 
     private static func manifestJSON(

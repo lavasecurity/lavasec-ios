@@ -61,6 +61,40 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
     }
 
+    func testWakeProactivelyReHandshakesResolverAfterSuspend() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let wakeBlock = try sourceBlock(
+            in: source,
+            startingAt: "override func wake()",
+            endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
+        )
+
+        // On wake the upstream connections are stale, so wake() drops them and
+        // re-probes: refresh device DNS, force-drop cached responses + tear down
+        // stale sockets/connections, invalidate the bootstrap cache, then
+        // re-handshake on settle. The forced reset closes the pre-settle-probe
+        // window where a query could otherwise reuse a pre-sleep connection.
+        XCTAssertTrue(wakeBlock.contains("dnsStateQueue.async"))
+        // In-flight smoke probes are invalidated so a pre-sleep result can't apply
+        // after resume and flip fallback on stale conditions.
+        XCTAssertTrue(wakeBlock.contains("invalidateInFlightSmokeProbes()"))
+        XCTAssertTrue(wakeBlock.contains("refreshDeviceDNSResolverAddressesOnDNSQueue(reason: \"wake\")"))
+        XCTAssertTrue(wakeBlock.contains("collectPendingResponsesAndResetResolverRuntime("))
+        XCTAssertTrue(wakeBlock.contains("reason: \"wake\""))
+        XCTAssertTrue(wakeBlock.contains("force: true"))
+        XCTAssertTrue(wakeBlock.contains("writeServerFailures(for: pendingResponses)"))
+        XCTAssertTrue(wakeBlock.contains("resolverBootstrapService.invalidateAll()"))
+        XCTAssertTrue(wakeBlock.contains("resolverProbeCoalescer.noteUnsettled()"))
+        // wake() must NOT clear the device-DNS fallback decision: it also fires on
+        // ordinary sleep, and dropping a working fallback would force a
+        // failing-primary retry and a fresh DNS stall every wake. Real network
+        // changes clear fallback in handleNetworkPathUpdate instead.
+        XCTAssertFalse(
+            wakeBlock.contains("resetFailureAndFallbackStateForRecovery()"),
+            "wake() should preserve fallback mode; only a real network change clears it."
+        )
+    }
+
     func testResolverFallbackRunsInlineToAvoidQueueStarvation() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let resolveBlock = try sourceBlock(
@@ -317,6 +351,193 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(helperBlock.contains("lastReconnectNeededActivityAt"))
     }
 
+    func testSelfReconnectEscalatesWedgedDNSWithBackoffGuards() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // The reconnect-needed path escalates into the self-reconnect policy.
+        let reconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func appendReconnectNeededIfPolicyRequiresReconnect",
+            endingBefore: "private func selfReconnectIfPolicyAllows"
+        )
+        XCTAssertTrue(reconnectBlock.contains("selfReconnectIfPolicyAllows(assessment: assessment, now: now)"))
+
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows",
+            endingBefore: "private static func loadSelfReconnectAttemptTimes"
+        )
+        // Decision delegates to the pure, tested policy, gated by protectionEnabled
+        // AND a confirmed Connect-On-Demand signal (protectionEnabled alone can be
+        // persisted even when arming on-demand failed, so a self-cancel without
+        // on-demand would strand the user offline).
+        XCTAssertTrue(helperBlock.contains("TunnelSelfReconnectPolicy.decision("))
+        XCTAssertTrue(helperBlock.contains("protectionEnabled: currentAppConfiguration().protectionEnabled"))
+        XCTAssertTrue(helperBlock.contains("onDemandEnabled: Self.isOnDemandConfirmedEnabled()"))
+        XCTAssertTrue(helperBlock.contains("guard decision == .reconnect else"))
+        // Latched so the cancel is issued once; attempts persisted for the
+        // cross-restart backoff (the cancel kills the process).
+        XCTAssertTrue(helperBlock.contains("guard !hasRequestedSelfReconnect else"))
+        XCTAssertTrue(helperBlock.contains("hasRequestedSelfReconnect = true"))
+        XCTAssertTrue(helperBlock.contains("saveSelfReconnectAttemptTimes"))
+        XCTAssertTrue(helperBlock.contains("cancelTunnelWithError(nil)"))
+    }
+
+    func testRecoveryFromAReconnectNeededWedgeIsLogged() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // Both recovery paths route through the shared helper so a self-heal that
+        // never reaches an organic query is still recorded: the organic-query path
+        // (recordUpstreamResult) and the in-place smoke-probe path (primary +
+        // device-DNS-fallback success in applyResolverSmokeProbeResult).
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+        // Organic-query recovery is recorded as proven by real forwarding; the
+        // smoke-probe paths record an upstream-only verification, so the two are
+        // distinguishable in field logs.
+        XCTAssertTrue(recordBlock.contains("logConnectivityRecoveredIfWedged(transport: result.transport, verifiedBy: \"forwarding\", now: now)"))
+
+        let smokeProbeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func applyResolverSmokeProbeResult",
+            endingBefore: "private func resetHealth"
+        )
+        XCTAssertTrue(smokeProbeBlock.contains("logConnectivityRecoveredIfWedged(transport: primaryResult.transport, verifiedBy: \"smoke-probe\", now: now)"))
+        XCTAssertTrue(smokeProbeBlock.contains("logConnectivityRecoveredIfWedged(transport: .deviceDNS, verifiedBy: \"smoke-probe\", now: now)"))
+
+        // The helper emits both the activity-log row and the firm device-log line,
+        // and measures duration from the wedge START (reconnectNeededSince), not the
+        // last failed lookup — so a multi-minute outage isn't underreported.
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func logConnectivityRecoveredIfWedged",
+            endingBefore: "private func clearReconnectNeededActivitySuppression"
+        )
+        XCTAssertTrue(helperBlock.contains("guard let wedgeStart = reconnectNeededSince else"))
+        XCTAssertTrue(helperBlock.contains("now.timeIntervalSince(wedgeStart)"))
+        // The activity row carries the wedge's failure reason + transport so
+        // distinct-cause recoveries within the 30s coalescing window aren't merged.
+        XCTAssertTrue(helperBlock.contains(".connectivityRecovered(reason: \"\\(failureReason) via \\(transport.rawValue)\")"))
+        XCTAssertTrue(helperBlock.contains("event: \"dns-recovered\""))
+        // ...and records whether the recovery was proven by real forwarding vs the
+        // upstream-only smoke probe, so a false-positive recovery is diagnosable.
+        XCTAssertTrue(helperBlock.contains("\"verifiedBy\": verifiedBy"))
+        // The marker is cleared by the recovery (here), so a handoff recovery that
+        // passes through the suppression clear on the network change is still caught.
+        XCTAssertTrue(helperBlock.contains("reconnectNeededSince = nil"))
+        // The failure depth is read from the marker (callers reset the live counter
+        // before recovery), so the recovery log still records how deep the wedge got.
+        XCTAssertTrue(helperBlock.contains("\"consecutiveUpstreamFailureCount\": \"\\(reconnectNeededPeakFailureCount)\""))
+
+        // Wedge start is stamped once on entry; the peak failure depth is tracked
+        // there too (where the live counter is still at its wedge value).
+        let reconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func appendReconnectNeededIfPolicyRequiresReconnect",
+            endingBefore: "private func selfReconnectIfPolicyAllows"
+        )
+        XCTAssertTrue(reconnectBlock.contains("if reconnectNeededSince == nil {"))
+        XCTAssertTrue(reconnectBlock.contains("reconnectNeededPeakFailureCount = max(reconnectNeededPeakFailureCount, health.consecutiveUpstreamFailureCount)"))
+
+        // The suppression clear must NOT drop the wedge marker (it runs on the
+        // network-change/wake reset before the settle probe recovers). The marker is
+        // owned by the recovery log + the lifecycle reset only.
+        let clearBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func clearReconnectNeededActivitySuppression",
+            endingBefore: "#if LAVA_QA_TOOLS"
+        )
+        XCTAssertFalse(clearBlock.contains("reconnectNeededSince = nil"))
+        let resetHealthBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetHealth()",
+            endingBefore: "private func startPathMonitor()"
+        )
+        XCTAssertTrue(resetHealthBlock.contains("reconnectNeededSince = nil"))
+    }
+
+    func testWedgedResolverSelfRecoversWithoutAManualToggle() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // The reconnect-needed path arms the in-place wedge recovery in addition
+        // to the (rate-limited, on-demand-gated) self-reconnect, so a same-network
+        // wedge recovers even when self-reconnect is suppressed.
+        let reconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func appendReconnectNeededIfPolicyRequiresReconnect",
+            endingBefore: "private func selfReconnectIfPolicyAllows"
+        )
+        XCTAssertTrue(reconnectBlock.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"))
+
+        // The recovery clears the backoff penalty box + stale connections (the
+        // clean slate a fresh process gets on a manual toggle) and re-probes; the
+        // failed re-probe re-arms it, so it self-sustains at the wedge cadence.
+        let recoveryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func scheduleResolverWedgeRecoveryProbeIfNeeded()",
+            endingBefore: "private func cancelResolverWedgeRecoveryProbe()"
+        )
+        XCTAssertTrue(recoveryBlock.contains("resolverBackoffPolicy.reset()"))
+        XCTAssertTrue(recoveryBlock.contains("resetResolverTransientState()"))
+        // A wedge is often stale resolvers from a prior network — re-capture
+        // device DNS before re-probing so the device-DNS user gets fresh addresses.
+        XCTAssertTrue(recoveryBlock.contains("refreshDeviceDNSResolverAddressesOnDNSQueue(reason: \"resolver-wedge-recovery\")"))
+        XCTAssertTrue(recoveryBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"resolver-wedge-recovery\")"))
+        XCTAssertTrue(recoveryBlock.contains("assessment.primaryAction == .reconnect"))
+        XCTAssertTrue(source.contains("private let resolverWedgeRecoveryProbeInterval: TimeInterval = 30"))
+
+        // Every recovery/success path funnels through the suppression clear, which
+        // is the single cancel point that keeps the recovery loop bounded to the
+        // actual wedge (no resetting a now-healthy resolver).
+        let suppressionBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func clearReconnectNeededActivitySuppression()",
+            endingBefore: "#if LAVA_QA_TOOLS"
+        )
+        XCTAssertTrue(suppressionBlock.contains("cancelResolverWedgeRecoveryProbe()"))
+
+        // A suppressed self-reconnect must be diagnosable from the Release log so a
+        // "said reconnect needed but never recovered" report carries the reason.
+        let selfReconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows",
+            endingBefore: "private static func loadSelfReconnectAttemptTimes"
+        )
+        XCTAssertTrue(selfReconnectBlock.contains("event: \"self-reconnect-suppressed\""))
+        // ...but a persistent wedge must not flood the capped log: the line is gated
+        // on a changed suppression signature or an elapsed cooldown, not emitted per tick.
+        XCTAssertTrue(selfReconnectBlock.contains("lastSelfReconnectSuppressionSignature"))
+        XCTAssertTrue(selfReconnectBlock.contains("if changed || cooldownElapsed {"))
+    }
+
+    func testRecoveryAcknowledgementDoesNotExtendProblemNotificationThrottle() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private static func recordProtectionNotificationDelivery",
+            endingBefore: "private static func removeSupersededProtectionNotifications"
+        )
+
+        // The 600s minimum-problem-delivery throttle keys off the delivered-at
+        // timestamp; only a problem delivery may advance it, so a .reconnected
+        // acknowledgement can't suppress a fresh problem after a flappy recovery.
+        let prefix = try sourceBlock(
+            in: recordBlock,
+            startingAt: "let defaults",
+            endingBefore: "if notification.kind.isProblem {"
+        )
+        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        let problemBranch = try sourceBlock(
+            in: recordBlock,
+            startingAt: "if notification.kind.isProblem {",
+            endingBefore: "} else if notification.kind == .reconnected {"
+        )
+        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+    }
+
     func testNetworkFlapCoalescesProactiveResolverRebuild() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let pathBlock = try sourceBlock(
@@ -353,6 +574,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(settleProbeBlock.contains("guard health.networkPathIsSatisfied else"))
         XCTAssertTrue(settleProbeBlock.contains("prewarmResolverBootstrapIfNeeded()"))
         XCTAssertTrue(settleProbeBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"network-settled\")"))
+
+        // Once the new network settles, re-capture device DNS — the capture at the
+        // instant of a handoff can preserve the previous network's (now
+        // unreachable) resolvers, which wedge a device-DNS user until the next
+        // change. Reset the runtime only when the addresses actually changed.
+        XCTAssertTrue(settleProbeBlock.contains("refreshDeviceDNSResolverAddressesOnDNSQueue(reason: \"network-settled\")"))
+        XCTAssertTrue(settleProbeBlock.contains("deviceDNSResolverAddresses != previousDeviceDNSResolverAddresses"))
 
         // Settle window + scheduler wiring.
         XCTAssertTrue(source.contains("private let resolverProbeSettleInterval: TimeInterval = 1.5"))
@@ -733,14 +961,42 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(bootstrapBlock.contains("#if DEBUG || LAVA_QA_TOOLS"))
     }
 
+    func testDeviceDebugLogShipsInReleaseForFeedbackReport() throws {
+        let appGroup = try readSource("Shared/AppGroup.swift")
+        // The device debug log is compiled in all configurations (including
+        // Release/TestFlight) so the optional Feedback report can carry on-device
+        // VPN diagnostics. A privacy audit confirmed no event records a queried
+        // domain. Guard against accidental re-gating behind #if DEBUG.
+        let enumIndex = try XCTUnwrap(appGroup.range(of: "enum LavaSecDeviceDebugLog {")?.lowerBound)
+        let prefix = String(appGroup[..<enumIndex])
+        XCTAssertFalse(
+            prefix.hasSuffix("#if DEBUG || LAVA_QA_TOOLS\n"),
+            "LavaSecDeviceDebugLog must stay un-gated so Release builds emit the device log."
+        )
+        XCTAssertFalse(
+            prefix.hasSuffix("#if DEBUG\n"),
+            "LavaSecDeviceDebugLog must stay un-gated so Release builds emit the device log."
+        )
+
+        // The core network-change DNS-recovery events must fire in Release: no bare
+        // `#if DEBUG` may remain wrapping a device-log append in the tunnel.
+        let tunnel = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        XCTAssertFalse(
+            tunnel.contains("#if DEBUG\n            LavaSecDeviceDebugLog.append")
+                || tunnel.contains("#if DEBUG\n        LavaSecDeviceDebugLog.append"),
+            "Tunnel device-log appends must not be re-gated behind #if DEBUG."
+        )
+    }
+
     func testEncryptedTransportsEmitHandshakeObservations() throws {
         let dotSource = try readSource("Sources/LavaSecCore/DoTTransport.swift")
         let doqSource = try readSource("Sources/LavaSecCore/DoQTransport.swift")
         let dohSource = try readSource("Sources/LavaSecCore/DoHTransport.swift")
 
         // Handshake cost is the per-connection sub-phase under an endpoint
-        // attempt; it is reported only when a debug logger is injected (nil in
-        // Release), measured connect -> ready / connect timings.
+        // attempt; it is reported when a debug logger is injected (the tunnel now
+        // injects one in all configurations), measured connect -> ready / connect
+        // timings.
         XCTAssertTrue(dotSource.contains("debugLogger: DNSTransportDebugLogger?"))
         XCTAssertTrue(dotSource.contains("\"dns-dot-connection-ready\""))
         XCTAssertTrue(dotSource.contains("\"handshakeMs\""))
@@ -755,11 +1011,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(dohSource.contains("!transaction.isReusedConnection"))
         XCTAssertTrue(dohSource.contains("\"handshakeMs\""))
 
-        // The tunnel injects the loggers only under the latency build gate so
-        // Release transports never link the debug-log backend.
+        // The tunnel injects the device-debug-log sink into every transport
+        // unconditionally (including Release) so the optional Feedback report can
+        // carry resolver handshake/health observations. The injected details are
+        // audited to never include a queried domain — only endpoints and timings.
         let tunnelSource = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
-        XCTAssertTrue(tunnelSource.contains("private let dohResolver: DoHTransport = {"))
-        XCTAssertTrue(tunnelSource.contains("private let dotResolver: DoTTransport = {"))
+        XCTAssertTrue(tunnelSource.contains("private let dohResolver = DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds) { event, details in"))
+        XCTAssertTrue(tunnelSource.contains("private let dotResolver = DoTTransport(timeoutSeconds: PacketTunnelProvider.dotTimeoutSeconds) { event, details in"))
     }
 
     func testMalformedUpstreamResponsesFailClosedBeforeForwardingOrCaching() throws {
@@ -1119,6 +1377,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "private func resolveDoQBootstrapAddresses",
             endingBefore: "private func startPeriodicResolverSmokeProbe"
         )
+        let prewarmBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func prewarmResolverBootstrapIfNeeded",
+            endingBefore: "private func resolveDoQBootstrapAddresses"
+        )
         let doqBootstrapResponseBlock = try sourceBlock(
             in: source,
             startingAt: "private func doqBootstrapResponse",
@@ -1147,6 +1410,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(bootstrapAddressesBlock.contains("resolvePlainDNS(aQuery, resolverAddresses: resolverAddresses, transport: .deviceDNS)"))
         XCTAssertTrue(bootstrapAddressesBlock.contains("DNSBootstrapAddressExtractor.addresses"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("resolverConfiguration.transport == .dnsOverQUIC"))
+        // A custom doq:// encrypted fallback keeps its hostname in the nested plan, so
+        // the bootstrap (and the prewarm) must consider the fallback's DoQ endpoints
+        // too — otherwise its lookup recurses through the wedged Device DNS.
+        XCTAssertTrue(doqBootstrapResponseBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
+        XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("DomainName.normalize(question.domain)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("DomainName.normalize(endpoint.hostname)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("doqEndpointResolvingBootstrapIfNeeded(endpoint)"))
@@ -1154,6 +1422,69 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(doqTransportSource.contains("NWConnection(host: NWEndpoint.Host(endpoint.hostname), port: port, using: parameters)"))
         XCTAssertFalse(doqTransportSource.contains("NWEndpoint.Host(connectionHost)"))
         XCTAssertFalse(doqTransportSource.contains("sec_protocol_options_set_verify_block"))
+    }
+
+    func testDoTBootstrapsCustomHostnamesBeforeForwarding() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let packetHandlerBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func handle(packet: Data, protocolNumber: NSNumber)",
+            endingBefore: "private func forward("
+        )
+        let dotBootstrapResponseBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func dotBootstrapResponse",
+            endingBefore: "private func startPeriodicResolverSmokeProbe"
+        )
+        let resolveBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func dotEndpointResolvingBootstrapIfNeeded",
+            endingBefore: "private func doqEndpointResolvingBootstrapIfNeeded"
+        )
+        let prewarmBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func prewarmResolverBootstrapIfNeeded",
+            endingBefore: "private func resolveDoQBootstrapAddresses"
+        )
+
+        // The packet path must intercept DoT hostnames too (a custom `tls://` fallback
+        // or primary connects by hostname when it has no bootstrap IPs), so the lookup
+        // is answered from cached bootstrap IPs rather than recursing through a wedged
+        // Device DNS — mirroring DoH/DoQ.
+        XCTAssertTrue(packetHandlerBlock.contains("dotBootstrapResponse("))
+        XCTAssertTrue(dotBootstrapResponseBlock.contains("resolverConfiguration.encryptedFallbackDoTEndpoints"))
+        XCTAssertTrue(dotBootstrapResponseBlock.contains("resolverConfiguration.transport == .dnsOverTLS"))
+        XCTAssertTrue(dotBootstrapResponseBlock.contains("dotEndpointResolvingBootstrapIfNeeded(endpoint)"))
+        XCTAssertTrue(dotBootstrapResponseBlock.contains("guard !bootstrappedEndpoint.allBootstrapServers.isEmpty else {"))
+        XCTAssertTrue(dotBootstrapResponseBlock.contains("DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)"))
+
+        // The cache resolver only consults the cache on the packet path and warms it
+        // asynchronously — never blocking the packet path on a lookup.
+        XCTAssertTrue(resolveBlock.contains("resolverBootstrapService.cachedAddresses(forHostname: endpoint.hostname)"))
+        XCTAssertTrue(resolveBlock.contains("resolverBootstrapService.prewarm(hostname: endpoint.hostname)"))
+
+        // Prewarm must cover empty-bootstrap DoT endpoints (primary + fallback).
+        XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.encryptedFallbackDoTEndpoints"))
+        XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.dotEndpoints"))
+    }
+
+    func testResolverNetworkIdentityIncludesEncryptedFallbackFields() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let identityBlock = try sourceBlock(
+            in: source,
+            startingAt: "private static func resolverNetworkIdentity",
+            endingBefore: "private func recordCacheHit"
+        )
+
+        // Changing the encrypted Device-DNS fallback resolver (e.g. saving a
+        // hostname-based Custom DoH/DoT/DoQ alternative while the VPN is running) must
+        // register as a resolver change so the reload re-warms its bootstrap hostname.
+        // If the identity omitted these, resolverChanged would be false and the new
+        // fallback host would stay un-warmed until a later packet reset.
+        XCTAssertTrue(identityBlock.contains("configuration.usesEncryptedDeviceDNSFallback"))
+        XCTAssertTrue(identityBlock.contains("configuration.fallbackResolverPresetID"))
+        XCTAssertTrue(identityBlock.contains("configuration.fallbackCustomResolverAddress"))
+        XCTAssertTrue(identityBlock.contains("configuration.fallbackCustomResolverSecondaryAddress"))
     }
 
     func testDoTConnectionReadinessCannotHangWithoutAQueryTimeout() throws {
@@ -1228,12 +1559,267 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private final class ResolverSmokeProbeTimeout: @unchecked Sendable"))
         XCTAssertTrue(source.contains("private let workItem: DispatchWorkItem"))
         XCTAssertTrue(probeBlock.contains("let timeout = ResolverSmokeProbeTimeout"))
-        XCTAssertTrue(probeBlock.contains("timeout.schedule(on: dnsStateQueue, timeoutSeconds: Self.resolverSmokeProbeTimeoutSeconds)"))
+        // The probe timeout is reason-derived: recovery-context probes use the
+        // shorter recovery timeout so a wedge is detected (and self-reconnect fired)
+        // faster; routine/startup probes keep the generous timeout.
+        XCTAssertTrue(probeBlock.contains("timeoutSeconds: Self.smokeProbeTimeoutSeconds("))
+        XCTAssertTrue(probeBlock.contains("transport: resolverConfiguration.transport"))
+        XCTAssertTrue(probeBlock.contains("canUseDeviceDNSFallback: canUseDeviceDNSFallback"))
         XCTAssertTrue(probeBlock.contains("timeout.cancel()"))
         XCTAssertTrue(probeBlock.contains("completeResolverSmokeProbeResult("))
         XCTAssertTrue(completionBlock.contains("resolverSmokeProbeGeneration += 1"))
         XCTAssertTrue(timeoutResultBlock.contains("outcome: .timeout"))
         XCTAssertTrue(timeoutResultBlock.contains("address: resolverConfiguration.cacheIdentifier"))
+    }
+
+    func testEncryptedFallbackEngagementIsLogged() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+
+        // When the Device-DNS primary is wedged and the Mullvad DoH fallback carried
+        // the query, log it (privacy-safe) so field exports show the safety net.
+        XCTAssertTrue(recordBlock.contains("if result.usedEncryptedFallback {"))
+        XCTAssertTrue(recordBlock.contains("event: \"dns-encrypted-fallback\""))
+    }
+
+    func testEncryptedFallbackSuccessDoesNotClearTheWedgeMarker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+
+        // A success carried by the encrypted fallback must NOT be recorded as a
+        // primary recovery: that would clear `reconnectNeededSince` (the wedge marker
+        // gating the refusal→fallback decision) and flap the next REFUSED into being
+        // treated as authoritative. The recovery-clearing call must sit in the
+        // non-fallback branch, with the fallback branch only re-arming the recovery probe.
+        let successBranch = try sourceBlock(
+            in: recordBlock,
+            startingAt: "if result.usedEncryptedFallback {",
+            endingBefore: "if result.udpTruncated {"
+        )
+        XCTAssertTrue(successBranch.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"))
+        XCTAssertTrue(successBranch.contains("} else {"))
+        // The wedge clear is in the else (primary-success) branch, after the fallback guard.
+        let fallbackGuardIndex = try XCTUnwrap(successBranch.range(of: "if result.usedEncryptedFallback {")).lowerBound
+        let recoveredIndex = try XCTUnwrap(successBranch.range(of: "logConnectivityRecoveredIfWedged")).lowerBound
+        let elseIndex = try XCTUnwrap(successBranch.range(of: "} else {")).lowerBound
+        XCTAssertLessThan(fallbackGuardIndex, elseIndex, "fallback branch comes first")
+        XCTAssertLessThan(elseIndex, recoveredIndex, "wedge clear must be inside the non-fallback else branch")
+    }
+
+    func testWedgeRecoveryProbeGateHonoursHeldWedgeMarkerNotJustHealth() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let scheduleBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func scheduleResolverWedgeRecoveryProbeIfNeeded",
+            endingBefore: "private func cancelResolverWedgeRecoveryProbe"
+        )
+
+        // The wedge marker the encrypted-fallback success path deliberately holds
+        // (testEncryptedFallbackSuccessDoesNotClearTheWedgeMarker) is only useful if the
+        // recovery probe actually re-probes the primary while it's held. A fallback-
+        // carried success clears health's failure counters, so the assessment reads
+        // healthy — gating the re-probe on the assessment ALONE would strand the primary
+        // on the fallback until a routine probe / manual toggle. The fire condition must
+        // also honour the wedge marker.
+        XCTAssertTrue(
+            scheduleBlock.contains("self.currentDeviceResolverWedged()"),
+            "The wedge-recovery probe must fire while the wedge marker is held, even when a fallback-carried success has made the health-derived assessment look healthy."
+        )
+        // Must be OR'd with the assessment (either signal fires the probe), not AND'd
+        // (which would re-introduce the masked-healthy bail this guards against).
+        XCTAssertTrue(
+            scheduleBlock.contains("assessment.primaryAction == .reconnect || self.currentDeviceResolverWedged()"),
+            "The gate must fire on EITHER the assessment or the held wedge marker."
+        )
+    }
+
+    func testFailedRecoveryProbeReArmsFromHeldWedgeMarker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let applyBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func applyResolverSmokeProbeResult",
+            endingBefore: "private func invalidateInFlightSmokeProbes"
+        )
+
+        // The recovery loop must self-sustain at the wedge cadence: a failed re-probe
+        // should schedule the next one. The threshold-gated
+        // appendReconnectNeededIfPolicyRequiresReconnect won't re-arm when an encrypted-
+        // fallback success has reset consecutiveUpstreamFailureCount below the reconnect
+        // threshold, so the smoke-probe failure path must ALSO re-arm directly while the
+        // wedge marker is held — otherwise a marker-only recovery probe runs once and stalls.
+        XCTAssertTrue(
+            applyBlock.contains("if currentDeviceResolverWedged() {"),
+            "A failed smoke probe must re-arm the wedge-recovery loop while the wedge marker is held."
+        )
+        XCTAssertTrue(
+            applyBlock.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"),
+            "The marker-held re-arm must reschedule the wedge-recovery probe."
+        )
+    }
+
+    func testPrimaryUpstreamSuccessTimestampExcludesBothFallbacks() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+
+        // `lastPrimaryUpstreamSuccessAt` is the recovery-acknowledgement signal, so it
+        // must reflect ONLY a genuine answer from the configured primary. Three fallback
+        // shapes are excluded:
+        //   * encrypted fallback — structurally (the assignment lives in the non-encrypted
+        //     else branch),
+        //   * per-query Device-DNS fallback — `withDeviceDNSFallback` keeps
+        //     `usedEncryptedFallback` false but sets `deviceDNSFallbackSucceeded`,
+        //   * Device-DNS fallback *mode* — a non-device configured resolver resolves via
+        //     `.deviceDNS` without setting `deviceDNSFallbackSucceeded`.
+        // Without these guards a fallback-carried query would falsely clear the reconnect
+        // banner and post "Lava reconnected".
+        let successBranch = try sourceBlock(
+            in: recordBlock,
+            startingAt: "if result.usedEncryptedFallback {",
+            endingBefore: "if result.udpTruncated {"
+        )
+        let elseIndex = try XCTUnwrap(successBranch.range(of: "} else {")).lowerBound
+        let fallbackModeTermIndex = try XCTUnwrap(
+            successBranch.range(of: "result.transport == .deviceDNS && wasDeviceDNSFallbackModeActive")
+        ).lowerBound
+        let guardIndex = try XCTUnwrap(
+            successBranch.range(of: "if !result.deviceDNSFallbackSucceeded, !resolvedThroughFallbackMode {")
+        ).lowerBound
+        let primaryTimestampIndex = try XCTUnwrap(
+            successBranch.range(of: "health.lastPrimaryUpstreamSuccessAt = now")
+        ).lowerBound
+        XCTAssertLessThan(
+            elseIndex,
+            fallbackModeTermIndex,
+            "the primary-success timestamp must sit in the non-encrypted-fallback else branch"
+        )
+        XCTAssertLessThan(
+            guardIndex,
+            primaryTimestampIndex,
+            "the primary-success timestamp must be gated on neither Device-DNS fallback nor fallback mode having carried the query"
+        )
+    }
+
+    func testEncryptedFallbackHostnameIsBootstrapped() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let bootstrapBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func dohBootstrapResponse",
+            endingBefore: "private func doqBootstrapResponse"
+        )
+
+        // The encrypted fallback host (Mullvad) must be bootstrapped from its bundled
+        // IPs even under a Device-DNS plan — otherwise the fallback's own
+        // `dns.mullvad.net` lookup is forwarded to the (possibly wedged) Device DNS
+        // and the safety net can never recover a cold/cache-miss device.
+        XCTAssertTrue(
+            bootstrapBlock.contains("resolverConfiguration.encryptedFallbackEndpoints"),
+            "DoH bootstrap must also answer the encrypted fallback hostname so the wedge safety net can resolve its own endpoint."
+        )
+        // A custom `https://host` resolver (primary or fallback) carries no bootstrap
+        // IPs, so the DoH bootstrap must resolve them from the warmed hostname cache
+        // (mirroring DoQ) and, when none are cached yet, forward the lookup rather than
+        // answer from empty arrays — an empty record set would guarantee a failed connect.
+        XCTAssertTrue(
+            bootstrapBlock.contains("dohEndpointResolvingBootstrapIfNeeded(endpoint)"),
+            "DoH bootstrap must resolve missing bootstrap IPs from the cache for custom https resolvers."
+        )
+        XCTAssertTrue(
+            bootstrapBlock.contains("guard !bootstrappedEndpoint.allBootstrapServers.isEmpty else {"),
+            "DoH bootstrap must forward (not answer empty) when a custom endpoint has no bootstrap IPs yet."
+        )
+
+        // The cache resolver only consults the cache on the packet path and warms it
+        // asynchronously — it must never block the packet path on a lookup.
+        let resolveBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func dohEndpointResolvingBootstrapIfNeeded",
+            endingBefore: "private func doqEndpointResolvingBootstrapIfNeeded"
+        )
+        XCTAssertTrue(resolveBlock.contains("resolverBootstrapService.cachedAddresses(forHostname: host)"))
+        XCTAssertTrue(resolveBlock.contains("resolverBootstrapService.prewarm(hostname: host)"))
+
+        // Prewarm must also cover empty-bootstrap DoH endpoints (primary + fallback).
+        let prewarmBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func prewarmResolverBootstrapIfNeeded",
+            endingBefore: "private func resolveDoQBootstrapAddresses"
+        )
+        XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.encryptedFallbackEndpoints"))
+        XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.dohEndpoints"))
+    }
+
+    func testReachableButRejectedResolverIsClassifiedAsAFailureNotSuccess() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let smokeProbeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func applyResolverSmokeProbeResult",
+            endingBefore: "private func resetHealth"
+        )
+
+        // A response that arrived but failed acceptance is recorded as
+        // `rejected-response` (a restart-worthy reason), not the wire "success" the
+        // failureSummary would otherwise yield — so recovery engages instead of the
+        // resolver being mis-read as healthy.
+        XCTAssertTrue(smokeProbeBlock.contains("if primaryResult.response != nil {"))
+        XCTAssertTrue(smokeProbeBlock.contains("primaryReason = \"rejected-response\""))
+        XCTAssertTrue(smokeProbeBlock.contains("health.lastFailureReason = primaryReason"))
+
+        // The health probe rotates its canary domain per generation so a single
+        // blocked/hijacked domain can't sustain a false unhealthy verdict.
+        let probeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func scheduleResolverSmokeProbeIfNeeded",
+            endingBefore: "private func applyResolverSmokeProbeResult"
+        )
+        XCTAssertTrue(probeBlock.contains("DNSResolverSmokeProbe.probeDomain(forSequence: generation)"))
+        XCTAssertTrue(probeBlock.contains("domain: probeDomain"))
+    }
+
+    func testRecoveryContextProbesUseAShorterTimeoutForFasterDetection() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // Recovery-context probes (post-handoff / wedge / fallback-recovery) get a
+        // tight timeout so an unreachable resolver is detected quickly and
+        // self-reconnect fires sooner — the lever that halves the handoff blip per
+        // the 1758 device log. Routine/startup probes keep the generous timeout.
+        XCTAssertTrue(source.contains("private static let resolverRecoveryProbeTimeoutSeconds = 4"))
+        XCTAssertTrue(source.contains("private static let resolverSmokeProbeTimeoutSeconds = 8"))
+
+        let selectorBlock = try sourceBlock(
+            in: source,
+            startingAt: "private static func smokeProbeTimeoutSeconds(",
+            endingBefore: "private static let slowUpstreamResponseThresholdMilliseconds"
+        )
+        // The short timeout is gated to the fast device/plain primary path with no
+        // fallback branch — an encrypted primary (5s transport) or a fallback-capable
+        // probe keeps the routine timeout, so a 3s cut can't deactivate a working
+        // device-DNS fallback while the primary is still down (P1).
+        XCTAssertTrue(selectorBlock.contains("recoveryContextProbeReasons.contains(reason)"))
+        XCTAssertTrue(selectorBlock.contains("transport == .deviceDNS || transport == .plainDNS"))
+        XCTAssertTrue(selectorBlock.contains("!canUseDeviceDNSFallback"))
+        XCTAssertTrue(selectorBlock.contains("return resolverRecoveryProbeTimeoutSeconds"))
+        XCTAssertTrue(selectorBlock.contains("return resolverSmokeProbeTimeoutSeconds"))
+
+        let reasonsBlock = try sourceBlock(
+            in: source,
+            startingAt: "private static let recoveryContextProbeReasons",
+            endingBefore: "private static func smokeProbeTimeoutSeconds"
+        )
+        for reason in ["network-settled", "resolver-wedge-recovery", "device-dns-fallback-recovery"] {
+            XCTAssertTrue(reasonsBlock.contains("\"\(reason)\""), "recovery-context reasons should include \(reason)")
+        }
     }
 
     func testResolverSmokeProbeLogsPrimaryAndFallbackDecisionEvidence() throws {

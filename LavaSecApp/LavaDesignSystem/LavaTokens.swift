@@ -84,6 +84,11 @@ enum LavaStyle {
     )
     /// Semantic alias for error-message text. Resolves to `dangerRed`.
     static let errorText = dangerRed
+    /// Neutral button tint for confirmation alerts. The app tints itself green, which a
+    /// native alert otherwise inherits for its Cancel/affirmative buttons; this resolves
+    /// them to the calm label color instead, so the escape action reads like the old
+    /// "Not now" rather than a branded primary. Destructive roles stay `dangerRed`.
+    static let confirmationButtonTint = primaryText
 
     private static func adaptiveColor(light: RGB, dark: RGB) -> Color {
         Color(uiColor: UIColor { traits in
@@ -107,6 +112,11 @@ enum LavaSurface {
     /// (panel defaulted to 10, standalone used 12) to one value — 12, matching
     /// `selectionCornerRadius` and the dominant explicit call-site usage.
     static let controlCornerRadius: CGFloat = 12
+    /// Shared action-button height. The panel/standalone/secondary action button
+    /// styles all render at this single height so sibling buttons line up without
+    /// any per-call-site hand adjustments (UR-4: Clear/Disable backup no longer
+    /// disagree with the sign-in/standalone buttons beside them).
+    static let actionButtonHeight: CGFloat = 44
     /// Metric-pill corner radius (e.g. `LavaMetricPill`).
     static let pillCornerRadius: CGFloat = 14
     /// Small icon-badge corner radius (e.g. the 34×34 nav-row glyph chip).
@@ -179,6 +189,25 @@ enum LavaSpacing {
     static let screenHorizontal: CGFloat = 18
     static let screenTop: CGFloat = 16
     static let screenBottom: CGFloat = 96
+}
+
+// MARK: - Row metrics
+
+/// Shared minimum height for settings / scaffold table rows. Standardizes the
+/// touch target across toggle rows, system-link rows, and inline action rows so
+/// sibling rows line up instead of each taking its content's intrinsic height
+/// (UR-28: the Live Activities toggle row and the Language "open in Settings"
+/// row no longer disagree). Anchored to a one-line info panel — a `LavaInfoCard`'s
+/// 16pt top + bottom padding around a single ~22pt `.headline` line (e.g. the "Off"
+/// status panel, ≈ 54pt) — so a single-line row sits level with a status panel
+/// beside it. The earlier 40pt floor was below that natural panel height, so the
+/// `LavaInfoPanel` floor never bound and panels read taller than the rows; 54
+/// makes the floor bind and the two line up.
+enum LavaRowHeight {
+    static let standard: CGFloat = 54
+    /// Horizontal inset shared by every row, so content lines up whether the row is a
+    /// standalone control card or sits inside a condensed list.
+    static let horizontalInset: CGFloat = 16
 }
 
 // MARK: - Depth semantics

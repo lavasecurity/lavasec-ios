@@ -94,7 +94,10 @@ final class BackupSetupSourceTests: XCTestCase {
     func testOverviewCopyAndFactRowsMatchSettingsScale() throws {
         let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
 
-        XCTAssertTrue(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
+        // The flow is a full bottom sheet now, so the title sits in the sheet's
+        // chevron-back header (step.title) rather than a pushed navigation bar.
+        XCTAssertFalse(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
+        XCTAssertTrue(source.contains("Text(step.title.lavaLocalized)"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
         XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."))
         XCTAssertFalse(source.contains("Lava stores only ciphertext"))
@@ -138,10 +141,18 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testPasskeyChoiceButtonsUseMatchingHeights() throws {
         let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let rootSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
+        let componentsSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
+        let tokensSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaTokens.swift")
 
-        XCTAssertTrue(rootSource.contains("let height: CGFloat"))
-        XCTAssertTrue(setupSource.contains("LavaPanelActionButtonStyle(height: 44"))
+        // Heights are no longer hand-set per call site: one shared design-system
+        // token drives the panel/standalone/secondary action button styles so
+        // sibling buttons line up automatically (UR-4).
+        XCTAssertTrue(tokensSource.contains("static let actionButtonHeight: CGFloat = 44"))
+        XCTAssertTrue(componentsSource.contains(".frame(height: LavaSurface.actionButtonHeight)"))
+        XCTAssertFalse(componentsSource.contains("let height: CGFloat"))
+        XCTAssertFalse(componentsSource.contains(".frame(height: 44)"))
+        XCTAssertTrue(setupSource.contains("LavaPanelActionButtonStyle()"))
+        XCTAssertFalse(setupSource.contains("LavaPanelActionButtonStyle(height: 44"))
     }
 
     func testPasskeySetupUsesIOSPlatformCredentialProvider() throws {
@@ -247,6 +258,24 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.qa.tunnel;"))
         // The TestFlight release workflow that also pins these bundle ids now lives
         // in the private lavasec-runner repo, so that cross-check moved there.
+    }
+
+    func testSetupFlowIsFullSheetWithFooterActions() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let settings = try Self.readAppSource("LavaSecApp/SettingsView.swift")
+
+        // Presented as a full bottom sheet (covers the tab bar) like Import filters,
+        // not pushed onto the settings navigation stack.
+        XCTAssertTrue(settings.contains(".sheet(isPresented: $isSettingUpBackup)"))
+        XCTAssertTrue(settings.contains("isSettingUpBackup = true"))
+        XCTAssertFalse(settings.contains("NavigationLink {\n                                BackupSetupView()"))
+
+        // The step actions (e.g. "Set up with Passkey") live on the sheet's footer
+        // bar; back is the header chevron.
+        XCTAssertTrue(source.contains("} footer: {"))
+        XCTAssertTrue(source.contains("private var overviewActions: some View"))
+        XCTAssertTrue(source.contains("private var validatePasskeyActions: some View"))
+        XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: headerBack)"))
     }
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {

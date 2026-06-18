@@ -48,6 +48,13 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     public var lastResolverRuntimeResetReason: String?
     public var resolverRuntimeResetCount: Int
     public var lastUpstreamSuccessAt: Date?
+    /// Timestamp of the last forwarding success carried by the configured PRIMARY
+    /// upstream (i.e. not the encrypted Device-DNS safety net). Recovery
+    /// acknowledgement keys off this rather than `lastUpstreamSuccessAt` so a
+    /// query that only resolved because the encrypted fallback caught it does not
+    /// clear the "reconnect" banner / post "reconnected" while the primary remains
+    /// wedged and traffic still depends on the safety net.
+    public var lastPrimaryUpstreamSuccessAt: Date?
     public var lastUpstreamFailureAt: Date?
     public var lastUpstreamDurationMilliseconds: Int?
     public var slowUpstreamResponseCount: Int
@@ -96,6 +103,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lastResolverRuntimeResetReason
         case resolverRuntimeResetCount
         case lastUpstreamSuccessAt
+        case lastPrimaryUpstreamSuccessAt
         case lastUpstreamFailureAt
         case lastUpstreamDurationMilliseconds
         case slowUpstreamResponseCount
@@ -145,6 +153,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         lastResolverRuntimeResetReason: String? = nil,
         resolverRuntimeResetCount: Int = 0,
         lastUpstreamSuccessAt: Date? = nil,
+        lastPrimaryUpstreamSuccessAt: Date? = nil,
         lastUpstreamFailureAt: Date? = nil,
         lastUpstreamDurationMilliseconds: Int? = nil,
         slowUpstreamResponseCount: Int = 0,
@@ -192,6 +201,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastResolverRuntimeResetReason = lastResolverRuntimeResetReason
         self.resolverRuntimeResetCount = resolverRuntimeResetCount
         self.lastUpstreamSuccessAt = lastUpstreamSuccessAt
+        self.lastPrimaryUpstreamSuccessAt = lastPrimaryUpstreamSuccessAt
         self.lastUpstreamFailureAt = lastUpstreamFailureAt
         self.lastUpstreamDurationMilliseconds = lastUpstreamDurationMilliseconds
         self.slowUpstreamResponseCount = slowUpstreamResponseCount
@@ -299,6 +309,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             forKey: .resolverRuntimeResetCount
         ) ?? 0
         self.lastUpstreamSuccessAt = try container.decodeIfPresent(Date.self, forKey: .lastUpstreamSuccessAt)
+        self.lastPrimaryUpstreamSuccessAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lastPrimaryUpstreamSuccessAt
+        )
         self.lastUpstreamFailureAt = try container.decodeIfPresent(Date.self, forKey: .lastUpstreamFailureAt)
         self.lastUpstreamDurationMilliseconds = try container.decodeIfPresent(
             Int.self,

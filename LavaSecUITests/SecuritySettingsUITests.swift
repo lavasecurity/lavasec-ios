@@ -111,13 +111,15 @@ final class SecuritySettingsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Guard"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Enter Passcode"].waitForExistence(timeout: 1))
 
-        tapRootTab("Filters", in: app)
+        openGuardSection("How Lava filters", in: app)
         XCTAssertTrue(app.staticTexts["Filters"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Enter Passcode"].waitForExistence(timeout: 1))
+        tapBack(in: app)
 
-        tapRootTab("Activity", in: app)
+        openGuardSection("What Lava has caught", in: app)
         XCTAssertTrue(app.staticTexts["Activity"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Enter Passcode"].waitForExistence(timeout: 1))
+        tapBack(in: app)
 
         tapRootTab("Settings", in: app)
         XCTAssertTrue(app.staticTexts["Your Lava"].waitForExistence(timeout: 5))
@@ -234,7 +236,7 @@ final class SecuritySettingsUITests: XCTestCase {
         tapSwitch("View Activities", in: app)
 
         tapBack(in: app)
-        tapRootTab("Activity", in: app)
+        openGuardSection("What Lava has caught", in: app)
         XCTAssertTrue(app.staticTexts["Activity"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Unlock to view Activity"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Authentication Required"].exists)
@@ -324,6 +326,23 @@ final class SecuritySettingsUITests: XCTestCase {
             .tap()
     }
 
+    /// Filters and Activity no longer live in the tab bar — they are reached from
+    /// the Guard screen's explainer rows ("How Lava filters" / "What Lava has
+    /// caught"). This opens Guard and taps the requested row.
+    private func openGuardSection(_ rowTitle: String, in app: XCUIApplication) {
+        tapRootTab("Guard", in: app)
+
+        let row = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", rowTitle)
+        ).firstMatch
+        if !row.waitForExistence(timeout: 2) {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Missing Guard row: \(rowTitle)")
+        row.tap()
+    }
+
     private func tapRootTab(_ title: String, in app: XCUIApplication) {
         let button = app.tabBars.buttons[title].firstMatch
         if button.waitForExistence(timeout: 2) {
@@ -334,13 +353,9 @@ final class SecuritySettingsUITests: XCTestCase {
         let xOffset: CGFloat
         switch title {
         case "Guard":
-            xOffset = 0.18
-        case "Filters":
-            xOffset = 0.38
-        case "Activity":
-            xOffset = 0.62
+            xOffset = 0.25
         case "Settings":
-            xOffset = 0.82
+            xOffset = 0.75
         default:
             XCTFail("Unknown root tab: \(title)")
             return

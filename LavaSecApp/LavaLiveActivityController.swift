@@ -90,7 +90,16 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
             resumeDate: resumeDate
         )
 
-        if let activity = currentActivity ?? Activity<LavaActivityAttributes>.activities.first {
+        // A Live Activity the system ended — e.g. after its multi-hour lifetime cap
+        // elapsed while the app was suspended overnight — stays referenced here but can
+        // no longer be updated; update() becomes a silent no-op and the Dynamic Island /
+        // Lock Screen stay blank. Only adopt an activity that is still updatable;
+        // otherwise drop the dead reference and request a fresh one so the presentation
+        // reappears on the next reconcile (app foreground or a tunnel-health change). (UR-25)
+        let adoptedActivity = currentActivity.flatMap { Self.isAdoptable($0) ? $0 : nil }
+            ?? Activity<LavaActivityAttributes>.activities.first(where: Self.isAdoptable)
+
+        if let activity = adoptedActivity {
             currentActivity = activity
             // ActivityKit updates are cross-process IPC; status refreshes repeat
             // with identical state, so only publish actual changes.
@@ -104,6 +113,9 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
             return
         }
 
+        // Nothing adoptable (never created, or the system ended ours) — clear the stale
+        // reference and request a new activity.
+        currentActivity = nil
         do {
             currentActivity = try Activity<LavaActivityAttributes>.request(
                 attributes: LavaActivityAttributes(),
@@ -116,6 +128,19 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
             currentActivity = nil
             lastPublishedActivityID = nil
             lastPublishedContentState = nil
+        }
+    }
+
+    /// A Live Activity can be refreshed only while it is still `active` or `stale`. Once
+    /// the system has ended or dismissed it — including when it hits its lifetime cap
+    /// while the app is suspended — `update()` is a no-op, so such references must be
+    /// discarded and replaced with a freshly requested activity rather than reused. (UR-25)
+    private static func isAdoptable(_ activity: Activity<LavaActivityAttributes>) -> Bool {
+        switch activity.activityState {
+        case .active, .stale:
+            return true
+        default:
+            return false
         }
     }
 

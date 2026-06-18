@@ -152,18 +152,6 @@ struct WebsiteAssetCaptureRootView: View {
 
             Color.clear
                 .tabItem {
-                    Label("Filters", systemImage: LavaIconRole.filters.sfSymbolName)
-                }
-                .tag(LavaRootTab.filters)
-
-            Color.clear
-                .tabItem {
-                    Label("Activity", systemImage: LavaIconRole.activity.sfSymbolName)
-                }
-                .tag(LavaRootTab.activity)
-
-            Color.clear
-                .tabItem {
                     Label("Settings", systemImage: LavaIconRole.settings.sfSymbolName)
                 }
                 .tag(LavaRootTab.settings)

@@ -27,7 +27,16 @@ public final class ResolverBootstrapService: @unchecked Sendable {
     private let queue: DispatchQueue
     private let lock = NSLock()
     private var cachedAddressesByHostname: [String: ResolvedAddresses] = [:]
-    private var inFlightHostnames: Set<String> = []
+    // hostname → the generation its in-flight lookup was kicked at. A prewarm is
+    // suppressed only while a lookup for the *current* generation is running, so
+    // after invalidateAll() bumps the generation a fresh prewarm can re-kick even
+    // if the superseded lookup is still finishing (it won't reuse the empty cache).
+    private var inFlightGenerationByHostname: [String: UInt64] = [:]
+    // Bumped by invalidateAll(). A lookup captures the generation when it starts
+    // and only caches its result if the generation is unchanged on completion, so
+    // a lookup kicked on a previous network (e.g. in flight across a sleep/network
+    // change) can't repopulate the freshly-cleared cache with stale addresses.
+    private var generation: UInt64 = 0
 
     public init(
         resolveAddresses: @escaping AddressResolver,
@@ -51,11 +60,13 @@ public final class ResolverBootstrapService: @unchecked Sendable {
     public func prewarm(hostname: String) {
         lock.lock()
         guard cachedAddressesByHostname[hostname] == nil,
-              inFlightHostnames.insert(hostname).inserted
+              inFlightGenerationByHostname[hostname] != generation
         else {
             lock.unlock()
             return
         }
+        let kickGeneration = generation
+        inFlightGenerationByHostname[hostname] = kickGeneration
         lock.unlock()
 
         queue.async { [weak self] in
@@ -66,19 +77,28 @@ public final class ResolverBootstrapService: @unchecked Sendable {
             let addresses = self.resolveAddresses(hostname)
 
             self.lock.lock()
-            self.inFlightHostnames.remove(hostname)
-            if !addresses.isEmpty {
-                self.cachedAddressesByHostname[hostname] = addresses
+            // Only the lookup that still owns the in-flight marker for its
+            // generation clears it and may cache. A lookup superseded by a later
+            // invalidateAll()/re-prewarm leaves the newer marker intact and drops
+            // its own (previous-network) result.
+            if self.inFlightGenerationByHostname[hostname] == kickGeneration {
+                self.inFlightGenerationByHostname[hostname] = nil
+                if kickGeneration == self.generation, !addresses.isEmpty {
+                    self.cachedAddressesByHostname[hostname] = addresses
+                }
             }
             self.lock.unlock()
         }
     }
 
     /// Bootstrap addresses are network-dependent; network changes drop them
-    /// all and callers pre-warm again.
+    /// all and callers pre-warm again. Bumping the generation also discards the
+    /// result of any lookup already in flight so it can't repopulate the cache
+    /// with addresses resolved on the previous network.
     public func invalidateAll() {
         lock.lock()
         cachedAddressesByHostname = [:]
+        generation &+= 1
         lock.unlock()
     }
 }

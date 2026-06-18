@@ -23,91 +23,12 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         )
     }
 
-    func testGuardFlowRowsUseStatusDrivenStyling() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-
-        XCTAssertTrue(rootViewSource.contains("status: viewModel.guardDNSFlowStepStatus"))
-        XCTAssertTrue(rootViewSource.contains("detail: viewModel.guardDNSFlowStepDetail"))
-        XCTAssertTrue(rootViewSource.contains("status: viewModel.guardFilterFlowStepStatus"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowStepPalette"))
-        // A connector takes the steps above and below it. A red step turns both
-        // bars touching it red; a grey (passthrough) step keeps them green.
-        XCTAssertTrue(rootViewSource.contains("upperStatus: viewModel.guardDNSFlowStepStatus"))
-        XCTAssertTrue(rootViewSource.contains("lowerStatus: viewModel.guardFilterFlowStepStatus"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowStepStatus.linkStatus(upperStatus, lowerStatus)"))
-        XCTAssertTrue(appViewModelSource.contains("var guardDNSFlowStepStatus: GuardFlowStepStatus"))
-        XCTAssertTrue(appViewModelSource.contains("var guardDNSFlowStepDetail: String"))
-        XCTAssertTrue(appViewModelSource.contains("var guardFilterFlowStepStatus: GuardFlowStepStatus"))
-    }
-
     func testGuardViewRefreshesTunnelHealthWhileVisible() throws {
         let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
 
         XCTAssertTrue(rootViewSource.contains("private func refreshGuardProtectionState() async"))
         XCTAssertTrue(rootViewSource.contains("await viewModel.sampleTunnelHealth()"))
         XCTAssertTrue(rootViewSource.contains("try? await Task.sleep(nanoseconds: 5_000_000_000)"))
-    }
-
-    func testGuardFlowConnectorsUseStableIconRailSpacing() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-
-        XCTAssertTrue(rootViewSource.contains("private enum GuardFlowMetrics"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowMetrics.iconSize"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowMetrics.chevronSlotSize"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowMetrics.connectorHorizontalInset"))
-        XCTAssertTrue(rootViewSource.contains("private struct GuardFlowStepRow: View"))
-        XCTAssertTrue(rootViewSource.contains("private struct GuardFlowConnectorRow: View"))
-        XCTAssertTrue(rootViewSource.contains("status: viewModel.guardFilterFlowStepStatus"))
-        XCTAssertFalse(rootViewSource.contains("Your browsing history is not sent to our server."))
-        XCTAssertFalse(rootViewSource.contains("var note:"))
-    }
-
-    func testGuardFlowNonHealthyRowsDimTheirTitleText() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let inactivePaletteBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "case .inactive:",
-            endingBefore: "case .issue:"
-        )
-        let issuePaletteBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "case .issue:",
-            endingBefore: "}"
-        )
-
-        XCTAssertTrue(inactivePaletteBlock.contains("titleForeground = LavaStyle.secondaryText"))
-        XCTAssertTrue(issuePaletteBlock.contains("titleForeground = LavaStyle.secondaryText"))
-    }
-
-    func testGuardFlowRowsDoNotUseHoverButtonChrome() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-
-        XCTAssertFalse(rootViewSource.contains("GuardFlowRowButtonStyle"))
-        XCTAssertTrue(rootViewSource.contains(".buttonStyle(.plain)"))
-        XCTAssertFalse(rootViewSource.contains(".hoverEffect(.highlight)\n            .accessibilityLabel(accessibilityLabel ?? \"Open \\(title)\")"))
-    }
-
-    func testGuardFlowStepNamesTailTruncateWhenTooLong() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let labelBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "Text(labelText)",
-            endingBefore: "Spacer(minLength: 8)"
-        )
-
-        XCTAssertTrue(labelBlock.contains(".lineLimit(1)"))
-        XCTAssertTrue(labelBlock.contains(".truncationMode(.tail)"))
-    }
-
-    func testGuardFlowStatusColorsAnimateWithMascotWakeTiming() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-
-        XCTAssertTrue(rootViewSource.contains("GuardianMascotAnimationPlan.wakeDuration"))
-        XCTAssertTrue(rootViewSource.contains("GuardFlowAnimation.statusColor(for: status, reduceMotion: reduceMotion)"))
-        XCTAssertTrue(rootViewSource.contains(".animation(statusAnimation, value: status)"))
-        XCTAssertTrue(rootViewSource.contains("GuardianMascotAnimationPlan.stateChangeDuration"))
-        XCTAssertTrue(rootViewSource.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
     }
 
     func testConcernedMascotExpressionDoesNotUseAngryBrows() throws {
@@ -291,34 +212,6 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertTrue(morphingEyeBlock.contains("interpolate(CGFloat(0.5), closedControlProgress, closedInfluence)"))
     }
 
-    func testGuardFlowConnectorLinesDoNotAnimateColorOverlaps() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let connectorBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "private struct GuardFlowConnectorRow: View",
-            endingBefore: "#if DEBUG"
-        )
-
-        XCTAssertTrue(connectorBlock.contains(".fill(palette.connectorFill)"))
-        XCTAssertFalse(connectorBlock.contains("statusAnimation"))
-        XCTAssertFalse(connectorBlock.contains(".animation("))
-    }
-
-    func testGuardFlowChevronsStayNeutralAcrossStatuses() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let chevronBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "private func chevronSlot",
-            endingBefore: "private var labelText"
-        )
-
-        XCTAssertTrue(chevronBlock.contains(".foregroundStyle(LavaStyle.safeGreen)"))
-        XCTAssertTrue(chevronBlock.contains(".background(LavaStyle.softGreen, in: Circle())"))
-        XCTAssertFalse(chevronBlock.contains("LavaStyle.tertiaryText"))
-        XCTAssertFalse(rootViewSource.contains("chevronTint"))
-        XCTAssertFalse(rootViewSource.contains("chevronBackground"))
-    }
-
     func testGuardFilterStatusDoesNotTreatUnloadedRulesAsIssue() throws {
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let issueBlock = try Self.sourceBlock(
@@ -464,8 +357,6 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertTrue(rootViewBlock.contains("private func requestRootTabScrollToTop(_ tab: LavaRootTab)"))
         XCTAssertTrue(rootViewBlock.contains("private func scrollToTopTrigger(for tab: LavaRootTab) -> Int"))
         XCTAssertTrue(rootViewBlock.contains("scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel)"))
-        XCTAssertTrue(rootViewBlock.contains("FiltersView(scrollToTopTrigger: scrollToTopTrigger(for: .filters))"))
-        XCTAssertTrue(rootViewBlock.contains("ActivityView(scrollToTopTrigger: scrollToTopTrigger(for: .activity))"))
         XCTAssertTrue(rootViewBlock.contains("SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))"))
 
         XCTAssertFalse(rootViewBlock.contains("RootTabReselectTapObserver"))
@@ -612,20 +503,6 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertFalse(selectDateBlock.contains("ActivityDateRange(start: min(draftRange.start, date), end: date)"))
     }
 
-    func testGuardFlowConnectorsAreCondensed() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let metricsBlock = try Self.sourceBlock(
-            in: rootViewSource,
-            startingAt: "private enum GuardFlowMetrics",
-            endingBefore: "private struct GuardFlowStepRow"
-        )
-
-        XCTAssertTrue(metricsBlock.contains("static let connectorLineHeight: CGFloat = 12"))
-        XCTAssertTrue(metricsBlock.contains("static let connectorVerticalInset: CGFloat = 3"))
-        XCTAssertFalse(metricsBlock.contains("static let connectorLineHeight: CGFloat = 20"))
-        XCTAssertFalse(metricsBlock.contains("static let connectorVerticalInset: CGFloat = 6"))
-    }
-
     func testRootTabsSharePrimaryTitleChrome() throws {
         let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
         let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
@@ -655,7 +532,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let actionButtonBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "private struct ProtectionPrimaryActionButton: View",
-            endingBefore: "private struct GuardProtectionFlowPanel"
+            endingBefore: "enum GuardDestination"
         )
 
         XCTAssertTrue(statusPanelBlock.contains("ProtectionPrimaryActionButton()"))
@@ -690,7 +567,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let actionButtonBlock = try Self.sourceBlock(
             in: rootViewSource,
             startingAt: "private struct ProtectionPrimaryActionButton: View",
-            endingBefore: "private struct GuardProtectionFlowPanel"
+            endingBefore: "enum GuardDestination"
         )
 
         XCTAssertTrue(appViewModelSource.contains("enum ProtectionPauseDuration: CaseIterable, Identifiable"))

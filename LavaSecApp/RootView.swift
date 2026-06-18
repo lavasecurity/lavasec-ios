@@ -4,18 +4,12 @@ import UIKit
 
 enum LavaRootTab: Hashable {
     case guardPanel
-    case filters
-    case activity
     case settings
 
     var securityPolicy: SecurityAccessPolicy {
         switch self {
         case .guardPanel:
             return .readOnly
-        case .filters:
-            return .readOnly
-        case .activity:
-            return .requires(.activityViewing)
         case .settings:
             return .requires(.appSettings)
         }
@@ -25,10 +19,6 @@ enum LavaRootTab: Hashable {
         switch self {
         case .guardPanel:
             return "Guard"
-        case .filters:
-            return "Filters"
-        case .activity:
-            return "Activity"
         case .settings:
             return "Settings"
         }
@@ -44,6 +34,7 @@ struct RootView: View {
     @State private var didRequestInitialAppUnlock = false
     @State private var selectedRootTab: LavaRootTab = .guardPanel
     @State private var settingsPath = [SettingsRoute]()
+    @State private var guardNavigationPath = [GuardDestination]()
     @State private var rootTabScrollToTopRequests = [LavaRootTab: Int]()
 
     #if DEBUG
@@ -53,31 +44,13 @@ struct RootView: View {
     var body: some View {
         TabView(selection: guardedRootTabSelection) {
             GuardView(
-                scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel),
-                openFilters: {
-                    security.resetViewAuthenticationTurn()
-                    selectedRootTab = .filters
-                },
-                openDNSResolver: {
-                    openSettingsRoute(.dnsResolver)
-                }
+                navigationPath: $guardNavigationPath,
+                scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel)
             )
                 .tabItem {
                     Label("Guard", systemImage: LavaIconRole.guardShield.sfSymbolName)
                 }
                 .tag(LavaRootTab.guardPanel)
-
-            FiltersView(scrollToTopTrigger: scrollToTopTrigger(for: .filters))
-                .tabItem {
-                    Label("Filters", systemImage: LavaIconRole.filters.sfSymbolName)
-                }
-                .tag(LavaRootTab.filters)
-
-            ActivityView(scrollToTopTrigger: scrollToTopTrigger(for: .activity))
-                .tabItem {
-                    Label("Activity", systemImage: LavaIconRole.activity.sfSymbolName)
-                }
-                .tag(LavaRootTab.activity)
 
             SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))
                 .tabItem {
@@ -113,22 +86,24 @@ struct RootView: View {
             SecurityPasscodeAuthenticationView(request: request)
                 .environmentObject(security)
         }
-        .lavaConfirmationDialog(
-            isPresented: Binding(
-                get: { viewModel.pendingRageShakeConfirmation != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        viewModel.cancelRageShakeFeedback()
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Send feedback?",
+                isPresented: Binding(
+                    get: { viewModel.pendingRageShakeConfirmation != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            viewModel.cancelRageShakeFeedback()
+                        }
                     }
-                }
-            ),
-            title: "Send feedback?",
-            message: "Looks like you shook your phone. Want to tell us what went wrong?",
-            confirmTitle: "Send feedback",
-            cancelTitle: "Not now",
-            onConfirm: { viewModel.confirmRageShakeFeedback() },
-            onCancel: { viewModel.cancelRageShakeFeedback() }
-        )
+                )
+            ) {
+                Button("Send feedback") { viewModel.confirmRageShakeFeedback() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Looks like you shook your phone. Want to tell us what went wrong?")
+            }
+        }
         .sheet(item: $viewModel.rageShakeDestination) { destination in
             switch destination {
 #if DEBUG || LAVA_QA_TOOLS
@@ -168,7 +143,14 @@ struct RootView: View {
                 }
             )
         ) {
-            LavaOnboardingView(hasSeenOnboarding: $hasSeenLavaOnboarding)
+            LavaOnboardingView(
+                hasSeenOnboarding: $hasSeenLavaOnboarding,
+                onRequestOpenSettings: {
+                    // Route through the auth-gated opener so passcode-protected
+                    // Settings still require authentication.
+                    openSettingsRoot()
+                }
+            )
         }
         .onAppear {
             handleDebugLaunchRageShakeIfNeeded()
@@ -204,6 +186,7 @@ struct RootView: View {
             hasSeenLavaOnboarding = true
             viewModel.dismissRageShakeDestination()
             settingsPath = []
+            guardNavigationPath = []
             security.resetViewAuthenticationTurn()
             selectedRootTab = .guardPanel
         }
@@ -229,13 +212,13 @@ struct RootView: View {
 
             security.resetViewAuthenticationTurn()
 
-            // Switch synchronously when the tab needs no auth gate (Guard/Filters
-            // are .readOnly; Activity is intentionally ungated). Routing every
-            // switch through an async Task makes the TabView selection lag the tap
-            // by a frame — the tapped tab flashes in, snaps back to the old tab,
-            // then settles — which is the Upgrade↔Guard flicker. Only auth-gated
-            // tabs (Settings) need the async authentication round-trip.
-            if nextTab == .activity || nextTab.securityPolicy.requiredSurface == nil {
+            // Switch synchronously when the tab needs no auth gate (Guard is
+            // .readOnly). Routing every switch through an async Task makes the
+            // TabView selection lag the tap by a frame — the tapped tab flashes
+            // in, snaps back to the old tab, then settles — which is the
+            // Upgrade↔Guard flicker. Only auth-gated tabs (Settings) need the
+            // async authentication round-trip.
+            if nextTab.securityPolicy.requiredSurface == nil {
                 selectedRootTab = nextTab
                 return
             }
@@ -290,17 +273,16 @@ struct RootView: View {
         switch deepLink {
         case .guardPanel:
             settingsPath = []
+            guardNavigationPath = []
             selectedRootTab = .guardPanel
         case .filters:
             settingsPath = []
-            Task {
-                await selectRootTab(.filters)
-            }
+            guardNavigationPath = [.filters]
+            selectedRootTab = .guardPanel
         case .activity:
             settingsPath = []
-            Task {
-                await selectRootTab(.activity)
-            }
+            guardNavigationPath = [.activity]
+            selectedRootTab = .guardPanel
         case .settings(let settingsRoute):
             guard let settingsRoute else {
                 openSettingsRoot()

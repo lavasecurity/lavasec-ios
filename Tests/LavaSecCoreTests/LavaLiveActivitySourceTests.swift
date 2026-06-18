@@ -174,7 +174,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains(".navigationDestination(isPresented: $showPrivacyDataPage)"))
         XCTAssertTrue(customizationBlock.contains("SettingsRouteDestinationView(route: .privacyData)"))
         XCTAssertTrue(customizationBlock.contains(".lavaQuietNoteText()"))
-        XCTAssertTrue(customizationBlock.contains("LavaPlainCard {\n                    Toggle(\"Match App Icon to Lava Guard\""))
+        XCTAssertTrue(customizationBlock.contains("Toggle(\"Match App Icon to Lava Guard\""))
         XCTAssertTrue(customizationBlock.contains("isOn: updatesAppIconBinding"))
         XCTAssertTrue(customizationBlock.contains("viewModel.setUpdatesAppIconWithLavaGuard(isEnabled)"))
         XCTAssertTrue(customizationBlock.contains("DisclosureGroup(isExpanded: $isExpanded)"))
@@ -299,6 +299,26 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(systemSettingsRowBlock.contains("UIApplication.shared.open(settingsURL)"))
         XCTAssertTrue(systemSettingsRowBlock.contains("Image(systemName: \"arrow.up.right\")"))
         XCTAssertFalse(customizationBlock.contains("SettingsNavigationRow(\n                        path: $path,\n                        route: .language"))
+
+        // UR-28: the Live Activities toggle row and the Language "open in Settings"
+        // row used to disagree in height (intrinsic Toggle vs. intrinsic HStack).
+        // Both now share the LavaRowHeight.standard floor via `lavaControlRowCard()`
+        // (which wraps `lavaRow()`), so sibling settings rows line up instead of each
+        // taking its content's intrinsic height — and no longer inflate inside a
+        // LavaPlainCard the way the earlier `.frame(minHeight:)`-inside-card form did.
+        let tokens = try readSource("LavaSecApp/LavaDesignSystem/LavaTokens.swift")
+        XCTAssertTrue(tokens.contains("enum LavaRowHeight"))
+        XCTAssertTrue(tokens.contains("static let standard: CGFloat = 54"))
+        let components = try readSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
+        XCTAssertTrue(components.contains("func lavaRow() -> some View"))
+        XCTAssertTrue(components.contains(".frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)"))
+        XCTAssertTrue(systemSettingsRowBlock.contains(".lavaControlRowCard()"))
+        XCTAssertTrue(customizationBlock.contains("Toggle(\"Use Live Activities\", isOn: usesLiveActivitiesBinding)"))
+        // The Live Activities toggle is now a standalone control row, not wrapped in a card.
+        XCTAssertFalse(customizationBlock.contains("LavaPlainCard {\n                        Toggle(\"Use Live Activities\""))
+        let liveActivitiesToggleIndex = try XCTUnwrap(customizationBlock.range(of: "Toggle(\"Use Live Activities\", isOn: usesLiveActivitiesBinding)")?.upperBound)
+        let liveActivitiesNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Shows Lava status on the Lock Screen")?.lowerBound)
+        XCTAssertTrue(customizationBlock[liveActivitiesToggleIndex..<liveActivitiesNoteIndex].contains(".lavaControlRowCard()"))
     }
 
     func testLiveActivitiesToggleIsGatedToSupportedDeviceClasses() throws {
@@ -818,6 +838,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         )
         XCTAssertTrue(controllerReconcileBlock.contains("let requestedProtectionState = protectionState"))
         XCTAssertFalse(controllerReconcileBlock.contains("protectionState ?? (activePauseUntil == nil ? nil : .paused)"))
+
+        // UR-25: a system-ended activity (e.g. lifetime cap reached overnight) must not be
+        // adopted and updated (a no-op) — only an updatable activity is reused; otherwise a
+        // fresh one is requested so the Dynamic Island reappears on the next reconcile.
+        XCTAssertFalse(controllerReconcileBlock.contains("currentActivity ?? Activity<LavaActivityAttributes>.activities.first {"))
+        XCTAssertTrue(controllerReconcileBlock.contains("currentActivity.flatMap { Self.isAdoptable($0) ? $0 : nil }"))
+        XCTAssertTrue(controllerReconcileBlock.contains("Activity<LavaActivityAttributes>.activities.first(where: Self.isAdoptable)"))
+        XCTAssertTrue(controllerReconcileBlock.contains("private static func isAdoptable(_ activity: Activity<LavaActivityAttributes>) -> Bool"))
+        XCTAssertTrue(controllerReconcileBlock.contains("case .active, .stale:"))
     }
 
     func testLiveActivityDoesNotExposeURLActionsAndFallbackResumeSkipsAuthentication() throws {
@@ -1005,6 +1034,55 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(mutationBlock.contains("try LavaProtectionCommandFileLock.withExclusiveLock"))
         XCTAssertTrue(performBlock.contains("await liveActivityUpdateCoordinator.schedule"))
         XCTAssertFalse(performBlock.contains("await updateLiveActivities("))
+    }
+
+    func testDynamicIslandReconcilesOnTunnelHealthChangeAndTunnelNudgesForegroundApp() throws {
+        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let tunnel = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let signal = try readSource("Sources/LavaSecCore/TunnelHealthSignal.swift")
+        let observer = try readSource("LavaSecApp/DarwinNotificationObserver.swift")
+
+        // Part A: the app reconciles the Live Activity whenever tunnel-health
+        // content changes — NEVPNStatus stays `.connected` through a reconnect.
+        let refreshHealthBlock = try sourceBlock(
+            in: appViewModel,
+            startingAt: "func refreshTunnelHealth(force: Bool = false)",
+            endingBefore: "private var lastTunnelHealthFlushRequestedAt"
+        )
+        XCTAssertTrue(refreshHealthBlock.contains("let previousHealth = tunnelHealth"))
+        XCTAssertTrue(refreshHealthBlock.contains("if snapshot != previousHealth {"))
+        XCTAssertTrue(refreshHealthBlock.contains("reconcileLiveActivity()"))
+
+        // Part B: the shared Darwin channel + a notifier the tunnel can post with.
+        XCTAssertTrue(signal.contains("enum TunnelHealthSignal"))
+        XCTAssertTrue(signal.contains("com.lavasec.protection.tunnel-health-changed"))
+        XCTAssertTrue(signal.contains("struct DarwinProtectionSignalNotifier: ProtectionSignalNotifier"))
+        XCTAssertTrue(signal.contains("CFNotificationCenterPostNotification"))
+
+        // The tunnel only POSTS the nudge (via the core notifier) when the
+        // connectivity-relevant assessment changes; it must never re-add the
+        // dormant, deliberately-removed extension-side Darwin observer.
+        XCTAssertTrue(tunnel.contains("private func signalAppIfConnectivityStateChanged"))
+        XCTAssertTrue(tunnel.contains("ProtectionConnectivityPolicy.assessment("))
+        XCTAssertTrue(tunnel.contains("connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName)"))
+        XCTAssertTrue(tunnel.contains("signalAppIfConnectivityStateChanged()"))
+        XCTAssertFalse(tunnel.contains("CFNotificationCenterAddObserver"))
+
+        // The foreground app observes the nudge and pulls fresh health over the
+        // reliable provider-message channel.
+        XCTAssertTrue(observer.contains("CFNotificationCenterAddObserver"))
+        XCTAssertTrue(observer.contains("CFNotificationCenterGetDarwinNotifyCenter"))
+        XCTAssertTrue(appViewModel.contains("DarwinNotificationObserver("))
+        XCTAssertTrue(appViewModel.contains("name: TunnelHealthSignal.darwinNotificationName"))
+        XCTAssertTrue(appViewModel.contains("func handleTunnelHealthNudge()"))
+
+        let nudgeBlock = try sourceBlock(
+            in: appViewModel,
+            startingAt: "func handleTunnelHealthNudge()",
+            endingBefore: "func performLiveActivityActionRequest(_ request: LavaLiveActivityActionRequest)"
+        )
+        XCTAssertTrue(nudgeBlock.contains("await self.requestTunnelHealthFlush()"))
+        XCTAssertTrue(nudgeBlock.contains("self.refreshTunnelHealth(force: true)"))
     }
 
     private func readSource(_ relativePath: String) throws -> String {

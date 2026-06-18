@@ -2,6 +2,7 @@ import LavaSecCore
 import SwiftUI
 
 struct BackupRestoreView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var recoveryPhrasePaste = ""
     @State private var recoveryWords = Array(repeating: "", count: BackupRecoveryPhrase.wordCount)
@@ -11,7 +12,9 @@ struct BackupRestoreView: View {
     @FocusState private var focusedWord: Int?
 
     var body: some View {
-        LavaScreenContent(spacing: 22) {
+        LavaSheetScaffold {
+            header
+        } content: {
             LavaSectionGroup("Unlock and restore locally") {
                 VStack(alignment: .leading, spacing: 14) {
                     RestoreStatusPanel(status: restoreStatus)
@@ -44,7 +47,7 @@ struct BackupRestoreView: View {
                     }
                 }
             }
-
+        } footer: {
             Button {
                 restore()
             } label: {
@@ -53,7 +56,28 @@ struct BackupRestoreView: View {
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(mode.isUnavailable || (mode.requiresTypedSecret && restoreSecret.isEmpty) || isRestoring)
         }
-        .navigationTitle("Restore Backup".lavaLocalized)
+    }
+
+    // Match the import-filters / backup-setup sheet chrome: chevron-back +
+    // centered title on the sheet's material header (no pushed navigation bar).
+    private var header: some View {
+        HStack {
+            LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back") {
+                dismiss()
+            }
+
+            Spacer()
+
+            Text("Restore Backup".lavaLocalized)
+                .font(.headline)
+                .foregroundStyle(LavaStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer()
+
+            Color.clear.frame(width: 44, height: 44)
+        }
     }
 
     private var recoveryPhraseFields: some View {

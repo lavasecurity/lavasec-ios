@@ -10,6 +10,22 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
     public var customResolverSecondaryAddress: String?
     public var customResolverName: String?
     public var fallbackToDeviceDNS: Bool
+    // Opt-in (default off) encrypted safety net for a Device-DNS *primary*: when the
+    // local resolver wedges, queries are carried transiently over an encrypted
+    // resolver (Mullvad DoH). Decoupled from `fallbackToDeviceDNS` (which is the
+    // inverse, on-by-default direction) so enabling a third-party encrypted resolver
+    // is always an explicit choice. The in-preset toggle that flips this ships
+    // separately; until then it stays off.
+    public var usesEncryptedDeviceDNSFallback: Bool
+    // The resolver the encrypted Device-DNS fallback routes to when engaged. Mirrors
+    // the primary resolver selection (a preset ID plus optional Custom fields) so the
+    // user can pick any provider/transport, Custom included (Plus-gated). Defaults to
+    // Mullvad DoH (top of the catalog). Only consulted when usesEncryptedDeviceDNSFallback
+    // is on and the primary is Device DNS.
+    public var fallbackResolverPresetID: String
+    public var fallbackCustomResolverAddress: String?
+    public var fallbackCustomResolverSecondaryAddress: String?
+    public var fallbackCustomResolverName: String?
     public var keepFilteringCounts: Bool
     public var keepDomainDiagnostics: Bool
     public var keepNetworkActivity: Bool
@@ -24,11 +40,16 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         enabledBlocklistIDs: Set<String> = [],
         allowedDomains: Set<String> = [],
         blockedDomains: Set<String> = [],
-        resolverPresetID: String = DNSResolverPreset.google.id,
+        resolverPresetID: String = DNSResolverPreset.mullvadDoH.id,
         customResolverAddress: String? = nil,
         customResolverSecondaryAddress: String? = nil,
         customResolverName: String? = nil,
         fallbackToDeviceDNS: Bool = true,
+        usesEncryptedDeviceDNSFallback: Bool = false,
+        fallbackResolverPresetID: String = DNSResolverPreset.mullvadDoH.id,
+        fallbackCustomResolverAddress: String? = nil,
+        fallbackCustomResolverSecondaryAddress: String? = nil,
+        fallbackCustomResolverName: String? = nil,
         keepFilteringCounts: Bool = true,
         keepDomainDiagnostics: Bool = true,
         keepNetworkActivity: Bool = true,
@@ -47,6 +68,11 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         self.customResolverSecondaryAddress = customResolverSecondaryAddress
         self.customResolverName = customResolverName
         self.fallbackToDeviceDNS = fallbackToDeviceDNS
+        self.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback
+        self.fallbackResolverPresetID = fallbackResolverPresetID
+        self.fallbackCustomResolverAddress = fallbackCustomResolverAddress
+        self.fallbackCustomResolverSecondaryAddress = fallbackCustomResolverSecondaryAddress
+        self.fallbackCustomResolverName = fallbackCustomResolverName
         self.keepFilteringCounts = keepFilteringCounts
         self.keepDomainDiagnostics = keepDomainDiagnostics
         self.keepNetworkActivity = keepNetworkActivity
@@ -104,6 +130,11 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         case customResolverSecondaryAddress
         case customResolverName
         case fallbackToDeviceDNS
+        case usesEncryptedDeviceDNSFallback
+        case fallbackResolverPresetID
+        case fallbackCustomResolverAddress
+        case fallbackCustomResolverSecondaryAddress
+        case fallbackCustomResolverName
         case keepFilteringCounts
         case keepDomainDiagnostics
         case keepNetworkActivity
@@ -120,11 +151,16 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         enabledBlocklistIDs = try container.decodeIfPresent(Set<String>.self, forKey: .enabledBlocklistIDs) ?? []
         allowedDomains = try container.decodeIfPresent(Set<String>.self, forKey: .allowedDomains) ?? []
         blockedDomains = try container.decodeIfPresent(Set<String>.self, forKey: .blockedDomains) ?? []
-        resolverPresetID = try container.decodeIfPresent(String.self, forKey: .resolverPresetID) ?? DNSResolverPreset.google.id
+        resolverPresetID = DNSResolverPreset.migratedPresetID(try container.decodeIfPresent(String.self, forKey: .resolverPresetID) ?? DNSResolverPreset.mullvadDoH.id)
         customResolverAddress = try container.decodeIfPresent(String.self, forKey: .customResolverAddress)
         customResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .customResolverSecondaryAddress)
         customResolverName = try container.decodeIfPresent(String.self, forKey: .customResolverName)
         fallbackToDeviceDNS = try container.decodeIfPresent(Bool.self, forKey: .fallbackToDeviceDNS) ?? true
+        usesEncryptedDeviceDNSFallback = try container.decodeIfPresent(Bool.self, forKey: .usesEncryptedDeviceDNSFallback) ?? false
+        fallbackResolverPresetID = DNSResolverPreset.migratedPresetID(try container.decodeIfPresent(String.self, forKey: .fallbackResolverPresetID) ?? DNSResolverPreset.mullvadDoH.id)
+        fallbackCustomResolverAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverAddress)
+        fallbackCustomResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverSecondaryAddress)
+        fallbackCustomResolverName = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverName)
         keepFilteringCounts = try container.decodeIfPresent(Bool.self, forKey: .keepFilteringCounts) ?? true
         keepDomainDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .keepDomainDiagnostics) ?? false
         keepNetworkActivity = try container.decodeIfPresent(Bool.self, forKey: .keepNetworkActivity) ?? true
@@ -160,7 +196,22 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
             return customResolver
         }
 
-        return DNSResolverPreset.allPresets.first { $0.id == resolverPresetID } ?? .google
+        return DNSResolverPreset.allPresets.first { $0.id == resolverPresetID } ?? .mullvadDoH
+    }
+
+    /// The resolver the encrypted Device-DNS fallback routes to, resolved the same
+    /// way as `resolverPreset` (Custom → built custom preset, else catalog lookup).
+    public var fallbackResolverPreset: DNSResolverPreset {
+        if fallbackResolverPresetID == DNSResolverPreset.customID,
+           let customResolver = DNSResolverPreset.custom(
+                primaryRawValue: fallbackCustomResolverAddress,
+                secondaryRawValue: fallbackCustomResolverSecondaryAddress,
+                displayName: fallbackCustomResolverName
+           ) {
+            return customResolver
+        }
+
+        return DNSResolverPreset.allPresets.first { $0.id == fallbackResolverPresetID } ?? .mullvadDoH
     }
 
     public var resolverDiagnosticDisplayName: String {

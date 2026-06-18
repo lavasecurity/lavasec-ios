@@ -64,12 +64,12 @@ public enum ThirdPartyLegalNotices {
             plannedUse: "Plain-text identification of the device DNS resolver used for allowed DNS lookups when selected or used as fallback."
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.google.id,
-            displayName: DNSResolverPreset.google.displayName,
+            id: DNSResolverPreset.mullvad.id,
+            displayName: DNSResolverPreset.mullvad.displayName,
             category: .dnsResolver,
-            ownerName: "Google LLC",
-            noticeText: "Google and Google Public DNS are trademarks of Google LLC.",
-            sourceURL: URL(string: "https://developers.google.com/speed/public-dns"),
+            ownerName: "Mullvad VPN AB",
+            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
+            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -91,21 +91,21 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.dnsSB.id,
-            displayName: DNSResolverPreset.dnsSB.displayName,
-            category: .dnsResolver,
-            ownerName: "xTom GmbH",
-            noticeText: "DNS.SB is operated by xTom GmbH.",
-            sourceURL: URL(string: "https://dns.sb/"),
-            plannedUse: dnsResolverPlannedUse
-        ),
-        ThirdPartyLegalNotice(
-            id: DNSResolverPreset.googleDoH.id,
-            displayName: DNSResolverPreset.googleDoH.displayName,
+            id: DNSResolverPreset.google.id,
+            displayName: DNSResolverPreset.google.displayName,
             category: .dnsResolver,
             ownerName: "Google LLC",
             noticeText: "Google and Google Public DNS are trademarks of Google LLC.",
             sourceURL: URL(string: "https://developers.google.com/speed/public-dns"),
+            plannedUse: dnsResolverPlannedUse
+        ),
+        ThirdPartyLegalNotice(
+            id: DNSResolverPreset.mullvadDoH.id,
+            displayName: DNSResolverPreset.mullvadDoH.displayName,
+            category: .dnsResolver,
+            ownerName: "Mullvad VPN AB",
+            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
+            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -127,21 +127,21 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.dnsSBDoH.id,
-            displayName: DNSResolverPreset.dnsSBDoH.displayName,
-            category: .dnsResolver,
-            ownerName: "xTom GmbH",
-            noticeText: "DNS.SB is operated by xTom GmbH.",
-            sourceURL: URL(string: "https://dns.sb/doh/"),
-            plannedUse: dnsResolverPlannedUse
-        ),
-        ThirdPartyLegalNotice(
-            id: DNSResolverPreset.googleDoT.id,
-            displayName: DNSResolverPreset.googleDoT.displayName,
+            id: DNSResolverPreset.googleDoH.id,
+            displayName: DNSResolverPreset.googleDoH.displayName,
             category: .dnsResolver,
             ownerName: "Google LLC",
             noticeText: "Google and Google Public DNS are trademarks of Google LLC.",
             sourceURL: URL(string: "https://developers.google.com/speed/public-dns"),
+            plannedUse: dnsResolverPlannedUse
+        ),
+        ThirdPartyLegalNotice(
+            id: DNSResolverPreset.mullvadDoT.id,
+            displayName: DNSResolverPreset.mullvadDoT.displayName,
+            category: .dnsResolver,
+            ownerName: "Mullvad VPN AB",
+            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
+            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -163,12 +163,12 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.dnsSBDoT.id,
-            displayName: DNSResolverPreset.dnsSBDoT.displayName,
+            id: DNSResolverPreset.googleDoT.id,
+            displayName: DNSResolverPreset.googleDoT.displayName,
             category: .dnsResolver,
-            ownerName: "xTom GmbH",
-            noticeText: "DNS.SB is operated by xTom GmbH.",
-            sourceURL: URL(string: "https://dns.sb/dot/"),
+            ownerName: "Google LLC",
+            noticeText: "Google and Google Public DNS are trademarks of Google LLC.",
+            sourceURL: URL(string: "https://developers.google.com/speed/public-dns"),
             plannedUse: dnsResolverPlannedUse
         )
     ]

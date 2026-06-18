@@ -110,6 +110,22 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("throw EncryptedBackupError.invalidRecoveryPhrase"))
     }
 
+    func testRestoreFlowIsFullSheetWithFooterAction() throws {
+        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let settings = try Self.readAppSource("LavaSecApp/SettingsView.swift")
+
+        // Presented as a full bottom sheet (covers the tab bar) like Import filters,
+        // matching the backup setup flow, instead of a pushed screen.
+        XCTAssertTrue(settings.contains(".sheet(isPresented: $isRestoringBackup)"))
+        XCTAssertTrue(settings.contains("isRestoringBackup = true"))
+        XCTAssertTrue(source.contains("LavaSheetScaffold {"))
+        // The Restore button lives on the sheet's footer bar; back is the chevron.
+        XCTAssertTrue(source.contains("} footer: {"))
+        XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\")"))
+        XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
+        XCTAssertFalse(source.contains(".navigationTitle(\"Restore Backup\".lavaLocalized)"))
+    }
+
     private static func readAppSource(_ relativePath: String) throws -> String {
         let current = URL(fileURLWithPath: #filePath)
         let packageRoot = current

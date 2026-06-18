@@ -28,6 +28,11 @@ enum LavaSecAppGroup {
     static let protectionLastDeliveredNotificationAtDefaultsKey = "lavasec.protection.lastDeliveredNotificationAt"
     static let protectionUnresolvedProblemNotificationIDDefaultsKey = "lavasec.protection.unresolvedProblemNotificationID"
     static let protectionUnresolvedProblemNotificationKindDefaultsKey = "lavasec.protection.unresolvedProblemNotificationKind"
+    // Written by the app only after `saveToPreferences` confirms Connect-On-Demand
+    // is armed/disarmed, and read by the tunnel to gate self-reconnect: a self-
+    // cancel only recovers if on-demand will bring the tunnel back, and the app
+    // persists `protectionEnabled = true` even when arming on-demand fails.
+    static let protectionOnDemandConfirmedEnabledDefaultsKey = "lavasec.protection.onDemandConfirmedEnabled"
     // Aliased to the LavaSecCore stores so the app, tunnel, intents, and the
     // stores can never drift on key strings.
     static let protectionActiveSessionIDDefaultsKey = ProtectionSessionStore.Keys.activeSessionID
@@ -85,7 +90,12 @@ enum LavaSecProviderMessageCodec {
     }
 }
 
-#if DEBUG || LAVA_QA_TOOLS
+// Compiled in all configurations (including Release/TestFlight) so the optional
+// Feedback report can carry the on-device VPN diagnostics. A privacy audit of
+// every append site confirmed no event records a queried domain (only resolver
+// endpoints, health/outcome metadata, and tunnel state); the user's domain
+// history lives separately in the user-controlled DiagnosticsStore. The 8 MB cap
+// plus rotation bounds the on-device footprint.
 enum LavaSecDeviceDebugLog {
     // Cap keeps the on-device log from growing without bound (an 88.9 MB file was
     // observed during QA); one rotated generation is kept for dump tooling.
@@ -175,4 +185,3 @@ enum LavaSecDeviceDebugLog {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename)
     }
 }
-#endif

@@ -74,11 +74,9 @@ private struct LavaNavigationRowButtonStyle: ButtonStyle {
 struct LavaPanelActionButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
-    let height: CGFloat
     let cornerRadius: CGFloat
 
-    init(height: CGFloat = 38, cornerRadius: CGFloat = LavaSurface.controlCornerRadius) {
-        self.height = height
+    init(cornerRadius: CGFloat = LavaSurface.controlCornerRadius) {
         self.cornerRadius = cornerRadius
     }
 
@@ -89,7 +87,7 @@ struct LavaPanelActionButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.82)
             .frame(maxWidth: .infinity)
-            .frame(height: height)
+            .frame(height: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(configuration.isPressed ? LavaStyle.panelActionPressedFill : LavaStyle.panelActionFill)
@@ -114,7 +112,7 @@ struct LavaStandaloneActionButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.82)
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
                     .fill(LavaStyle.safeControlGreen)
@@ -143,7 +141,7 @@ struct LavaSecondaryActionButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.82)
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
                     .fill(Color(uiColor: .secondarySystemFill))
@@ -155,6 +153,32 @@ struct LavaSecondaryActionButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
             .opacity(isEnabled ? 1 : 0.45)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    /// The shared body of a single-line row: horizontal inset plus the `LavaRowHeight`
+    /// tap-target floor, with content vertically centered. One definition so a toggle
+    /// row, an action row, and a system-link row share the exact same height. Surface is
+    /// applied separately — a row inside a `LavaCondensedList` inherits the list's card;
+    /// a standalone row uses `lavaControlRowCard()`.
+    ///
+    /// Single-line rows take no extra vertical padding (the floor centers the control),
+    /// which is why a toggle lands at `LavaRowHeight.standard` rather than inflating the
+    /// way a `LavaPlainCard`-wrapped control did (card pad + the floor stacked to ~72pt).
+    func lavaRow() -> some View {
+        self
+            .padding(.horizontal, LavaRowHeight.horizontalInset)
+            .frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)
+            .contentShape(Rectangle())
+    }
+
+    /// A standalone single control (toggle, segmented picker, lone action) in its own
+    /// card at the shared row height. Use instead of `LavaPlainCard` for one-control
+    /// rows; `LavaPlainCard` stays right for genuinely multi-content cards, and multi-row
+    /// groups belong in a `LavaCondensedList` of `lavaRow`s.
+    func lavaControlRowCard() -> some View {
+        lavaRow().lavaSurface(.card)
     }
 }
 
@@ -218,24 +242,41 @@ struct LavaTextEditorInputRow: View {
     @Binding var text: String
     let placeholder: String
     var minHeight: CGFloat = 96
+    /// When set, shows a live character counter and hard-caps input at this length (UR-29).
+    var characterLimit: Int? = nil
 
     var body: some View {
         LavaTextInputRow(title: title) {
-            ZStack(alignment: .topLeading) {
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(placeholder.lavaLocalized)
+            VStack(alignment: .leading, spacing: 4) {
+                ZStack(alignment: .topLeading) {
+                    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(placeholder.lavaLocalized)
+                            .font(.body)
+                            .foregroundStyle(LavaStyle.tertiaryText)
+                            .padding(.top, 8)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextEditor(text: $text)
                         .font(.body)
-                        .foregroundStyle(LavaStyle.tertiaryText)
-                        .padding(.top, 8)
-                        .allowsHitTesting(false)
+                        .frame(minHeight: minHeight)
+                        .scrollContentBackground(.hidden)
+                        // TextEditor keeps UITextView line padding; pull it back to align with the row label.
+                        .padding(.leading, -5)
                 }
 
-                TextEditor(text: $text)
-                    .font(.body)
-                    .frame(minHeight: minHeight)
-                    .scrollContentBackground(.hidden)
-                    // TextEditor keeps UITextView line padding; pull it back to align with the row label.
-                    .padding(.leading, -5)
+                if let characterLimit {
+                    Text("\(text.count)/\(characterLimit)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(text.count >= characterLimit ? LavaStyle.lavaOrange : LavaStyle.tertiaryText)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .accessibilityLabel("\(text.count) of \(characterLimit) characters used")
+                        .onChange(of: text) { _, newValue in
+                            if newValue.count > characterLimit {
+                                text = String(newValue.prefix(characterLimit))
+                            }
+                        }
+                }
             }
         }
     }
@@ -338,16 +379,18 @@ struct LavaMetricPill: View {
 struct LavaInfoCard<Content: View>: View {
     let content: Content
     let borderTint: Color?
+    let minHeight: CGFloat?
 
-    init(borderTint: Color? = nil, @ViewBuilder content: () -> Content) {
+    init(borderTint: Color? = nil, minHeight: CGFloat? = nil, @ViewBuilder content: () -> Content) {
         self.borderTint = borderTint
+        self.minHeight = minHeight
         self.content = content()
     }
 
     var body: some View {
         content
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
             .lavaPanelBackground(cornerRadius: 20, borderTint: borderTint)
     }
 }
@@ -460,7 +503,10 @@ struct LavaInfoPanel: View {
     }
 
     var body: some View {
-        LavaInfoCard(borderTint: borderTint) {
+        // Floor to the shared row height so a single-line panel (e.g. a status row like
+        // "Ready after sign-in") lines up with the rows beside it instead of sitting
+        // shorter. Multi-line panels already exceed this, so it's a no-op there.
+        LavaInfoCard(borderTint: borderTint, minHeight: LavaRowHeight.standard) {
             VStack(alignment: .leading, spacing: description == nil ? 0 : 10) {
                 header
 
