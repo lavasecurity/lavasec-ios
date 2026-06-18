@@ -7,20 +7,24 @@ struct ActivityView: View {
     @EnvironmentObject private var security: SecurityController
     @Environment(\.scenePhase) private var scenePhase
     let scrollToTopTrigger: Int
+    let embedsNavigationStack: Bool
     @State private var selectedRange = ActivityDateRange.today()
     @State private var isShowingDatePicker = false
     @State private var isActivityAuthenticated = false
 
-    init(scrollToTopTrigger: Int = 0) {
+    init(scrollToTopTrigger: Int = 0, embedsNavigationStack: Bool = true) {
         self.scrollToTopTrigger = scrollToTopTrigger
+        self.embedsNavigationStack = embedsNavigationStack
     }
 
     var body: some View {
-        NavigationStack {
-            if canShowActivity {
-                activityContent
+        Group {
+            if embedsNavigationStack {
+                NavigationStack {
+                    gatedActivityScreen
+                }
             } else {
-                ActivityAuthenticationGateView(authenticate: authenticateActivity)
+                gatedActivityScreen
             }
         }
         .onDisappear {
@@ -30,6 +34,15 @@ struct ActivityView: View {
             if security.isProtected(.activityViewing) {
                 isActivityAuthenticated = false
             }
+        }
+    }
+
+    @ViewBuilder
+    private var gatedActivityScreen: some View {
+        if canShowActivity {
+            activityContent
+        } else {
+            ActivityAuthenticationGateView(authenticate: authenticateActivity)
         }
     }
 
@@ -346,17 +359,19 @@ private struct NetworkActivityLogView: View {
             canClear: !viewModel.networkActivityLog.entries.isEmpty,
             clear: { showingClearActivityConfirmation = true }
         )
-        .alert(
-            "Clear local network activity?",
-            isPresented: $showingClearActivityConfirmation
-        ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear Activity", role: .destructive) {
-                viewModel.clearNetworkActivityLog()
-                visibleEntryCount = LocalLogPagination.initialCount
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Clear local network activity?",
+                isPresented: $showingClearActivityConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear Activity", role: .destructive) {
+                    viewModel.clearNetworkActivityLog()
+                    visibleEntryCount = LocalLogPagination.initialCount
+                }
+            } message: {
+                Text("This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.")
             }
-        } message: {
-            Text("This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.")
         }
         .task {
             viewModel.refreshNetworkActivityLog(force: true)
@@ -497,6 +512,10 @@ private extension NetworkActivityEvent {
             return .deviceDNS
         case .reconnectNeeded:
             return .reconnect
+        case .connectivityRecovered:
+            // The positive counterpart to .reconnectNeeded — protection is healthy
+            // again (green checkmark), closing the wedge→recovery pair in the feed.
+            return .protectionLifecycle
         case .networkSettingsReapplyFailed:
             return .smokeTest(isWarning: true)
         }
@@ -1002,17 +1021,19 @@ private struct DomainHistoryView: View {
             canClear: viewModel.configuration.keepDomainDiagnostics && !viewModel.diagnostics.recentEvents.isEmpty,
             clear: { showingClearHistoryConfirmation = true }
         )
-        .alert(
-            "Clear local domain history?",
-            isPresented: $showingClearHistoryConfirmation
-        ) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear History", role: .destructive) {
-                viewModel.clearDomainHistory()
-                visibleEventCount = LocalLogPagination.initialCount
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Clear local domain history?",
+                isPresented: $showingClearHistoryConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear History", role: .destructive) {
+                    viewModel.clearDomainHistory()
+                    visibleEventCount = LocalLogPagination.initialCount
+                }
+            } message: {
+                Text("This removes saved domain rows from this phone. Filtering counts and network activity are unchanged.")
             }
-        } message: {
-            Text("This removes saved domain rows from this phone. Filtering counts and network activity are unchanged.")
         }
         .sheet(item: $activeReviewSheet) { _ in
             FilterConfirmationSheet(origin: .domainHistory)
@@ -1140,15 +1161,15 @@ private struct DomainHistoryRow: View {
             Button {
                 UIPasteboard.general.string = event.domain
             } label: {
-                Label("Copy Domain", systemImage: "doc.on.doc")
+                Label("Copy", systemImage: "doc.on.doc")
             }
 
             Button(action: addToBlocked) {
-                Label("Add to Blocked Domains", systemImage: "hand.raised.fill")
+                Label("Block", systemImage: "hand.raised.fill")
             }
 
             Button(action: addToAllowed) {
-                Label("Add to Allowed Domains", systemImage: "arrow.right.circle.fill")
+                Label("Allow", systemImage: "arrow.right.circle.fill")
             }
         }
     }

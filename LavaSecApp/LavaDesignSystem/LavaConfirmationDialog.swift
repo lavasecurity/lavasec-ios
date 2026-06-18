@@ -1,117 +1,34 @@
 import SwiftUI
 
-/// A branded, centered confirmation card for *soft* two-choice prompts — the kind
-/// where the action is harmless and we want the app's own voice (e.g. the
-/// rage-shake "Send feedback?" nudge). Destructive confirmations deliberately stay
-/// on the system `.alert`, where the native destructive role and accessibility are
-/// the right tools.
-///
-/// Buttons stack vertically: the green primary on top, the neutral "escape" choice
-/// below — so the calm option never competes with the primary for emphasis.
-///
-/// Callers pass plain English copy; the card localizes each string at render via
-/// `.lavaLocalized` (a verbatim `Text(String)` would otherwise skip the catalog),
-/// so the keys must exist in `Localizable.xcstrings`.
-struct LavaConfirmationDialog: View {
-    let title: String
-    let message: String
-    let confirmTitle: String
-    let cancelTitle: String
-    let onConfirm: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.primaryText)
-
-            Text(message.lavaLocalized)
-                .font(.subheadline)
-                .foregroundStyle(LavaStyle.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(spacing: 8) {
-                Button(confirmTitle.lavaLocalized, action: onConfirm)
-                    .buttonStyle(LavaStandaloneActionButtonStyle())
-
-                Button(cancelTitle.lavaLocalized, action: onCancel)
-                    .buttonStyle(LavaSecondaryActionButtonStyle())
-            }
-            .padding(.top, 10)
-        }
-        .padding(20)
-        .frame(maxWidth: 320)
-        .lavaSurface(.card)
-        .shadow(color: Color.black.opacity(0.28), radius: 24, y: 10)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-    }
-}
-
-private struct LavaConfirmationDialogPresentation: ViewModifier {
-    @Binding var isPresented: Bool
-    let title: String
-    let message: String
-    let confirmTitle: String
-    let cancelTitle: String
-    let onConfirm: () -> Void
-    let onCancel: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .overlay {
-                if isPresented {
-                    ZStack {
-                        Color.black.opacity(0.45)
-                            .ignoresSafeArea()
-                            .contentShape(Rectangle())
-                            .onTapGesture(perform: onCancel)
-                            .transition(.opacity)
-                            .accessibilityHidden(true)
-
-                        LavaConfirmationDialog(
-                            title: title,
-                            message: message,
-                            confirmTitle: confirmTitle,
-                            cancelTitle: cancelTitle,
-                            onConfirm: onConfirm,
-                            onCancel: onCancel
-                        )
-                        .padding(40)
-                        .transition(.scale(scale: 0.96).combined(with: .opacity))
-                    }
-                    .accessibilityIdentifier("lavaConfirmationDialog")
-                }
-            }
-            .animation(.easeOut(duration: 0.2), value: isPresented)
-    }
-}
-
 extension View {
-    /// Presents a ``LavaConfirmationDialog`` over the current view while
-    /// `isPresented` is true. Tapping the dimmed backdrop runs `onCancel` — safe,
-    /// because these prompts are non-destructive. For destructive confirmations,
-    /// prefer the system `.alert` instead.
-    func lavaConfirmationDialog(
-        isPresented: Binding<Bool>,
-        title: String,
-        message: String,
-        confirmTitle: String,
-        cancelTitle: String,
-        onConfirm: @escaping () -> Void,
-        onCancel: @escaping () -> Void
+    /// Routes a confirmation `.alert` through the app's shared scaffold so every
+    /// two-choice prompt looks alike: the native system alert (the "Discard changes?"
+    /// look — a centered card with the system's light border) whose buttons read
+    /// *neutral* rather than the app's green. The Cancel/escape action stays calm, the
+    /// way the old rage-shake "Not now" button did, and destructive roles keep their red.
+    ///
+    /// The app tints itself green (`RootView`'s `.tint`), and a native alert inherits that
+    /// tint for its non-destructive buttons — which is why an un-styled "Cancel" shows up
+    /// green. Re-tinting the *screen* neutral would also drain the green from its toggles
+    /// and links, so instead the alert rides a clear, neutrally-tinted layer behind the
+    /// content; the surrounding screen keeps its green untouched.
+    ///
+    /// Attach the `.alert` to the `Color` the closure hands back:
+    ///
+    ///     .lavaConfirmationAlert { host in
+    ///         host.alert("Discard changes?", isPresented: $isShowing) {
+    ///             Button("Cancel", role: .cancel) {}
+    ///             Button("Discard", role: .destructive) { discard() }
+    ///         } message: {
+    ///             Text("Your draft changes will be removed.")
+    ///         }
+    ///     }
+    func lavaConfirmationAlert<Output: View>(
+        @ViewBuilder _ alert: (Color) -> Output
     ) -> some View {
-        modifier(
-            LavaConfirmationDialogPresentation(
-                isPresented: isPresented,
-                title: title,
-                message: message,
-                confirmTitle: confirmTitle,
-                cancelTitle: cancelTitle,
-                onConfirm: onConfirm,
-                onCancel: onCancel
-            )
-        )
+        background {
+            alert(Color.clear)
+                .tint(LavaStyle.confirmationButtonTint)
+        }
     }
 }

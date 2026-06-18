@@ -16,6 +16,19 @@ final class ThirdPartyLegalNoticeTests: XCTestCase {
         XCTAssertEqual(noticeIDs, resolverIDs)
     }
 
+    func testMullvadPresetHasResolverNotice() throws {
+        let notice = try XCTUnwrap(
+            ThirdPartyLegalNotices.notice(id: DNSResolverPreset.mullvadDoH.id)
+        )
+
+        // Mullvad is now a selectable resolver preset, so it must be disclosed as a
+        // third-party DNS resolver with attribution and a source link.
+        XCTAssertEqual(notice.category, .dnsResolver)
+        XCTAssertEqual(notice.ownerName, "Mullvad VPN AB")
+        XCTAssertTrue(notice.noticeText.contains("Mullvad"))
+        XCTAssertNotNil(notice.sourceURL)
+    }
+
     func testEveryResolverNoticeMentionsEncryptedForwardingForAllowedLookups() {
         XCTAssertTrue(ThirdPartyLegalNotices.dnsResolverNotices.allSatisfy {
             if $0.id == DNSResolverPreset.device.id {

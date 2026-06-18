@@ -173,11 +173,59 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private static let dohTimeoutSeconds = 5
     private static let dotTimeoutSeconds = 5
     private static let doqTimeoutSeconds = 5
+    // Routine smoke-probe timeout (health checks, startup): generous, since these
+    // aren't latency-critical and a long timeout avoids false negatives.
     private static let resolverSmokeProbeTimeoutSeconds = 8
+    // Recovery smoke-probe timeout (dns-recovery optimization A). The 1758 device
+    // log showed the ~12s handoff blip was dominated by the 8s probe timeout
+    // gating "am I back yet?" detection before self-reconnect fired (probe started
+    // 07:55:27, failed 07:55:36, self-reconnect 07:55:38, recovered 07:55:39).
+    // Sized to cover the first device/plain resolver's full failover (UDP 1s + TCP
+    // 2s = 3s) PLUS a secondary resolver's UDP attempt (1s): a reachable secondary
+    // answers via UDP in well under a second, so this no longer masks a working
+    // secondary when the first address is blackholed (review note), while still
+    // detecting an all-dead resolver set ~4s sooner than the routine 8s. Trade-off:
+    // a slow-but-alive resolver on a high-latency network, or a secondary that
+    // needs TCP, may cost one extra self-reconnect — bounded and self-healing (the
+    // restart re-captures and the next query fails over).
+    private static let resolverRecoveryProbeTimeoutSeconds = 4
+    // Probe reasons that run while the user may be wedged, where fast detection
+    // matters; everything else (periodic-health-check, startTunnel,
+    // configuration-changed) keeps the routine timeout.
+    private static let recoveryContextProbeReasons: Set<String> = [
+        "network-settled",
+        "resolver-wedge-recovery",
+        "device-dns-fallback-recovery"
+    ]
+    // The short recovery timeout is only SAFE for the fast, UDP-based device/plain
+    // primary path with no fallback branch to cut short:
+    //  - An encrypted primary (DoH/DoT/DoQ) can't even return before its 5s
+    //    transport timeout, so 3s would always declare a spurious failure.
+    //  - A fallback-capable probe runs primary THEN device-DNS fallback; cutting at
+    //    3s completes with fallbackResult=nil and the failure branch would
+    //    DEACTIVATE a working device-DNS fallback while the primary is still down
+    //    (P1, flagged in review). Those keep the routine timeout.
+    private static func smokeProbeTimeoutSeconds(
+        reason: String,
+        transport: DNSResolverTransport,
+        canUseDeviceDNSFallback: Bool
+    ) -> Int {
+        let isFastPrimary = transport == .deviceDNS || transport == .plainDNS
+        if recoveryContextProbeReasons.contains(reason), isFastPrimary, !canUseDeviceDNSFallback {
+            return resolverRecoveryProbeTimeoutSeconds
+        }
+        return resolverSmokeProbeTimeoutSeconds
+    }
     private static let slowUpstreamResponseThresholdMilliseconds = 2_500
     private let resolverBackoffStateQueue = DispatchQueue(label: "com.lavasec.tunnel.resolver-backoff", qos: .utility)
     private let pathMonitor = Network.NWPathMonitor()
     private static let resolverSmokeProbeInterval: TimeInterval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+    // Fast recovery cadence for a same-network resolver wedge. Far shorter than
+    // the 300s routine probe: when DNS is failed-closed, the user is offline now,
+    // so re-probe (after clearing the backoff penalty box) on a tight loop until
+    // it recovers. One re-probe per interval — not per query — so it never
+    // reintroduces the dead-resolver hammering the backoff exists to prevent.
+    private let resolverWedgeRecoveryProbeInterval: TimeInterval = 30
     private let healthWriteInterval: TimeInterval = 30
     private let diagnosticsWriteInterval: TimeInterval = 30
     private let configurationRefreshInterval: TimeInterval = 30
@@ -204,6 +252,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var firstDNSDecisionReferenceAt: Date?
     private var tunnelStartLatencyOperationID: LatencyOperationID?
     private var fallbackRecoverySmokeProbeWorkItem: DispatchWorkItem?
+    // Pending same-network wedge-recovery re-probe (backoff reset + smoke probe),
+    // scheduled while DNS is wedged and cancelled the moment it recovers.
+    private var resolverWedgeRecoveryWorkItem: DispatchWorkItem?
     private var networkKind: TunnelNetworkKind = .unknown
     private var lastConfigurationRefreshAt = Date.distantPast
     private var lastProtectionPauseStateRefreshAt = Date.distantPast
@@ -248,33 +299,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return true
         }
     )
-    private let dohResolver: DoHTransport = {
-        #if DEBUG || LAVA_QA_TOOLS
-        DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds) { event, details in
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
-        }
-        #else
-        DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds)
+    private let dohResolver = DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds) { event, details in
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
+    }
+    private let dotResolver = DoTTransport(timeoutSeconds: PacketTunnelProvider.dotTimeoutSeconds) { event, details in
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
+    }
+    private let doqResolver = DoQTransport(timeoutSeconds: PacketTunnelProvider.doqTimeoutSeconds) { event, details in
+        #if !(DEBUG || LAVA_QA_TOOLS)
+        // DoQ opens a fresh QUIC connection per query (no pooling yet), so its
+        // per-query "connection-ready" handshake event would put appendLine back on
+        // the Release DNS success hot path. Drop just that event in Release; the
+        // rare connection-error events (failures — the useful handoff signal) still
+        // log. DoH/DoT pool connections, so their connection-ready stays on.
+        if event == "dns-doq-connection-ready" { return }
         #endif
-    }()
-    private let dotResolver: DoTTransport = {
-        #if DEBUG || LAVA_QA_TOOLS
-        DoTTransport(timeoutSeconds: PacketTunnelProvider.dotTimeoutSeconds) { event, details in
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
-        }
-        #else
-        DoTTransport(timeoutSeconds: PacketTunnelProvider.dotTimeoutSeconds)
-        #endif
-    }()
-    private let doqResolver: DoQTransport = {
-        #if DEBUG || LAVA_QA_TOOLS
-        DoQTransport(timeoutSeconds: PacketTunnelProvider.doqTimeoutSeconds) { event, details in
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
-        }
-        #else
-        DoQTransport(timeoutSeconds: PacketTunnelProvider.doqTimeoutSeconds)
-        #endif
-    }()
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
+    }
     // One operation id groups all resolver-path latency spans (endpoint
     // attempts, device fallback, bootstrap) for a tunnel session. Only read
     // inside DEBUG/QA latency emission; harmless and unused in Release.
@@ -287,7 +328,50 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var lastNetworkSettingsReapplyAt = Date.distantPast
     private let reconnectNeededActivityReminderInterval: TimeInterval = 300
     private var lastReconnectNeededActivityAt: Date?
-    private var lastReconnectNeededActivityReason: String?
+    // When the current reconnect-needed wedge *began* (set once on entry, cleared
+    // on recovery). Distinct from lastReconnectNeededActivityAt, which refreshes on
+    // When the current reconnect-needed wedge *began* (set once on entry, cleared
+    // only when a recovery is actually logged or on a tunnel-lifecycle reset).
+    // Deliberately NOT cleared by clearReconnectNeededActivitySuppression: a
+    // network change routes through that clear before the network-settled probe
+    // recovers, and wiping the marker there would make the handoff recovery (a
+    // primary path this logging targets) silently no-op. Distinct from
+    // lastReconnectNeededActivityAt (300s notify throttle) and lastUpstreamFailureAt
+    // (refreshes on every failed query), so a recovery reports the true wedge
+    // duration, not the gap since the last failed lookup.
+    private var reconnectNeededSince: Date?
+    private var reconnectNeededReason: String?
+    // Peak consecutive-upstream-failure count seen during the current wedge.
+    // Captured on the marker because the success paths reset
+    // health.consecutiveUpstreamFailureCount to 0 before logging recovery, so the
+    // exported dns-recovered would otherwise lose how many failures the wedge
+    // accumulated (orthogonal to duration: few failures over a long idle wedge vs.
+    // many under heavy browsing). max() preserves it across a network-change reset.
+    private var reconnectNeededPeakFailureCount = 0
+    // Last-resort recovery: when DNS stays wedged after a handoff (device-DNS
+    // resolvers can't be re-captured while the tunnel is active), restart the
+    // tunnel so startup re-captures them. Latched so we issue the cancel once, and
+    // the attempt history is persisted (the cancel kills this process) for the
+    // cross-restart backoff in TunnelSelfReconnectPolicy.
+    private var hasRequestedSelfReconnect = false
+    // Dedup state for the self-reconnect-suppressed device-log line. A persistent
+    // wedge re-evaluates the policy on every failed query/tick, which previously
+    // logged a suppressed line each time (hundreds per wedge), churning the size-
+    // capped debug log and evicting useful diagnostics. We log only when the
+    // suppression signature changes or after a cooldown, so the reason is still
+    // captured without the storm.
+    private var lastSelfReconnectSuppressionSignature: String?
+    private var lastSelfReconnectSuppressionLogAt: Date?
+    private static let selfReconnectSuppressionLogInterval: TimeInterval = 60
+    private static let selfReconnectAttemptsDefaultsKey = "tunnel.selfReconnectAttemptTimes"
+    // Nudges the foreground app to pull fresh health (over the provider-message
+    // channel) when the connectivity-relevant state changes, so the Dynamic
+    // Island reflects reconnect/network-lost states without waiting for the next
+    // app-side status poll (UR-6). Darwin works app-side because the app's run
+    // loop is live; the tunnel only ever POSTS — it must not re-add the dormant,
+    // unreliable extension-side observer that was deliberately removed.
+    private let connectivitySignalNotifier: any ProtectionSignalNotifier = DarwinProtectionSignalNotifier()
+    private var lastSignaledConnectivityKey: String?
     #if LAVA_QA_TOOLS
     private var lastQAConnectivitySeverity: ProtectionConnectivitySeverity = .healthy
     private var lastQAConnectivityLogAt = Date.distantPast
@@ -304,12 +388,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         ])
         #endif
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "startTunnel-begin", details: [
             "hasOptions": "\(options != nil)",
             "hasOperationID": "\(operationID != nil)"
         ])
-        #endif
 
         let completion = SendableCompletion(completionHandler)
         let lifecycleGeneration = beginTunnelLifecycle(reason: "startTunnel")
@@ -323,14 +405,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         let settingsBundle = makeTunnelNetworkSettingsForCurrentConfiguration()
 
-        #if DEBUG
         let settingsStartedAt = Date()
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "setTunnelNetworkSettings-begin", details: [
             "tunnelAddress": settingsBundle.tunnelAddress,
             "dnsServerAddress": settingsBundle.dnsServerAddress,
             "route": settingsBundle.routeDescription
         ])
-        #endif
         #if DEBUG || LAVA_QA_TOOLS
         let networkSettingsSpan = trace.beginSpan("tunnel.setNetworkSettings", parent: startSpan, details: [
             "status": "begin"
@@ -348,9 +428,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
 
             if let error {
-                #if DEBUG
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "setTunnelNetworkSettings-error", details: Self.errorDebugDetails(error))
-                #endif
                 #if DEBUG || LAVA_QA_TOOLS
                 networkSettingsSpan.end(details: ["status": "error", "errorKind": "\(type(of: error))"])
                 startSpan.end(details: ["status": "error", "errorKind": "\(type(of: error))"])
@@ -375,12 +453,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
-            #if DEBUG
             let duration = Date().timeIntervalSince(settingsStartedAt)
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "setTunnelNetworkSettings-success", details: [
                 "durationMs": "\(Int((duration * 1_000).rounded()))"
             ])
-            #endif
             #if DEBUG || LAVA_QA_TOOLS
             networkSettingsSpan.end(details: ["status": "ok"])
             #endif
@@ -400,9 +476,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self.scheduleResolverSmokeProbeIfNeeded(reason: "startTunnel")
             self.startPeriodicResolverSmokeProbe()
             self.readPackets()
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "startTunnel-ready")
-            #endif
             #if DEBUG || LAVA_QA_TOOLS
             startSpan.end(details: ["status": "ready"])
             #endif
@@ -426,6 +500,51 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         invalidateTunnelLifecycle(reason: "stopTunnel")
         cleanUpTunnelRuntimeAfterStop(reason: "stopTunnel") {
             completion.complete()
+        }
+    }
+
+    // iOS can suspend the extension while the device sleeps (e.g. in a pocket
+    // while walking out the door) and then call wake() when it resumes. By then
+    // the upstream resolver connections and bootstrapped endpoint IPs are likely
+    // stale, so drop them and re-probe: refresh device DNS, force-drop cached
+    // responses and tear down stale UDP sockets / DoH/DoT/DoQ connections,
+    // invalidate the bootstrap cache, then schedule the resolver re-handshake once
+    // the path settles. The forced reset is what keeps a query arriving before the
+    // coalesced settle probe from reusing a pre-sleep connection.
+    //
+    // We deliberately do NOT clear the device-DNS fallback decision here. wake()
+    // also fires on ordinary sleep with no network change; clearing fallback would
+    // drop a fallback that is keeping DNS working (configured resolver failing on
+    // this network) and force a failing-primary retry — a fresh stall every wake.
+    // Real network changes are handled by handleNetworkPathUpdate (which does clear
+    // fallback). Computing the reset identifier with the current mode keeps the
+    // post-reset runtime consistent with what queries use; the settle probe still
+    // re-checks the primary in the background and recovers if it now works.
+    override func wake() {
+        // Device-log appends stay un-gated so Release/TestFlight feedback reports
+        // capture VPN wake events (privacy-audited: no event records a queried
+        // domain). #21 shipped this in Release; do not re-wrap in #if DEBUG.
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "wake")
+        dnsStateQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            // Invalidate any smoke probe already in flight (regular or
+            // fallback-recovery) so a result computed before sleep can't apply
+            // after resume and flip the fallback decision on stale, pre-sleep
+            // network conditions — without itself clearing fallback.
+            self.invalidateInFlightSmokeProbes()
+            self.refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "wake")
+            let resolverIdentifier = self.currentResolverRuntimeConfiguration().cacheIdentifier
+            let pendingResponses = self.collectPendingResponsesAndResetResolverRuntime(
+                identifier: resolverIdentifier,
+                reason: "wake",
+                force: true
+            )
+            self.resolverBootstrapService.invalidateAll()
+            self.writeServerFailures(for: pendingResponses)
+            self.resolverProbeCoalescer.noteUnsettled()
         }
     }
 
@@ -520,6 +639,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         cancelProtectionPauseResumeTimer()
         endProtectionVPNSession(reason: reason)
         cancelFallbackRecoverySmokeProbe()
+        cancelResolverWedgeRecoveryProbe()
 
         resolverSocketQueue.async { [weak self] in
             self?.resolverSockets = [:]
@@ -540,7 +660,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
-    #if DEBUG
     private static func errorDebugDetails(_ error: Error) -> [String: String] {
         let nsError = error as NSError
         return [
@@ -568,7 +687,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
         return String(format: "%.1f", Double(info.phys_footprint) / 1_048_576)
     }
-    #endif
 
     private static func errorSummary(_ error: Error) -> String {
         let nsError = error as NSError
@@ -804,6 +922,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     query: request.dnsPayload,
                     resolverConfiguration: resolverConfiguration
                 ) ?? doqBootstrapResponse(
+                    for: question,
+                    query: request.dnsPayload,
+                    resolverConfiguration: resolverConfiguration
+                ) ?? dotBootstrapResponse(
                     for: question,
                     query: request.dnsPayload,
                     resolverConfiguration: resolverConfiguration
@@ -1105,13 +1227,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 }
             },
             resolveDoT: { query, endpoint, usesIsolatedConnection, completion in
-                #if DEBUG
+                #if DEBUG || LAVA_QA_TOOLS
+                // Per-query "begin" trace is verbose Debug/QA instrumentation; it is
+                // kept off the Release DNS hot path (no diagnostic value without the
+                // matching result, which Release logs only on failure below).
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-dot-query-begin", details: [
                     "endpoint": endpoint.displayAddress,
                     "bootstrapCount": "\(endpoint.allBootstrapServers.count)"
                 ])
-                #endif
-                #if DEBUG || LAVA_QA_TOOLS
                 let attemptSpan = beginResolverSpan("resolver.endpointAttempt", ["transport": "DoT"])
                 #endif
 
@@ -1120,13 +1243,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         dotResolver.resetConnectionsWhenIdle()
                     }
 
-                    #if DEBUG
-                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-dot-query-result", details: [
-                        "endpoint": endpoint.displayAddress,
-                        "outcome": upstreamResponse.outcome.rawValue,
-                        "succeeded": "\(upstreamResponse.response != nil)"
-                    ])
+                    let succeeded = upstreamResponse.response != nil
+                    #if DEBUG || LAVA_QA_TOOLS
+                    let shouldLogResult = true
+                    #else
+                    // Release: keep per-query logging off the DNS success hot path
+                    // (appendLine open/write/close per query adds resolution
+                    // latency). Failures are rare and are exactly the signal needed
+                    // to diagnose a Wi-Fi/cellular handoff, so log only those.
+                    let shouldLogResult = !succeeded
                     #endif
+                    if shouldLogResult {
+                        LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-dot-query-result", details: [
+                            "endpoint": endpoint.displayAddress,
+                            "outcome": upstreamResponse.outcome.rawValue,
+                            "succeeded": "\(succeeded)"
+                        ])
+                    }
                     #if DEBUG || LAVA_QA_TOOLS
                     endAttemptSpan(attemptSpan, upstreamResponse)
                     #endif
@@ -1141,12 +1274,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 }
             },
             resolveDoQ: { query, endpoint, usesIsolatedConnection, completion in
-                #if DEBUG
+                #if DEBUG || LAVA_QA_TOOLS
+                // Per-query "begin" trace is verbose Debug/QA instrumentation; kept
+                // off the Release DNS hot path (see DoT path above).
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-doq-query-begin", details: [
                     "endpoint": endpoint.displayAddress
                 ])
-                #endif
-                #if DEBUG || LAVA_QA_TOOLS
                 let attemptSpan = beginResolverSpan("resolver.endpointAttempt", ["transport": "DoQ"])
                 #endif
 
@@ -1155,13 +1288,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         doqResolver.resetConnectionsWhenIdle()
                     }
 
-                    #if DEBUG
-                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-doq-query-result", details: [
-                        "endpoint": endpoint.displayAddress,
-                        "outcome": upstreamResponse.outcome.rawValue,
-                        "succeeded": "\(upstreamResponse.response != nil)"
-                    ])
+                    let succeeded = upstreamResponse.response != nil
+                    #if DEBUG || LAVA_QA_TOOLS
+                    let shouldLogResult = true
+                    #else
+                    // Release: only log failures to keep per-query I/O off the DNS
+                    // success hot path (see DoT path above).
+                    let shouldLogResult = !succeeded
                     #endif
+                    if shouldLogResult {
+                        LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-doq-query-result", details: [
+                            "endpoint": endpoint.displayAddress,
+                            "outcome": upstreamResponse.outcome.rawValue,
+                            "succeeded": "\(succeeded)"
+                        ])
+                    }
                     #if DEBUG || LAVA_QA_TOOLS
                     endAttemptSpan(attemptSpan, upstreamResponse)
                     #endif
@@ -1415,13 +1556,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             ])
             #endif
 
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-doq-bootstrap-resolved", details: [
                 "hostname": hostname,
                 "ipv4Count": "\(bootstrap.ipv4.count)",
                 "ipv6Count": "\(bootstrap.ipv6.count)"
             ])
-            #endif
 
             return ResolverBootstrapService.ResolvedAddresses(ipv4: bootstrap.ipv4, ipv6: bootstrap.ipv6)
         }
@@ -1458,8 +1597,87 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
+        // Best-effort device-DNS re-capture once the new network has settled.
+        //
+        // KNOWN-INEFFECTIVE WHILE MASKED (field evidence, 1758 device log): on the
+        // cellular networks observed, EVERY in-tunnel capture returns empty — iOS
+        // surfaces only the tunnel's own 10.255.0.1 (which we filter out) while the
+        // tunnel is active. Across that session all 98 `network-settled` and 98
+        // `wake` captures were count:0; the only non-empty captures (count:2) were
+        // the two cold `startTunnel`s. So preserveOnEmptyCapture keeps the PREVIOUS
+        // network's resolvers, and on a resolver-CHANGING handoff those are
+        // unreachable (timeout) → a wedge that only a tunnel restart (self-reconnect,
+        // which re-captures at cold start) actually fixes. Do NOT rely on this
+        // re-capture for handoff recovery; it is kept because it is harmless and may
+        // still help on networks/iOS versions that don't mask. If they changed,
+        // reset the runtime so the fresh addresses take effect (mirrors wake()).
+        let previousDeviceDNSResolverAddresses = deviceDNSResolverAddresses
+        refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "network-settled")
+        if deviceDNSResolverAddresses != previousDeviceDNSResolverAddresses {
+            let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
+            let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
+                identifier: resolverIdentifier,
+                reason: "device-dns-recaptured-on-settle",
+                force: true
+            )
+            writeServerFailures(for: pendingResponses)
+        }
+
         prewarmResolverBootstrapIfNeeded()
         scheduleResolverSmokeProbeIfNeeded(reason: "network-settled")
+    }
+
+    private func dohEndpointResolvingBootstrapIfNeeded(_ endpoint: DNSOverHTTPSEndpoint) -> DNSOverHTTPSEndpoint {
+        // A built-in DoH endpoint ships with bootstrap IPs; a user-typed custom
+        // `https://host` resolver does not. Resolve the missing bootstrap from the
+        // hostname cache (warmed while Device DNS was reachable) so the DoH client
+        // can connect even when the device resolver is wedged — mirroring the DoQ
+        // path. Literal-IP hosts and already-bootstrapped endpoints pass through.
+        guard endpoint.allBootstrapServers.isEmpty,
+              let host = endpoint.url.host,
+              ResolverEndpoint(address: host) == nil
+        else {
+            return endpoint
+        }
+
+        guard let cached = resolverBootstrapService.cachedAddresses(forHostname: host) else {
+            // Never block the packet path on a bootstrap lookup: warm the cache
+            // asynchronously (pre-warms at tunnel start, resolver switches, and
+            // network changes make this miss rare).
+            resolverBootstrapService.prewarm(hostname: host)
+            return endpoint
+        }
+
+        return DNSOverHTTPSEndpoint(
+            url: endpoint.url,
+            bootstrapIPv4Servers: cached.ipv4,
+            bootstrapIPv6Servers: cached.ipv6
+        )
+    }
+
+    private func dotEndpointResolvingBootstrapIfNeeded(_ endpoint: DNSOverTLSEndpoint) -> DNSOverTLSEndpoint {
+        // As with DoH/DoQ: a built-in DoT endpoint ships bootstrap IPs, a user-typed
+        // custom `tls://host` resolver does not. Fill the missing IPs from the warmed
+        // hostname cache so the DoT connection doesn't have to resolve its own hostname
+        // through a wedged Device DNS. Literal-IP hosts and already-bootstrapped
+        // endpoints pass through.
+        guard endpoint.allBootstrapServers.isEmpty,
+              ResolverEndpoint(address: endpoint.hostname) == nil
+        else {
+            return endpoint
+        }
+
+        guard let cached = resolverBootstrapService.cachedAddresses(forHostname: endpoint.hostname) else {
+            resolverBootstrapService.prewarm(hostname: endpoint.hostname)
+            return endpoint
+        }
+
+        return DNSOverTLSEndpoint(
+            hostname: endpoint.hostname,
+            port: endpoint.port,
+            bootstrapIPv4Servers: cached.ipv4,
+            bootstrapIPv6Servers: cached.ipv6
+        )
     }
 
     private func doqEndpointResolvingBootstrapIfNeeded(_ endpoint: DNSOverQUICEndpoint) -> DNSOverQUICEndpoint {
@@ -1488,11 +1706,44 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func prewarmResolverBootstrapIfNeeded() {
         let resolverConfiguration = currentResolverRuntimeConfiguration()
-        guard resolverConfiguration.transport == .dnsOverQUIC else {
-            return
+        // Prewarm the primary's DoQ endpoints (when DoQ is the active transport) AND
+        // any encrypted-fallback DoQ endpoints (a custom `doq://` fallback a wedged
+        // Device-DNS primary keeps). The fallback host must be bootstrapped even
+        // though the primary transport is Device DNS, mirroring the DoH fallback.
+        var doqEndpoints = resolverConfiguration.encryptedFallbackDoQEndpoints
+        if resolverConfiguration.transport == .dnsOverQUIC {
+            doqEndpoints = resolverConfiguration.doqEndpoints + doqEndpoints
         }
 
-        for endpoint in resolverConfiguration.doqEndpoints
+        for endpoint in doqEndpoints
+        where endpoint.allBootstrapServers.isEmpty && ResolverEndpoint(address: endpoint.hostname) == nil {
+            resolverBootstrapService.prewarm(hostname: endpoint.hostname)
+        }
+
+        // Same for DoH: a user-typed custom `https://host` resolver (primary or the
+        // encrypted fallback) ships no bootstrap IPs, so warm its hostname while the
+        // device resolver is reachable. Built-in endpoints carry their own IPs and
+        // are skipped (allBootstrapServers non-empty).
+        var dohEndpoints = resolverConfiguration.encryptedFallbackEndpoints
+        if resolverConfiguration.transport == .dnsOverHTTPS {
+            dohEndpoints = resolverConfiguration.dohEndpoints + dohEndpoints
+        }
+
+        for endpoint in dohEndpoints where endpoint.allBootstrapServers.isEmpty {
+            guard let host = endpoint.url.host, ResolverEndpoint(address: host) == nil else {
+                continue
+            }
+            resolverBootstrapService.prewarm(hostname: host)
+        }
+
+        // And DoT: a custom `tls://host` resolver (primary or encrypted fallback)
+        // connects by hostname when it has no bootstrap IPs, so warm its hostname too.
+        var dotEndpoints = resolverConfiguration.encryptedFallbackDoTEndpoints
+        if resolverConfiguration.transport == .dnsOverTLS {
+            dotEndpoints = resolverConfiguration.dotEndpoints + dotEndpoints
+        }
+
+        for endpoint in dotEndpoints
         where endpoint.allBootstrapServers.isEmpty && ResolverEndpoint(address: endpoint.hostname) == nil {
             resolverBootstrapService.prewarm(hostname: endpoint.hostname)
         }
@@ -1671,8 +1922,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             networkKind: currentNetworkKind(),
             deviceDNSFallbackModeActive: currentDeviceDNSFallbackModeActive(),
             ignoresDeviceDNSFallbackMode: ignoresDeviceDNSFallbackMode,
-            allowsQueryFallback: allowsQueryFallback
+            allowsQueryFallback: allowsQueryFallback,
+            deviceResolverWedged: currentDeviceResolverWedged()
         )
+    }
+
+    // "Broadly wedged" evidence for the encrypted fallback: the connectivity policy
+    // has declared a needs-reconnect wedge (driven by the smoke probe on known-good
+    // domains + consecutive upstream failures) and it hasn't recovered. This is NOT
+    // reset by individual SERVFAIL/REFUSED forwarding replies, so a stale off-network
+    // resolver that refuses everything still trips it via the smoke probe, while a
+    // healthy resolver answering one blocked domain with REFUSED does not.
+    private func currentDeviceResolverWedged() -> Bool {
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            return reconnectNeededSince != nil
+        }
+
+        return dnsStateQueue.sync {
+            reconnectNeededSince != nil
+        }
     }
 
     private func orderedResolverAddressesForCurrentNetwork(_ addresses: [String]) -> [String] {
@@ -1684,9 +1952,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         query: Data,
         resolverConfiguration: ResolverRuntimeConfiguration
     ) -> Data? {
-        guard resolverConfiguration.transport == .dnsOverHTTPS,
+        // Hostnames that must be answered from bundled bootstrap IPs rather than
+        // forwarded (forwarding would recurse through the very resolver we're trying
+        // to reach):
+        //   - the active DoH primary's endpoints, and
+        //   - the encrypted fallback endpoints (Mullvad), which a Device-DNS primary
+        //     keeps for the wedge safety net. Without bootstrapping the fallback host,
+        //     its own `dns.mullvad.net` lookup would be forwarded to the (possibly
+        //     wedged) Device DNS, so the safety net couldn't recover a cold device.
+        var candidateEndpoints = resolverConfiguration.encryptedFallbackEndpoints
+        if resolverConfiguration.transport == .dnsOverHTTPS {
+            candidateEndpoints = resolverConfiguration.dohEndpoints + candidateEndpoints
+        }
+
+        guard !candidateEndpoints.isEmpty,
               let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
-              let endpoint = resolverConfiguration.dohEndpoints.first(where: { endpoint in
+              let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let endpointHost = endpoint.url.host,
                         let normalizedEndpointHost = try? DomainName.normalize(endpointHost)
                   else {
@@ -1699,8 +1980,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return nil
         }
 
+        let bootstrappedEndpoint = dohEndpointResolvingBootstrapIfNeeded(endpoint)
+        guard !bootstrappedEndpoint.allBootstrapServers.isEmpty else {
+            // A custom DoH endpoint with no bootstrap IPs yet (cache not warmed).
+            // Answering from empty arrays would hand the client an empty record set
+            // and guarantee the connection fails; forwarding the hostname normally at
+            // least resolves while Device DNS is healthy, so don't intercept here.
+            return nil
+        }
+
         // Bootstrap answers for the selected DoH hostname bypass filtering and diagnostics to avoid resolver recursion.
-        return DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint)
+        return DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)
     }
 
     private func doqBootstrapResponse(
@@ -1708,9 +1998,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         query: Data,
         resolverConfiguration: ResolverRuntimeConfiguration
     ) -> Data? {
-        guard resolverConfiguration.transport == .dnsOverQUIC,
+        // Candidate DoQ hostnames to answer from bundled bootstrap IPs rather than
+        // forward (forwarding would recurse through the very resolver we're reaching):
+        //   - the active DoQ primary's endpoints, and
+        //   - the encrypted fallback's DoQ endpoints (a custom `doq://` fallback a
+        //     Device-DNS primary keeps for the wedge safety net). Without bootstrapping
+        //     the fallback host, its lookup would be forwarded to the (possibly wedged)
+        //     Device DNS, so the safety net couldn't recover a cold device — the same
+        //     reasoning as the DoH fallback in `dohBootstrapResponse`.
+        var candidateEndpoints = resolverConfiguration.encryptedFallbackDoQEndpoints
+        if resolverConfiguration.transport == .dnsOverQUIC {
+            candidateEndpoints = resolverConfiguration.doqEndpoints + candidateEndpoints
+        }
+
+        guard !candidateEndpoints.isEmpty,
               let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
-              let endpoint = resolverConfiguration.doqEndpoints.first(where: { endpoint in
+              let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
                       return false
                   }
@@ -1727,6 +2030,44 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         // Bootstrap answers for the selected DoQ hostname keep NWConnection hostname-based for SNI/cert validation while avoiding resolver recursion.
+        return DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)
+    }
+
+    private func dotBootstrapResponse(
+        for question: DNSQuestion,
+        query: Data,
+        resolverConfiguration: ResolverRuntimeConfiguration
+    ) -> Data? {
+        // Candidate DoT hostnames to answer from bundled/cached bootstrap IPs rather
+        // than forward (forwarding would recurse through the very resolver we're
+        // reaching). `DoTTransport` connects by hostname when an endpoint has no
+        // bootstrap IPs, so without this a custom `tls://` fallback (or primary) would
+        // resolve its own hostname through the (possibly wedged) Device DNS — the same
+        // reasoning as the DoH/DoQ bootstraps.
+        var candidateEndpoints = resolverConfiguration.encryptedFallbackDoTEndpoints
+        if resolverConfiguration.transport == .dnsOverTLS {
+            candidateEndpoints = resolverConfiguration.dotEndpoints + candidateEndpoints
+        }
+
+        guard !candidateEndpoints.isEmpty,
+              let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
+              let endpoint = candidateEndpoints.first(where: { endpoint in
+                  guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
+                      return false
+                  }
+
+                  return normalizedQuestionDomain == normalizedEndpointHost
+              })
+        else {
+            return nil
+        }
+
+        let bootstrappedEndpoint = dotEndpointResolvingBootstrapIfNeeded(endpoint)
+        guard !bootstrappedEndpoint.allBootstrapServers.isEmpty else {
+            return nil
+        }
+
+        // Bootstrap answers for the selected DoT hostname keep NWConnection hostname-based for SNI/cert validation while avoiding resolver recursion.
         return DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)
     }
 
@@ -1817,6 +2158,98 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         fallbackRecoverySmokeProbeWorkItem = nil
     }
 
+    // Same-network DNS wedge recovery. When every resolver address is benched
+    // (e.g. a transient burst of timeouts under heavy browsing backs them all
+    // off) with no network or resolver-runtime change, nothing resets that
+    // penalty box: queries stay failed-closed until the per-address backoff
+    // expires AND organic traffic happens to retry, or the 300s routine probe
+    // runs, or the user toggles protection (a fresh process starts with an empty
+    // backoff — which is why a manual toggle recovers when in-place retries do
+    // not). Self-reconnect is the heavier escalation, but it is rate-limited and
+    // requires confirmed Connect-On-Demand, so it is suppressed exactly when the
+    // user is most stuck. This lighter recovery resets the resolver backoff +
+    // stale upstream connections and re-probes on a short cadence, with no
+    // process restart and no per-query hammering (one re-probe per interval).
+    // Cancelled by clearReconnectNeededActivitySuppression as soon as DNS recovers.
+    private func scheduleResolverWedgeRecoveryProbeIfNeeded() {
+        guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
+            dnsStateQueue.async { [weak self] in
+                self?.scheduleResolverWedgeRecoveryProbeIfNeeded()
+            }
+            return
+        }
+
+        guard health.networkPathIsSatisfied,
+              resolverWedgeRecoveryWorkItem == nil
+        else {
+            return
+        }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else {
+                return
+            }
+
+            self.resolverWedgeRecoveryWorkItem = nil
+
+            // Re-confirm the wedge is still current before disrupting the runtime;
+            // a recovery (or network change) between scheduling and firing clears
+            // the suppression and would have cancelled this, but the assessment
+            // guard keeps the reset from firing on an already-healthy tunnel.
+            let assessment = ProtectionConnectivityPolicy.assessment(
+                isConnected: true,
+                health: self.health,
+                now: Date()
+            )
+            guard assessment.primaryAction == .reconnect,
+                  self.health.networkPathIsSatisfied
+            else {
+                return
+            }
+
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "resolver-wedge-recovery", details: [
+                "reason": self.health.lastFailureReason ?? "dns-wedged",
+                "severity": assessment.severity.diagnosticLabel,
+                "consecutiveUpstreamFailureCount": "\(self.health.consecutiveUpstreamFailureCount)"
+            ])
+
+            // Best-effort device-DNS re-capture (same masking caveat as the settle
+            // probe: in-tunnel capture was observed always-empty in the 1758 log, so
+            // this can't refresh a stale resolver while the tunnel is up — the
+            // self-reconnect restart is what actually re-captures). Kept as harmless
+            // best-effort. Then clear the backoff penalty box and stale upstream
+            // connections so the re-probe (and the next organic query) gets a fresh
+            // attempt at every resolver — the clean slate a fresh process gets.
+            self.refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "resolver-wedge-recovery")
+            self.resolverBackoffStateQueue.sync {
+                self.resolverBackoffPolicy.reset()
+            }
+            self.resetResolverTransientState()
+            // A failed re-probe re-enters appendReconnectNeededIfPolicyRequiresReconnect,
+            // which re-arms this recovery — so the loop self-sustains at the wedge
+            // cadence until DNS recovers (then the success path cancels it).
+            self.scheduleResolverSmokeProbeIfNeeded(reason: "resolver-wedge-recovery")
+        }
+
+        resolverWedgeRecoveryWorkItem = workItem
+        dnsStateQueue.asyncAfter(
+            deadline: .now() + resolverWedgeRecoveryProbeInterval,
+            execute: workItem
+        )
+    }
+
+    private func cancelResolverWedgeRecoveryProbe() {
+        guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
+            dnsStateQueue.async { [weak self] in
+                self?.cancelResolverWedgeRecoveryProbe()
+            }
+            return
+        }
+
+        resolverWedgeRecoveryWorkItem?.cancel()
+        resolverWedgeRecoveryWorkItem = nil
+    }
+
     private func scheduleResolverSmokeProbeIfNeeded(reason: String) {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -1838,15 +2271,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             && !resolverConfiguration.deviceDNSFallbackAddresses.isEmpty
         resolverSmokeProbeGeneration += 1
         let generation = resolverSmokeProbeGeneration
-        let query = DNSResolverSmokeProbe.query(transactionID: UInt16.random(in: 0...UInt16.max))
+        // Rotate the canary domain per probe so a single blocked/hijacked domain
+        // can't sustain a false "unhealthy" verdict (a different domain's success
+        // resets the consecutive-failure count); a resolver that refuses them all
+        // still escalates.
+        let probeDomain = DNSResolverSmokeProbe.probeDomain(forSequence: generation)
+        let query = DNSResolverSmokeProbe.query(
+            transactionID: UInt16.random(in: 0...UInt16.max),
+            domain: probeDomain
+        )
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-begin", details: [
             "reason": reason,
             "transport": resolverConfiguration.transport.rawValue,
             "canUseDeviceDNSFallback": "\(canUseDeviceDNSFallback)"
         ])
-        #endif
 
         runResolverSmokeProbeWork { [weak self] finish in
             guard let self else {
@@ -1880,7 +2319,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     finish()
                 }
             }
-            timeout.schedule(on: dnsStateQueue, timeoutSeconds: Self.resolverSmokeProbeTimeoutSeconds)
+            timeout.schedule(on: dnsStateQueue, timeoutSeconds: Self.smokeProbeTimeoutSeconds(
+                reason: reason,
+                transport: resolverConfiguration.transport,
+                canUseDeviceDNSFallback: canUseDeviceDNSFallback
+            ))
 
             self.resolvePrimaryUpstream(query, resolverConfiguration: resolverConfiguration, purpose: .smokeProbe) { [weak self] primaryResult in
                 guard let self else {
@@ -1894,7 +2337,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     matching: query
                 )
 
-                #if DEBUG
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-primary-result", details: [
                     "reason": reason,
                     "primaryAccepted": "\(primarySucceeded)",
@@ -1903,7 +2345,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     "transport": primaryResult.transport.rawValue,
                     "resolver": primaryResult.successfulResolverAddress ?? primaryResult.attempts.last?.address ?? "nil"
                 ])
-                #endif
 
                 guard !primarySucceeded, canUseDeviceDNSFallback else {
                     timeout.cancel()
@@ -1928,12 +2369,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         return
                     }
 
-                    #if DEBUG
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-fallback-begin", details: [
                         "reason": reason,
                         "resolverCount": "\(resolverConfiguration.deviceDNSFallbackAddresses.count)"
                     ])
-                    #endif
 
                     let fallbackResult = self.resolveDeviceDNS(
                         query,
@@ -1944,7 +2383,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         matching: query
                     )
 
-                    #if DEBUG
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-fallback-result", details: [
                         "reason": reason,
                         "fallbackAccepted": "\(fallbackSucceeded)",
@@ -1952,7 +2390,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         "fallbackOutcome": fallbackResult.failureSummary ?? "success",
                         "resolver": fallbackResult.successfulResolverAddress ?? fallbackResult.attempts.last?.address ?? "nil"
                     ])
-                    #endif
 
                     timeout.cancel()
                     self.dnsStateQueue.async { [weak self] in
@@ -2048,6 +2485,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 health.lastDoHHTTPVersion = negotiatedDoHProtocol
             }
             health.consecutiveUpstreamFailureCount = 0
+            // In-place recovery via the (wedge-recovery / settle) smoke probe — the
+            // common self-heal path that never reaches recordUpstreamResult. Record
+            // it before clearing the wedge state so the recovery isn't silent.
+            logConnectivityRecoveredIfWedged(transport: primaryResult.transport, verifiedBy: "smoke-probe", now: now)
             clearReconnectNeededActivitySuppression()
             cancelFallbackRecoverySmokeProbe()
             let pendingResponses = wasDeviceDNSFallbackModeActive
@@ -2076,14 +2517,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             logQAConnectivityAssessmentIfNeeded(reason: "dns-smoke-probe-success", now: now)
             #endif
 
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-success", details: [
                 "reason": reason,
                 "transport": primaryResult.transport.rawValue,
                 "resolver": primaryResult.successfulResolverAddress ?? "nil",
                 "dohHTTPVersion": primaryResult.negotiatedDoHProtocol ?? "nil"
             ])
-            #endif
             return
         }
 
@@ -2111,6 +2550,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             health.lastResolverAddress = fallbackResult.successfulResolverAddress
             health.lastResolverTransport = .deviceDNS
             health.consecutiveUpstreamFailureCount = 0
+            // Device-DNS fallback now resolving after a wedge counts as recovery
+            // (DNS flows again); record it before clearing the wedge state.
+            logConnectivityRecoveredIfWedged(transport: .deviceDNS, verifiedBy: "smoke-probe", now: now)
             clearReconnectNeededActivitySuppression()
             let pendingResponses = deviceDNSFallbackModeActive
                 ? collectPendingResponsesAndResetResolverRuntime(
@@ -2136,14 +2578,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
             #endif
 
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-device-fallback", details: [
                 "reason": reason,
-                "resolver": fallbackResult.successfulResolverAddress ?? "nil",
                 "evidenceCount": "\(consecutiveQueryFallbackSuccessCount)",
-                "fallbackModeActive": "\(deviceDNSFallbackModeActive)"
+                "fallbackModeActive": "\(deviceDNSFallbackModeActive)",
+                "resolver": fallbackResult.successfulResolverAddress ?? "nil"
             ])
-            #endif
             return
         }
 
@@ -2155,7 +2595,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             consecutiveQueryFallbackSuccessCount = 0
             cancelFallbackRecoverySmokeProbe()
         }
-        health.lastFailureReason = primaryResult.failureSummary ?? fallbackResult?.failureSummary ?? "dns-smoke-failed"
+        // A response that arrived but failed acceptance (rcode != 0, no answers, or
+        // a question mismatch) means the resolver is REACHABLE but unusable — e.g. a
+        // stale off-network resolver refusing queries, or a hijacked/blocked answer.
+        // Its last attempt's wire outcome is `.success`, so failureSummary would
+        // record the nonsensical "success" — which is NOT a restart-worthy reason,
+        // so the connectivity policy mis-read it as healthy and never engaged
+        // recovery (the 1941 "DNS smoke probe failed: success" wedge). Classify it
+        // as `rejected-response` (a restart-worthy reason) so recovery engages.
+        let primaryReason: String
+        if primaryResult.response != nil {
+            primaryReason = "rejected-response"
+        } else {
+            primaryReason = primaryResult.failureSummary ?? fallbackResult?.failureSummary ?? "dns-smoke-failed"
+        }
+        health.lastFailureReason = primaryReason
         health.lastUpstreamFailureAt = now
         health.consecutiveUpstreamFailureCount += 1
         health.lastResolverAddress = primaryResult.successfulResolverAddress ?? primaryResult.attempts.last?.address
@@ -2169,12 +2623,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         logQAConnectivityAssessmentIfNeeded(reason: "dns-smoke-probe-failed", now: now)
         #endif
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-failed", details: [
             "reason": reason,
             "failure": health.lastFailureReason ?? "nil"
         ])
-        #endif
     }
 
     private func resetHealth() {
@@ -2184,6 +2636,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
 
             self.health = TunnelHealthSnapshot(networkKind: self.currentNetworkKind())
+            // Lifecycle reset owns the other half of the wedge-marker lifetime
+            // (the recovery path owns the rest), so a stale marker can't survive a
+            // fresh tunnel session and mis-date a later "recovery".
+            self.reconnectNeededSince = nil
+            self.reconnectNeededReason = nil
+            self.reconnectNeededPeakFailureCount = 0
+            self.lastSelfReconnectSuppressionSignature = nil
+            self.lastSelfReconnectSuppressionLogAt = nil
             self.persistHealthIfNeeded(force: true)
         }
     }
@@ -2205,6 +2665,33 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         pathMonitor.start(queue: dnsStateQueue)
+    }
+
+    // Clears recent-failure + device-DNS-fallback state so the next resolver
+    // runtime computation and forced reset target the configured DoH/DoT/DoQ
+    // resolver, not the fallback (the per-query and smoke-probe paths re-engage
+    // fallback if the primary still fails). Shared by the network-change and wake
+    // recovery paths so they pick the same runtime. Runs on dnsStateQueue.
+    private func resetFailureAndFallbackStateForRecovery() {
+        health.lastFailureReason = nil
+        health.consecutiveUpstreamFailureCount = 0
+        deviceDNSFallbackModeActive = false
+        consecutiveQueryFallbackSuccessCount = 0
+        health.deviceDNSFallbackModeActive = false
+        health.lastDeviceDNSFallbackActivatedAt = nil
+        clearReconnectNeededActivitySuppression()
+        invalidateInFlightSmokeProbes()
+    }
+
+    // Cancels a scheduled fallback-recovery probe and bumps the smoke-probe
+    // generation so a probe already in flight can't apply its result after the
+    // runtime moved on (the generation guard in completeResolverSmokeProbeResult
+    // then discards it). Independent of the fallback decision: wake() invalidates
+    // stale probes this way without clearing fallback, while a network change also
+    // clears fallback via resetFailureAndFallbackStateForRecovery().
+    private func invalidateInFlightSmokeProbes() {
+        cancelFallbackRecoverySmokeProbe()
+        resolverSmokeProbeGeneration += 1
     }
 
     private func handleNetworkPathUpdate(_ update: NetworkPathUpdate) {
@@ -2230,15 +2717,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let now = Date()
         health.lastNetworkChangeAt = now
         health.networkChangeCount += 1
-        health.lastFailureReason = nil
-        health.consecutiveUpstreamFailureCount = 0
-        deviceDNSFallbackModeActive = false
-        consecutiveQueryFallbackSuccessCount = 0
-        health.deviceDNSFallbackModeActive = false
-        health.lastDeviceDNSFallbackActivatedAt = nil
-        clearReconnectNeededActivitySuppression()
-        cancelFallbackRecoverySmokeProbe()
-        resolverSmokeProbeGeneration += 1
+        resetFailureAndFallbackStateForRecovery()
         refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "network-path-changed")
 
         let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
@@ -2266,7 +2745,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             scheduleProtectionNotificationIfNeeded(now: now)
         }
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "network-path-changed", details: [
             "previousKind": previousKind?.rawValue ?? "nil",
             "kind": update.kind.rawValue,
@@ -2276,11 +2754,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             "pendingResponses": "\(pendingResponses.count)",
             "resolverIdentifier": resolverIdentifier
         ])
-        #endif
 
         writeServerFailures(for: pendingResponses)
 
         if update.isSatisfied {
+            // FUTURE (dns-recovery optimization B, pending rc/debug-log evidence):
+            // re-capture device DNS and fire one confirming query the instant the
+            // path is satisfied (not only at the +1.5s coalesced settle), so a
+            // device-DNS user adopts the new network's resolver before the first
+            // organic query fails closed. Trade-off: slightly more probing on
+            // flappy networks — already coalesced, so minor. Pair with optimization
+            // C (bounded capture-retry) so an empty capture here doesn't strand us.
             reapplyTunnelNetworkSettings(reason: "network-path-changed", enforceThrottle: true)
             // Coalesce the proactive resolver rebuild (bootstrap pre-warm + smoke
             // probe) so a flap burst re-handshakes once after the path settles,
@@ -2299,21 +2783,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         lastNetworkSettingsReapplyAt = now
         let settingsBundle = makeTunnelNetworkSettingsForCurrentConfiguration()
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "network-settings-reapply-begin", details: [
             "reason": reason,
             "kind": currentNetworkKind().rawValue,
             "dnsServerAddress": settingsBundle.dnsServerAddress,
             "route": settingsBundle.routeDescription
         ])
-        #endif
 
         setTunnelNetworkSettings(settingsBundle.settings) { [weak self] error in
             guard let self else {
                 return
             }
 
-            #if DEBUG
             if let error {
                 LavaSecDeviceDebugLog.append(
                     component: "tunnel",
@@ -2326,7 +2807,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     "kind": self.currentNetworkKind().rawValue
                 ])
             }
-            #endif
 
             if let error {
                 self.recordNetworkSettingsReapplyFailure(error, reason: reason)
@@ -2354,9 +2834,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func loadInitialSharedState() {
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadInitialSharedState-begin")
-        #endif
 
         let configuration = loadConfiguration() ?? AppConfiguration()
         setAppConfiguration(configuration)
@@ -2377,12 +2855,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             persistDiagnosticsIfNeeded(force: true)
         }
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadInitialSharedState-ready", details: [
             "bootstrapBlockRuleCount": "\(snapshot.blockRuleCount)",
             "bootstrapAllowRuleCount": "\(snapshot.allowRuleCount)"
         ])
-        #endif
     }
 
     private func recordDiagnostic(domain: String, decision: FilterDecision) {
@@ -2451,7 +2927,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             configuration.resolverPresetID,
             configuration.customResolverAddress ?? "",
             configuration.customResolverSecondaryAddress ?? "",
-            configuration.fallbackToDeviceDNS ? "1" : "0"
+            configuration.fallbackToDeviceDNS ? "1" : "0",
+            // The encrypted Device-DNS fallback resolver is part of the resolver
+            // runtime too: changing it (e.g. saving a hostname-based Custom DoH/DoT/DoQ
+            // alternative while running) must count as a resolver change so the reload
+            // re-warms its bootstrap hostname, rather than leaving it un-warmed until a
+            // later packet resets the runtime — by which point Device DNS may be wedged.
+            configuration.usesEncryptedDeviceDNSFallback ? "1" : "0",
+            configuration.fallbackResolverPresetID,
+            configuration.fallbackCustomResolverAddress ?? "",
+            configuration.fallbackCustomResolverSecondaryAddress ?? ""
         ].joined(separator: "|")
     }
 
@@ -2495,7 +2980,41 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             health.lastFailureReason = nil
             health.lastUpstreamSuccessAt = now
             health.consecutiveUpstreamFailureCount = 0
-            clearReconnectNeededActivitySuppression()
+            if result.usedEncryptedFallback {
+                // The encrypted safety net carried this query — the *primary* device
+                // resolver is still wedged. Recording it as a primary recovery would
+                // clear `reconnectNeededSince` (the wedge marker `currentDeviceResolverWedged`
+                // reads), so the next REFUSED from the still-stale resolver would be
+                // treated as authoritative and bypass the fallback — a flap. Hold the
+                // marker and keep the lighter recovery probe armed; only a genuine
+                // primary success or the primary-only smoke probe clears the wedge.
+                scheduleResolverWedgeRecoveryProbeIfNeeded()
+            } else {
+                // Recovery acknowledgement keys off `lastPrimaryUpstreamSuccessAt`, so
+                // record it ONLY for a genuine answer from the *configured primary*
+                // resolver — never one a fallback carried while the primary is still
+                // down. Two non-encrypted fallback shapes must be excluded here:
+                //   * Per-query Device-DNS fallback: `withDeviceDNSFallback` keeps
+                //     `usedEncryptedFallback` false (so we land in this branch) but sets
+                //     `deviceDNSFallbackSucceeded` — the configured primary failed and the
+                //     device resolver answered.
+                //   * Device-DNS fallback *mode*: for a non-device configured resolver,
+                //     `DNSResolverRuntimePlan.make` makes the effective transport
+                //     `.deviceDNS`, so the query resolves via device DNS without setting
+                //     `deviceDNSFallbackSucceeded`. That is still fallback traffic, not the
+                //     configured primary.
+                // A Device-DNS *primary* answering directly is neither (fallback mode can't
+                // be active for a device primary), so it still counts. Treating any of the
+                // fallback shapes as recovery would clear the reconnect banner / post "Lava
+                // reconnected" while DNS still depends on the fallback.
+                let resolvedThroughFallbackMode = result.transport == .deviceDNS && wasDeviceDNSFallbackModeActive
+                if !result.deviceDNSFallbackSucceeded, !resolvedThroughFallbackMode {
+                    health.lastPrimaryUpstreamSuccessAt = now
+                }
+                // Record recovery before clearing the wedge state (organic-query path).
+                logConnectivityRecoveredIfWedged(transport: result.transport, verifiedBy: "forwarding", now: now)
+                clearReconnectNeededActivitySuppression()
+            }
             if let durationMilliseconds = result.durationMilliseconds,
                durationMilliseconds >= Self.slowUpstreamResponseThresholdMilliseconds {
                 health.slowUpstreamResponseCount += 1
@@ -2601,6 +3120,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         if !didResolve {
             appendReconnectNeededIfPolicyRequiresReconnect(now: now)
         }
+
+        if result.usedEncryptedFallback {
+            // The Device-DNS primary was wedged and the encrypted (Mullvad DoH)
+            // fallback carried this query — un-gated + privacy-safe (resolver
+            // endpoint, never a queried domain), so field exports show the safety
+            // net engaging and how often it saves a wedge.
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-encrypted-fallback", details: [
+                "transport": result.transport.rawValue,
+                "resolver": result.successfulResolverAddress ?? "nil"
+            ])
+        }
         #if LAVA_QA_TOOLS
         logQAConnectivityAssessmentIfNeeded(
             reason: didResolve ? "upstream-success" : "upstream-failure",
@@ -2630,7 +3160,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func markHealthUpdated() {
         health.updatedAt = Date()
         health.networkKind = currentNetworkKind()
+        signalAppIfConnectivityStateChanged()
         healthPersistence.markDirty()
+    }
+
+    /// Posts the tunnel-health Darwin nudge when the connectivity-relevant state
+    /// (the assessment that drives the Dynamic Island's reconnecting / network
+    /// lost / needs-reconnect glyphs) changes. Deduped so routine health churn
+    /// that does not change the derived state stays quiet. dnsStateQueue-confined,
+    /// like the `health` it reads (UR-6).
+    private func signalAppIfConnectivityStateChanged(now: Date = Date()) {
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: now
+        )
+        let key = "\(assessment.severity.diagnosticLabel)|\(String(describing: assessment.primaryAction))"
+        guard key != lastSignaledConnectivityKey else {
+            return
+        }
+
+        lastSignaledConnectivityKey = key
+        connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName)
     }
 
     private func persistHealthIfNeeded(force: Bool = false) {
@@ -2661,10 +3212,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
         }
 
+        // Use the pre-clear `history`: clearResolvedProblemNotifications above wipes
+        // the unresolved-problem markers from defaults, but the recovery acknowledgement
+        // (`.reconnected`) needs to see that a problem was outstanding to fire. Re-reading
+        // here would always miss it.
         guard let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: assessment,
             health: health,
-            history: protectionNotificationHistory(defaults: defaults),
+            history: history,
             now: now
         ) else {
             return
@@ -2741,9 +3296,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             notification.identifier,
             forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
         )
-        defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
 
         if notification.kind.isProblem {
+            // Only problem deliveries advance the throttle clock; the 600s
+            // minimum-problem-interval keys off this timestamp, so a recovery
+            // acknowledgement must not extend it (a fresh problem after a flappy
+            // recovery would otherwise be suppressed for another full window).
+            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
             defaults.set(
                 notification.identifier,
                 forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
@@ -2829,20 +3388,195 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        if let lastReconnectNeededActivityAt,
-           now.timeIntervalSince(lastReconnectNeededActivityAt) < reconnectNeededActivityReminderInterval {
+        // Stamp the wedge start once, on entry — the basis for the recovery
+        // duration (not lastUpstreamFailureAt, which refreshes on every failed
+        // query and would shrink a multi-minute outage to "since the last lookup").
+        // Capture the reason here too, so a recovery logged after a network-change
+        // reset (which clears the notify-throttle reason) still reports it.
+        if reconnectNeededSince == nil {
+            reconnectNeededSince = now
+            reconnectNeededReason = health.lastFailureReason ?? "upstream-failed"
+        }
+        // Track the worst failure depth across the wedge (survives the
+        // network-change reset that zeroes the live counter).
+        reconnectNeededPeakFailureCount = max(reconnectNeededPeakFailureCount, health.consecutiveUpstreamFailureCount)
+
+        let shouldNotify: Bool
+        if let lastReconnectNeededActivityAt {
+            shouldNotify = now.timeIntervalSince(lastReconnectNeededActivityAt) >= reconnectNeededActivityReminderInterval
+        } else {
+            shouldNotify = true
+        }
+
+        if shouldNotify {
+            let reason = health.lastFailureReason ?? "upstream-failed"
+            appendNetworkActivity(event: .reconnectNeeded(reason: reason), now: now)
+            lastReconnectNeededActivityAt = now
+        }
+
+        // When the wedge persists, escalate from notifying to actually restarting
+        // the tunnel — startup re-captures Device DNS for the current network,
+        // which an in-place recovery can't while the tunnel is active.
+        selfReconnectIfPolicyAllows(assessment: assessment, now: now)
+
+        // Always arm the lighter in-place recovery too: self-reconnect is
+        // rate-limited and gated on confirmed Connect-On-Demand, so it can be
+        // suppressed exactly when the user is stuck. The wedge-recovery re-probe
+        // resets the backoff penalty box and re-tests without a process restart,
+        // so DNS self-heals on a same-network wedge instead of waiting on a manual
+        // toggle. No-op while one is already pending or once DNS recovers.
+        scheduleResolverWedgeRecoveryProbeIfNeeded()
+    }
+
+    // Restart the tunnel to recover wedged DNS, rate-limited so a network that
+    // simply can't resolve can't drive a restart loop. The restart kills this
+    // process, so attempt history is persisted (in the app group) and read back on
+    // the next launch for the cross-restart backoff. Only fires when protection is
+    // enabled — Connect-On-Demand is what brings the tunnel back after the cancel.
+    private func selfReconnectIfPolicyAllows(assessment: ProtectionConnectivityAssessment, now: Date) {
+        guard !hasRequestedSelfReconnect else {
             return
         }
 
-        let reason = health.lastFailureReason ?? "upstream-failed"
-        appendNetworkActivity(event: .reconnectNeeded(reason: reason), now: now)
-        lastReconnectNeededActivityAt = now
-        lastReconnectNeededActivityReason = reason
+        let attempts = Self.loadSelfReconnectAttemptTimes()
+        let decision = TunnelSelfReconnectPolicy.decision(
+            assessment: assessment,
+            protectionEnabled: currentAppConfiguration().protectionEnabled,
+            onDemandEnabled: Self.isOnDemandConfirmedEnabled(),
+            recentReconnectTimes: attempts,
+            now: now
+        )
+        guard decision == .reconnect else {
+            // Surface *why* a wedge did not trigger a restart — the most common
+            // "it said reconnect needed but never recovered" case. Un-gated and
+            // privacy-safe (no queried domain is recorded), so Release/TestFlight
+            // feedback reports carry the suppression reason. The lighter
+            // wedge-recovery re-probe still runs regardless of this decision.
+            //
+            // A persistent wedge calls this on every failed query/tick, so dedup the
+            // line: log only when the suppression signature changes or the cooldown
+            // elapses, to keep one wedge from flooding (and evicting) the capped log.
+            let reason = health.lastFailureReason ?? "dns-wedged"
+            let signature = "\(decision)|\(reason)|\(currentAppConfiguration().protectionEnabled)|\(Self.isOnDemandConfirmedEnabled())"
+            let changed = signature != lastSelfReconnectSuppressionSignature
+            let cooldownElapsed = lastSelfReconnectSuppressionLogAt.map {
+                now.timeIntervalSince($0) >= Self.selfReconnectSuppressionLogInterval
+            } ?? true
+            if changed || cooldownElapsed {
+                lastSelfReconnectSuppressionSignature = signature
+                lastSelfReconnectSuppressionLogAt = now
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "self-reconnect-suppressed", details: [
+                    "decision": String(describing: decision),
+                    "protectionEnabled": "\(currentAppConfiguration().protectionEnabled)",
+                    "onDemandConfirmed": "\(Self.isOnDemandConfirmedEnabled())",
+                    "attemptsInWindow": "\(attempts.count)",
+                    "reason": reason
+                ])
+            }
+            return
+        }
+
+        lastSelfReconnectSuppressionSignature = nil
+        lastSelfReconnectSuppressionLogAt = nil
+        hasRequestedSelfReconnect = true
+        let updatedAttempts = TunnelSelfReconnectPolicy.prunedAttemptTimes(attempts, now: now) + [now]
+        Self.saveSelfReconnectAttemptTimes(updatedAttempts)
+
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "self-reconnect", details: [
+            "reason": health.lastFailureReason ?? "dns-wedged",
+            "attemptsInWindow": "\(updatedAttempts.count)"
+        ])
+
+        DispatchQueue.main.async { [weak self] in
+            self?.cancelTunnelWithError(nil)
+        }
+    }
+
+    // Confirmed by the app only after `saveToPreferences` arms Connect-On-Demand.
+    // Defaults to false (never armed) so a missing/failed-to-arm signal suppresses
+    // self-reconnect rather than risking a cancel with no automatic recovery.
+    private static func isOnDemandConfirmedEnabled() -> Bool {
+        LavaSecAppGroup.sharedDefaults.bool(
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+        )
+    }
+
+    private static func loadSelfReconnectAttemptTimes() -> [Date] {
+        let raw = LavaSecAppGroup.sharedDefaults.array(forKey: selfReconnectAttemptsDefaultsKey) as? [Double] ?? []
+        return raw.map(Date.init(timeIntervalSince1970:))
+    }
+
+    private static func saveSelfReconnectAttemptTimes(_ times: [Date]) {
+        LavaSecAppGroup.sharedDefaults.set(
+            times.map(\.timeIntervalSince1970),
+            forKey: selfReconnectAttemptsDefaultsKey
+        )
+    }
+
+    // Pairs a logged "Reconnect needed" with a visible recovery row + a firm
+    // device-log line (mechanism + true wedge duration). Call BEFORE
+    // clearReconnectNeededActivitySuppression (which drops the wedge state). Fires
+    // only when a wedge is in progress (reconnectNeededSince set), so it no-ops on
+    // ordinary successes and routine probes. Both the organic-query path
+    // (recordUpstreamResult) and the in-place smoke-probe recovery path
+    // (applyResolverSmokeProbeResult) route through here, so a self-recovery that
+    // never sees an organic query is still recorded.
+    // `verifiedBy` distinguishes a recovery proven by a real client query that
+    // resolved through the tunnel ("forwarding", the full downstream path) from one
+    // seen only by the smoke probe ("smoke-probe", the provider→resolver upstream
+    // leg). The two can diverge — the probe can pass while the device still isn't
+    // routing DNS through the tunnel — so recording which proved it makes a
+    // "recovered but the user still had to toggle" incident diagnosable from the log.
+    private func logConnectivityRecoveredIfWedged(
+        transport: DNSResolverTransport,
+        verifiedBy: String,
+        now: Date
+    ) {
+        guard let wedgeStart = reconnectNeededSince else {
+            return
+        }
+
+        let durationMs = max(0, Int((now.timeIntervalSince(wedgeStart) * 1_000).rounded()))
+        let failureReason = reconnectNeededReason ?? "dns-wedged"
+        // Carry the wedge's failure reason (not just the transport) so the recovery
+        // row pairs 1:1 with its "Reconnect needed: <reason>" and two distinct-cause
+        // wedges that recover within the activity log's 30s duplicate-coalescing
+        // window aren't collapsed into one row. (Same-cause+same-transport recoveries
+        // within 30s still coalesce — they're indistinguishable in the summary; the
+        // un-coalesced device-log dns-recovered below keeps the per-recovery detail.)
+        appendNetworkActivity(
+            event: .connectivityRecovered(reason: "\(failureReason) via \(transport.rawValue)"),
+            now: now
+        )
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-recovered", details: [
+            "reason": failureReason,
+            "transport": transport.rawValue,
+            "verifiedBy": verifiedBy,
+            "durationMs": "\(durationMs)",
+            "consecutiveUpstreamFailureCount": "\(reconnectNeededPeakFailureCount)"
+        ])
+        // The wedge marker is owned here (and by the lifecycle reset): clearing it
+        // only after a recovery is logged is what lets a handoff recovery — which
+        // passes through clearReconnectNeededActivitySuppression on the network
+        // change before recovering — still be captured.
+        reconnectNeededSince = nil
+        reconnectNeededReason = nil
+        reconnectNeededPeakFailureCount = 0
+        // The wedge ended, so the next one should log its suppression fresh.
+        lastSelfReconnectSuppressionSignature = nil
+        lastSelfReconnectSuppressionLogAt = nil
     }
 
     private func clearReconnectNeededActivitySuppression() {
         lastReconnectNeededActivityAt = nil
-        lastReconnectNeededActivityReason = nil
+        // NOTE: reconnectNeededSince/Reason are deliberately NOT cleared here. This
+        // runs on the network-change/wake reset path too (before the settle probe
+        // recovers), and clearing the wedge marker there would make the handoff
+        // recovery silently no-op. The marker is cleared only by a logged recovery
+        // (logConnectivityRecoveredIfWedged) or a tunnel-lifecycle reset (resetHealth).
+        // DNS recovered (or the runtime was reset for recovery): drop any pending
+        // wedge-recovery re-probe so it can't reset a now-healthy resolver.
+        cancelResolverWedgeRecoveryProbe()
     }
 
     #if LAVA_QA_TOOLS
@@ -3006,13 +3740,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             preserveOnEmptyCapture: preserveOnEmptyCapture
         )
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-captured", details: [
             "reason": reason,
             "count": "\(addresses.count)",
             "activeCount": "\(activeAddresses.count)"
         ])
-        #endif
     }
 
     private func refreshDeviceDNSResolverAddressesOnDNSQueue(
@@ -3026,13 +3758,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             preserveOnEmptyCapture: preserveOnEmptyCapture
         )
 
-        #if DEBUG
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-captured", details: [
             "reason": reason,
             "count": "\(addresses.count)",
             "activeCount": "\(deviceDNSResolverAddresses.count)"
         ])
-        #endif
     }
 
     private static func currentSystemDNSServerAddresses() -> [String] {
@@ -3259,13 +3989,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
-            #if DEBUG
             let startedAt = Date()
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-begin", details: [
                 "generation": "\(generation)",
                 "reason": reason
             ])
-            #endif
 
             let configuration = self.loadConfiguration() ?? self.currentAppConfiguration()
 
@@ -3359,12 +4087,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     }
                 }
 
-                #if DEBUG
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-missing", details: [
                     "generation": "\(generation)",
                     "reason": reason
                 ])
-                #endif
                 #if DEBUG || LAVA_QA_TOOLS
                 loadSpan.end(details: [
                     "status": configuration.enabledBlocklistIDs.isEmpty ? "missing" : "fail-closed"
@@ -3401,7 +4127,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 identity: loaded.identity
             )
 
-            #if DEBUG
             let duration = Date().timeIntervalSince(startedAt)
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-loaded", details: [
                 "generation": "\(generation)",
@@ -3413,7 +4138,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "footprintMB": Self.currentMemoryFootprintMB(),
                 "resolver": configuration.resolverDiagnosticDisplayName
             ])
-            #endif
             #if DEBUG || LAVA_QA_TOOLS
             loadSpan.end(details: [
                 "status": "loaded",
@@ -3863,20 +4587,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 configuration: configuration,
                 cachedCatalog: cachedCatalog
             ) {
-                #if DEBUG
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-hit", details: [
                     "identity": compactSnapshot.identity.fingerprint
                 ])
-                #endif
                 return (compactSnapshot, compactSnapshot.identity)
             }
 
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-miss", details: [
                 "expected": expectedIdentity.fingerprint,
                 "actual": compactSnapshot.identity.fingerprint
             ])
-            #endif
         }
 
         if let preparedSnapshot = loadPreparedSnapshot() {
@@ -3884,20 +4604,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 configuration: configuration,
                 cachedCatalog: cachedCatalog
             ) {
-                #if DEBUG
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-prepared-hit", details: [
                     "identity": preparedSnapshot.identity.fingerprint
                 ])
-                #endif
                 return (preparedSnapshot.snapshot, preparedSnapshot.identity)
             }
 
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-prepared-miss", details: [
                 "expected": expectedIdentity.fingerprint,
                 "actual": preparedSnapshot.identity.fingerprint
             ])
-            #endif
         }
 
         let baseSnapshot = configuration.filterSnapshot()
@@ -3912,9 +4628,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             ).compile(baseSnapshot: baseSnapshot, configuration: configuration)
             return (compiled, expectedIdentity)
         } catch {
-            #if DEBUG
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-cache-compile-error", details: Self.errorDebugDetails(error))
-            #endif
             return configuration.enabledBlocklistIDs.isEmpty ? (baseSnapshot, expectedIdentity) : nil
         }
     }
@@ -4835,6 +5549,21 @@ private enum DNSBootstrapResponseFactory {
         for query: Data,
         question: DNSQuestion,
         endpoint: DNSOverQUICEndpoint,
+        ttl: UInt32 = 60
+    ) -> Data? {
+        response(
+            for: query,
+            question: question,
+            ipv4Servers: endpoint.bootstrapIPv4Servers,
+            ipv6Servers: endpoint.bootstrapIPv6Servers,
+            ttl: ttl
+        )
+    }
+
+    static func response(
+        for query: Data,
+        question: DNSQuestion,
+        endpoint: DNSOverTLSEndpoint,
         ttl: UInt32 = 60
     ) -> Data? {
         response(

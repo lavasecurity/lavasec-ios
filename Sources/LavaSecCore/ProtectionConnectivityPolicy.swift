@@ -48,6 +48,15 @@ public struct ProtectionConnectivityAssessment: Equatable, Sendable {
 }
 
 public enum ProtectionConnectivityPolicy {
+    // FUTURE (dns-recovery optimization D, pending rc/debug-log evidence): within
+    // this window after a runtime reset the state stays `.recovering` rather than
+    // escalating to `.needsReconnect`. The 1504 export hit `backed-off` ~15s after
+    // a handoff — just outside this 10s window — so a normal handoff briefly showed
+    // the alarming `needs-reconnect`. Widening to ~20–30s would keep an ordinary
+    // handoff in `.recovering` (the light recapture/reprobe recovery still runs
+    // throughout). Trade-off: a genuinely-broken-after-handoff case takes longer to
+    // escalate to the heavy self-reconnect — mostly cosmetic, but confirm typical
+    // handoff recovery duration from the device debug log before widening.
     private static let freshRecoveryWindow: TimeInterval = 10
     private static let reconnectFailureThreshold = 3
     private static let slowResponseThresholdMilliseconds = 2_500
@@ -58,7 +67,11 @@ public enum ProtectionConnectivityPolicy {
         "backed-off",
         "receive-failed",
         "send-failed",
-        "socket-unavailable"
+        "socket-unavailable",
+        // Resolver reachable but its answer was rejected (rcode != 0 / no answers /
+        // question mismatch) — e.g. a stale off-network resolver refusing queries.
+        // Restart-worthy so recovery engages instead of mis-reading it as healthy.
+        "rejected-response"
     ]
 
     public static func assessment(

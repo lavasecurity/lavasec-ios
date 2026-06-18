@@ -75,6 +75,33 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
         XCTAssertEqual(assessment.primaryAction, .reconnect)
     }
 
+    func testRejectedResponseRecommendsReconnect() {
+        // A resolver that answers but with rejected content (rcode != 0 / no answers
+        // / question mismatch) — e.g. a stale off-network resolver — is reachable but
+        // unusable. It must be restart-worthy, not mis-read as healthy (the 1941
+        // "DNS smoke probe failed: success" wedge where recovery never engaged).
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let latestFailureAt = startedAt.addingTimeInterval(3_600)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "rejected-response",
+            upstreamSuccessCount: 120,
+            upstreamFailureCount: 3,
+            consecutiveUpstreamFailureCount: 3,
+            lastUpstreamSuccessAt: startedAt.addingTimeInterval(3_540),
+            lastUpstreamFailureAt: latestFailureAt
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: latestFailureAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .needsReconnect)
+        XCTAssertEqual(assessment.primaryAction, .reconnect)
+    }
+
     func testBackedOffFailureRecommendsReconnectAfterRepeatedDoHFailures() {
         let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
         let latestFailureAt = startedAt.addingTimeInterval(3_600)

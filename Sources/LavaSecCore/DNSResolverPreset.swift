@@ -236,24 +236,24 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare"
         case Self.quad9Secure.id:
             "Quad9"
-        case Self.dnsSB.id:
-            "DNS.SB"
+        case Self.mullvad.id:
+            "Mullvad"
         case Self.googleDoH.id:
             "Google (\(dohAnnotation))"
         case Self.cloudflareDoH.id:
             "Cloudflare (\(dohAnnotation))"
         case Self.quad9SecureDoH.id:
             "Quad9 (\(dohAnnotation))"
-        case Self.dnsSBDoH.id:
-            "DNS.SB (\(dohAnnotation))"
+        case Self.mullvadDoH.id:
+            "Mullvad (\(dohAnnotation))"
         case Self.googleDoT.id:
             "Google (DoT)"
         case Self.cloudflareDoT.id:
             "Cloudflare (DoT)"
         case Self.quad9SecureDoT.id:
             "Quad9 (DoT)"
-        case Self.dnsSBDoT.id:
-            "DNS.SB (DoT)"
+        case Self.mullvadDoT.id:
+            "Mullvad (DoT)"
         default:
             displayName
         }
@@ -296,8 +296,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare"
         case Self.quad9Secure.id, Self.quad9SecureDoH.id, Self.quad9SecureDoT.id:
             "Quad9"
-        case Self.dnsSB.id, Self.dnsSBDoH.id, Self.dnsSBDoT.id:
-            "DNS.SB"
+        case Self.mullvad.id, Self.mullvadDoH.id, Self.mullvadDoT.id:
+            "Mullvad"
         default:
             displayName
         }
@@ -317,16 +317,16 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflare
         case Self.quad9SecureDoH.id:
             return .quad9Secure
-        case Self.dnsSBDoH.id:
-            return .dnsSB
+        case Self.mullvadDoH.id:
+            return .mullvad
         case Self.googleDoT.id:
             return .google
         case Self.cloudflareDoT.id:
             return .cloudflare
         case Self.quad9SecureDoT.id:
             return .quad9Secure
-        case Self.dnsSBDoT.id:
-            return .dnsSB
+        case Self.mullvadDoT.id:
+            return .mullvad
         default:
             return DNSResolverPreset.settingsPresets.first { $0.id == id } ?? self
         }
@@ -344,8 +344,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflareDoH
         case Self.quad9Secure.id:
             return .quad9SecureDoH
-        case Self.dnsSB.id:
-            return .dnsSBDoH
+        case Self.mullvad.id:
+            return .mullvadDoH
         default:
             return nil
         }
@@ -371,8 +371,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflareDoT
         case Self.quad9Secure.id:
             return .quad9SecureDoT
-        case Self.dnsSB.id:
-            return .dnsSBDoT
+        case Self.mullvad.id:
+            return .mullvadDoT
         default:
             return nil
         }
@@ -876,12 +876,12 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         hasUpstreamFiltering: true
     )
 
-    public static let dnsSB = DNSResolverPreset(
-        id: "dns-sb",
-        displayName: "DNS.SB",
-        ipv4Servers: ["185.222.222.222", "45.11.45.11"],
-        ipv6Servers: ["2a09::", "2a11::"],
-        notes: "Privacy-oriented resolver with no logging and DNSSEC enabled.",
+    public static let mullvad = DNSResolverPreset(
+        id: "mullvad",
+        displayName: "Mullvad",
+        ipv4Servers: ["194.242.2.2"],
+        ipv6Servers: ["2a07:e340::2"],
+        notes: "Privacy-focused resolver from Mullvad VPN with no logging and DNSSEC validation.",
         hasUpstreamFiltering: false
     )
 
@@ -930,18 +930,18 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         )
     )
 
-    public static let dnsSBDoH = DNSResolverPreset(
-        id: "dns-sb-doh",
-        displayName: "DNS.SB (DoH)",
-        ipv4Servers: ["185.222.222.222", "45.11.45.11"],
-        ipv6Servers: ["2a09::", "2a11::"],
-        notes: "DNS over HTTPS endpoint metadata for DNS.SB.",
+    public static let mullvadDoH = DNSResolverPreset(
+        id: "mullvad-doh",
+        displayName: "Mullvad (DoH)",
+        ipv4Servers: ["194.242.2.2"],
+        ipv6Servers: ["2a07:e340::2"],
+        notes: "DNS over HTTPS endpoint metadata for Mullvad.",
         hasUpstreamFiltering: false,
         transport: .dnsOverHTTPS,
         dohEndpoint: DNSOverHTTPSEndpoint(
-            url: URL(string: "https://doh.dns.sb/dns-query")!,
-            bootstrapIPv4Servers: ["185.222.222.222", "45.11.45.11"],
-            bootstrapIPv6Servers: ["2a09::", "2a11::"]
+            url: URL(string: "https://dns.mullvad.net/dns-query")!,
+            bootstrapIPv4Servers: ["194.242.2.2"],
+            bootstrapIPv6Servers: ["2a07:e340::2"]
         )
     )
 
@@ -990,52 +990,63 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         )
     )
 
-    public static let dnsSBDoT = DNSResolverPreset(
-        id: "dns-sb-dot",
-        displayName: "DNS.SB (DoT)",
-        ipv4Servers: ["185.222.222.222", "45.11.45.11"],
-        ipv6Servers: ["2a09::", "2a11::"],
-        notes: "DNS over TLS endpoint metadata for DNS.SB.",
+    public static let mullvadDoT = DNSResolverPreset(
+        id: "mullvad-dot",
+        displayName: "Mullvad (DoT)",
+        ipv4Servers: ["194.242.2.2"],
+        ipv6Servers: ["2a07:e340::2"],
+        notes: "DNS over TLS endpoint metadata for Mullvad.",
         hasUpstreamFiltering: false,
         transport: .dnsOverTLS,
         dotEndpoint: DNSOverTLSEndpoint(
-            hostname: "dot.sb",
-            bootstrapIPv4Servers: ["185.222.222.222", "45.11.45.11"],
-            bootstrapIPv6Servers: ["2a09::", "2a11::"]
+            hostname: "dns.mullvad.net",
+            bootstrapIPv4Servers: ["194.242.2.2"],
+            bootstrapIPv6Servers: ["2a07:e340::2"]
         )
     )
 
     public static let builtInPresets: [DNSResolverPreset] = [
         .device,
-        .google,
+        .mullvad,
         .cloudflare,
         .quad9Secure,
-        .dnsSB
+        .google
     ]
 
     public static let settingsPresets: [DNSResolverPreset] = [
         .device,
-        .google,
+        .mullvad,
         .cloudflare,
         .quad9Secure,
-        .dnsSB
+        .google
     ]
 
     public static let allPresets: [DNSResolverPreset] = [
         .device,
-        .google,
+        .mullvad,
         .cloudflare,
         .quad9Secure,
-        .dnsSB,
-        .googleDoH,
+        .google,
+        .mullvadDoH,
         .cloudflareDoH,
         .quad9SecureDoH,
-        .dnsSBDoH,
-        .googleDoT,
+        .googleDoH,
+        .mullvadDoT,
         .cloudflareDoT,
         .quad9SecureDoT,
-        .dnsSBDoT
+        .googleDoT
     ]
+
+    /// Maps retired preset IDs to their current equivalent so a stored selection
+    /// survives a catalog change. DNS.SB was replaced by Mullvad.
+    public static func migratedPresetID(_ storedID: String) -> String {
+        switch storedID {
+        case "dns-sb": return mullvad.id
+        case "dns-sb-doh": return mullvadDoH.id
+        case "dns-sb-dot": return mullvadDoT.id
+        default: return storedID
+        }
+    }
 }
 
 private enum CustomDNSResolverValidationError: Error {

@@ -1,9 +1,21 @@
 import Foundation
 
+/// Coarse classification used by triage to separate defects from product ideas.
+/// Sent to the backend alongside the report so the promoter can label the Linear
+/// issue (`[bug]` / `[suggestion]` / `[other]`) and the triage agent can route it.
+public enum BugReportIssueKind: String, Codable, Sendable {
+    case bug
+    case suggestion
+    case other
+}
+
 public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sendable {
+    // Bug topics first, then the suggestion topic, then a true catch-all "other".
+    // Order here is the order shown in the feedback topic picker (allCases).
     case websiteAccess
     case vpnOrFilterIssue
     case featureIssue
+    case suggestion
     case other
 
     public var id: String {
@@ -18,10 +30,32 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
             "VPN or filter doesn't work"
         case .featureIssue:
             "A Lava feature doesn't work"
+        case .suggestion:
+            "I have a suggestion"
         case .other:
             "Something else"
         }
     }
+
+    public var kind: BugReportIssueKind {
+        switch self {
+        case .websiteAccess, .vpnOrFilterIssue, .featureIssue:
+            .bug
+        case .suggestion:
+            .suggestion
+        case .other:
+            .other
+        }
+    }
+}
+
+/// Shared length limits for the free-text bug-report fields. Both the UI (counter
+/// + input truncation) and the bundle normalization read these so the limit shown
+/// to the user is exactly the limit enforced on submission (UR-29).
+public enum BugReportInputLimits {
+    public static let affectedSite = 300
+    public static let details = 5_000
+    public static let contactEmail = 320
 }
 
 public struct BugReportContext: Equatable, Codable, Sendable {
@@ -46,11 +80,13 @@ public struct BugReportContext: Equatable, Codable, Sendable {
     }
 
     public var normalizedAffectedSite: String {
-        Self.trim(affectedSite, maxLength: 300)
+        // Single-line field: collapse any embedded line breaks so a pasted value can't inject a
+        // fake "Details:"/"Issue:" line into the composed userDescription (UR-29).
+        Self.trim(affectedSite, maxLength: BugReportInputLimits.affectedSite, allowsLineBreaks: false)
     }
 
     public var normalizedDetails: String {
-        Self.trim(details, maxLength: 5_000)
+        Self.trim(details, maxLength: BugReportInputLimits.details, allowsLineBreaks: true)
     }
 
     public var normalizedContactEmail: String? {
@@ -58,7 +94,8 @@ public struct BugReportContext: Equatable, Codable, Sendable {
             return nil
         }
 
-        let trimmed = Self.trim(contactEmail, maxLength: 320)
+        // Single-line field: no embedded line breaks.
+        let trimmed = Self.trim(contactEmail, maxLength: BugReportInputLimits.contactEmail, allowsLineBreaks: false)
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -76,13 +113,77 @@ public struct BugReportContext: Equatable, Codable, Sendable {
         return lines.joined(separator: "\n")
     }
 
-    private static func trim(_ value: String, maxLength: Int) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func trim(_ value: String, maxLength: Int, allowsLineBreaks: Bool) -> String {
+        let trimmed = Self.sanitize(value, allowsLineBreaks: allowsLineBreaks)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > maxLength else {
             return trimmed
         }
 
         return String(trimmed.prefix(maxLength))
+    }
+
+    /// Strip control and invisible characters from free-text input before it is stored or
+    /// transmitted. These are invisible in the text field but can smuggle hidden content or
+    /// visually reorder text that later reaches the triage tooling, so normalizing here keeps
+    /// what we send legible and is a first line of defense alongside the server-side
+    /// sanitization (UR-29).
+    ///
+    /// Every invisible scalar is removed unconditionally — no scalar that doesn't render on its
+    /// own survives, so nothing hidden can ride along inside an otherwise-visible string and an
+    /// all-invisible field normalizes to empty. The deliberate trade-off for a diagnostic field
+    /// is that multi-scalar emoji that rely on joiners/selectors/tags are flattened to their
+    /// visible base scalars (👩‍👧 → 👩👧, 🏴 tag flags → 🏴, ❤️ → ❤); standalone emoji, skin-tone
+    /// modifiers, and regional-indicator flags are unaffected.
+    ///
+    /// `allowsLineBreaks` is false for single-line fields (affected site, contact email): every
+    /// line break — including the Unicode line/paragraph separators (U+2028 / U+2029) and NEL,
+    /// not just `\n` — and tabs are collapsed to a space so a pasted value can't inject extra
+    /// lines into the structured report text. Multi-line Details keeps its line breaks (all
+    /// normalized to `\n`).
+    static func sanitize(_ value: String, allowsLineBreaks: Bool = true) -> String {
+        let newlines = CharacterSet.newlines
+        // Normalize CRLF and lone CR to a single LF up front: a lone carriage return is itself a
+        // line break (so it must survive in Details), while CRLF must not become two breaks.
+        let value = value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(value.unicodeScalars.count)
+
+        for scalar in value.unicodeScalars {
+            // Any Unicode line break (LF, NEL, U+2028 line / U+2029 paragraph separator, …) is
+            // normalized to a single "\n" for multi-line content, or collapsed to a space for
+            // single-line fields so no new line can be introduced into the report text.
+            if newlines.contains(scalar) {
+                scalars.append(allowsLineBreaks ? "\n" : " ")
+                continue
+            }
+
+            if scalar == "\t" {
+                scalars.append(allowsLineBreaks ? scalar : " ")
+                continue
+            }
+
+            if !Self.isStrippable(scalar) {
+                scalars.append(scalar)
+            }
+        }
+
+        return String(scalars)
+    }
+
+    /// Every invisible / non-rendering scalar: controls, format characters, default-ignorable
+    /// code points (ZWJ, ZWNJ, word joiner, variation selectors, tag characters, …), and bidi
+    /// controls (ALM, LRM/RLM, embeddings, overrides, isolates). Newline and tab are handled by
+    /// the caller before this is consulted. (UR-29)
+    private static func isStrippable(_ scalar: Unicode.Scalar) -> Bool {
+        let properties = scalar.properties
+        let category = properties.generalCategory
+        return category == .control
+            || category == .format
+            || properties.isDefaultIgnorableCodePoint
+            || properties.isBidiControl
     }
 }
 
@@ -283,6 +384,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
     private static let allowedDetailKeys: Set<String> = [
         "allowRuleCount",
         "activeCount",
+        "attemptsInWindow",
         "blockRuleCount",
         "canUseDeviceDNSFallback",
         "catalogVersion",
@@ -290,6 +392,12 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "connectionStatus",
         "consecutiveUpstreamFailureCount",
         "count",
+        // Self-reconnect suppression diagnostics (why a wedge did not restart the
+        // tunnel): a decision label + the gating booleans. Privacy-safe — no
+        // queried domain, just policy state.
+        "decision",
+        "onDemandConfirmed",
+        "protectionEnabled",
         "deviceDNSFallbackActivationCount",
         "deviceDNSFallbackModeActive",
         "dnsServerAddress",
@@ -300,7 +408,9 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "errorCode",
         "errorDescription",
         "errorDomain",
+        "evidenceCount",
         "failure",
+        "fallbackModeActive",
         "fingerprint",
         "guardrailRuleCount",
         "isEnabled",
@@ -342,9 +452,42 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "upstreamFailureCount",
         "upstreamSuccessCount",
         "upstreamTimeoutCount",
+        // Recovery verification source ("forwarding" vs "smoke-probe") — policy
+        // state, no queried domain.
+        "verifiedBy",
         "vpnMessage",
         "vpnMessageIsError",
-        "vpnStatus"
+        "vpnStatus",
+
+        // Release-promoted resolver/DNS diagnostics (counts, resolver endpoints,
+        // outcomes, timings, fingerprints). Audited to never carry a queried
+        // domain — they surface the Wi-Fi/cellular DNS-recovery story in the
+        // optional Feedback report now that the device debug log ships in Release.
+        "bootstrapAllowRuleCount",
+        "bootstrapBlockRuleCount",
+        "bootstrapCount",
+        "dohHTTPVersion",
+        "endpoint",
+        "error",
+        "fallbackAccepted",
+        "fallbackHasResponse",
+        "fallbackOutcome",
+        "footprintMB",
+        "generation",
+        "handshakeMs",
+        "hostname",
+        "ipv4Count",
+        "ipv6Count",
+        "negotiatedALPN",
+        "outcome",
+        "phase",
+        "primaryAccepted",
+        "primaryHasResponse",
+        "primaryOutcome",
+        "protocol",
+        "resolverCount",
+        "succeeded",
+        "underlyingError"
     ]
 
     private static func stringValue(_ value: Any) -> String? {
@@ -417,6 +560,7 @@ public struct BugReportBundle: Sendable {
             "report_id": reportID.uuidString.lowercased(),
             "include_recent_dns_events": false,
             "include_optional_diagnostics": context.includeDiagnostics,
+            "kind": context.issueType.kind.rawValue,
             "user_description": context.userDescription
         ]
 

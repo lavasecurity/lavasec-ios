@@ -6,7 +6,7 @@ final class OnboardingDefaultsTests: XCTestCase {
         let summary = OnboardingDefaultsSummary(configuration: .lavaRecommendedDefaults)
 
         XCTAssertEqual(summary.blocklistText, "Block List Project Phishing + 1 more")
-        XCTAssertEqual(summary.resolverText, "Google Public DNS")
+        XCTAssertEqual(summary.resolverText, "Device DNS")
         XCTAssertEqual(summary.deviceDNSFallbackText, "On")
         XCTAssertEqual(summary.localLoggingText, "Domain counts, domain history, and network activity")
         XCTAssertEqual(summary.accountText, "Continue without account")

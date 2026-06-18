@@ -110,6 +110,27 @@ final class BackupConfigurationPayloadTests: XCTestCase {
         XCTAssertNil(configuration.qaProbeSet)
     }
 
+    func testEncryptedFallbackSelectionRoundTripsThroughBackupPayload() throws {
+        let configuration = AppConfiguration(
+            resolverPresetID: DNSResolverPreset.device.id,
+            usesEncryptedDeviceDNSFallback: true,
+            fallbackResolverPresetID: DNSResolverPreset.cloudflareDoH.id
+        )
+
+        // Encode + decode the payload (not just the in-memory copy) to prove the new
+        // keys persist, then restore and confirm the selection survives end to end.
+        let payload = BackupConfigurationPayload(configuration: configuration)
+        let decodedPayload = try JSONDecoder().decode(
+            BackupConfigurationPayload.self,
+            from: try JSONEncoder().encode(payload)
+        )
+        let restored = decodedPayload.restoredConfiguration()
+
+        XCTAssertTrue(restored.usesEncryptedDeviceDNSFallback)
+        XCTAssertEqual(restored.fallbackResolverPresetID, DNSResolverPreset.cloudflareDoH.id)
+        XCTAssertEqual(restored.fallbackResolverPreset, .cloudflareDoH)
+    }
+
     func testLegacyPayloadHapticFeedbackPreferenceIsIgnored() throws {
         let data = Data("""
         {

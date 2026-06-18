@@ -7,8 +7,117 @@ final class BugReportBundleTests: XCTestCase {
             "I can't visit a website",
             "VPN or filter doesn't work",
             "A Lava feature doesn't work",
+            "I have a suggestion",
             "Something else"
         ])
+    }
+
+    func testIssueTypesMapToTriageKinds() {
+        XCTAssertEqual(BugReportIssueType.websiteAccess.kind, .bug)
+        XCTAssertEqual(BugReportIssueType.vpnOrFilterIssue.kind, .bug)
+        XCTAssertEqual(BugReportIssueType.featureIssue.kind, .bug)
+        XCTAssertEqual(BugReportIssueType.suggestion.kind, .suggestion)
+        XCTAssertEqual(BugReportIssueType.other.kind, .other)
+    }
+
+    func testRequestBodyIncludesTriageKind() throws {
+        let bundle = makeBundle(
+            context: BugReportContext(issueType: .suggestion, details: "Please add a widget")
+        )
+        let body = bundle.makeRequestBody()
+        XCTAssertEqual(body["kind"] as? String, "suggestion")
+    }
+
+    func testNormalizationStripsInvisibleAndControlCharacters() {
+        let context = BugReportContext(
+            issueType: .other,
+            affectedSite: "exa\u{200B}mple.com",
+            details: "Line one\nLine two\u{202E}reversed\u{0007}",
+            contactEmail: "user\u{FEFF}@example.com"
+        )
+
+        // Zero-width space, bidi override, and bell control are removed; newline + text survive.
+        XCTAssertEqual(context.normalizedAffectedSite, "example.com")
+        XCTAssertEqual(context.normalizedDetails, "Line one\nLine tworeversed")
+        XCTAssertEqual(context.normalizedContactEmail, "user@example.com")
+    }
+
+    func testSanitizeKeepsStandaloneEmojiButFlattensJoinedSequences() {
+        // Standalone emoji, skin-tone modifiers, and flags are untouched (no invisible scalars).
+        XCTAssertEqual(BugReportContext.sanitize("🚀"), "🚀")
+        XCTAssertEqual(BugReportContext.sanitize("👍🏽"), "👍🏽")
+        XCTAssertEqual(BugReportContext.sanitize("🇺🇸"), "🇺🇸")
+        // ZWJ-joined sequences are flattened to their visible base scalars (joiner removed).
+        XCTAssertEqual(BugReportContext.sanitize("👩\u{200D}👩\u{200D}👧"), "👩👩👧")
+    }
+
+    func testSanitizeStripsWordJoinerAndOtherInvisibleFormatScalars() {
+        // Word joiner (U+2060) and other invisible format scalars must be stripped, not just
+        // the specific zero-width set — otherwise blank-looking content submits hidden text.
+        XCTAssertEqual(BugReportContext.sanitize("a\u{2060}b"), "ab")
+        XCTAssertEqual(BugReportContext.sanitize("\u{2061}\u{2066}\u{206F}"), "")
+        // ARABIC LETTER MARK (U+061C) is a bidi control and must be stripped too.
+        XCTAssertEqual(BugReportContext.sanitize("a\u{061C}b"), "ab")
+        XCTAssertEqual(BugReportContext.sanitize("\u{061C}"), "")
+        // A zero-width joiner that is standalone, at an edge, or between ordinary characters
+        // (incl. ASCII keycap bases, for which Unicode isEmoji is true) is invisible filler →
+        // dropped, so it can't hide content and an all-invisible field normalizes to empty.
+        XCTAssertEqual(BugReportContext.sanitize("\u{200D}"), "")
+        XCTAssertEqual(BugReportContext.sanitize("a\u{200D}"), "a")
+        XCTAssertEqual(BugReportContext.sanitize("a\u{200D}b"), "ab")
+        XCTAssertEqual(BugReportContext.sanitize("1\u{200D}2"), "12")
+        XCTAssertEqual(BugReportContext.sanitize("#\u{200D}*"), "#*")
+        // Standalone variation selectors and soft hyphens are invisible → stripped.
+        XCTAssertEqual(BugReportContext.sanitize("\u{FE0F}"), "")
+        XCTAssertEqual(BugReportContext.sanitize("a\u{00AD}b"), "ab")
+        // Tag characters (U+E0020–E007F) can ride along inside any emoji grapheme cluster, so
+        // they are stripped unconditionally too — no invisible scalar survives.
+        XCTAssertEqual(BugReportContext.sanitize("😀\u{E0061}\u{E0062}"), "😀")
+        // Invisible scalars are removed even adjacent to emoji (joiner / selector flattened).
+        XCTAssertEqual(BugReportContext.sanitize("👩\u{200D}👧"), "👩👧")
+        XCTAssertEqual(BugReportContext.sanitize("❤\u{FE0F}"), "❤")
+    }
+
+    func testDetailsNormalizationEnforcesSharedInputLimit() {
+        let longDetails = String(repeating: "a", count: BugReportInputLimits.details + 50)
+        let context = BugReportContext(issueType: .other, details: longDetails)
+        XCTAssertEqual(context.normalizedDetails.count, BugReportInputLimits.details)
+    }
+
+    func testSingleLineFieldsCollapseEmbeddedLineBreaks() {
+        let context = BugReportContext(
+            issueType: .websiteAccess,
+            affectedSite: "example.com\nDetails: spoofed",
+            details: "Line one\nLine two",
+            contactEmail: "user\n@example.com"
+        )
+
+        // Single-line site + email collapse the newline to a space; multi-line details keep it.
+        XCTAssertEqual(context.normalizedAffectedSite, "example.com Details: spoofed")
+        XCTAssertEqual(context.normalizedContactEmail, "user @example.com")
+        XCTAssertEqual(context.normalizedDetails, "Line one\nLine two")
+        XCTAssertFalse(context.normalizedAffectedSite.contains("\n"))
+        XCTAssertFalse(context.normalizedContactEmail?.contains("\n") ?? false)
+        // The site value stays on a single line in the composed report text — it can't inject a
+        // standalone "Details:" line; the only "Details:" line is the real one.
+        XCTAssertTrue(context.userDescription.contains("Affected site/domain: example.com Details: spoofed"))
+    }
+
+    func testSingleLineFieldsCollapseUnicodeLineSeparators() {
+        // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR are line breaks too, so single-line
+        // fields must collapse them just like \n — otherwise they reopen the line-injection path.
+        let context = BugReportContext(
+            issueType: .websiteAccess,
+            affectedSite: "example.com\u{2028}Details: spoofed",
+            contactEmail: "user\u{2029}@example.com"
+        )
+        XCTAssertEqual(context.normalizedAffectedSite, "example.com Details: spoofed")
+        XCTAssertEqual(context.normalizedContactEmail, "user @example.com")
+
+        // Multi-line details normalize every line-break variant (CRLF, lone CR, U+2028) to "\n".
+        XCTAssertEqual(BugReportContext.sanitize("a\u{2028}b"), "a\nb")
+        XCTAssertEqual(BugReportContext.sanitize("a\r\nb"), "a\nb")
+        XCTAssertEqual(BugReportContext.sanitize("a\rb"), "a\nb")
     }
 
     func testRequestBodyOmitsOptionalDiagnosticsByDefault() throws {
@@ -159,6 +268,69 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertEqual(entries[0].details["upstreamFailureCount"], "3")
         XCTAssertEqual(entries[0].details["lastUpstreamFailureAt"], "2026-05-18T01:04:00Z")
         XCTAssertNil(entries[0].details["privateDomain"])
+    }
+
+    func testDebugLogParserKeepsNetworkRecoveryDiagnosticDetails() throws {
+        // Mirrors what the tunnel now emits on release for the handoff/DNS-recovery
+        // story — counts, reasons, and kinds only, never resolver addresses or
+        // queried domains — so a Feedback log can show it without leaking anything.
+        let jsonLines = """
+        {"component":"tunnel","event":"device-dns-captured","timestamp":"2026-05-18T01:05:00Z","reason":"network-path-changed","count":"0","activeCount":"2"}
+        {"component":"tunnel","event":"dns-smoke-probe-device-fallback","timestamp":"2026-05-18T01:05:01Z","reason":"network-settled","evidenceCount":"2","fallbackModeActive":"true"}
+        {"component":"tunnel","event":"self-reconnect","timestamp":"2026-05-18T01:05:02Z","reason":"dns-wedged","attemptsInWindow":"1"}
+        {"component":"tunnel","event":"dns-doq-connection-error","timestamp":"2026-05-18T01:05:03Z","endpoint":"dns.example:8853","phase":"failed","error":"POSIXErrorCode(rawValue: 54): Connection reset by peer","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 4)
+        XCTAssertEqual(entries[0].event, "device-dns-captured")
+        XCTAssertEqual(entries[0].details["count"], "0")
+        XCTAssertEqual(entries[0].details["activeCount"], "2")
+        XCTAssertEqual(entries[1].details["evidenceCount"], "2")
+        XCTAssertEqual(entries[1].details["fallbackModeActive"], "true")
+        XCTAssertEqual(entries[2].event, "self-reconnect")
+        XCTAssertEqual(entries[2].details["attemptsInWindow"], "1")
+        XCTAssertEqual(entries[2].details["reason"], "dns-wedged")
+        // DoQ connection failures are promoted to Release; the NWError reason and
+        // phase must survive redaction (they distinguish failure modes during a
+        // handoff) while a queried domain on the same entry is still stripped.
+        XCTAssertEqual(entries[3].event, "dns-doq-connection-error")
+        XCTAssertEqual(entries[3].details["phase"], "failed")
+        XCTAssertEqual(entries[3].details["error"], "POSIXErrorCode(rawValue: 54): Connection reset by peer")
+        XCTAssertEqual(entries[3].details["endpoint"], "dns.example:8853")
+        XCTAssertNil(entries[3].details["privateDomain"])
+    }
+
+    func testDebugLogParserKeepsWedgeRecoveryDiagnosticDetails() throws {
+        // The "said reconnect needed but never recovered" story: why a wedge was
+        // not restarted (decision + gating booleans) and the in-place recovery
+        // re-probe. Policy state only — no resolver address or queried domain.
+        let jsonLines = """
+        {"component":"tunnel","event":"self-reconnect-suppressed","timestamp":"2026-05-18T01:06:00Z","decision":"throttled","protectionEnabled":"true","onDemandConfirmed":"false","attemptsInWindow":"2","reason":"backed-off","privateDomain":"checkout.example"}
+        {"component":"tunnel","event":"resolver-wedge-recovery","timestamp":"2026-05-18T01:06:30Z","reason":"backed-off","severity":"needs-reconnect","consecutiveUpstreamFailureCount":"5"}
+        {"component":"tunnel","event":"dns-recovered","timestamp":"2026-05-18T01:06:35Z","reason":"backed-off","transport":"device-dns","durationMs":"5120","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries[0].event, "self-reconnect-suppressed")
+        XCTAssertEqual(entries[0].details["decision"], "throttled")
+        XCTAssertEqual(entries[0].details["protectionEnabled"], "true")
+        XCTAssertEqual(entries[0].details["onDemandConfirmed"], "false")
+        XCTAssertEqual(entries[0].details["attemptsInWindow"], "2")
+        XCTAssertEqual(entries[0].details["reason"], "backed-off")
+        XCTAssertNil(entries[0].details["privateDomain"])
+        XCTAssertEqual(entries[1].event, "resolver-wedge-recovery")
+        XCTAssertEqual(entries[1].details["severity"], "needs-reconnect")
+        XCTAssertEqual(entries[1].details["consecutiveUpstreamFailureCount"], "5")
+        // The recovery counterpart: mechanism + how long the wedge lasted, with a
+        // co-located queried domain still stripped.
+        XCTAssertEqual(entries[2].event, "dns-recovered")
+        XCTAssertEqual(entries[2].details["transport"], "device-dns")
+        XCTAssertEqual(entries[2].details["durationMs"], "5120")
+        XCTAssertNil(entries[2].details["privateDomain"])
     }
 
     func testDebugLogParserKeepsLatencySpanDetails() throws {

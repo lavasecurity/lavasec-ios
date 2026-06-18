@@ -76,17 +76,19 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
 
     func testAllBottomSheetCallSitesUseSharedSheetScaffold() throws {
         let appSources = [
+            try Self.source(named: "BackupRestoreView.swift", in: "LavaSecApp"),
             try Self.source(named: "BackupSetupView.swift", in: "LavaSecApp"),
             try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp"),
             try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp"),
             try Self.source(named: "FiltersView.swift", in: "LavaSecApp"),
             try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp"),
-            try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+            try Self.source(named: "SettingsView.swift", in: "LavaSecApp"),
+            try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
         ].joined(separator: "\n")
 
         XCTAssertEqual(
             appSources.occurrences(of: "LavaSheetScaffold(") + appSources.occurrences(of: "LavaSheetScaffold {"),
-            9
+            16
         )
         XCTAssertFalse(appSources.contains("safeAreaBar(edge: .bottom"))
     }

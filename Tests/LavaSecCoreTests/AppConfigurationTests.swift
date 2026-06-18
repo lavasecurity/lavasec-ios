@@ -10,6 +10,12 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertTrue(AppConfiguration().fallbackToDeviceDNS)
     }
 
+    func testEncryptedDeviceDNSFallbackDefaultsOffForFreshConfiguration() {
+        // Enabling a third-party encrypted resolver for a Device-DNS primary is an
+        // explicit opt-in; it must never be on without the user choosing it.
+        XCTAssertFalse(AppConfiguration().usesEncryptedDeviceDNSFallback)
+    }
+
     func testLocalLogPreferencesDefaultToKeepingCountsDomainHistoryNetworkActivityAndGuardProgress() {
         let configuration = AppConfiguration()
 
@@ -68,6 +74,41 @@ final class AppConfigurationTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AppConfiguration.self, from: data)
 
         XCTAssertTrue(decoded.fallbackToDeviceDNS)
+    }
+
+    func testFallbackResolverSelectionDefaultsToMullvadDoH() {
+        let configuration = AppConfiguration()
+        XCTAssertEqual(configuration.fallbackResolverPresetID, DNSResolverPreset.mullvadDoH.id)
+        XCTAssertEqual(configuration.fallbackResolverPreset, .mullvadDoH)
+    }
+
+    func testFallbackResolverSelectionRoundTripsAndResolves() throws {
+        let configuration = AppConfiguration(
+            usesEncryptedDeviceDNSFallback: true,
+            fallbackResolverPresetID: DNSResolverPreset.customID,
+            fallbackCustomResolverAddress: "https://fallback.example/dns-query",
+            fallbackCustomResolverName: " My Fallback "
+        )
+
+        let decoded = try JSONDecoder().decode(
+            AppConfiguration.self,
+            from: try JSONEncoder().encode(configuration)
+        )
+
+        XCTAssertTrue(decoded.usesEncryptedDeviceDNSFallback)
+        XCTAssertEqual(decoded.fallbackResolverPresetID, DNSResolverPreset.customID)
+        XCTAssertEqual(decoded.fallbackResolverPreset.displayName, "My Fallback")
+        XCTAssertEqual(decoded.fallbackResolverPreset.dohEndpoints.map { $0.url.absoluteString }, [
+            "https://fallback.example/dns-query"
+        ])
+    }
+
+    func testRetiredDNSSBFallbackSelectionMigratesToMullvad() throws {
+        let data = Data("""
+        { "fallbackResolverPresetID": "dns-sb-doh" }
+        """.utf8)
+        let configuration = try JSONDecoder().decode(AppConfiguration.self, from: data)
+        XCTAssertEqual(configuration.fallbackResolverPresetID, DNSResolverPreset.mullvadDoH.id)
     }
 
     func testAppConfigurationResolvesDeviceDNSResolverIDFromCatalog() throws {

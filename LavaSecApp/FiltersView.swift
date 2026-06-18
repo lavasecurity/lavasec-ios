@@ -3,48 +3,98 @@ import LavaSecCore
 
 struct FiltersView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var security: SecurityController
     let scrollToTopTrigger: Int
+    let embedsNavigationStack: Bool
 
-    init(scrollToTopTrigger: Int = 0) {
+    @State private var isSharingFilters = false
+    @State private var isImportingFilters = false
+
+    init(scrollToTopTrigger: Int = 0, embedsNavigationStack: Bool = true) {
         self.scrollToTopTrigger = scrollToTopTrigger
+        self.embedsNavigationStack = embedsNavigationStack
     }
 
     var body: some View {
-        NavigationStack {
-            LavaPrimaryTabScreenContent(
-                title: "Filters",
-                scrollToTopTrigger: scrollToTopTrigger,
-                refreshAction: {
-                    await viewModel.refreshFilterNumberSummaries()
+        Group {
+            if embedsNavigationStack {
+                NavigationStack {
+                    filtersScreen
                 }
-            ) {
-                FiltersOverviewPanel()
-            } content: {
-                LavaSectionGroup("Manage filters") {
-                    VStack(spacing: 10) {
-                        LavaNavigationRow(
-                            icon: .blocked,
-                            title: "Blocked Domains",
-                            summary: viewModel.blockedFiltersSummaryText
-                        ) {
-                            BlockedDomainsDetailView()
-                        }
-
-                        LavaNavigationRow(
-                            icon: .allowed,
-                            title: "Allowed Exceptions",
-                            summary: viewModel.allowedExceptionsSummaryText
-                        ) {
-                            AllowedExceptionsDetailView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
+            } else {
+                filtersScreen
             }
         }
         .fullScreenCover(isPresented: $viewModel.isFilterPreparationScreenPresented) {
             FilterPreparationScreen(origin: .filters)
                 .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $isSharingFilters) {
+            ShareFiltersSheet()
+                .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $isImportingFilters) {
+            ImportFiltersFlow(
+                startMode: .chooseMethod,
+                authorizeImport: {
+                    await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filters")
+                }
+            )
+            .environmentObject(viewModel)
+        }
+    }
+
+    private var filtersScreen: some View {
+        LavaPrimaryTabScreenContent(
+            title: "Filters",
+            scrollToTopTrigger: scrollToTopTrigger,
+            refreshAction: {
+                await viewModel.refreshFilterNumberSummaries()
+            }
+        ) {
+            FiltersOverviewPanel()
+        } content: {
+            LavaSectionGroup("Manage filters") {
+                VStack(spacing: 10) {
+                    LavaNavigationRow(
+                        icon: .blocked,
+                        title: "Blocked Domains",
+                        summary: viewModel.blockedFiltersSummaryText
+                    ) {
+                        BlockedDomainsDetailView()
+                    }
+
+                    LavaNavigationRow(
+                        icon: .allowed,
+                        title: "Allowed Exceptions",
+                        summary: viewModel.allowedExceptionsSummaryText
+                    ) {
+                        AllowedExceptionsDetailView()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            LavaSectionGroup("Share & import") {
+                VStack(spacing: 10) {
+                    ImportOptionRow(
+                        systemImage: "square.and.arrow.up",
+                        title: "Share my filters",
+                        subtitle: "Share via QR or code"
+                    ) {
+                        isSharingFilters = true
+                    }
+
+                    ImportOptionRow(
+                        systemImage: "square.and.arrow.down",
+                        title: "Import filters",
+                        subtitle: "Scan a QR or code"
+                    ) {
+                        isImportingFilters = true
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
         }
     }
 }
@@ -209,13 +259,15 @@ private struct BlockedDomainsDetailView: View {
             FilterConfirmationSheet(origin: .filters)
                 .environmentObject(viewModel)
         }
-        .alert("Discard changes?", isPresented: $showingDiscardConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Discard", role: .destructive) {
-                viewModel.cancelFilterEditing()
+        .lavaConfirmationAlert { host in
+            host.alert("Discard changes?", isPresented: $showingDiscardConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Discard", role: .destructive) {
+                    viewModel.cancelFilterEditing()
+                }
+            } message: {
+                Text("Your draft changes will be removed. The current saved filters will stay active.")
             }
-        } message: {
-            Text("Your draft changes will be removed. The current saved filters will stay active.")
         }
     }
 
@@ -363,13 +415,15 @@ private struct AllowedExceptionsDetailView: View {
             FilterConfirmationSheet(origin: .filters)
                 .environmentObject(viewModel)
         }
-        .alert("Discard changes?", isPresented: $showingDiscardConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Discard", role: .destructive) {
-                viewModel.cancelFilterEditing()
+        .lavaConfirmationAlert { host in
+            host.alert("Discard changes?", isPresented: $showingDiscardConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Discard", role: .destructive) {
+                    viewModel.cancelFilterEditing()
+                }
+            } message: {
+                Text("Your draft changes will be removed. The current saved filters will stay active.")
             }
-        } message: {
-            Text("Your draft changes will be removed. The current saved filters will stay active.")
         }
     }
 
@@ -913,13 +967,15 @@ struct AddBlocklistSheet: View {
             }
         }
         .presentationDetents([.fraction(0.62), .large])
-        .alert("Delete custom list?", isPresented: deleteConfirmationIsPresented, presenting: customDeleteConfirmation) { source in
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                deleteCustomSource(id: source.id)
+        .lavaConfirmationAlert { host in
+            host.alert("Delete custom list?", isPresented: deleteConfirmationIsPresented, presenting: customDeleteConfirmation) { source in
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    deleteCustomSource(id: source.id)
+                }
+            } message: { source in
+                Text("This removes the custom blocklist from your saved lists. \(viewModel.customBlocklistPickerTitle(for: source)) can be added again later.")
             }
-        } message: { source in
-            Text("This removes the custom blocklist from your saved lists. \(viewModel.customBlocklistPickerTitle(for: source)) can be added again later.")
         }
         .sheet(isPresented: $showUpgradePage) {
             LavaPlusUpgradeSheet()

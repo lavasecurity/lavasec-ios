@@ -60,11 +60,29 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         }
     }
 
+    // iOS's loadAllFromPreferences can transiently return an empty list right
+    // after the extension is torn down or during a network handoff, even though
+    // the saved profile still exists. Re-querying a few times before concluding
+    // "no profile" avoids minting a brand-new manager in that window — which
+    // re-prompts for VPN permission and leaves a duplicate profile (the
+    // "asked to install a new VPN profile after a network change" regression).
+    public struct ReloadBeforeCreatePolicy: Sendable {
+        public let retryCount: Int
+        public let retryDelay: TimeInterval
+
+        public init(retryCount: Int = 2, retryDelay: TimeInterval = 0.4) {
+            self.retryCount = retryCount
+            self.retryDelay = retryDelay
+        }
+    }
+
     private let repository: Repository
     private let statusWaiter: any VPNStatusChangeWaiting
     private let expectedProviderBundleIdentifier: String
     private let waitPolicy: WaitPolicy
+    private let reloadBeforeCreatePolicy: ReloadBeforeCreatePolicy
     private let now: @MainActor () -> Date
+    private let sleep: @MainActor (TimeInterval) async -> Void
     private let emitEvent: @MainActor (String, [String: String]) -> Void
 
     public init(
@@ -72,14 +90,20 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         statusWaiter: any VPNStatusChangeWaiting,
         expectedProviderBundleIdentifier: String,
         waitPolicy: WaitPolicy = WaitPolicy(),
+        reloadBeforeCreatePolicy: ReloadBeforeCreatePolicy = ReloadBeforeCreatePolicy(),
         now: @escaping @MainActor () -> Date = { Date() },
+        sleep: @escaping @MainActor (TimeInterval) async -> Void = { seconds in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+        },
         emitEvent: @escaping @MainActor (String, [String: String]) -> Void = { _, _ in }
     ) {
         self.repository = repository
         self.statusWaiter = statusWaiter
         self.expectedProviderBundleIdentifier = expectedProviderBundleIdentifier
         self.waitPolicy = waitPolicy
+        self.reloadBeforeCreatePolicy = reloadBeforeCreatePolicy
         self.now = now
+        self.sleep = sleep
         self.emitEvent = emitEvent
     }
 
@@ -102,18 +126,44 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
     }
 
     public func loadOrCreateManager(existing: Manager? = nil) async throws -> Manager {
-        let current: Manager?
-        if let existing {
-            current = existing
-        } else {
-            current = try await loadExistingManager()
-        }
-
+        let current = try await resolveManagerBeforeCreate(existing: existing)
         let manager = current ?? repository.makeManager()
+        if current == nil {
+            emitEvent("load-or-create-creating-new-manager", [:])
+        }
         repository.applyConfiguration(to: manager)
         try await repository.saveAndReload(manager)
         await removeDuplicateManagers(keeping: manager)
         return manager
+    }
+
+    // Resolve the existing Lava manager before falling back to creating one.
+    // A passed-in `existing` is trusted as-is; otherwise we re-query, tolerating
+    // a transient empty load (see ReloadBeforeCreatePolicy) so a network handoff
+    // can't trick us into minting a duplicate profile and re-prompting for VPN
+    // permission. A thrown load error propagates (we never create over an error).
+    private func resolveManagerBeforeCreate(existing: Manager?) async throws -> Manager? {
+        if let existing {
+            return existing
+        }
+
+        var attempt = 0
+        while true {
+            if let found = try await loadExistingManager() {
+                if attempt > 0 {
+                    emitEvent("load-existing-manager-recovered-after-empty", ["attempts": "\(attempt + 1)"])
+                }
+                return found
+            }
+
+            guard attempt < reloadBeforeCreatePolicy.retryCount else {
+                return nil
+            }
+
+            attempt += 1
+            emitEvent("load-existing-manager-empty-retry", ["attempt": "\(attempt)"])
+            await sleep(reloadBeforeCreatePolicy.retryDelay)
+        }
     }
 
     public func removeManager(_ manager: Manager) async throws {

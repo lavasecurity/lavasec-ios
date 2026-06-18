@@ -3,6 +3,36 @@ import XCTest
 @testable import LavaSecCore
 
 final class DNSResolverSmokeProbeTests: XCTestCase {
+    func testProbeDomainRotatesAcrossSequencesSoConsecutiveProbesDiffer() {
+        let domains = DNSResolverSmokeProbe.rotatingProbeDomains
+        XCTAssertGreaterThanOrEqual(domains.count, 2, "rotation needs at least two domains to diversify")
+
+        // Consecutive sequence numbers (the probe generation) must map to different
+        // domains, so a single blocked/hijacked canary can't fail every probe.
+        for sequence in 0..<(domains.count * 2) {
+            let here = DNSResolverSmokeProbe.probeDomain(forSequence: sequence)
+            let next = DNSResolverSmokeProbe.probeDomain(forSequence: sequence + 1)
+            XCTAssertNotEqual(here, next, "consecutive probes \(sequence)/\(sequence + 1) must rotate domains")
+            XCTAssertTrue(domains.contains(here))
+        }
+
+        // Deterministic, wraps cleanly, and stable for negative sequences.
+        XCTAssertEqual(DNSResolverSmokeProbe.probeDomain(forSequence: 0), domains[0])
+        XCTAssertEqual(DNSResolverSmokeProbe.probeDomain(forSequence: domains.count), domains[0])
+        XCTAssertEqual(DNSResolverSmokeProbe.probeDomain(forSequence: -1), domains[domains.count - 1])
+    }
+
+    func testRotatingProbeBuildsAValidQueryForEachDomain() throws {
+        for (index, expected) in DNSResolverSmokeProbe.rotatingProbeDomains.enumerated() {
+            let domain = DNSResolverSmokeProbe.probeDomain(forSequence: index)
+            XCTAssertEqual(domain, expected)
+            let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56, domain: domain)
+            let question = try DNSMessage.parseQuestion(from: query)
+            XCTAssertEqual(question.domain, expected)
+            XCTAssertEqual(question.recordType, .a)
+        }
+    }
+
     func testSmokeProbeBuildsARecordQueryForExampleDomain() throws {
         let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
         let question = try DNSMessage.parseQuestion(from: query)
@@ -56,6 +86,35 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         )
 
         XCTAssertFalse(DNSResolverSmokeProbe.acceptsResolutionResponse(nxdomain, matching: query))
+    }
+
+    func testIndicatesResolverFailureFlagsServfailAndRefused() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        // QR bit set (0x8000) + rcode 2 (SERVFAIL) / rcode 5 (REFUSED): the resolver
+        // is reachable but failed to serve — must trigger the forwarding fallback.
+        let servfail = Self.response(for: query, transactionID: 0x4C56, flags: 0x8002, answerCount: 0)
+        let refused = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 0)
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesResolverFailure(servfail))
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesResolverFailure(refused))
+    }
+
+    func testIndicatesResolverFailurePassesLegitimateAnswersThrough() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        // NOERROR with answers, NOERROR/NODATA (0 answers), and NXDOMAIN are all
+        // authoritative replies that MUST pass through untouched — rerouting them to
+        // the fallback resolver would break resolution semantics and leak traffic.
+        let answered = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let noData = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 0)
+        let nxdomain = Self.response(for: query, transactionID: 0x4C56, flags: 0x8183, answerCount: 0)
+
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(answered))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(noData))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(nxdomain))
+        // A bare query (QR bit unset) and a nil/short packet are not resolver failures.
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(query))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(nil))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(Data([0x00, 0x01])))
     }
 
     private static func response(
