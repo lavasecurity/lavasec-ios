@@ -1,5 +1,6 @@
 import SwiftUI
 import LavaSecCore
+import StoreKit
 import UIKit
 import UniformTypeIdentifiers
 
@@ -1065,6 +1066,7 @@ private struct UpgradeSettingsView: View {
 
             if viewModel.configuration.hasLavaSecurityPlus {
                 UpgradeThankYouView()
+                subscriberManagementSection
             } else if !viewModel.hasCheckedLavaSecurityPlusEntitlements
                 || viewModel.isRefreshingLavaSecurityPlusEntitlements {
                 UpgradeEntitlementCheckingView()
@@ -1202,9 +1204,80 @@ private struct UpgradeSettingsView: View {
             await viewModel.restoreLavaSecurityPlusPurchases()
         }
     }
+
+    @ViewBuilder
+    private var subscriberManagementSection: some View {
+        VStack(spacing: 10) {
+            // Manage / cancel — auto-renewable plans only. The lifetime unlock has no
+            // expiry and nothing to cancel, so it gets no Manage row.
+            if viewModel.lavaSecurityPlusExpiresAt != nil {
+                Button {
+                    manageSubscription()
+                } label: {
+                    SettingsActionRow(title: "Manage Subscription") {
+                        Image(systemName: "creditcard.circle")
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isPurchasingLavaSecurityPlus)
+                .padding(16)
+                .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
+            }
+
+            // Restore — relevant for any plan after a reinstall or device switch.
+            Button {
+                restorePurchases()
+            } label: {
+                SettingsActionRow(title: "Restore Purchase") {
+                    if viewModel.isPurchasingLavaSecurityPlus {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isPurchasingLavaSecurityPlus)
+            .padding(16)
+            .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
+        }
+    }
+
+    private func manageSubscription() {
+        performAppSettingsMutation(reason: "Manage Lava Security Plus") {
+            await presentManageSubscriptions()
+        }
+    }
+
+    @MainActor
+    private func presentManageSubscriptions() async {
+        // Prefer Apple's in-app manage sheet; fall back to the App Store subscriptions
+        // page when no foreground scene is available or the sheet can't present (e.g. the
+        // Simulator, where showManageSubscriptions often no-ops).
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) {
+            do {
+                try await AppStore.showManageSubscriptions(in: scene)
+                await viewModel.refreshLavaSecurityPlusEntitlements()
+                return
+            } catch {
+                // Fall through to the deep link below.
+            }
+        }
+
+        if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+            _ = await UIApplication.shared.open(url)
+        }
+    }
 }
 
 private struct UpgradeThankYouView: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+
     var body: some View {
         LavaPlainCard {
             VStack(spacing: 14) {
@@ -1220,6 +1293,13 @@ private struct UpgradeThankYouView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(LavaStyle.secondaryText)
                         .multilineTextAlignment(.center)
+
+                    if let expiresAt = viewModel.lavaSecurityPlusExpiresAt {
+                        Text("Expiration: %@".lavaLocalizedFormat(expiresAt.formatted(date: .abbreviated, time: .omitted)))
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)

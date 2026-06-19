@@ -883,6 +883,10 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isLoadingLavaSecurityPlusProducts = false
     @Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false
     @Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false
+    /// Expiry of the active auto-renewable Lava Security Plus entitlement (nil for the
+    /// lifetime plan or when there is no active entitlement). Drives the subscriber
+    /// "Expiration" line and gates the Manage Subscription control.
+    @Published private(set) var lavaSecurityPlusExpiresAt: Date?
     @Published private(set) var isPurchasingLavaSecurityPlus = false
     @Published private(set) var lavaSecurityPlusMessage: String?
     @Published private(set) var lavaSecurityPlusMessageIsError = false
@@ -5247,6 +5251,14 @@ final class AppViewModel: ObservableObject {
     }
 
     private func applyLavaSecurityPlusEntitlement(_ entitlement: LavaSecurityPlusEntitlement) {
+        // Surface the auto-renewable expiry (nil for the lifetime plan / no entitlement)
+        // before the early-return below, so the subscriber UI stays current even when the
+        // active flag itself is unchanged (e.g. a renewal that only moves the expiry date).
+        let nextExpiresAt = entitlement.isActive ? entitlement.expiresAt : nil
+        if lavaSecurityPlusExpiresAt != nextExpiresAt {
+            lavaSecurityPlusExpiresAt = nextExpiresAt
+        }
+
         let hasLavaSecurityPlus = entitlement.isActive
         guard configuration.hasLavaSecurityPlus != hasLavaSecurityPlus else {
             return
