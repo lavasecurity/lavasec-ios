@@ -169,19 +169,19 @@ final class DefaultCatalogTests: XCTestCase {
         XCTAssertEqual(visibleIDs, DefaultCatalog.curatedSources.map(\.id))
     }
 
-    func testFreePlanAllowsTenIndividualDomainsButNoCustomLists() {
+    func testFreePlanAllowsTwentyFiveIndividualDomainsButNoCustomLists() {
         let limits = AppConfiguration().limits
 
-        XCTAssertEqual(limits.maxAllowedDomains, 10)
+        XCTAssertEqual(limits.maxAllowedDomains, 25)
         XCTAssertFalse(limits.allowsCustomBlocklists)
     }
 
-    func testFreePlanAllowsTenAdditionalBlockedDomains() {
-        XCTAssertEqual(FeatureLimits.free.maxBlockedDomains, 10)
+    func testFreePlanAllowsTwentyFiveAdditionalBlockedDomains() {
+        XCTAssertEqual(FeatureLimits.free.maxBlockedDomains, 25)
     }
 
-    func testPaidPlanAllowsFiveHundredAdditionalBlockedDomainsAndCustomLists() {
-        XCTAssertEqual(FeatureLimits.paid.maxBlockedDomains, 500)
+    func testPaidPlanAllowsOneThousandAdditionalBlockedDomainsAndCustomLists() {
+        XCTAssertEqual(FeatureLimits.paid.maxBlockedDomains, 1_000)
         XCTAssertTrue(FeatureLimits.paid.allowsCustomBlocklists)
     }
 }

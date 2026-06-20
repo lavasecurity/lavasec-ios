@@ -2,6 +2,7 @@ import Foundation
 
 public enum DNSWireMessage {
     public static func transactionID(in data: Data) -> UInt16? {
+        let data = zeroBased(data)
         guard data.count >= 2 else {
             return nil
         }
@@ -10,7 +11,7 @@ public enum DNSWireMessage {
     }
 
     public static func clearingTransactionID(in data: Data) -> Data {
-        var copy = data
+        var copy = zeroBased(data)
         guard copy.count >= 2 else {
             return copy
         }
@@ -21,7 +22,8 @@ public enum DNSWireMessage {
     }
 
     public static func replacingTransactionID(in response: Data, from query: Data) -> Data {
-        var copy = response
+        var copy = zeroBased(response)
+        let query = zeroBased(query)
         guard copy.count >= 2, query.count >= 2 else {
             return copy
         }
@@ -50,6 +52,8 @@ public enum DNSWireMessage {
         matching query: Data,
         requiresMatchingTransactionID: Bool = true
     ) -> Bool {
+        let response = zeroBased(response)
+        let query = zeroBased(query)
         if requiresMatchingTransactionID, !matchesTransactionID(in: response, query: query) {
             return false
         }
@@ -72,6 +76,7 @@ public enum DNSWireMessage {
     }
 
     public static func cappingCacheableTTLs(in response: Data, to maximumTTL: UInt32) -> Data? {
+        let response = zeroBased(response)
         guard response.count >= 12 else {
             return nil
         }
@@ -122,6 +127,7 @@ public enum DNSWireMessage {
     }
 
     public static func hasWellFormedResourceRecords(_ response: Data) -> Bool {
+        let response = zeroBased(response)
         guard response.count >= 12 else {
             return false
         }
@@ -231,6 +237,14 @@ public enum DNSWireMessage {
         }
 
         return false
+    }
+
+    // Every parser below indexes by absolute integer offset, which is only valid
+    // on a 0-indexed Data. Callers today pass copies (0-indexed), but a sliced
+    // Data (non-zero startIndex) would silently misread or trap. Normalize once at
+    // each public entry: a no-op (no copy) when already 0-based, a copy otherwise.
+    private static func zeroBased(_ data: Data) -> Data {
+        data.startIndex == 0 ? data : Data(data)
     }
 
     private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {

@@ -88,7 +88,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
         let localLogSearchBlock = try Self.sourceBlock(
             in: diagnosticsSource,
             startingAt: "private struct LocalLogSearchField: View",
-            endingBefore: "private struct NetworkActivityLogView: View"
+            endingBefore: "struct NetworkActivityLogView: View"
         )
         let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
         let blocklistSearchBlock = try Self.sourceBlock(

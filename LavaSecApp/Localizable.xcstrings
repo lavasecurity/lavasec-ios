@@ -1,6 +1,90 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ times" : {
+      "comment" : "Top Domains row subtitle: how many times a domain was queried. Preserve the %@ placeholder.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Mal"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ times"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ fois"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 回"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 次"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 次"
+          }
+        }
+      }
+    },
+    "Most blocked & allowed domains" : {
+      "comment" : "Top Domains navigation row summary under Local Logs.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Häufigste blockierte & erlaubte Domains"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Most blocked & allowed domains"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domaines bloqués et autorisés les plus fréquents"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最も多いブロック・許可ドメイン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最常拦截和允许的域名"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最常封鎖與允許的網域"
+          }
+        }
+      }
+    },
     "Looks like you shook your phone. Want to tell us what went wrong?" : {
       "comment" : "Message in the rage-shake feedback dialog, shown after the user shakes the phone.",
       "extractionState" : "manual",
@@ -104,7 +188,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Envoyer un commentaire"
+            "value" : "Envoyer un retour"
           }
         },
         "ja" : {
@@ -146,7 +230,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Envoyer un commentaire ?"
+            "value" : "Envoyer un retour ?"
           }
         },
         "ja" : {
@@ -289,7 +373,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "即可使用透過 HTTPS、TLS 和 QUIC 加密的 DNS"
+            "value" : "即可使用透過 HTTPS、TLS 和 QUIC 的 DNS"
           }
         }
       }
@@ -442,7 +526,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“Lava Security”は通知の送信を求めています"
+            "value" : "“Lava Security”が通知の送信を求めています"
           }
         },
         "zh-Hans" : {
@@ -998,7 +1082,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 本機防護"
+            "value" : "本機已防護 %@"
           }
         }
       }
@@ -1022,7 +1106,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ sera prepare et enregistre localement."
+            "value" : "%@ sera préparé et enregistré localement."
           }
         },
         "ja" : {
@@ -1040,7 +1124,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 會生成並儲存在本機。"
+            "value" : "%@ 會在本機準備並儲存。"
           }
         }
       }
@@ -1334,7 +1418,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已選 %d/%d - 請移除一個選項後繼續。"
+            "value" : "已選 %d/%d，請移除一個選項後繼續。"
           }
         }
       }
@@ -1841,47 +1925,6 @@
         }
       }
     },
-    "All local logs stay on this phone and are sent to us only if you include them in a bug report." : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alle lokalen Protokolle bleiben auf diesem Smartphone und werden nur gesendet, wenn du sie einem Fehlerbericht beifügst."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All local logs stay on this phone and are sent to us only if you include them in a bug report."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tous les journaux locaux restent sur ce téléphone et ne nous sont envoyés que si vous les joignez à un rapport de bug."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのローカルログはこのスマートフォンに残り、バグレポートに含めた場合にのみ送信されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "所有本地日志都保留在这台手机上，只有你在错误报告中包含它们时才会发送给我们。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "所有本機記錄都留在這台手機，只有在你將其加入錯誤回報時才會傳送給我們。"
-          }
-        }
-      }
-    },
     "All other trademarks and service marks are property of their respective owners." : {
       "comment" : "Release app UI string. Keep placeholders and product names intact.",
       "localizations" : {
@@ -1918,7 +1961,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "其他商標和服務標誌均屬各自所有者。"
+            "value" : "所有其他商標和服務標章均為其各自所有者的財產。"
           }
         }
       }
@@ -2096,7 +2139,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Eigene QA-Probes anwenden"
+            "value" : "Eigene QA-Tests anwenden"
           }
         },
         "en" : {
@@ -2126,7 +2169,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "套用自訂 QA 探測"
+            "value" : "套用自訂 QA 探測項目"
           }
         }
       }
@@ -2905,7 +2948,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Controle la protection DNS locale de Lava."
+            "value" : "Contrôle la protection DNS locale de Lava."
           }
         },
         "ja" : {
@@ -3001,13 +3044,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已复制!"
+            "value" : "已复制！"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已複製!"
+            "value" : "已複製！"
           }
         }
       }
@@ -3157,7 +3200,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Credits et licences"
+            "value" : "Crédits et licences"
           }
         },
         "ja" : {
@@ -3199,7 +3242,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Offre personnalisee"
+            "value" : "Offre personnalisée"
           }
         },
         "ja" : {
@@ -3218,6 +3261,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自訂方案"
+          }
+        }
+      }
+    },
+    "Detailed activity stays on this phone for 7 days and is sent to us only if you include it in a bug report." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detaillierte Aktivität bleibt 7 Tage lang auf diesem Smartphone und wird nur gesendet, wenn du sie einem Fehlerbericht beifügst."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detailed activity stays on this phone for 7 days and is sent to us only if you include it in a bug report."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'activité détaillée reste sur ce téléphone pendant 7 jours et ne nous est envoyée que si vous la joignez à un rapport de bug."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細なアクティビティはこのスマートフォンに7日間保存され、バグレポートに含めた場合にのみ送信されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详细活动会在这台手机上保留 7 天，只有你在错误报告中包含它时才会发送给我们。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細活動會在這台手機保留 7 天，只有在你將其加入錯誤回報時才會傳送給我們。"
           }
         }
       }
@@ -3481,7 +3565,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kennst du diese Domain ?"
+            "value" : "Kennst du diese Domain?"
           }
         },
         "en" : {
@@ -3558,6 +3642,594 @@
         }
       }
     },
+    "Domain Logs" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain-Protokolle"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain Logs"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Journaux de domaines"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメインログ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "域名日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網域日誌"
+          }
+        }
+      }
+    },
+    "Kept on this iPhone for 7 days, and only leaves the device if you export it or attach it to a bug report." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird 7 Tage lang auf diesem iPhone gespeichert und verlässt das Gerät nur, wenn du es exportierst oder an einen Fehlerbericht anhängst."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kept on this iPhone for 7 days, and only leaves the device if you export it or attach it to a bug report."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conservé sur cet iPhone pendant 7 jours et ne quitte l’appareil que si vous l’exportez ou le joignez à un rapport de bug."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneに7日間保存され、エクスポートするかバグレポートに添付した場合にのみ端末から外部に出ます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 iPhone 上保留 7 天，只有当你导出它或将其附加到错误报告时才会离开本机。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 iPhone 上保留 7 天，只有當你匯出它或將其附加到錯誤報告時才會離開本機。"
+          }
+        }
+      }
+    },
+    "Clear Domain Logs?" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain-Protokolle löschen?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Domain Logs?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer les journaux de domaines ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメインログを消去しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除域名日志？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除網域日誌？"
+          }
+        }
+      }
+    },
+    "Clear Domain Logs" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain-Protokolle löschen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Domain Logs"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Effacer les journaux de domaines"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメインログを消去"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除域名日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除網域日誌"
+          }
+        }
+      }
+    },
+    "This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dies entfernt gespeicherte Domain-Protokolle von diesem Smartphone. Filterzähler und Netzwerkaktivität bleiben unverändert."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cela supprime les journaux de domaines enregistrés sur ce téléphone. Les compteurs de filtrage et l’activité réseau ne changent pas."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このスマートフォンに保存されたドメインログを削除します。フィルタリング数とネットワークアクティビティは変わりません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这会移除这台手机上保存的域名日志。过滤计数和网络活动不会改变。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這會移除此手機上儲存的網域日誌。篩選計數和網路活動不會改變。"
+          }
+        }
+      }
+    },
+    "Allowed" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaubt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allowed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已允许"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已允許"
+          }
+        }
+      }
+    },
+    "Blocked" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blockiert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocked"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloqué"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブロック"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拦截"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已封鎖"
+          }
+        }
+      }
+    },
+    "Network activity is a local log of connection and protection events on this device. It is sent to us only if you attach it to a bug report." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Netzwerkaktivität ist ein lokales Protokoll von Verbindungs- und Schutzereignissen auf diesem Gerät. Sie wird nur an uns gesendet, wenn du sie einem Fehlerbericht anhängst."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Network activity is a local log of connection and protection events on this device. It is sent to us only if you attach it to a bug report."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'activité réseau est un journal local des événements de connexion et de protection sur cet appareil. Elle ne nous est envoyée que si vous la joignez à un rapport de bogue."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ネットワークアクティビティは、このデバイス上の接続および保護イベントのローカルログです。バグレポートに添付した場合にのみ当社へ送信されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络活动是本设备上连接和保护事件的本地日志。仅当您将其附加到错误报告时才会发送给我们。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網路活動是本裝置上連線與保護事件的本機記錄。僅在您將其附加至錯誤報告時才會傳送給我們。"
+          }
+        }
+      }
+    },
+    "Stays on this iPhone" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bleibt auf diesem iPhone"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays on this iPhone"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reste sur cet iPhone"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneに保存されます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅保留在此 iPhone 上"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅保留在此 iPhone 上"
+          }
+        }
+      }
+    },
+    "Top Domains" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top-Domains"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top Domains"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domaines principaux"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上位ドメイン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "热门域名"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "熱門網域"
+          }
+        }
+      }
+    },
+    "Turn on Domain History to see your most frequent domains." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiviere den Domain-Verlauf, um deine häufigsten Domains zu sehen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on Domain History to see your most frequent domains."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Activez l'historique des domaines pour voir vos domaines les plus fréquents."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメイン履歴をオンにすると、よくアクセスするドメインが表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启域名历史记录即可查看您最常访问的域名。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟網域記錄即可查看您最常造訪的網域。"
+          }
+        }
+      }
+    },
+    "Detailed activity is kept for 7 days — export to keep a copy." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detaillierte Aktivität wird 7 Tage lang aufbewahrt – exportiere sie, um eine Kopie zu behalten."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detailed activity is kept for 7 days — export to keep a copy."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'activité détaillée est conservée 7 jours — exportez-la pour en garder une copie."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細なアクティビティは7日間保存されます。コピーを残すにはエクスポートしてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详细活动保留 7 天——导出以保留副本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細活動保留 7 天——匯出以保留副本。"
+          }
+        }
+      }
+    },
+    "Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain-Verlauf und Netzwerkaktivität werden 7 Tage lang aufbewahrt. Zähler und Lava Guard-Fortschritt werden länger aufbewahrt. Unten kannst du jedes behalten oder löschen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L'historique des domaines et l'activité réseau sont conservés 7 jours. Les compteurs et la progression Lava Guard sont conservés plus longtemps. Conservez ou effacez chacun ci-dessous."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメイン履歴とネットワークアクティビティは7日間保存されます。カウントとLava Guardの進捗はより長く保存されます。下で個別に保持または消去できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "域名历史记录和网络活动保留 7 天。计数和 Lava Guard 进度保留更久。可在下方分别保留或清除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "網域記錄與網路活動保留 7 天。計數與 Lava Guard 進度保留更久。可在下方分別保留或清除。"
+          }
+        }
+      }
+    },
+    "Kept on this iPhone for 7 days." : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird 7 Tage lang auf diesem iPhone aufbewahrt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kept on this iPhone for 7 days."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conservé 7 jours sur cet iPhone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneに7日間保存されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 iPhone 上保留 7 天。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 iPhone 上保留 7 天。"
+          }
+        }
+      }
+    },
     "domains blocked" : {
       "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
       "extractionState" : "manual",
@@ -3596,6 +4268,48 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已封鎖網域"
+          }
+        }
+      }
+    },
+    "requests processed" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anfragen verarbeitet"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "requests processed"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "requêtes traitées"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "処理したリクエスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已处理请求"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已處理請求"
           }
         }
       }
@@ -3875,7 +4589,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このスマートフォン上でローカルにフィルタリングします"
+            "value" : "このスマートフォン上でローカルにフィルタリングを行います"
           }
         },
         "zh-Hans" : {
@@ -3888,90 +4602,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "篩選會在這台手機上本機完成"
-          }
-        }
-      }
-    },
-    "Filters" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filter"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filters"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filtres"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フィルター"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "篩選器"
-          }
-        }
-      }
-    },
-    "Filters not updated yet" : {
-      "comment" : "Release app UI string or runtime format. Preserve placeholders and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filter noch nicht aktualisiert"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filters not updated yet"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filtres pas encore mis à jour"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フィルターはまだ更新されていません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "过滤器尚未更新"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "篩選器尚未更新"
           }
         }
       }
@@ -4037,7 +4667,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Protection"
+            "value" : "Guard"
           }
         },
         "ja" : {
@@ -4163,7 +4793,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "J'ai enregistre le mot de passe de sauvegarde."
+            "value" : "J'ai enregistré le mot de passe de sauvegarde."
           }
         },
         "ja" : {
@@ -4487,7 +5117,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wird diese Domain als verdächtig markiert ?"
+            "value" : "Ist diese Domain als verdächtig markiert?"
           }
         },
         "en" : {
@@ -4499,7 +5129,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ce domaine est-il signale comme suspect ?"
+            "value" : "Ce domaine est-il signalé comme suspect ?"
           }
         },
         "ja" : {
@@ -4564,47 +5194,6 @@
         }
       }
     },
-    "Keep Current Filters" : {
-      "comment" : "Release app UI string. Keep placeholders and product names intact.",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Aktuelle Filter behalten"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep Current Filters"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Garder les filtres actuels"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "現在のフィルターを維持"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保留当前过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保留目前篩選器"
-          }
-        }
-      }
-    },
     "Keep this somewhere safe. It can restore the backup without the password." : {
       "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
       "extractionState" : "manual",
@@ -4630,7 +5219,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "安全な場所に保管してください。パスワードなしでバックアップを復元できます。"
+            "value" : "安全な場所に保管してください。これがあればパスワードなしでもバックアップを復元できます。"
           }
         },
         "zh-Hans" : {
@@ -4642,7 +5231,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請將它保存在安全的位置。沒有密碼時也可用它復原備份。"
+            "value" : "請妥善保存。即使沒有密碼，也能用它復原備份。"
           }
         }
       }
@@ -4777,7 +5366,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lava ist gesperrt"
+            "value" : "Lava gesperrt"
           }
         },
         "en" : {
@@ -4895,6 +5484,90 @@
         }
       }
     },
+    "Expiration: %@" : {
+      "comment" : "Subscriber upgrade screen status line showing when the current auto-renewable Lava Security Plus period ends. %@ is a localized date.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ablauf: %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expiration: %@"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expire le : %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効期限：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到期日：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到期日：%@"
+          }
+        }
+      }
+    },
+    "Manage Subscription" : {
+      "comment" : "Subscriber upgrade screen button that opens the system sheet to manage or cancel the Lava Security Plus subscription.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abo verwalten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage Subscription"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gérer l’abonnement"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サブスクリプションを管理"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理订阅"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理訂閱"
+          }
+        }
+      }
+    },
     "Lava stands guard here" : {
       "comment" : "Release app UI string. Keep placeholders and product names intact.",
       "localizations" : {
@@ -4913,7 +5586,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lava veille ici"
+            "value" : "Lava monte la garde ici"
           }
         },
         "ja" : {
@@ -4932,48 +5605,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "岩醬在這裡替你守著"
-          }
-        }
-      }
-    },
-    "Lava will fetch the source catalog before preparing filters." : {
-      "comment" : "Release app UI string or runtime format. Preserve placeholders and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava ruft den Quellkatalog ab, bevor Filter vorbereitet werden."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava will fetch the source catalog before preparing filters."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava récupérera le catalogue source avant de préparer les filtres."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava はフィルターを準備する前にソースカタログを取得します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava Security 会在准备过滤器前获取来源目录。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lava Security 會在準備過濾器前取得來源目錄。"
           }
         }
       }
@@ -5103,48 +5734,6 @@
         }
       }
     },
-    "Local filters" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lokale Filter"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local filters"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filtres locaux"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ローカルフィルター"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本機篩選器"
-          }
-        }
-      }
-    },
     "Local history is off" : {
       "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
       "extractionState" : "manual",
@@ -5183,90 +5772,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本機歷史記錄已關閉"
-          }
-        }
-      }
-    },
-    "Local history off" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lokaler Verlauf ist aus"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local history off"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Historique local désactivé"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ローカル履歴はオフ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地历史已关闭"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本機歷史記錄已關閉"
-          }
-        }
-      }
-    },
-    "Local history on" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lokaler Verlauf ist an"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local history on"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Historique local activé"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ローカル履歴はオン"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地历史已开启"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本機歷史記錄已開啟"
           }
         }
       }
@@ -5380,7 +5885,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "一時停止オプションを表示するには長押し"
+            "value" : "長押しで一時停止オプションを表示"
           }
         },
         "zh-Hans" : {
@@ -5403,7 +5908,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bösartige Domains sind die heißen Stellen. Dein Smartphone kann sie umgehen, bevor Apps und Websites verbinden."
+            "value" : "Schädliche Domains sind die Gefahrenstellen. Dein Smartphone kann ihnen ausweichen, bevor Apps und Websites eine Verbindung aufbauen."
           }
         },
         "en" : {
@@ -5415,67 +5920,25 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les domaines malveillants sont les zones brûlantes. Votre téléphone peut les contourner avant que les apps et sites web se connectent."
+            "value" : "Les domaines malveillants, c'est là que ça chauffe. Votre téléphone peut les éviter avant que les apps et les sites web s'y connectent."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "悪意のあるドメインは、ネット上の熱い足場です。アプリやウェブサイトが接続する前に、スマートフォンがそこを避けられます。"
+            "value" : "悪意のあるドメインは、ネット上の危険なスポットです。アプリやウェブサイトが接続する前に、スマートフォンがそこを避けてくれます。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "恶意域名就是烫脚点。App 和网站连接前，你的手机可以先绕开它们。"
+            "value" : "恶意域名就像滚烫的岩浆。App 和网站连接前，你的手机可以先帮你绕开它们。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "惡意網域就是燙腳點。App 和網站連線前，你的手機可以先繞開它們。"
-          }
-        }
-      }
-    },
-    "Manage filters" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filter verwalten"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Manage filters"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gérer les filtres"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フィルターを管理"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "管理过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "管理篩選器"
+            "value" : "惡意網域就像滾燙的熱點。App 和網站連線前，你的手機可以先繞開它們。"
           }
         }
       }
@@ -5559,48 +6022,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有其他已封鎖網域"
-          }
-        }
-      }
-    },
-    "No filters active yet" : {
-      "comment" : "Release app UI string. Guard filters row empty state. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Noch keine Filter aktiv"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No filters active yet"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Aucun filtre actif pour l’instant"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "有効なフィルターはまだありません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚无生效的过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚無生效的篩選器"
           }
         }
       }
@@ -6150,48 +6571,6 @@
         }
       }
     },
-    "Open Filters" : {
-      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filter öffnen"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Filters"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ouvrir les filtres"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フィルターを開く"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开过滤器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟篩選器"
-          }
-        }
-      }
-    },
     "Optional diagnostics include anonymized Lava Data like VPN status, network logs, and filter snapshot. They help the Lava team better investigate what went wrong." : {
       "comment" : "Feedback form diagnostic-data explanation. Keep Lava and VPN unchanged.",
       "extractionState" : "manual",
@@ -6282,7 +6661,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Andere Domains dürfen durch"
+            "value" : "Andere Domains werden durchgelassen"
           }
         },
         "en" : {
@@ -6820,6 +7199,48 @@
         }
       }
     },
+    "Recent domain lookups & decisions" : {
+      "comment" : "Domain History navigation row summary under Local Logs.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuelle Domain-Abfragen & Entscheidungen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent domain lookups & decisions"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requêtes de domaines et décisions récentes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近のドメイン照会と判定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近的域名查询和处理结果"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近的網域查詢與處理結果"
+          }
+        }
+      }
+    },
     "Reconnect" : {
       "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
       "extractionState" : "manual",
@@ -6965,7 +7386,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Actualise"
+            "value" : "Actualisé"
           }
         },
         "ja" : {
@@ -7025,7 +7446,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "回報 ID:"
+            "value" : "回報 ID："
           }
         }
       }
@@ -7287,7 +7708,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Live-DNS-Smoke ausführen"
+            "value" : "Live-DNS-Smoke-Test ausführen"
           }
         },
         "en" : {
@@ -7317,7 +7738,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "執行即時 DNS Smoke"
+            "value" : "執行即時 DNS 煙霧測試"
           }
         }
       }
@@ -7736,7 +8157,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "停止即時 DNS Smoke 防護"
+            "value" : "停止即時 DNS 煙霧測試防護"
           }
         }
       }
@@ -8017,13 +8438,13 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ネットは溶岩"
+            "value" : "インターネットは溶岩だらけ"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "网上有岩浆"
+            "value" : "网络遍地是岩浆"
           }
         },
         "zh-Hant" : {
@@ -8231,7 +8652,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这会移除此手機上保存的域名记录。过滤计数和网络活动不会改变。"
+            "value" : "这会移除这台手机上保存的域名记录。过滤计数和网络活动不会改变。"
           }
         },
         "zh-Hant" : {
@@ -8272,7 +8693,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这会移除此手機上保存的网络活动记录。过滤计数和域名历史不会改变。"
+            "value" : "这会移除这台手机上保存的网络活动记录。过滤计数和域名历史不会改变。"
           }
         },
         "zh-Hant" : {
@@ -8289,7 +8710,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Dadurch wird die eigene Sperrliste aus deinen gespeicherten Listen entfernt. %@ kann später erneut hinzugefügt werden."
+            "value" : "Dadurch wird die eigene Blockliste aus deinen gespeicherten Listen entfernt. %@ kann später erneut hinzugefügt werden."
           }
         },
         "en" : {
@@ -8313,7 +8734,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这会从已保存的列表中移除自定义屏蔽列表。稍后可以再次添加 %@。"
+            "value" : "这会从已保存的列表中移除自定义拦截列表。稍后可以再次添加 %@。"
           }
         },
         "zh-Hant" : {
@@ -8402,7 +8823,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "關閉防護"
+            "value" : "關閉"
           }
         }
       }
@@ -8444,7 +8865,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟防護"
+            "value" : "開啟"
           }
         }
       }
@@ -8653,7 +9074,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "準備好時開啟防護"
+            "value" : "準備好時開啟本機防護"
           }
         }
       }
@@ -8677,7 +9098,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Desactivation"
+            "value" : "Désactivation"
           }
         },
         "ja" : {
@@ -8886,13 +9307,13 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Débloqué"
+            "value" : "Déverrouillé"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "利用可能"
+            "value" : "ロック解除済み"
           }
         },
         "zh-Hans" : {
@@ -8988,7 +9409,7 @@
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "升級即可使用透過 HTTPS、TLS 和 QUIC 加密的 DNS"
+            "value" : "升級即可使用透過 HTTPS、TLS 和 QUIC 的 DNS"
           }
         }
       }
@@ -9263,7 +9684,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ravi de veiller pour vous !\nLa configuration est terminée. Vous pourrez tout changer plus tard dans Réglages."
+            "value" : "Ravi de veiller sur vous !\nLa configuration est terminée. Vous pourrez tout changer plus tard dans les Réglages."
           }
         },
         "ja" : {
@@ -9275,13 +9696,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "很高兴为你守着！\n设置完成。之后都可以在“设置”里修改。"
+            "value" : "很高兴为你守护！\n设置完成。之后都可以在“设置”里随时修改。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "很高興為你守著！\n設定完成。之後都可以在「設定」裡修改。"
+            "value" : "很高興能守護你！\n設定完成，之後都能在「設定」裡修改。"
           }
         }
       }
@@ -9366,47 +9787,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的自訂 DNS 草稿將會被移除。"
-          }
-        }
-      }
-    },
-    "Your draft changes will be removed. The current saved filters will stay active." : {
-      "comment" : "Release app UI string. Keep placeholders and product names intact.",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deine Entwurfsänderungen werden entfernt. Die aktuell gespeicherten Filter bleiben aktiv."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your draft changes will be removed. The current saved filters will stay active."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vos modifications en brouillon seront supprimées. Les filtres actuellement enregistrés resteront actifs."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "下書きの変更は削除されます。現在保存されているフィルターは引き続き有効です。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "草稿更改会被移除。当前已保存的过滤器会继续生效。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "草稿變更會被移除。目前已儲存的篩選器會繼續生效。"
           }
         }
       }
@@ -9532,6 +9912,1432 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "到 Lava Security Plus 即可使用你自己的封鎖清單"
+          }
+        }
+      }
+    },
+    "Downloading from the sources" : {
+      "comment" : "Filter preparation progress — step 1 of 3, shown while blocklists download.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird von den Quellen heruntergeladen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading from the sources"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Téléchargement depuis les sources"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ソースからダウンロード中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在从来源下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在從來源下載"
+          }
+        }
+      }
+    },
+    "My list" : {
+      "comment" : "Filters tab: section header and title for the consolidated list of blocklists and domains.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meine Liste"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My list"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ma liste"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイリスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的清單"
+          }
+        }
+      }
+    },
+    "Got a good list?" : {
+      "comment" : "Filters tab: section header for sharing and importing filter setups.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine gute Liste?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Got a good list?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une bonne liste ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "良いリストはありますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有好的列表吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有好的清單嗎？"
+          }
+        }
+      }
+    },
+    "Lava blocks these" : {
+      "comment" : "My list: header for the shelf of blocklists and blocked domains.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava blockiert diese"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava blocks these"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava bloque ceci"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava がブロックするもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 会拦截这些"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 會封鎖這些"
+          }
+        }
+      }
+    },
+    "Lava lets these through" : {
+      "comment" : "My list: header for the shelf of allowed exceptions.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava lässt diese durch"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava lets these through"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava laisse passer ceci"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava が通過させるもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 会放行这些"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 會放行這些"
+          }
+        }
+      }
+    },
+    "Add a blocklist" : {
+      "comment" : "My list edit mode: button to add a curated blocklist.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sperrliste hinzufügen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a blocklist"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajouter une liste de blocage"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブロックリストを追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加拦截列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增封鎖清單"
+          }
+        }
+      }
+    },
+    "Block a domain" : {
+      "comment" : "My list edit mode: button to block a single domain.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Domain blockieren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block a domain"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquer un domaine"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ドメインをブロック"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拦截域名"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "封鎖網域"
+          }
+        }
+      }
+    },
+    "Add an exception" : {
+      "comment" : "My list edit mode: button to allow a single domain through.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausnahme hinzufügen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an exception"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajouter une exception"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "例外を追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加例外"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增例外"
+          }
+        }
+      }
+    },
+    "Blocklists, blocked and allowed domains" : {
+      "comment" : "Filters tab: subtitle on the My list entry row.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sperrlisten, blockierte und erlaubte Domains"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blocklists, blocked and allowed domains"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listes de blocage, domaines bloqués et autorisés"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブロックリスト、ブロック済み・許可済みドメイン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拦截列表、已拦截和已允许的域名"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "封鎖清單、已封鎖和已允許的網域"
+          }
+        }
+      }
+    },
+    "Lava uses local filters to block your phone's access to unwanted sites." : {
+      "comment" : "Filters tab: illustration caption explaining what Lava does.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava verwendet lokale Filter, um den Zugriff deines Telefons auf unerwünschte Websites zu blockieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava uses local filters to block your phone's access to unwanted sites."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava utilise des filtres locaux pour bloquer l'accès de votre téléphone aux sites indésirables."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はローカルフィルターを使って、不要なサイトへのアクセスをブロックします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用本地过滤器阻止你的手机访问不需要的网站。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用本機過濾器阻止你的手機存取不需要的網站。"
+          }
+        }
+      }
+    },
+    "Allowed exceptions let a site through even when a blocklist would catch it." : {
+      "comment" : "Review sheet caution shown when the change adds an allowed exception.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausnahmen lassen eine Website durch, selbst wenn eine Sperrliste sie erfassen würde."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allowed exceptions let a site through even when a blocklist would catch it."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les exceptions laissent passer un site même si une liste de blocage le bloquerait."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可された例外は、ブロックリストが捕捉する場合でもサイトを通過させます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即使拦截列表会拦截某个网站，允许的例外也会放行它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即使封鎖清單會封鎖某個網站，允許的例外也會放行它。"
+          }
+        }
+      }
+    },
+    "Lava is still preparing an update for this blocklist source. Try again shortly." : {
+      "comment" : "Prepare-failure reason: source update still in progress.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava bereitet noch ein Update für diese Sperrlistenquelle vor. Versuche es gleich erneut."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava is still preparing an update for this blocklist source. Try again shortly."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava prépare encore une mise à jour pour cette source de liste de blocage. Réessayez dans un instant."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はこのブロックリストソースの更新をまだ準備中です。しばらくしてからもう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 仍在为此拦截列表来源准备更新。请稍后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 仍在為此封鎖清單來源準備更新。請稍後重試。"
+          }
+        }
+      }
+    },
+    "Lava could not reach the source catalog. Check your connection and try again." : {
+      "comment" : "Prepare-failure reason: catalog unreachable.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava konnte den Quellenkatalog nicht erreichen. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava could not reach the source catalog. Check your connection and try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava n'a pas pu accéder au catalogue source. Vérifiez votre connexion et réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はソースカタログに接続できませんでした。接続を確認してもう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 无法连接到来源目录。请检查你的连接并重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 無法連接到來源目錄。請檢查你的連線並重試。"
+          }
+        }
+      }
+    },
+    "Lava could not refresh the source catalog. Try again shortly." : {
+      "comment" : "Prepare-failure reason: catalog refresh failed.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava konnte den Quellenkatalog nicht aktualisieren. Versuche es gleich erneut."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava could not refresh the source catalog. Try again shortly."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava n'a pas pu actualiser le catalogue source. Réessayez dans un instant."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はソースカタログを更新できませんでした。しばらくしてからもう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 无法刷新来源目录。请稍后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 無法重新整理來源目錄。請稍後重試。"
+          }
+        }
+      }
+    },
+    "A selected blocklist is no longer available. Choose another list and try again." : {
+      "comment" : "Prepare-failure reason: a selected blocklist vanished.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine ausgewählte Sperrliste ist nicht mehr verfügbar. Wähle eine andere Liste und versuche es erneut."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A selected blocklist is no longer available. Choose another list and try again."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une liste de blocage sélectionnée n'est plus disponible. Choisissez une autre liste et réessayez."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択したブロックリストは利用できなくなりました。別のリストを選んでもう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选的拦截列表已不可用。请选择其他列表并重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所選的封鎖清單已無法使用。請選擇其他清單並重試。"
+          }
+        }
+      }
+    },
+    "Update recommended" : {
+      "comment" : "My list rules-panel freshness — a refresh is suggested.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktualisierung empfohlen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update recommended"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mise à jour recommandée"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新をおすすめします"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建議更新"
+          }
+        }
+      }
+    },
+    "View & edit" : {
+      "comment" : "Filters tab: My list entry row title (opens the consolidated list).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansehen & bearbeiten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View & edit"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voir et modifier"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表示と編集"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看和编辑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢視與編輯"
+          }
+        }
+      }
+    },
+    "What Lava blocks and lets through" : {
+      "comment" : "Filters tab: My list entry subtitle — plain description of the list's content.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Was Lava blockiert und durchlässt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What Lava blocks and lets through"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce que Lava bloque et laisse passer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava がブロックするものと通すもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 拦截和放行的内容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 封鎖和放行的內容"
+          }
+        }
+      }
+    },
+    "My filter" : {
+      "comment" : "Filters tab: section header + cover title for the user's one filter (lists are its components).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mein Filter"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mon filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイフィルター"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的過濾器"
+          }
+        }
+      }
+    },
+    "Got a good filter?" : {
+      "comment" : "Filters tab: section header for sharing/importing a filter.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einen guten Filter?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Got a good filter?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un bon filtre ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "良いフィルターはありますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有好的过滤器吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有好的過濾器嗎？"
+          }
+        }
+      }
+    },
+    "Share my filter" : {
+      "comment" : "Share/import: row + sheet title for sharing the user's filter.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meinen Filter teilen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share my filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partager mon filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マイフィルターを共有"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享我的过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享我的過濾器"
+          }
+        }
+      }
+    },
+    "Import a filter" : {
+      "comment" : "Share/import: row + sheet title for importing a shared filter.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter importieren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import a filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importer un filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターをインポート"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入過濾器"
+          }
+        }
+      }
+    },
+    "Lava uses a local filter to block your phone's access to unwanted sites." : {
+      "comment" : "Filters tab: illustration caption (singular: one local filter).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava verwendet einen lokalen Filter, um den Zugriff deines Telefons auf unerwünschte Websites zu blockieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava uses a local filter to block your phone's access to unwanted sites."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava utilise un filtre local pour bloquer l'accès de votre téléphone aux sites indésirables."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はローカルフィルターを使って、不要なサイトへのアクセスをブロックします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用本地过滤器阻止你的手机访问不需要的网站。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用本機過濾器阻止你的手機存取不需要的網站。"
+          }
+        }
+      }
+    },
+    "Filter" : {
+      "comment" : "Release app UI string. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルター"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "篩選器"
+          }
+        }
+      }
+    },
+    "Your draft changes will be removed. The current saved filter will stay active." : {
+      "comment" : "Release app UI string. Keep placeholders and product names intact.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deine Entwurfsänderungen werden entfernt. Der aktuell gespeicherte Filter bleibt aktiv."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your draft changes will be removed. The current saved filter will stay active."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vos modifications en brouillon seront supprimées. Le filtre actuellement enregistré restera actif."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下書きの変更は削除されます。現在保存されているフィルターは引き続き有効です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "草稿更改会被移除。当前已保存的过滤器会继续生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "草稿變更會被移除。目前已儲存的篩選器會繼續生效。"
+          }
+        }
+      }
+    },
+    "We couldn't update your filter" : {
+      "comment" : "Prepare-failure screen title — the problem (lists were not updated).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein Filter konnte nicht aktualisiert werden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We couldn't update your filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre filtre n'a pas pu être mis à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターを更新できませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更新你的过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法更新你的篩選器"
+          }
+        }
+      }
+    },
+    "Your previous filter is still active." : {
+      "comment" : "Prepare-failure screen reassurance — old filters still protect the user.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein bisheriger Filter ist weiterhin aktiv."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your previous filter is still active."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre filtre précédent reste actif."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以前のフィルターは引き続き有効です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你之前的过滤器仍然有效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你先前的過濾器仍然有效。"
+          }
+        }
+      }
+    },
+    "Keep Current Filter" : {
+      "comment" : "Release app UI string. Keep placeholders and product names intact.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuellen Filter behalten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Current Filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Garder le filtre actuel"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在のフィルターを維持"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留当前过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留目前篩選器"
+          }
+        }
+      }
+    },
+    "Building the filter" : {
+      "comment" : "Filter preparation progress — step 2 of 3, shown while the filter list is compiled.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter wird erstellt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Building the filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Création du filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターを作成中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在构建过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在建立篩選器"
+          }
+        }
+      }
+    },
+    "Saving the filter" : {
+      "comment" : "Filter preparation progress — step 3 of 3, shown while the filter list is saved.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter wird gespeichert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving the filter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrement du filtre"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターを保存中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在保存过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在儲存篩選器"
+          }
+        }
+      }
+    },
+    "No filter active yet" : {
+      "comment" : "Release app UI string. Guard filters row empty state. Keep product/legal terms from the glossary unchanged and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch kein Filter aktiv"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No filter active yet"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun filtre actif pour l’instant"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効なフィルターはまだありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚无生效的过滤器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚無生效的篩選器"
+          }
+        }
+      }
+    },
+    "Filter not updated yet" : {
+      "comment" : "Release app UI string or runtime format. Preserve placeholders and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter noch nicht aktualisiert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter not updated yet"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtre pas encore mis à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターはまだ更新されていません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过滤器尚未更新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "篩選器尚未更新"
+          }
+        }
+      }
+    },
+    "Filter up to date" : {
+      "comment" : "My list rules-panel freshness — filters are current.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter aktuell"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter up to date"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtre à jour"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィルターは最新です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过滤器已是最新"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "過濾器已是最新"
+          }
+        }
+      }
+    },
+    "Lava will fetch the source catalog before preparing the filter." : {
+      "comment" : "Release app UI string or runtime format. Preserve placeholders and review before final release.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava ruft den Quellkatalog ab, bevor der Filter vorbereitet wird."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava will fetch the source catalog before preparing the filter."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava récupérera le catalogue source avant de préparer le filtre."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava はフィルターを準備する前にソースカタログを取得します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security 会在准备过滤器前获取来源目录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security 會在準備過濾器前取得來源目錄。"
           }
         }
       }

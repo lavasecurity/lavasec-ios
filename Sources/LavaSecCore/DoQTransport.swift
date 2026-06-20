@@ -330,6 +330,13 @@ final class DoQConnection: @unchecked Sendable {
             logConnectionError(error, phase: "failed")
             finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
 
+        case .cancelled:
+            // An externally cancelled live connection (resetConnections, sleep) must
+            // fail the in-flight query immediately rather than wait out the query
+            // timeout, mirroring DoT. finishCurrentQuery is idempotent and the guard
+            // above drops the self-cancel it triggers, so this can't double-complete.
+            finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
+
         default:
             break
         }

@@ -620,13 +620,40 @@ struct LavaToolbarIconButton: View {
     }
 }
 
+/// Semantic action role for icon buttons, mapped to the system `ButtonRole` with
+/// availability handling. `.confirm` and `.close` are iOS 26-only, so this stays a
+/// project enum to keep call sites free of those symbols and to fall back cleanly on
+/// earlier OSes. `.cancel`/`.destructive` are standard since iOS 15 and apply everywhere.
+enum LavaActionRole {
+    case confirm
+    case cancel
+    case close
+    case destructive
+
+    var buttonRole: ButtonRole? {
+        switch self {
+        case .cancel: return .cancel
+        case .destructive: return .destructive
+        case .confirm:
+            if #available(iOS 26.0, *) { return .confirm }
+            return nil
+        case .close:
+            if #available(iOS 26.0, *) { return .close }
+            return nil
+        }
+    }
+}
+
 struct NativeToolbarIconButton: View {
     let systemName: String
     let accessibilityLabel: String
+    /// Optional semantic role. Drives the system's role styling (prominent confirm,
+    /// destructive tint, etc.); leave nil for a plain icon action.
+    var role: LavaActionRole? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(role: role.flatMap(\.buttonRole), action: action) {
             LavaToolbarIconSymbol(systemName: systemName)
                 .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
         }

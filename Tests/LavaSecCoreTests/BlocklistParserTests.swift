@@ -23,6 +23,45 @@ final class BlocklistParserTests: XCTestCase {
         XCTAssertFalse(result.ruleSet.contains("allowed.example.com"))
     }
 
+    func testHostsLineWithMultipleDomainsBlocksEveryHost() {
+        let parser = BlocklistParser()
+        let result = parser.parse(
+            "0.0.0.0 ads.example.com tracker.example.com analytics.example.com",
+            format: .hosts
+        )
+
+        XCTAssertEqual(result.rules.count, 3)
+        XCTAssertTrue(result.ruleSet.contains("ads.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("tracker.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("analytics.example.com"))
+        XCTAssertTrue(result.rejectedLines.isEmpty)
+    }
+
+    func testHostsMultiDomainParsesIdenticallyThroughBothParsers() {
+        let parser = BlocklistParser()
+        let text = "0.0.0.0 a.example.com b.example.com c.example.com"
+
+        let arrayResult = parser.parse(text, format: .auto)
+        let ruleSetResult = parser.parseRuleSet(text, format: .auto)
+
+        XCTAssertEqual(ruleSetResult.ruleSet, arrayResult.ruleSet)
+        XCTAssertTrue(ruleSetResult.ruleSet.contains("c.example.com"))
+    }
+
+    func testHostsMultiDomainHonorsMaxRulesPerRuleNotPerLine() {
+        let parser = BlocklistParser(maxRules: 2)
+        let result = parser.parse(
+            "0.0.0.0 one.example.com two.example.com three.example.com",
+            format: .hosts
+        )
+
+        XCTAssertEqual(result.rules.count, 2)
+        XCTAssertTrue(result.ruleSet.contains("one.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("two.example.com"))
+        XCTAssertFalse(result.ruleSet.contains("three.example.com"))
+        XCTAssertEqual(result.rejectedLines.first?.reason, "Rule limit reached.")
+    }
+
     func testRejectsInvalidDomains() {
         let parser = BlocklistParser()
         let result = parser.parse(

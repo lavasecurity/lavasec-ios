@@ -6,9 +6,9 @@ import LavaSecCore
 enum FilterPreparationPresentation {
     static func message(for phase: FilterPreparationPhase) -> String {
         switch phase {
-        case .downloading: return "(1/3) Downloading lists"
-        case .compiling:   return "(2/3) Compiling the list"
-        case .saving:      return "(3/3) Saving the list"
+        case .downloading: return "Downloading from the sources"
+        case .compiling:   return "Building the filter"
+        case .saving:      return "Saving the filter"
         }
     }
 }

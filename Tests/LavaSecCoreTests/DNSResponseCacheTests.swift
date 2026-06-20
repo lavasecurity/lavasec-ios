@@ -190,6 +190,41 @@ final class DNSResponseCacheTests: XCTestCase {
         XCTAssertNotNil(cache.cachedResponse(for: keys[2], query: Self.dnsQuery(id: 9, domain: "host2.example.com"), now: now))
     }
 
+    func testTrimKeepsLongestLivedEntriesUnderSustainedOverflow() throws {
+        // Sustained inserts past capacity must hold the table at its cap while always
+        // evicting the soonest-to-expire entry first. This exercises the linear-pass
+        // trim that replaced the per-write full sort.
+        let cache = DNSResponseCache(maximumEntryCount: 3, cleanupInterval: 3_600)
+        // Shuffled, distinct TTLs (all within the 300s cache cap so expiries stay
+        // distinct) so eviction can't be an artifact of insertion order.
+        let ttls: [UInt32] = [250, 50, 200, 100, 300, 150]
+        var entries: [(ttl: UInt32, domain: String, key: DNSCacheKey)] = []
+        for (index, ttl) in ttls.enumerated() {
+            let domain = "host\(index).example.com"
+            let query = Self.dnsQuery(id: UInt16(index + 1), domain: domain)
+            let response = Self.dnsResponse(id: 0, domain: domain, answerTTLs: [ttl])
+            let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+            entries.append((ttl, domain, key))
+            cache.store(response, for: key, now: now)
+        }
+
+        XCTAssertEqual(cache.count, 3, "The linear-pass trim holds the cache at its cap.")
+
+        let survivingTTLs = Set(ttls.sorted(by: >).prefix(3)) // 300, 250, 200
+        for entry in entries {
+            let hit = cache.cachedResponse(
+                for: entry.key,
+                query: Self.dnsQuery(id: 99, domain: entry.domain),
+                now: now
+            )
+            if survivingTTLs.contains(entry.ttl) {
+                XCTAssertNotNil(hit, "TTL \(entry.ttl)s (longest-lived) should be retained.")
+            } else {
+                XCTAssertNil(hit, "TTL \(entry.ttl)s should be evicted earliest-expiring-first.")
+            }
+        }
+    }
+
     func testStoreSweepsExpiredEntriesAfterCleanupInterval() throws {
         let cache = DNSResponseCache(maximumEntryCount: 512, cleanupInterval: 30)
         let queryA = Self.dnsQuery(id: 1, domain: "a.example.com")

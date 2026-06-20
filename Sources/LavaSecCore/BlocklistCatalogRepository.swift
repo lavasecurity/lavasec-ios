@@ -11,6 +11,14 @@ struct LoadedCatalogPayloadValue: Sendable {
 // with BlocklistCatalogSynchronizer; cheap metadata reads (the warm-start reuse
 // gate, freshness checks) no longer drag the payload/compile machinery along.
 public struct BlocklistCatalogRepository: Sendable {
+    // The catalog is METADATA only (source list + hashes), so a few hundred KB in
+    // practice. Cap it before decoding so a compromised/MITM catalog host (incl. the
+    // public fallback) can't hand back a multi-GB body that amplifies into an
+    // out-of-memory JSON decode in the tight extension/app budget. This is the
+    // decode-side guard; a streaming byte ceiling during the download itself is a
+    // separate, larger hardening (the body is still materialized by the fetcher).
+    public static let maximumCatalogBytes = 8 * 1024 * 1024
+
     public let cacheDirectoryURL: URL
     private let catalogURLs: [URL]
     private let dataFetcher: BlocklistCatalogDataFetcher
@@ -42,6 +50,9 @@ public struct BlocklistCatalogRepository: Sendable {
         }
 
         let data = try Data(contentsOf: url)
+        guard data.count <= Self.maximumCatalogBytes else {
+            throw BlocklistCatalogSyncError.invalidCatalog
+        }
         return try BlocklistCatalogSynchronizer.makeJSONDecoder().decode(BlocklistCatalog.self, from: data)
     }
 
@@ -76,6 +87,11 @@ public struct BlocklistCatalogRepository: Sendable {
         for catalogURL in catalogURLs {
             do {
                 let data = try await dataFetcher(catalogURL)
+                guard data.count <= Self.maximumCatalogBytes else {
+                    // Oversized remote catalog → skip it and fall through to the cache /
+                    // built-in fallback rather than decode it.
+                    continue
+                }
                 let catalog = try BlocklistCatalogSynchronizer.makeJSONDecoder().decode(BlocklistCatalog.self, from: data)
                 return LoadedCatalogPayloadValue(catalog: catalog, data: data, shouldCache: true)
             } catch {
@@ -84,6 +100,7 @@ public struct BlocklistCatalogRepository: Sendable {
         }
 
         if let data = try? Data(contentsOf: latestCatalogURL),
+           data.count <= Self.maximumCatalogBytes,
            let catalog = try? BlocklistCatalogSynchronizer.makeJSONDecoder().decode(BlocklistCatalog.self, from: data) {
             return LoadedCatalogPayloadValue(catalog: catalog, data: data, shouldCache: false)
         }

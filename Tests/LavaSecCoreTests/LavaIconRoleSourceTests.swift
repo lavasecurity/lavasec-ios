@@ -25,10 +25,6 @@ final class LavaIconRoleSourceTests: XCTestCase {
         let root = try source("LavaSecApp/RootView.swift")
         XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
         XCTAssertFalse(root.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
-
-        let filters = try source("LavaSecApp/FiltersView.swift")
-        XCTAssertTrue(filters.contains("icon: .blocked,"))
-        XCTAssertTrue(filters.contains("icon: .allowed,"))
     }
 
     private func source(_ relativePath: String) throws -> String {

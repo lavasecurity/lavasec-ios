@@ -64,22 +64,25 @@ struct ActivityView: View {
                     ActivityDigestSection(summary: selectedSummary)
                 },
                 content: {
-                    VStack(alignment: .leading, spacing: 10) {
-                        LavaSectionGroup("Local Logs") {
+                    VStack(alignment: .leading, spacing: 18) {
+                        LavaSectionGroup("Domain Logs") {
                             LavaNavigationRow(
-                                icon: .domainHistory,
-                                title: "Domain History",
-                                summary: viewModel.localHistoryStatusText
+                                icon: .activity,
+                                title: "Top Domains",
+                                summary: "Most blocked & allowed domains"
                             ) {
-                                DomainHistoryView()
+                                TopDomainsView(
+                                    rangeStart: selectedRange.start,
+                                    rangeEnd: selectedRange.end
+                                )
                             }
 
                             LavaNavigationRow(
-                                icon: .networkActivity,
-                                title: "Network Activity",
-                                summary: networkActivitySummary
+                                icon: .domainHistory,
+                                title: "Domain History",
+                                summary: "Recent domain lookups & decisions"
                             ) {
-                                NetworkActivityLogView()
+                                DomainHistoryView()
                             }
                         }
 
@@ -104,10 +107,6 @@ struct ActivityView: View {
 
     private var selectedSummary: DiagnosticsSummary {
         viewModel.diagnostics.rangeSummary(from: selectedRange.start, to: selectedRange.end)
-    }
-
-    private var networkActivitySummary: String {
-        viewModel.configuration.keepNetworkActivity ? "Local network activity on" : "Local network activity off"
     }
 
     private var canShowActivity: Bool {
@@ -152,7 +151,7 @@ private struct ActivityAuthenticationGateView: View {
 private struct LocalLogsPrivacyFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("All local logs stay on this phone and are sent to us only if you include them in a bug report.")
+            Text("Detailed activity stays on this phone for 7 days and is sent to us only if you include it in a bug report.")
                 .lavaQuietNoteText()
 
             NavigationLink {
@@ -169,45 +168,191 @@ private struct LocalLogsPrivacyFooter: View {
     }
 }
 
+/// The Activity hero, drawn as a flow rather than a number-plus-rows card:
+/// a single "requests processed" total that splits into an Allowed/Blocked
+/// branch bar, so the proportion is legible before any digit is read. The
+/// headline metric is **requests** (per-lookup volume) — the flow shape is a
+/// volume metaphor, and "who" the domains were lives in the Top Domains section.
 private struct ActivityDigestSection: View {
     let summary: DiagnosticsSummary
 
     var body: some View {
-        LavaTabOverviewCard {
-            VStack(spacing: 18) {
+        // Mirrors the Filter tab's "rules in effect" panel: a content-sized
+        // `LavaInfoCard` (not the fixed-height tab overview card) with the shared
+        // `LavaOverviewMetricBlock`, so the headline metric lands at the same
+        // position, size, and weight on both screens and the panel keeps no
+        // excess vertical padding.
+        LavaInfoCard {
+            VStack(spacing: 14) {
                 LavaOverviewMetricBlock(
-                    value: summary.blockedCount.formatted(),
-                    label: "domains blocked"
+                    value: summary.totalCount.formatted(),
+                    label: "requests processed"
                 )
 
+                ActivityFlowBar(
+                    allowedCount: summary.allowedCount,
+                    blockedCount: summary.blockedCount
+                )
+
+
+                // Two plain stat rows plus the uptime line — no filled chips, so
+                // the bar stays the only colored shape in the panel.
                 VStack(spacing: 10) {
-                    LavaOverviewBannerRow(
-                        systemImage: "hand.raised.fill",
-                        title: "%@ domains blocked".lavaLocalizedFormat(blockRateText),
-                        tint: LavaStyle.lavaOrange,
-                        background: LavaStyle.lavaOrangeSoft
-                    )
-
-                    LavaOverviewBannerRow(
+                    ActivityFlowStatRow(
                         systemImage: "arrow.right.circle.fill",
-                        title: "%@ domains allowed".lavaLocalizedFormat(summary.allowedCount.formatted()),
                         tint: LavaStyle.safeGreen,
-                        background: LavaStyle.softGreen
+                        label: "Allowed",
+                        value: statValueText(count: summary.allowedCount, rate: allowedRate)
                     )
 
-                    LavaOverviewBannerRow(
-                        systemImage: "timer",
-                        title: "%@ protected locally".lavaLocalizedFormat(summary.compactLocalProtectionUptimeText),
-                        tint: LavaStyle.secondaryText,
-                        background: LavaStyle.secondaryText.opacity(0.12)
+                    ActivityFlowStatRow(
+                        systemImage: "hand.raised.fill",
+                        tint: LavaStyle.lavaOrange,
+                        label: "Blocked",
+                        value: statValueText(count: summary.blockedCount, rate: summary.blockRate)
                     )
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "timer")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .frame(width: 22)
+                            .accessibilityHidden(true)
+
+                        Text("%@ protected locally".lavaLocalizedFormat(summary.compactLocalProtectionUptimeText))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(LavaStyle.secondaryText)
+
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
     }
 
-    private var blockRateText: String {
-        summary.blockRate.formatted(.percent.precision(.fractionLength(0)))
+    private var allowedRate: Double {
+        guard summary.totalCount > 0 else {
+            return 0
+        }
+        return Double(summary.allowedCount) / Double(summary.totalCount)
+    }
+
+    private func statValueText(count: Int, rate: Double) -> String {
+        "\(count.formatted()) (\(rateText(rate)))"
+    }
+
+    /// Honest rounding at the extremes: a real-but-tiny share reads "<1%" instead
+    /// of "0%", and a near-total share reads ">99%" instead of a misleading "100%".
+    private func rateText(_ rate: Double) -> String {
+        if rate <= 0 {
+            return "0%"
+        }
+        if rate < 0.01 {
+            return "<1%"
+        }
+        if rate >= 1 {
+            return "100%"
+        }
+        if rate > 0.99 {
+            return ">99%"
+        }
+        return rate.formatted(.percent.precision(.fractionLength(0)))
+    }
+}
+
+/// Proportional Allowed/Blocked split with a min-width floor on the blocked
+/// branch, so an extreme ratio (e.g. 18 of 4,426) still shows an orange sliver
+/// instead of vanishing.
+private struct ActivityFlowBar: View {
+    let allowedCount: Int
+    let blockedCount: Int
+
+    private let barHeight: CGFloat = 14
+    private let minBranchWidth: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { proxy in
+            let total = allowedCount + blockedCount
+            let bothPresent = allowedCount > 0 && blockedCount > 0
+            // Keep the outer ends rounded but square off the two facing edges so
+            // the split reads as a clean "][" with a small, deliberate gap rather
+            // than two pills nearly touching.
+            let gap: CGFloat = bothPresent ? 3 : 0
+            let available = max(proxy.size.width - gap, 0)
+            let radius = barHeight / 2
+
+            if total > 0 {
+                let rawBlocked = available * CGFloat(blockedCount) / CGFloat(total)
+                let blockedWidth = blockedCount > 0 ? max(rawBlocked, minBranchWidth) : 0
+                let allowedWidth = max(available - blockedWidth, 0)
+
+                HStack(spacing: gap) {
+                    if allowedCount > 0 {
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: radius,
+                            bottomLeadingRadius: radius,
+                            bottomTrailingRadius: bothPresent ? 0 : radius,
+                            topTrailingRadius: bothPresent ? 0 : radius,
+                            style: .continuous
+                        )
+                        .fill(LavaStyle.safeGreen)
+                        .frame(width: allowedWidth)
+                    }
+
+                    if blockedCount > 0 {
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: bothPresent ? 0 : radius,
+                            bottomLeadingRadius: bothPresent ? 0 : radius,
+                            bottomTrailingRadius: radius,
+                            topTrailingRadius: radius,
+                            style: .continuous
+                        )
+                        .fill(LavaStyle.lavaOrange)
+                        .frame(width: blockedWidth)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+        .frame(height: barHeight)
+        .background(LavaStyle.secondaryText.opacity(0.12), in: Capsule(style: .continuous))
+        .accessibilityElement()
+        .accessibilityLabel("Allowed \(allowedCount), blocked \(blockedCount)")
+    }
+}
+
+/// One plain Allowed/Blocked stat line in the digest: a small tinted glyph, the
+/// label, and the count-plus-share value pushed to the trailing edge. Replaces
+/// the old filled legend chips so the flow bar is the panel's only color block.
+private struct ActivityFlowStatRow: View {
+    let systemImage: String
+    let tint: Color
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+
+            Text(label.lavaLocalized)
+                .font(.subheadline)
+                .foregroundStyle(LavaStyle.secondaryText)
+
+            Spacer(minLength: 8)
+
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(LavaStyle.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -227,7 +372,7 @@ private struct LocalLogSubpageChrome: ViewModifier {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    NativeToolbarIconButton(systemName: "trash", accessibilityLabel: "Clear", action: clear)
+                    NativeToolbarIconButton(systemName: "trash", accessibilityLabel: "Clear", role: .destructive, action: clear)
                         .disabled(!canClear)
                 }
             }
@@ -313,7 +458,43 @@ private struct LocalLogSearchField: View {
     }
 }
 
-private struct NetworkActivityLogView: View {
+/// Network Activity now lives under Settings → Advanced (it left the Activity
+/// tab), so it carries its own privacy explainer and the Review Privacy & Data
+/// link that the Activity-screen footer used to provide alongside it.
+private struct NetworkActivityPrivacyInfoPanel: View {
+    var body: some View {
+        LavaInfoCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Label {
+                    Text("Stays on this iPhone")
+                        .foregroundStyle(LavaStyle.ink)
+                } icon: {
+                    Image(systemName: "lock.shield")
+                        .foregroundStyle(LavaStyle.safeGreen)
+                }
+                .font(.headline)
+
+                Text("Network activity is a local log of connection and protection events on this device. It is sent to us only if you attach it to a bug report.")
+                    .lavaSupportingText()
+
+                Text("Kept on this iPhone for 7 days.")
+                    .lavaSupportingText()
+
+                NavigationLink {
+                    PrivacyDataSettingsView()
+                } label: {
+                    Text("Review Privacy & Data")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(LavaStyle.safeGreen)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct NetworkActivityLogView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @State private var visibleEntryCount = LocalLogPagination.initialCount
     @State private var showingClearActivityConfirmation = false
@@ -324,6 +505,8 @@ private struct NetworkActivityLogView: View {
                 viewModel.refreshNetworkActivityLog(force: true)
             }
         ) {
+            NetworkActivityPrivacyInfoPanel()
+
             LavaCondensedList {
                 let entries = viewModel.networkActivityLog.entries
                 let visibleEntries = Array(entries.prefix(visibleEntryCount))
@@ -724,7 +907,7 @@ private struct ActivityDateRangePickerSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", action: dismiss.callAsFunction)
+                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
                     }
                 }
             }
@@ -1003,7 +1186,7 @@ private struct DomainHistoryView: View {
 
             LavaSectionGroup(
                 selectedFilter.rawValue,
-                footer: "This list is local to this phone. Bug reports do not include domain history unless you explicitly attach it."
+                footer: "Kept on this iPhone for 7 days, and only leaves the device if you export it or attach it to a bug report."
             ) {
                 if viewModel.configuration.keepDomainDiagnostics {
                     historyRows
@@ -1023,16 +1206,16 @@ private struct DomainHistoryView: View {
         )
         .lavaConfirmationAlert { host in
             host.alert(
-                "Clear local domain history?",
+                "Clear Domain Logs?",
                 isPresented: $showingClearHistoryConfirmation
             ) {
                 Button("Cancel", role: .cancel) {}
-                Button("Clear History", role: .destructive) {
+                Button("Clear Domain Logs", role: .destructive) {
                     viewModel.clearDomainHistory()
                     visibleEventCount = LocalLogPagination.initialCount
                 }
             } message: {
-                Text("This removes saved domain rows from this phone. Filtering counts and network activity are unchanged.")
+                Text("This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged.")
             }
         }
         .sheet(item: $activeReviewSheet) { _ in
@@ -1074,7 +1257,7 @@ private struct DomainHistoryView: View {
 
         LavaCondensedList {
             if events.isEmpty {
-                Text(searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search")
+                Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
                     .lavaSupportingText()
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
@@ -1176,5 +1359,135 @@ private struct DomainHistoryRow: View {
 
     private var rowDetailText: String {
         "\(event.decision.reason.rawValue.capitalized) · \(event.timestampLine)"
+    }
+}
+
+/// Top Domains lives under Local Logs as its own screen: the same Allowed/Blocked
+/// segmented toggle as Domain History, over a list of domains ranked by query
+/// count (`topDomains`) for the selected Activity range. Each row's subtitle is
+/// the query count ("N times").
+private struct TopDomainsView: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    let rangeStart: Date
+    let rangeEnd: Date
+    @State private var selectedFilter: DomainHistoryFilter = .blocked
+    @State private var searchText = ""
+    @State private var showingClearHistoryConfirmation = false
+
+    var body: some View {
+        LavaScreenContent(
+            spacing: 22,
+            refreshAction: {
+                await viewModel.sampleReports()
+            }
+        ) {
+            LocalLogSearchField(text: $searchText)
+
+            LavaSectionGroup("History Type") {
+                LavaCondensedList {
+                    Picker("History Type", selection: $selectedFilter) {
+                        ForEach(DomainHistoryFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+            }
+
+            LavaSectionGroup(
+                selectedFilter.rawValue,
+                footer: "Kept on this iPhone for 7 days, and only leaves the device if you export it or attach it to a bug report."
+            ) {
+                if viewModel.configuration.keepDomainDiagnostics {
+                    topDomainRows
+                } else {
+                    LavaCondensedList {
+                        Text("Turn on Domain History to see your most frequent domains.")
+                            .lavaSupportingText()
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                    }
+                }
+            }
+        }
+        .localLogSubpageChrome(
+            title: "Top Domains",
+            canClear: viewModel.configuration.keepDomainDiagnostics && !viewModel.diagnostics.recentEvents.isEmpty,
+            clear: { showingClearHistoryConfirmation = true }
+        )
+        .lavaConfirmationAlert { host in
+            host.alert(
+                "Clear Domain Logs?",
+                isPresented: $showingClearHistoryConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear Domain Logs", role: .destructive) {
+                    viewModel.clearDomainHistory()
+                }
+            } message: {
+                Text("This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var topDomainRows: some View {
+        let domains = viewModel.diagnostics.topDomains(
+            action: selectedFilter.action,
+            from: rangeStart,
+            to: rangeEnd,
+            searchText: searchText,
+            limit: 20
+        )
+
+        LavaCondensedList {
+            if domains.isEmpty {
+                Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
+                    .lavaSupportingText()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+            } else {
+                ForEach(Array(domains.enumerated()), id: \.element.domain) { index, item in
+                    TopDomainRow(
+                        domain: item.domain,
+                        count: item.count,
+                        action: selectedFilter.action
+                    )
+
+                    if index < domains.count - 1 {
+                        LavaCondensedDivider(leadingInset: 54)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct TopDomainRow: View {
+    let domain: String
+    let count: Int
+    let action: FilterAction
+
+    var body: some View {
+        LavaCondensedListItem(
+            title: domain,
+            metadata: "%@ times".lavaLocalizedFormat(count.formatted()),
+            titleLineLimit: 2
+        ) {
+            Image(systemName: action == .block ? "hand.raised.circle.fill" : "arrow.right.circle.fill")
+                .foregroundStyle(action == .block ? LavaStyle.lavaOrange : LavaStyle.safeGreen)
+                .font(.title3)
+                .frame(width: 28)
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = domain
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+        }
     }
 }

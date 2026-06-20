@@ -12,8 +12,8 @@ final class PublicNetworkActivityFeatureTests: XCTestCase {
     func testNetworkActivityLogViewIsNotQAGated() throws {
         let diagnosticsSource = try readSource("LavaSecApp/DiagnosticsView.swift")
 
-        assertPhraseNotInsideQAConditional(".navigationTitle(\"Network Activity\")", in: diagnosticsSource)
-        assertPhraseNotInsideQAConditional("private struct NetworkActivityLogView", in: diagnosticsSource)
+        assertPhraseNotInsideQAConditional(".localLogSubpageChrome(", in: diagnosticsSource)
+        assertPhraseNotInsideQAConditional("struct NetworkActivityLogView", in: diagnosticsSource)
     }
 
     func testNetworkActivityLoggingIsNotQAGated() throws {

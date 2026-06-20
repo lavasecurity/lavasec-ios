@@ -155,6 +155,14 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
     public let customBlocklistFingerprints: [String: String]
     public let guardrailVersionIDs: [String: String]
     public let guardrailHashes: [String: String]
+    // Blocklist parser rules version the artifact was compiled under. Folded into
+    // the identity so a parser-behavior change (which bumps
+    // BlocklistParsingRules.rulesVersion) invalidates already-compiled compact and
+    // prepared artifacts — not just the RuleSetCache — forcing the app to
+    // regenerate and the tunnel to reload instead of reusing a stale artifact whose
+    // source bytes/hash did not change. Legacy artifacts predating this field decode
+    // as 0, which never equals a real version (≥1), so they are always regenerated.
+    public let parserRulesVersion: Int
 
     private enum CodingKeys: String, CodingKey {
         case enabledBlocklistIDs
@@ -168,6 +176,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         case customBlocklistFingerprints
         case guardrailVersionIDs
         case guardrailHashes
+        case parserRulesVersion
     }
 
     public init(
@@ -181,7 +190,8 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         selectedSourceHashes: [String: String],
         customBlocklistFingerprints: [String: String] = [:],
         guardrailVersionIDs: [String: String],
-        guardrailHashes: [String: String]
+        guardrailHashes: [String: String],
+        parserRulesVersion: Int = BlocklistParsingRules.rulesVersion
     ) {
         self.enabledBlocklistIDs = enabledBlocklistIDs
         self.blockedDomains = blockedDomains
@@ -194,6 +204,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         self.customBlocklistFingerprints = customBlocklistFingerprints
         self.guardrailVersionIDs = guardrailVersionIDs
         self.guardrailHashes = guardrailHashes
+        self.parserRulesVersion = parserRulesVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -218,6 +229,9 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         ) ?? [:]
         self.guardrailVersionIDs = try container.decode([String: String].self, forKey: .guardrailVersionIDs)
         self.guardrailHashes = try container.decode([String: String].self, forKey: .guardrailHashes)
+        // 0 = artifact compiled before this field existed (genuinely a pre-v2 parser).
+        // It never equals a real rules version, so such artifacts are regenerated.
+        self.parserRulesVersion = try container.decodeIfPresent(Int.self, forKey: .parserRulesVersion) ?? 0
     }
 
     public static func make(
@@ -240,7 +254,8 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
             selectedSourceHashes: Dictionary(uniqueKeysWithValues: selectedSources.map { ($0.id, $0.normalizedHash) }),
             customBlocklistFingerprints: customFingerprints,
             guardrailVersionIDs: Dictionary(uniqueKeysWithValues: guardrailSources.map { ($0.id, $0.versionID) }),
-            guardrailHashes: Dictionary(uniqueKeysWithValues: guardrailSources.map { ($0.id, $0.normalizedHash) })
+            guardrailHashes: Dictionary(uniqueKeysWithValues: guardrailSources.map { ($0.id, $0.normalizedHash) }),
+            parserRulesVersion: BlocklistParsingRules.rulesVersion
         )
     }
 
@@ -273,11 +288,16 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         if customBlocklistFingerprints != other.customBlocklistFingerprints { mismatches.append("customBlocklistFingerprints") }
         if guardrailVersionIDs != other.guardrailVersionIDs { mismatches.append("guardrailVersionIDs") }
         if guardrailHashes != other.guardrailHashes { mismatches.append("guardrailHashes") }
+        if parserRulesVersion != other.parserRulesVersion { mismatches.append("parserRulesVersion") }
         return mismatches
     }
 
     public func hasSameConfigurationInputs(as configuration: AppConfiguration) -> Bool {
-        enabledBlocklistIDs == configuration.enabledBlocklistIDs.sorted()
+        // The no-cached-catalog warm-start branch compares against the running
+        // binary's parser rules version (configuration carries no artifact version),
+        // so an artifact compiled under an older parser is rejected and regenerated.
+        parserRulesVersion == BlocklistParsingRules.rulesVersion
+            && enabledBlocklistIDs == configuration.enabledBlocklistIDs.sorted()
             && blockedDomains == configuration.blockedDomains.sorted()
             && allowedDomains == configuration.allowedDomains.sorted()
             && qaProbeSet == configuration.qaProbeSet

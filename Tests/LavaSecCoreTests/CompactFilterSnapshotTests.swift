@@ -3,6 +3,36 @@ import XCTest
 @testable import LavaSecCore
 
 final class CompactFilterSnapshotTests: XCTestCase {
+    func testDecodeRejectsUnsortedRuleTable() throws {
+        // Two subdomain (suffix) rules of equal length → blockRules has 0 exact + 2
+        // suffix entries (6 bytes each), byte-sorted as a/b. The binary-search lookup
+        // relies on that order, so a corrupted (unsorted) table must fail CLOSED.
+        var blockRules = DomainRuleSet()
+        try blockRules.insert(domain: "a.example.com", matchesSubdomains: true)
+        try blockRules.insert(domain: "b.example.com", matchesSubdomains: true)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: nil),
+            snapshot: FilterSnapshot(blockRules: blockRules)
+        )
+        let data = try CompactFilterSnapshot(preparedSnapshot: prepared).encodedData()
+        XCTAssertNoThrow(try CompactFilterSnapshot.decode(from: data), "the sorted table must decode fine")
+
+        // Layout: magic(8) + version(4) + metaLen(4) + meta(N) + blockRules table
+        // [exactCount(4) + suffixCount(4) + suffix entries…]. Swap the two 6-byte
+        // suffix-entry records to break the sorted order.
+        var bytes = [UInt8](data)
+        let metaLen = Int(UInt32(bytes[12]) | (UInt32(bytes[13]) << 8) | (UInt32(bytes[14]) << 16) | (UInt32(bytes[15]) << 24))
+        let entryStart = 24 + metaLen
+        for offset in 0..<6 {
+            bytes.swapAt(entryStart + offset, entryStart + 6 + offset)
+        }
+
+        XCTAssertThrowsError(try CompactFilterSnapshot.decode(from: Data(bytes))) { error in
+            XCTAssertEqual(error as? CompactFilterSnapshotError, .invalidRuleTable)
+        }
+    }
+
     func testCompactSnapshotRoundTripPreservesDecisionOrdering() throws {
         var blockRules = DomainRuleSet()
         try blockRules.insert(domain: "ads.example.com", matchesSubdomains: true)

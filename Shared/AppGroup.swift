@@ -28,6 +28,7 @@ enum LavaSecAppGroup {
     static let protectionLastDeliveredNotificationAtDefaultsKey = "lavasec.protection.lastDeliveredNotificationAt"
     static let protectionUnresolvedProblemNotificationIDDefaultsKey = "lavasec.protection.unresolvedProblemNotificationID"
     static let protectionUnresolvedProblemNotificationKindDefaultsKey = "lavasec.protection.unresolvedProblemNotificationKind"
+    static let protectionNotificationKindSchemaVersionDefaultsKey = "lavasec.protection.notificationKindSchemaVersion"
     // Written by the app only after `saveToPreferences` confirms Connect-On-Demand
     // is armed/disarmed, and read by the tunnel to gate self-reconnect: a self-
     // cancel only recovers if on-demand will bring the tunnel back, and the app
@@ -56,6 +57,19 @@ enum LavaSecAppGroup {
 
     static func protectionNotificationRequestIdentifier(for identifier: String) -> String {
         "\(protectionNotificationRequestIdentifierPrefix)\(identifier)"
+    }
+
+    /// One-time migration of the persisted connectivity-notification state across the
+    /// notification-kind vocabulary change (slow-DNS got its own kind). Idempotent and
+    /// version-gated, so it's safe to call on every scheduling pass in both processes.
+    static func migrateProtectionNotificationStateIfNeeded(_ defaults: UserDefaults = sharedDefaults) {
+        ProtectionConnectivityNotificationStore.migrateLegacyKindSchemaIfNeeded(
+            in: defaults,
+            keys: ProtectionConnectivityNotificationStore.DefaultsKeys(
+                schemaVersion: protectionNotificationKindSchemaVersionDefaultsKey,
+                unresolvedProblemKind: protectionUnresolvedProblemNotificationKindDefaultsKey
+            )
+        )
     }
 }
 

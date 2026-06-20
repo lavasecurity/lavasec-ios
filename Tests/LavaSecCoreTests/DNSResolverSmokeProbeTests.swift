@@ -3,6 +3,21 @@ import XCTest
 @testable import LavaSecCore
 
 final class DNSResolverSmokeProbeTests: XCTestCase {
+    func testIndicatesResolverFailureIsSliceSafeForNonZeroStartIndexData() {
+        // SERVFAIL response header: QR=1, rcode=2 (flags 0x8182).
+        let servfail = Data([0x12, 0x34, 0x81, 0x82, 0, 1, 0, 0, 0, 0, 0, 0])
+        let slice = (Data([0xAA, 0xBB]) + servfail)[2...]
+        XCTAssertNotEqual(slice.startIndex, 0)
+
+        // A non-zero-start slice must classify identically to the 0-indexed copy
+        // (the failure classifier feeds the encrypted-fallback decision).
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesResolverFailure(servfail))
+        XCTAssertEqual(
+            DNSResolverSmokeProbe.indicatesResolverFailure(slice),
+            DNSResolverSmokeProbe.indicatesResolverFailure(servfail)
+        )
+    }
+
     func testProbeDomainRotatesAcrossSequencesSoConsecutiveProbesDiffer() {
         let domains = DNSResolverSmokeProbe.rotatingProbeDomains
         XCTAssertGreaterThanOrEqual(domains.count, 2, "rotation needs at least two domains to diversify")

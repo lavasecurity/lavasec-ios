@@ -1,5 +1,56 @@
 import Foundation
 
+/// Build/environment provenance recorded in the export `manifest.json` so a
+/// capture can be pinned to an exact app version, build, and source commit
+/// (the SHA is what actually maps an export to merged PRs — a marketing version
+/// can't, since fixes land after the version bump). Sourced by the app layer
+/// from the same Info.plist / device values the bug-report bundle already uses.
+public struct LocalLogExportMetadata: Equatable, Sendable {
+    public var appVersion: String?
+    public var build: String?
+    public var sourceRevision: String?
+    public var osVersion: String?
+    public var deviceFamily: String?
+    public var locale: String?
+    public var catalogVersion: String?
+
+    public init(
+        appVersion: String? = nil,
+        build: String? = nil,
+        sourceRevision: String? = nil,
+        osVersion: String? = nil,
+        deviceFamily: String? = nil,
+        locale: String? = nil,
+        catalogVersion: String? = nil
+    ) {
+        self.appVersion = appVersion
+        self.build = build
+        self.sourceRevision = sourceRevision
+        self.osVersion = osVersion
+        self.deviceFamily = deviceFamily
+        self.locale = locale
+        self.catalogVersion = catalogVersion
+    }
+
+    /// Ordered `(manifestKey, value)` pairs, dropping empty / "Unknown" values so
+    /// the manifest schema stays clean for local builds (e.g. no SHA, no catalog).
+    var manifestPairs: [(String, String)] {
+        let candidates: [(String, String?)] = [
+            ("app_version", appVersion),
+            ("build", build),
+            ("source_revision", sourceRevision),
+            ("os_version", osVersion),
+            ("device_family", deviceFamily),
+            ("locale", locale),
+            ("catalog_version", catalogVersion)
+        ]
+        return candidates.compactMap { key, value in
+            guard let value, !value.isEmpty, value != "Unknown" else { return nil }
+            return (key, value)
+        }
+    }
+}
+
 public struct LocalLogExportArchive: Equatable, Sendable {
     public let filename: String
     public let data: Data
@@ -10,6 +61,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
         deviceDebugLog: [BugReportDebugLogEntry] = [],
+        metadata: LocalLogExportMetadata = LocalLogExportMetadata(),
         generatedAt: Date = Date(),
         calendar: Calendar = .current
     ) throws -> LocalLogExportArchive {
@@ -20,6 +72,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: lavaGuardUnlocks,
             deviceDebugLog: deviceDebugLog,
+            metadata: metadata,
             generatedAt: generatedAt,
             timestamp: timestamp,
             calendar: calendar
@@ -37,6 +90,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
         deviceDebugLog: [BugReportDebugLogEntry],
+        metadata: LocalLogExportMetadata,
         generatedAt: Date,
         timestamp: ExportTimestamp,
         calendar: Calendar
@@ -87,7 +141,8 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             data: manifestJSON(
                 generatedAt: generatedAtString,
                 archiveFilename: "lava-local-logs-\(timestamp.filename).zip",
-                fileNames: files.map(\.0)
+                fileNames: files.map(\.0),
+                metadata: metadata
             )
         ))
         return entries
@@ -186,14 +241,21 @@ public struct LocalLogExportArchive: Equatable, Sendable {
     private static func manifestJSON(
         generatedAt: String,
         archiveFilename: String,
-        fileNames: [String]
+        fileNames: [String],
+        metadata: LocalLogExportMetadata
     ) -> Data {
-        let object: [String: Any] = [
-            "format": "lava-local-logs-zip-v1",
+        // v2 adds optional build/environment provenance (app_version, build,
+        // source_revision, os_version, device_family, locale, catalog_version).
+        // Older exports are v1 and simply carry none of these keys.
+        var object: [String: Any] = [
+            "format": "lava-local-logs-zip-v2",
             "generated_at": generatedAt,
             "archive": archiveFilename,
             "files": fileNames + ["manifest.json"]
         ]
+        for (key, value) in metadata.manifestPairs {
+            object[key] = value
+        }
 
         return (try? JSONSerialization.data(
             withJSONObject: object,

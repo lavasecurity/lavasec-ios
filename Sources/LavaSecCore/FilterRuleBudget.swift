@@ -25,6 +25,21 @@ public enum FilterRuleBudget: Sendable {
         knownRuleCount > softCeiling(forBudget: budget)
     }
 
+    /// The rule count to *show* in the "X of budget" selection copy. While a
+    /// selection is still savable (inside the soft-ceiling margin), the
+    /// over-counted per-list sum can drift a little past the budget — e.g.
+    /// "506K of 500K" for a selection that is actually allowed, which reads as
+    /// over-limit even though it saves fine. In that window we clamp the shown
+    /// total to the budget so it reads "500K of 500K". Once the selection passes
+    /// the soft ceiling (no longer savable) we show the true, uncapped count so
+    /// the user can see how far over they are and that they must remove/upgrade.
+    public static func displayedRuleCount(knownRuleCount: Int, budget: Int) -> Int {
+        guard !exceedsSoftCeiling(knownRuleCount: knownRuleCount, budget: budget) else {
+            return knownRuleCount
+        }
+        return min(knownRuleCount, budget)
+    }
+
     /// Compact filter-rule count for tight UI: 500K, 1.2M, 2M. Rounds the
     /// thousands first and rolls 1000K up to 1M; renders whole millions without
     /// a trailing ".0" while keeping one decimal otherwise.

@@ -54,6 +54,14 @@ struct FilterConfirmationSheet: View {
                 }
 
                 let diff = viewModel.filterDraftDiff
+                if !diff.addedAllowedDomains.isEmpty {
+                    LavaInfoPanel(
+                        title: "Be extra careful",
+                        description: "Allowed exceptions let a site through even when a blocklist would catch it.",
+                        systemImage: "exclamationmark.triangle.fill",
+                        tint: LavaStyle.lavaOrange
+                    )
+                }
                 DiffGroup(
                     title: "Blocklists",
                     added: diff.addedBlocklistIDs.map { viewModel.blocklistName(for: $0) },
@@ -76,7 +84,7 @@ struct FilterConfirmationSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel") {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel) {
                         cancelIfStandaloneReview()
                         dismiss()
                     }
@@ -200,46 +208,42 @@ struct FilterPreparationScreen: View {
                         .foregroundStyle(LavaStyle.lavaOrange)
 
                     VStack(spacing: 10) {
-                        Text("Previous Filters Still Active")
+                        Text("We couldn't update your filter")
                             .font(.title.bold())
                             .multilineTextAlignment(.center)
                         Text(message.lavaLocalized)
                             .lavaBodySupportingText()
                             .multilineTextAlignment(.center)
+                        Text("Your previous filter is still active.")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 6)
                     }
 
                     VStack(spacing: 10) {
-                        Button {
+                        Button("Try Again") {
                             viewModel.retryFilterPreparation()
-                        } label: {
-                            Text("Try Again")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 50)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(LavaStyle.safeControlGreen)
+                        .buttonStyle(LavaStandaloneActionButtonStyle())
 
-                        Button {
+                        Button(origin.failureBackTitle) {
                             viewModel.returnToFilterEditAfterPrepareFailure()
                             returnToReview?()
-                        } label: {
-                            Text(origin.failureBackTitle)
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 50)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(LavaSecondaryActionButtonStyle())
 
                         Button(role: .cancel) {
                             viewModel.keepCurrentFiltersAfterPrepareFailure()
                         } label: {
-                            Text("Keep Current Filters")
-                                .font(.headline)
+                            Text("Keep Current Filter")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LavaStyle.secondaryText)
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 50)
+                                .frame(height: 44)
                         }
                         .buttonStyle(.plain)
+                        .padding(.top, 2)
                     }
                     .frame(maxWidth: 320)
                 }
@@ -265,7 +269,7 @@ struct PreparationTickerTitle: View {
     }
 
     var body: some View {
-        Text(displayedText)
+        Text(displayedText.lavaLocalized)
             .font(.title.bold())
             .lineLimit(2)
             .minimumScaleFactor(0.86)

@@ -177,12 +177,17 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("Toggle(\"Match App Icon to Lava Guard\""))
         XCTAssertTrue(customizationBlock.contains("isOn: updatesAppIconBinding"))
         XCTAssertTrue(customizationBlock.contains("viewModel.setUpdatesAppIconWithLavaGuard(isEnabled)"))
-        XCTAssertTrue(customizationBlock.contains("DisclosureGroup(isExpanded: $isExpanded)"))
-        XCTAssertTrue(customizationBlock.contains("ForEach(GuardianShieldStyle.allCases)"))
+        // The catalog now opens as a bottom sheet (radio-style single select) rather
+        // than an inline disclosure: the row presents LavaGuardLookPickerSheet, which
+        // lists every Guard and applies the selection before dismissing.
+        XCTAssertTrue(customizationBlock.contains(".sheet(isPresented: $isPresentingPicker)"))
+        XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerSheet(selectedLook: look, onSelect: onSelect)"))
+        XCTAssertTrue(customizationBlock.contains("ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \\.element.id)"))
         XCTAssertTrue(customizationBlock.contains("viewModel.setLavaGuardLook(look)"))
         XCTAssertTrue(customizationBlock.contains("guard availability.isSelectable else"))
-        XCTAssertTrue(customizationBlock.contains("withAnimation(.easeInOut(duration: 0.18))"))
-        XCTAssertTrue(customizationBlock.contains("isExpanded = false"))
+        XCTAssertTrue(customizationBlock.contains("onSelect(look)"))
+        XCTAssertTrue(customizationBlock.contains("dismiss()"))
+        XCTAssertFalse(customizationBlock.contains("DisclosureGroup(isExpanded: $isExpanded)"))
         XCTAssertTrue(customizationBlock.contains("private struct LavaGuardLookContent: View"))
         XCTAssertTrue(customizationBlock.contains("private struct MaskedLavaGuardIcon: View"))
         XCTAssertTrue(customizationBlock.contains("private enum LavaGuardLookRowMetrics"))

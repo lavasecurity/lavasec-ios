@@ -27,16 +27,16 @@ public struct FeatureLimits: Equatable, Codable, Sendable {
     }
 
     public static let free = FeatureLimits(
-        maxAllowedDomains: 10,
-        maxBlockedDomains: 10,
+        maxAllowedDomains: 25,
+        maxBlockedDomains: 25,
         maxFilterRules: 500_000,
         allowsCustomBlocklists: false,
         allowsCustomDNS: false
     )
 
     public static let paid = FeatureLimits(
-        maxAllowedDomains: 500,
-        maxBlockedDomains: 500,
+        maxAllowedDomains: 1_000,
+        maxBlockedDomains: 1_000,
         maxFilterRules: 2_000_000,
         allowsCustomBlocklists: true,
         allowsCustomDNS: true

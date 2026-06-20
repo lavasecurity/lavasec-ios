@@ -102,6 +102,88 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
         XCTAssertEqual(assessment.primaryAction, .reconnect)
     }
 
+    func testSustainedRejectedResponseEscalatesEvenWhenGenericStreakWasResetByChurn() {
+        // UR-37 / LAV-87: a hijacking resolver keeps rejecting, but network-change /
+        // settle churn keeps `consecutiveDNSSmokeProbeFailureCount` pinned at 1 so neither
+        // threshold-3 path fires. The resolver-identity-scoped rejected counter survives
+        // the churn and escalates so recovery (and the encrypted fallback) can engage.
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let probeAt = startedAt.addingTimeInterval(300)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "rejected-response",
+            consecutiveUpstreamFailureCount: 1,
+            lastDNSSmokeProbeAt: probeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1,
+            consecutiveRejectedSmokeResponseCount: 3,
+            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201",
+            lastResolverRuntimeResetAt: startedAt
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: probeAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .needsReconnect)
+        XCTAssertEqual(assessment.primaryAction, .reconnect)
+    }
+
+    func testRejectedResponseBelowThresholdStaysRecovering() {
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let probeAt = startedAt.addingTimeInterval(300)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "rejected-response",
+            consecutiveUpstreamFailureCount: 1,
+            lastDNSSmokeProbeAt: probeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1,
+            consecutiveRejectedSmokeResponseCount: 2,
+            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201",
+            lastResolverRuntimeResetAt: startedAt
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: probeAt.addingTimeInterval(1)
+        )
+
+        // Honesty floor: below the threshold it must not read healthy, but it must not
+        // escalate to a reconnect either.
+        XCTAssertEqual(assessment.severity, .recovering)
+    }
+
+    func testSustainedRejectedResponseClearedByPrimarySuccessStaysHealthy() {
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let probeAt = startedAt.addingTimeInterval(300)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "rejected-response",
+            consecutiveUpstreamFailureCount: 1,
+            lastDNSSmokeProbeAt: probeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1,
+            consecutiveRejectedSmokeResponseCount: 3,
+            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201",
+            lastResolverRuntimeResetAt: startedAt,
+            lastPrimaryUpstreamSuccessAt: probeAt.addingTimeInterval(2)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: probeAt.addingTimeInterval(3)
+        )
+
+        // A genuine PRIMARY success postdating the probe means the resolver works again —
+        // even with a stale-high rejected count, do not escalate.
+        XCTAssertEqual(assessment.severity, .healthy)
+    }
+
     func testBackedOffFailureRecommendsReconnectAfterRepeatedDoHFailures() {
         let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
         let latestFailureAt = startedAt.addingTimeInterval(3_600)
@@ -276,7 +358,8 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
             consecutiveUpstreamFailureCount: 3,
             lastDNSSmokeProbeAt: networkChangedAt.addingTimeInterval(2),
             lastDNSSmokeProbeSucceeded: false,
-            dnsSmokeProbeFailureCount: 1,
+            dnsSmokeProbeFailureCount: 3,
+            consecutiveDNSSmokeProbeFailureCount: 3,
             lastNetworkChangeAt: networkChangedAt
         )
 
@@ -284,6 +367,162 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
             isConnected: true,
             health: health,
             now: networkChangedAt.addingTimeInterval(12)
+        )
+
+        XCTAssertEqual(assessment.severity, .needsReconnect)
+        XCTAssertEqual(assessment.primaryAction, .reconnect)
+    }
+
+    func testForwardingSuccessDoesNotMaskPersistentlyFailingSmokeProbe() {
+        // The reported "Protected, no internet" wedge: the primary resolver's health
+        // probe keeps failing, but incidental forwarding / encrypted-fallback successes
+        // (and self-reconnects) keep zeroing consecutiveUpstreamFailureCount. Recovery
+        // must key off the dedicated smoke-failure counter so it still escalates.
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = networkChangedAt.addingTimeInterval(40)
+        let health = TunnelHealthSnapshot(
+            lastFailureReason: "rejected-response",
+            // Reset to 0 by a fallback-carried forwarding success — the masking signal.
+            consecutiveUpstreamFailureCount: 0,
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 3,
+            lastNetworkChangeAt: networkChangedAt,
+            // The last forwarding success PREDATES the failing probe, so it must not clear it.
+            lastUpstreamSuccessAt: networkChangedAt.addingTimeInterval(5)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .needsReconnect)
+        XCTAssertEqual(assessment.primaryAction, .reconnect)
+    }
+
+    func testColdStartFailingSmokeProbeWithoutNetworkChangeStillEscalates() {
+        // Cold start / post-self-reconnect: a fresh snapshot has no lastNetworkChangeAt.
+        // The probe must still be evaluated against the session-start baseline, or a
+        // failing primary would be skipped entirely (and fallback traffic could paint it
+        // healthy). Sustained failures → needsReconnect.
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = startedAt.addingTimeInterval(8)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "rejected-response",
+            consecutiveUpstreamFailureCount: 0,
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 3
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .needsReconnect)
+        XCTAssertEqual(assessment.primaryAction, .reconnect)
+    }
+
+    func testColdStartSingleFailingSmokeProbeWithoutNetworkChangeReportsRecovering() {
+        // Same cold-start context, below the threshold: never `.healthy` over a failing
+        // probe — surfaces `.recovering`.
+        let startedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = startedAt.addingTimeInterval(8)
+        let health = TunnelHealthSnapshot(
+            startedAt: startedAt,
+            lastFailureReason: "timeout",
+            consecutiveUpstreamFailureCount: 0,
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .recovering)
+        XCTAssertEqual(assessment.primaryAction, .turnOff)
+    }
+
+    func testSingleUncoveredSmokeProbeFailureReportsRecoveringNotHealthy() {
+        // Below the reconnect threshold a failing probe must still not read as healthy
+        // ("Protected"); it surfaces as recovering until a probe succeeds.
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = networkChangedAt.addingTimeInterval(5)
+        let health = TunnelHealthSnapshot(
+            lastFailureReason: "timeout",
+            consecutiveUpstreamFailureCount: 0,
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1,
+            lastNetworkChangeAt: networkChangedAt
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(assessment.severity, .recovering)
+        XCTAssertEqual(assessment.primaryAction, .turnOff)
+    }
+
+    func testPrimaryForwardingSuccessAfterFailedSmokeProbeStaysHealthy() {
+        // The inverse guard: a genuine PRIMARY forwarding success that POSTDATES the
+        // failed probe means the configured resolver is working again, so we must not
+        // nag. Stays healthy.
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = networkChangedAt.addingTimeInterval(5)
+        let health = TunnelHealthSnapshot(
+            lastFailureReason: "timeout",
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 3,
+            lastNetworkChangeAt: networkChangedAt,
+            lastPrimaryUpstreamSuccessAt: smokeProbeAt.addingTimeInterval(2)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(3)
+        )
+
+        XCTAssertEqual(assessment.severity, .healthy)
+        XCTAssertEqual(assessment.primaryAction, .turnOff)
+    }
+
+    func testFallbackSuccessAfterFailedSmokeProbeStillRecommendsReconnect() {
+        // A fallback-carried success (encrypted or device-DNS) does NOT prove the
+        // configured primary recovered — it bumps lastUpstreamSuccessAt but not
+        // lastPrimaryUpstreamSuccessAt. It must not clear a sustained failing primary
+        // probe, or the "fallback masks a failing primary" wedge returns.
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let smokeProbeAt = networkChangedAt.addingTimeInterval(40)
+        let health = TunnelHealthSnapshot(
+            lastFailureReason: "rejected-response",
+            consecutiveUpstreamFailureCount: 0,
+            lastDNSSmokeProbeAt: smokeProbeAt,
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 3,
+            lastNetworkChangeAt: networkChangedAt,
+            // Fallback-carried success AFTER the probe: bumps lastUpstreamSuccessAt only.
+            lastUpstreamSuccessAt: smokeProbeAt.addingTimeInterval(2)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: smokeProbeAt.addingTimeInterval(3)
         )
 
         XCTAssertEqual(assessment.severity, .needsReconnect)

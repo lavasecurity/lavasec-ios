@@ -36,6 +36,25 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     public var lastDNSSmokeProbeSucceeded: Bool?
     public var dnsSmokeProbeSuccessCount: Int
     public var dnsSmokeProbeFailureCount: Int
+    /// Consecutive failed DNS smoke probes, reset only by a smoke-probe success.
+    /// Unlike `consecutiveUpstreamFailureCount` this is NOT reset by forwarding /
+    /// encrypted-fallback successes or self-reconnects, so a primary resolver that
+    /// keeps failing its health probe can't be masked "healthy" by incidental
+    /// fallback-carried traffic — the signal the connectivity policy escalates on.
+    public var consecutiveDNSSmokeProbeFailureCount: Int
+    /// Consecutive smoke probes that returned a REACHABLE-but-rejected answer
+    /// (`rejected-response`) from the SAME resolver identity. Unlike
+    /// `consecutiveDNSSmokeProbeFailureCount` this is resolver-identity-scoped and is
+    /// deliberately kept OUT of every recovery reset path — network-change recovery, the
+    /// device-DNS settle/recapture churn, wake, AND the organic forwarding path (where a
+    /// REFUSED reply counts as `didResolve`). It is cleared only by an accepted primary
+    /// smoke-probe success or a resolver change. A churny roaming network kept the generic streak
+    /// pinned under the reconnect threshold so a steadily hijacking/stale resolver never
+    /// escalated (UR-37 / LAV-87); this survives that churn so recovery can engage.
+    public var consecutiveRejectedSmokeResponseCount: Int
+    /// The resolver identity (`cacheIdentifier`) the rejected-response streak is counting,
+    /// so a handoff to a different resolver restarts the count instead of carrying it over.
+    public var rejectedSmokeResponseResolverIdentity: String?
     public var deviceDNSFallbackModeActive: Bool
     public var lastDeviceDNSFallbackActivatedAt: Date?
     public var deviceDNSFallbackActivationCount: Int
@@ -91,6 +110,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lastDNSSmokeProbeSucceeded
         case dnsSmokeProbeSuccessCount
         case dnsSmokeProbeFailureCount
+        case consecutiveDNSSmokeProbeFailureCount
+        case consecutiveRejectedSmokeResponseCount
+        case rejectedSmokeResponseResolverIdentity
         case deviceDNSFallbackModeActive
         case lastDeviceDNSFallbackActivatedAt
         case deviceDNSFallbackActivationCount
@@ -141,6 +163,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         lastDNSSmokeProbeSucceeded: Bool? = nil,
         dnsSmokeProbeSuccessCount: Int = 0,
         dnsSmokeProbeFailureCount: Int = 0,
+        consecutiveDNSSmokeProbeFailureCount: Int = 0,
+        consecutiveRejectedSmokeResponseCount: Int = 0,
+        rejectedSmokeResponseResolverIdentity: String? = nil,
         deviceDNSFallbackModeActive: Bool = false,
         lastDeviceDNSFallbackActivatedAt: Date? = nil,
         deviceDNSFallbackActivationCount: Int = 0,
@@ -189,6 +214,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastDNSSmokeProbeSucceeded = lastDNSSmokeProbeSucceeded
         self.dnsSmokeProbeSuccessCount = dnsSmokeProbeSuccessCount
         self.dnsSmokeProbeFailureCount = dnsSmokeProbeFailureCount
+        self.consecutiveDNSSmokeProbeFailureCount = consecutiveDNSSmokeProbeFailureCount
+        self.consecutiveRejectedSmokeResponseCount = consecutiveRejectedSmokeResponseCount
+        self.rejectedSmokeResponseResolverIdentity = rejectedSmokeResponseResolverIdentity
         self.deviceDNSFallbackModeActive = deviceDNSFallbackModeActive
         self.lastDeviceDNSFallbackActivatedAt = lastDeviceDNSFallbackActivatedAt
         self.deviceDNSFallbackActivationCount = deviceDNSFallbackActivationCount
@@ -270,6 +298,18 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             Int.self,
             forKey: .dnsSmokeProbeFailureCount
         ) ?? 0
+        self.consecutiveDNSSmokeProbeFailureCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .consecutiveDNSSmokeProbeFailureCount
+        ) ?? 0
+        self.consecutiveRejectedSmokeResponseCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .consecutiveRejectedSmokeResponseCount
+        ) ?? 0
+        self.rejectedSmokeResponseResolverIdentity = try container.decodeIfPresent(
+            String.self,
+            forKey: .rejectedSmokeResponseResolverIdentity
+        )
         self.deviceDNSFallbackModeActive = try container.decodeIfPresent(
             Bool.self,
             forKey: .deviceDNSFallbackModeActive

@@ -10,11 +10,14 @@ public enum BlocklistFormat: String, Codable, Sendable {
 
 // Invalidation constant for caches of PARSED rules (RuleSetCache). Bump when
 // parse behavior changes in any way that can alter output for the same input
-// bytes: clean()/candidateDomain()/auto-format detection, DomainName.normalize
+// bytes: clean()/candidateDomains()/auto-format detection, DomainName.normalize
 // semantics, the maxLineLength/maxRules defaults, or the
 // DomainRuleSet.lavaSecProtectedDomains list (cached entries are post-filter).
 public enum BlocklistParsingRules {
-    public static let rulesVersion = 1
+    // v2: parseHosts now emits every host on a multi-domain line (was: first only),
+    // so the same source bytes can yield more rules. Bumped to orphan stale RuleSetCache
+    // entries parsed under the first-host-only behavior.
+    public static let rulesVersion = 2
 }
 
 public struct RejectedBlocklistLine: Equatable, Sendable {
@@ -66,7 +69,7 @@ public struct BlocklistParser: Sendable {
         var rules: [DomainRule] = []
         var rejected: [RejectedBlocklistLine] = []
 
-        for (offset, rawLine) in text.split(whereSeparator: \.isNewline).enumerated() {
+        parseLoop: for (offset, rawLine) in text.split(whereSeparator: \.isNewline).enumerated() {
             let lineNumber = offset + 1
             let line = String(rawLine)
 
@@ -85,18 +88,28 @@ public struct BlocklistParser: Sendable {
                 continue
             }
 
-            guard let candidate = candidateDomain(from: cleaned, format: format) else {
+            let candidates = candidateDomains(from: cleaned, format: format)
+            guard !candidates.isEmpty else {
                 if shouldRecordRejection(cleaned) {
                     rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Unsupported rule syntax."))
                 }
                 continue
             }
 
-            do {
-                let rule = try DomainRule(domain: candidate.domain, matchesSubdomains: candidate.matchesSubdomains)
-                rules.append(rule)
-            } catch {
-                rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Invalid domain."))
+            // A single hosts line can carry several domains; enforce maxRules per rule
+            // (not per line) so a multi-host line near the cap can't overshoot it.
+            for candidate in candidates {
+                guard rules.count < maxRules else {
+                    rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: "", reason: "Rule limit reached."))
+                    break parseLoop
+                }
+
+                do {
+                    let rule = try DomainRule(domain: candidate.domain, matchesSubdomains: candidate.matchesSubdomains)
+                    rules.append(rule)
+                } catch {
+                    rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Invalid domain."))
+                }
             }
         }
 
@@ -108,7 +121,7 @@ public struct BlocklistParser: Sendable {
         var rejected: [RejectedBlocklistLine] = []
         var acceptedRuleCount = 0
 
-        for (offset, rawLine) in text.split(whereSeparator: \.isNewline).enumerated() {
+        parseLoop: for (offset, rawLine) in text.split(whereSeparator: \.isNewline).enumerated() {
             let lineNumber = offset + 1
             let line = String(rawLine)
 
@@ -127,19 +140,29 @@ public struct BlocklistParser: Sendable {
                 continue
             }
 
-            guard let candidate = candidateDomain(from: cleaned, format: format) else {
+            let candidates = candidateDomains(from: cleaned, format: format)
+            guard !candidates.isEmpty else {
                 if shouldRecordRejection(cleaned) {
                     rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Unsupported rule syntax."))
                 }
                 continue
             }
 
-            do {
-                let rule = try DomainRule(domain: candidate.domain, matchesSubdomains: candidate.matchesSubdomains)
-                ruleSet.insert(rule)
-                acceptedRuleCount += 1
-            } catch {
-                rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Invalid domain."))
+            // A single hosts line can carry several domains; enforce maxRules per rule
+            // (not per line) so a multi-host line near the cap can't overshoot it.
+            for candidate in candidates {
+                guard acceptedRuleCount < maxRules else {
+                    rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: "", reason: "Rule limit reached."))
+                    break parseLoop
+                }
+
+                do {
+                    let rule = try DomainRule(domain: candidate.domain, matchesSubdomains: candidate.matchesSubdomains)
+                    ruleSet.insert(rule)
+                    acceptedRuleCount += 1
+                } catch {
+                    rejected.append(RejectedBlocklistLine(lineNumber: lineNumber, content: cleaned, reason: "Invalid domain."))
+                }
             }
         }
 
@@ -164,21 +187,26 @@ public struct BlocklistParser: Sendable {
         return line.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func candidateDomain(from line: String, format: BlocklistFormat) -> (domain: String, matchesSubdomains: Bool)? {
+    private func candidateDomains(from line: String, format: BlocklistFormat) -> [(domain: String, matchesSubdomains: Bool)] {
         switch format {
         case .plainDomains:
-            return parsePlainDomain(line)
+            return parsePlainDomain(line).map { [$0] } ?? []
         case .hosts:
             return parseHosts(line)
         case .adblock:
-            return parseAdblock(line)
+            return parseAdblock(line).map { [$0] } ?? []
         case .dnsmasq:
-            return parseDNSMasq(line)
+            return parseDNSMasq(line).map { [$0] } ?? []
         case .auto:
-            return parseHosts(line)
-                ?? parseDNSMasq(line)
-                ?? parseAdblock(line)
-                ?? parsePlainDomain(line)
+            // hosts can carry multiple domains; the other formats are one-per-line.
+            let hosts = parseHosts(line)
+            if !hosts.isEmpty {
+                return hosts
+            }
+            if let domain = parseDNSMasq(line) ?? parseAdblock(line) ?? parsePlainDomain(line) {
+                return [domain]
+            }
+            return []
         }
     }
 
@@ -206,18 +234,20 @@ public struct BlocklistParser: Sendable {
         return (candidate, true)
     }
 
-    private func parseHosts(_ line: String) -> (domain: String, matchesSubdomains: Bool)? {
+    private func parseHosts(_ line: String) -> [(domain: String, matchesSubdomains: Bool)] {
         let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
         guard parts.count >= 2 else {
-            return nil
+            return []
         }
 
         let address = parts[0]
         guard isNullRoutingAddress(address) else {
-            return nil
+            return []
         }
 
-        return (parts[1], true)
+        // A hosts line may map one null-route address to several domains
+        // (`0.0.0.0 a.com b.com c.com`); block every host, not just the first.
+        return parts[1...].map { (domain: $0, matchesSubdomains: true) }
     }
 
     private func parseAdblock(_ line: String) -> (domain: String, matchesSubdomains: Bool)? {

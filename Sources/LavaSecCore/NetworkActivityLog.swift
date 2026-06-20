@@ -194,6 +194,13 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         trimToMaximumEntryCount()
     }
 
+    /// Age cap mirroring the fine-grained local-log retention window. Network
+    /// activity is held for at most this long on device, on top of the entry-count
+    /// ceiling.
+    public static var retentionWindow: TimeInterval {
+        TimeInterval(LocalLogRetention.fineGrainedDays) * 86_400
+    }
+
     public mutating func append(_ entry: NetworkActivityLogEntry) {
         guard !isDuplicateWithinCoalescingWindow(entry) else {
             return
@@ -201,11 +208,34 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
 
         entries.insert(entry, at: 0)
         entries.sort { $0.timestamp > $1.timestamp }
+        pruneEntriesOlderThanRetentionWindow()
         trimToMaximumEntryCount()
     }
 
     public mutating func clear() {
         entries.removeAll()
+    }
+
+    /// Drops entries older than the retention window relative to `now`, reporting
+    /// whether anything was removed. Call on load so an idle device still ages out
+    /// stale activity even without a new append.
+    @discardableResult
+    public mutating func pruneExpired(now: Date = Date()) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.retentionWindow)
+        let countBefore = entries.count
+        entries.removeAll { $0.timestamp < cutoff }
+        return entries.count != countBefore
+    }
+
+    private mutating func pruneEntriesOlderThanRetentionWindow() {
+        // Reference the newest entry's timestamp (not wall-clock) so append stays
+        // deterministic for tests and so a batch of dated entries prunes coherently.
+        guard let newest = entries.first?.timestamp else {
+            return
+        }
+
+        let cutoff = newest.addingTimeInterval(-Self.retentionWindow)
+        entries.removeAll { $0.timestamp < cutoff }
     }
 
     private func isDuplicateWithinCoalescingWindow(_ entry: NetworkActivityLogEntry) -> Bool {
@@ -256,6 +286,35 @@ public enum NetworkActivityLogPersistence {
         }
     }
 
+    /// Prunes entries older than the retention window from the persisted file,
+    /// under the same exclusive lock the tunnel uses to append — so the on-disk
+    /// log honors the 7-day cap even on an idle device, without racing a write.
+    public static func pruneExpired(at url: URL, now: Date = Date()) {
+        withExclusiveFileLock(for: url) {
+            var log = load(from: url)
+            if log.pruneExpired(now: now) {
+                try? save(log, to: url)
+            }
+        }
+    }
+
+    /// Prunes expired entries and returns the resulting log together with the
+    /// file's modification date, captured under the same exclusive lock. Reading
+    /// the contents and the mtime atomically prevents a concurrent tunnel append
+    /// (landing between a separate load and mtime read) from being silently
+    /// recorded as already-read by the caller's read gate.
+    public static func loadPruned(at url: URL, now: Date = Date()) -> (log: NetworkActivityLog, modifiedAt: Date?) {
+        withExclusiveFileLock(for: url) {
+            var log = load(from: url)
+            if log.pruneExpired(now: now) {
+                try? save(log, to: url)
+            }
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let modifiedAt = attributes?[.modificationDate] as? Date
+            return (log, modifiedAt)
+        }
+    }
+
     public static func makeJSONDecoder() -> JSONDecoder {
         JSONDecoder()
     }
@@ -266,14 +325,14 @@ public enum NetworkActivityLogPersistence {
         return encoder
     }
 
-    private static func withExclusiveFileLock(for url: URL, perform work: () -> Void) {
+    @discardableResult
+    private static func withExclusiveFileLock<T>(for url: URL, perform work: () -> T) -> T {
         let directoryURL = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let lockURL = url.appendingPathExtension("lock")
         let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else {
-            work()
-            return
+            return work()
         }
 
         defer {
@@ -281,14 +340,13 @@ public enum NetworkActivityLogPersistence {
         }
 
         guard flock(descriptor, LOCK_EX) == 0 else {
-            work()
-            return
+            return work()
         }
 
         defer {
             flock(descriptor, LOCK_UN)
         }
-        work()
+        return work()
     }
 }
 

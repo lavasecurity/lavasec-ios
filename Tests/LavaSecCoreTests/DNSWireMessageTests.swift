@@ -8,6 +8,37 @@ final class DNSWireMessageTests: XCTestCase {
         XCTAssertNil(DNSWireMessage.transactionID(in: Data([0x12])))
     }
 
+    func testParsersAreSliceSafeForNonZeroStartIndexData() {
+        // The public parsers index by absolute offset, so a Data slice with a
+        // non-zero startIndex (a sub-range of a larger buffer) must parse identically
+        // to a 0-indexed copy — never misread or trap on data[0].
+        func nonZeroStartSlice(_ payload: Data) -> Data {
+            let slice = (Data([0xAA, 0xBB]) + payload)[2...]
+            XCTAssertNotEqual(slice.startIndex, 0)
+            return slice
+        }
+
+        let query = Data([0xCA, 0xFE, 0x01, 0x00])
+        let response = Data([0x00, 0x00, 0x81, 0x80])
+
+        XCTAssertEqual(
+            DNSWireMessage.transactionID(in: nonZeroStartSlice(query)),
+            DNSWireMessage.transactionID(in: query)
+        )
+        XCTAssertEqual(
+            DNSWireMessage.clearingTransactionID(in: nonZeroStartSlice(query)),
+            DNSWireMessage.clearingTransactionID(in: query)
+        )
+        XCTAssertEqual(
+            DNSWireMessage.replacingTransactionID(in: nonZeroStartSlice(response), from: nonZeroStartSlice(query)),
+            DNSWireMessage.replacingTransactionID(in: response, from: query)
+        )
+        XCTAssertEqual(
+            DNSWireMessage.matchesTransactionID(in: nonZeroStartSlice(query), query: nonZeroStartSlice(query)),
+            DNSWireMessage.matchesTransactionID(in: query, query: query)
+        )
+    }
+
     func testClearsTransactionID() {
         let query = Data([0x12, 0x34, 0x01, 0x00])
 

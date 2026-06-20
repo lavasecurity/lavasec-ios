@@ -236,20 +236,24 @@ public final class DNSResponseCache {
     }
 
     private func trimIfNeeded() {
-        guard entries.count > maximumEntryCount else {
-            return
+        // store() runs this after every insert, so the cache overflows by at most one
+        // entry at a time. Evict the soonest-to-expire entry with a single linear pass
+        // rather than re-sorting the entire table on every cacheable response once full
+        // (the previous O(n log n)-per-write behavior on the serial dnsStateQueue). The
+        // loop keeps the same evict-earliest-first semantics if it ever needs to shed
+        // more than one (e.g. a future smaller cap), at O(n) per evicted entry.
+        while entries.count > maximumEntryCount, let earliestKey = earliestExpiringKey() {
+            entries.removeValue(forKey: earliestKey)
         }
+    }
 
-        let overflowCount = entries.count - maximumEntryCount
-        let keysToRemove = entries
-            .sorted { lhs, rhs in
-                lhs.value.expiresAt < rhs.value.expiresAt
-            }
-            .prefix(overflowCount)
-            .map { $0.key }
-
-        for key in keysToRemove {
-            entries.removeValue(forKey: key)
+    private func earliestExpiringKey() -> DNSCacheKey? {
+        var earliestKey: DNSCacheKey?
+        var earliestExpiry = Date.distantFuture
+        for (key, cached) in entries where cached.expiresAt < earliestExpiry {
+            earliestExpiry = cached.expiresAt
+            earliestKey = key
         }
+        return earliestKey
     }
 }

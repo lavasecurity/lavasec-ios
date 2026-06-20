@@ -1,5 +1,6 @@
 import SwiftUI
 import LavaSecCore
+import StoreKit
 import UIKit
 import UniformTypeIdentifiers
 
@@ -13,6 +14,7 @@ enum SettingsRoute: Hashable {
     case bugReport
     case legalNotices
     case versionNerdStats
+    case networkActivity
 #if DEBUG || LAVA_QA_TOOLS
     case phoneQA
 #endif
@@ -38,7 +40,15 @@ enum SettingsRoute: Hashable {
         case .legalNotices:
             return .readOnly
         case .versionNerdStats:
-            return .readOnly
+            // Nerd Stats exposes tunnel health and version diagnostics — the same
+            // "view my on-device diagnostics" family as Activity and Network
+            // Activity, so it shares their `.activityViewing` lock.
+            return .requires(.activityViewing)
+        case .networkActivity:
+            // Network Activity used to live behind the Activity tab's
+            // `.activityViewing` gate; keep that protection now that it is reached
+            // from Settings, so moving it does not bypass the user's passcode.
+            return .requires(.activityViewing)
 #if DEBUG || LAVA_QA_TOOLS
         case .phoneQA:
             return .requires(.appSettings)
@@ -66,6 +76,8 @@ enum SettingsRoute: Hashable {
             return "Open Legal Notices"
         case .versionNerdStats:
             return "Open Nerd Stats"
+        case .networkActivity:
+            return "Open Network Activity"
 #if DEBUG || LAVA_QA_TOOLS
         case .phoneQA:
             return "Open Phone QA settings"
@@ -106,6 +118,8 @@ private struct SettingsRouteDestinationView: View {
             case .versionNerdStats:
                 VersionNerdStatsView()
                     .lavaTier(.technical)
+            case .networkActivity:
+                NetworkActivityLogView()
 #if DEBUG || LAVA_QA_TOOLS
             case .phoneQA:
                 PhoneQASettingsView()
@@ -254,6 +268,14 @@ struct SettingsView: View {
                             systemImage: "info.circle",
                             title: "Nerd Stats",
                             summary: "Version and tunnel health"
+                        )
+
+                        SettingsNavigationRow(
+                            path: $path,
+                            route: .networkActivity,
+                            systemImage: "waveform.path.ecg.rectangle",
+                            title: "Network Activity",
+                            summary: viewModel.configuration.keepNetworkActivity ? "Local network activity on" : "Local network activity off"
                     )
                 }
 
@@ -929,7 +951,7 @@ private struct AccountSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", action: dismiss.callAsFunction)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
                 }
             }
         }
@@ -1065,6 +1087,7 @@ private struct UpgradeSettingsView: View {
 
             if viewModel.configuration.hasLavaSecurityPlus {
                 UpgradeThankYouView()
+                subscriberManagementSection
             } else if !viewModel.hasCheckedLavaSecurityPlusEntitlements
                 || viewModel.isRefreshingLavaSecurityPlusEntitlements {
                 UpgradeEntitlementCheckingView()
@@ -1202,9 +1225,80 @@ private struct UpgradeSettingsView: View {
             await viewModel.restoreLavaSecurityPlusPurchases()
         }
     }
+
+    @ViewBuilder
+    private var subscriberManagementSection: some View {
+        VStack(spacing: 10) {
+            // Manage / cancel — auto-renewable plans only. The lifetime unlock has no
+            // expiry and nothing to cancel, so it gets no Manage row.
+            if viewModel.lavaSecurityPlusExpiresAt != nil {
+                Button {
+                    manageSubscription()
+                } label: {
+                    SettingsActionRow(title: "Manage Subscription") {
+                        Image(systemName: "creditcard.circle")
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isPurchasingLavaSecurityPlus)
+                .padding(16)
+                .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
+            }
+
+            // Restore — relevant for any plan after a reinstall or device switch.
+            Button {
+                restorePurchases()
+            } label: {
+                SettingsActionRow(title: "Restore Purchase") {
+                    if viewModel.isPurchasingLavaSecurityPlus {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise.circle")
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isPurchasingLavaSecurityPlus)
+            .padding(16)
+            .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
+        }
+    }
+
+    private func manageSubscription() {
+        performAppSettingsMutation(reason: "Manage Lava Security Plus") {
+            await presentManageSubscriptions()
+        }
+    }
+
+    @MainActor
+    private func presentManageSubscriptions() async {
+        // Prefer Apple's in-app manage sheet; fall back to the App Store subscriptions
+        // page when no foreground scene is available or the sheet can't present (e.g. the
+        // Simulator, where showManageSubscriptions often no-ops).
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) {
+            do {
+                try await AppStore.showManageSubscriptions(in: scene)
+                await viewModel.refreshLavaSecurityPlusEntitlements()
+                return
+            } catch {
+                // Fall through to the deep link below.
+            }
+        }
+
+        if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
+            _ = await UIApplication.shared.open(url)
+        }
+    }
 }
 
 private struct UpgradeThankYouView: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+
     var body: some View {
         LavaPlainCard {
             VStack(spacing: 14) {
@@ -1220,6 +1314,13 @@ private struct UpgradeThankYouView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(LavaStyle.secondaryText)
                         .multilineTextAlignment(.center)
+
+                    if let expiresAt = viewModel.lavaSecurityPlusExpiresAt {
+                        Text("Expiration: %@".lavaLocalizedFormat(expiresAt.formatted(date: .abbreviated, time: .omitted)))
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -1392,8 +1493,6 @@ private struct UpgradePlanOfferRow: View {
 private struct CustomizationSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
-    @State private var showUpgradePage = false
-    @State private var showPrivacyDataPage = false
 
     var body: some View {
         SettingsSubpageContent {
@@ -1440,40 +1539,9 @@ private struct CustomizationSettingsView: View {
                     .font(.headline)
                     .tint(LavaStyle.safeGreen)
                     .lavaControlRowCard()
-
-                if !viewModel.configuration.hasLavaSecurityPlus {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(.init("Keep Lava protecting you to unlock more Guards, or [**Upgrade**](lavasecurity://settings/upgrade) to unlock them all.".lavaLocalized))
-                            .lavaQuietNoteText(horizontalPadding: 0)
-
-                        Text(.init("Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)".lavaLocalized))
-                            .lavaQuietNoteText(horizontalPadding: 0)
-                    }
-                    .tint(LavaStyle.safeGreen)
-                    .padding(.horizontal, 10)
-                    .environment(\.openURL, OpenURLAction { url in
-                        if url == URL(string: "lavasecurity://settings/upgrade") {
-                            showUpgradePage = true
-                            return .handled
-                        }
-
-                        if url == URL(string: "lavasecurity://settings/privacy-data") {
-                            showPrivacyDataPage = true
-                            return .handled
-                        }
-
-                        return .systemAction
-                    })
-                }
             }
         }
         .navigationTitle("Customization")
-        .navigationDestination(isPresented: $showUpgradePage) {
-            SettingsRouteDestinationView(route: .upgrade)
-        }
-        .navigationDestination(isPresented: $showPrivacyDataPage) {
-            SettingsRouteDestinationView(route: .privacyData)
-        }
     }
 
     private var appearanceBinding: Binding<LavaAppearancePreference> {
@@ -1523,9 +1591,13 @@ private struct CustomizationSettingsView: View {
     }
 }
 
+/// The current Guard is a single tappable row that opens the catalog as a bottom
+/// sheet (radio-style single select, mirroring the Select Blocklists scaffold)
+/// rather than an inline disclosure that pushed the rest of the screen around.
 private struct LavaGuardLookPickerRow: View {
     @EnvironmentObject private var viewModel: AppViewModel
-    @State private var isExpanded = false
+    @EnvironmentObject private var security: SecurityController
+    @State private var isPresentingPicker = false
 
     let look: GuardianShieldStyle
     let availability: LavaGuardAvailability
@@ -1533,40 +1605,142 @@ private struct LavaGuardLookPickerRow: View {
 
     var body: some View {
         LavaPlainCard {
-            DisclosureGroup(isExpanded: $isExpanded) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Divider()
-                        .padding(.vertical, 12)
-
-                    ForEach(GuardianShieldStyle.allCases) { look in
-                        let availability = viewModel.lavaGuardAvailability(for: look)
-                        Button {
-                            guard availability.isSelectable else {
-                                return
-                            }
-                            onSelect(look)
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                isExpanded = false
-                            }
-                        } label: {
-                            LavaGuardLookOptionRow(
-                                look: look,
-                                availability: availability,
-                                isSelected: look == self.look
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!availability.isSelectable)
-                    }
-                }
+            Button {
+                isPresentingPicker = true
             } label: {
-                LavaGuardLookContent(look: look, availability: availability)
-                    .contentShape(Rectangle())
+                HStack(spacing: 12) {
+                    LavaGuardLookContent(look: look, availability: availability)
+                        .layoutPriority(1)
+
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(LavaStyle.secondaryText)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
             }
-            .tint(LavaStyle.safeGreen)
             .buttonStyle(.plain)
             .accessibilityLabel("Lava Guard look".lavaLocalized)
             .accessibilityValue(availability.title(for: look).lavaLocalized)
+            .accessibilityHint("Opens the Lava Guard picker".lavaLocalized)
+        }
+        .sheet(isPresented: $isPresentingPicker) {
+            LavaGuardLookPickerSheet(selectedLook: look, onSelect: onSelect)
+                .environmentObject(viewModel)
+                .environmentObject(security)
+        }
+    }
+}
+
+/// The Lava Guard catalog as a bottom sheet: an info panel up top (when more
+/// Guards are still locked) followed by the radio-style single-select list.
+private struct LavaGuardLookPickerSheet: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var showUpgradePage = false
+    @State private var showPrivacyDataPage = false
+
+    let selectedLook: GuardianShieldStyle
+    let onSelect: (GuardianShieldStyle) -> Void
+
+    var body: some View {
+        NavigationStack {
+            LavaSheetScaffold(spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
+                    if !viewModel.configuration.hasLavaSecurityPlus {
+                        LavaGuardUnlockInfoPanel(
+                            openUpgrade: { showUpgradePage = true },
+                            openPrivacyData: { showPrivacyDataPage = true }
+                        )
+                    }
+
+                    LavaSectionGroup("Choose your Guard") {
+                        LavaPlainCard {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \.element.id) { index, look in
+                                    let availability = viewModel.lavaGuardAvailability(for: look)
+                                    Button {
+                                        guard availability.isSelectable else {
+                                            return
+                                        }
+                                        onSelect(look)
+                                        dismiss()
+                                    } label: {
+                                        LavaGuardLookOptionRow(
+                                            look: look,
+                                            availability: availability,
+                                            isSelected: look == selectedLook
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(!availability.isSelectable)
+
+                                    if index + 1 < GuardianShieldStyle.allCases.count {
+                                        Divider()
+                                            .padding(.leading, LavaGuardLookRowMetrics.mascotFrameSize + 12)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Lava Guard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    NativeToolbarIconButton(
+                        systemName: "xmark",
+                        accessibilityLabel: "Close",
+                        role: .cancel,
+                        action: dismiss.callAsFunction
+                    )
+                }
+            }
+            .navigationDestination(isPresented: $showUpgradePage) {
+                SettingsRouteDestinationView(route: .upgrade)
+            }
+            .navigationDestination(isPresented: $showPrivacyDataPage) {
+                SettingsRouteDestinationView(route: .privacyData)
+            }
+        }
+    }
+}
+
+/// Moved out of the Customization screen into the picker sheet: the same unlock
+/// and privacy copy, now presented as an info panel above the catalog.
+private struct LavaGuardUnlockInfoPanel: View {
+    let openUpgrade: () -> Void
+    let openPrivacyData: () -> Void
+
+    var body: some View {
+        LavaInfoCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(.init("Keep Lava protecting you to unlock more Guards, or [**Upgrade**](lavasecurity://settings/upgrade) to unlock them all.".lavaLocalized))
+                    .font(.subheadline)
+                    .foregroundStyle(LavaStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(.init("Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)".lavaLocalized))
+                    .font(.footnote)
+                    .foregroundStyle(LavaStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tint(LavaStyle.safeGreen)
+            .environment(\.openURL, OpenURLAction { url in
+                if url == URL(string: "lavasecurity://settings/upgrade") {
+                    openUpgrade()
+                    return .handled
+                }
+
+                if url == URL(string: "lavasecurity://settings/privacy-data") {
+                    openPrivacyData()
+                    return .handled
+                }
+
+                return .systemAction
+            })
         }
     }
 }
@@ -1675,11 +1849,16 @@ private struct LavaGuardLookOptionRow: View {
     let isSelected: Bool
 
     var body: some View {
-        LavaGuardLookContent(
-            look: look,
-            availability: availability,
-            showsDescription: !availability.isRevealed
-        )
+        HStack(spacing: 12) {
+            LavaGuardLookContent(
+                look: look,
+                availability: availability,
+                showsDescription: !availability.isRevealed
+            )
+            .layoutPriority(1)
+
+            selectionIndicator
+        }
             .frame(minHeight: LavaGuardLookRowMetrics.minRowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selectedHighlight)
@@ -1688,6 +1867,25 @@ private struct LavaGuardLookOptionRow: View {
             .opacity(availability.isSelectable ? 1 : 0.68)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// Radio glyph for any selectable Guard; a lock for ones still gated behind
+    /// usage/Plus, so the row reads as "single-select, this one isn't available yet".
+    @ViewBuilder
+    private var selectionIndicator: some View {
+        Group {
+            if !availability.isSelectable {
+                Image(systemName: "lock.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(LavaStyle.secondaryText)
+            } else {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? LavaStyle.safeGreen : LavaStyle.secondaryText)
+            }
+        }
+        .frame(width: 28)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -2854,17 +3052,17 @@ private struct CustomDNSResolverRow: View {
             Text(metadata.lavaLocalized)
                 .lavaMetadataText()
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text("Upgrade".lavaLocalized)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(LavaStyle.safeGreen)
-
-                Text(" to use DNS over HTTPS, TLS and QUIC".lavaLocalized)
-                    .font(.caption)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(minHeight: 14, alignment: .leading)
+            // One concatenated Text so the copy flows and wraps as a single
+            // paragraph instead of "Upgrade" sitting in its own column beside a
+            // separately-wrapping remainder.
+            (Text("Upgrade".lavaLocalized)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(LavaStyle.safeGreen)
+             + Text(" to use DNS over HTTPS, TLS and QUIC".lavaLocalized)
+                .font(.caption)
+                .foregroundStyle(LavaStyle.secondaryText))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, minHeight: 14, alignment: .leading)
         }
     }
 }
@@ -2959,7 +3157,7 @@ struct PrivacyDataSettingsView: View {
                 VStack(spacing: 10) {
                     LavaInfoPanel(
                         title: "All local logs stay on this iPhone",
-                        description: "Counts, domain history, network activity and Lava Guard progress can be kept or cleared independently",
+                        description: "Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below.",
                         systemImage: "lock.shield.fill"
                     )
 
@@ -2968,7 +3166,7 @@ struct PrivacyDataSettingsView: View {
 
                         LavaCondensedDivider()
 
-                        localLogToggle("Domain History", isOn: keepDomainHistoryBinding)
+                        localLogToggle("Domain Logs", isOn: keepDomainHistoryBinding)
 
                         LavaCondensedDivider()
 
@@ -2988,6 +3186,10 @@ struct PrivacyDataSettingsView: View {
                             .lavaControlRowCard()
                     }
                     .buttonStyle(.plain)
+
+                    Text("Detailed activity is kept for 7 days — export to keep a copy.")
+                        .lavaQuietNoteText()
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let localLogExportErrorMessage {
                         Text(localLogExportErrorMessage)
@@ -3421,7 +3623,7 @@ private struct SecurityPasscodeSetupView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", action: dismiss.callAsFunction)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
                 }
             }
             .task {
@@ -3728,7 +3930,7 @@ struct BugReportSettingsView: View {
 
             if onDismissRequested != nil && !isShowingThankYou {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", action: requestDismiss)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: requestDismiss)
                 }
             }
         }

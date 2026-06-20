@@ -103,6 +103,16 @@ public enum ProtectionConnectivityPolicy {
             return ProtectionConnectivityAssessment(severity: .recovering, primaryAction: .turnOff)
         }
 
+        // Honesty floor: a current, uncovered smoke-probe failure (below the reconnect
+        // threshold) must never read as `.healthy`. Otherwise — when forwarding is light
+        // or carried by the encrypted fallback, which resets consecutiveUpstreamFailureCount
+        // — the app showed "Protected" while the primary resolver's health probe was
+        // failing. Surface `.recovering` until a probe actually succeeds (it escalates to
+        // `.needsReconnect` once the smoke failures reach the threshold, above).
+        if hasUncoveredFailedSmokeProbe(health) {
+            return ProtectionConnectivityAssessment(severity: .recovering, primaryAction: .turnOff)
+        }
+
         return healthyAssessment
     }
 
@@ -112,6 +122,10 @@ public enum ProtectionConnectivityPolicy {
 
     private static func hasCurrentRestartWorthyFailure(_ health: TunnelHealthSnapshot) -> Bool {
         if hasRecentFailedSmokeProbeWithoutFallback(health) {
+            return true
+        }
+
+        if hasSustainedRejectedSmokeResponse(health) {
             return true
         }
 
@@ -165,11 +179,58 @@ public enum ProtectionConnectivityPolicy {
     }
 
     private static func hasRecentFailedSmokeProbeWithoutFallback(_ health: TunnelHealthSnapshot) -> Bool {
+        // Sustained failure of the PRIMARY resolver's health probe is restart-worthy.
+        // Keyed on `consecutiveDNSSmokeProbeFailureCount` (reset only by a smoke-probe
+        // success) rather than `consecutiveUpstreamFailureCount`: the latter is reset by
+        // forwarding / encrypted-fallback successes and self-reconnects, so a wedged
+        // primary that kept failing its probe was masked "healthy" by incidental
+        // fallback-carried traffic (the "Protected, no internet" reports).
+        hasUncoveredFailedSmokeProbe(health)
+            && health.consecutiveDNSSmokeProbeFailureCount >= reconnectFailureThreshold
+    }
+
+    /// A resolver that stays REACHABLE but keeps rejecting the known-good smoke probe
+    /// (a hijacking / captive / stale resolver) is restart-worthy even when the generic
+    /// smoke-failure streak above can't accumulate: on a churny roaming network that
+    /// streak is repeatedly reset to 1 (network-change recovery, the device-DNS
+    /// settle/recapture churn, a momentary accept) before reaching the threshold, so a
+    /// steadily-bad resolver never escalated and recovery — including the encrypted
+    /// fallback, which is gated on the same wedge marker — stayed dark (UR-37 / LAV-87).
+    /// `consecutiveRejectedSmokeResponseCount` is resolver-identity-scoped and is kept out
+    /// of those reset paths (cleared only by a genuine primary success or a resolver
+    /// change), so the same resolver rejecting `reconnectFailureThreshold` times escalates.
+    /// Reuses `hasUncoveredFailedSmokeProbe` so all the freshness / primary-success /
+    /// fallback-coverage guards (and the honesty floor) still apply.
+    private static func hasSustainedRejectedSmokeResponse(_ health: TunnelHealthSnapshot) -> Bool {
+        // `hasUncoveredFailedSmokeProbe` only requires the reason to be in
+        // `restartFailureReasons` (which includes several classes); tighten to
+        // `rejected-response` specifically so this path is keyed to the rejected counter
+        // and never doubles as a lower-threshold trigger for timeout / send-failed / etc.
+        hasUncoveredFailedSmokeProbe(health)
+            && health.lastFailureReason == "rejected-response"
+            && health.consecutiveRejectedSmokeResponseCount >= reconnectFailureThreshold
+    }
+
+    /// A current smoke-probe failure that real traffic / device-DNS fallback hasn't
+    /// already covered — the shared predicate behind both the `.recovering` honesty
+    /// floor and the `.needsReconnect` escalation (which adds the consecutive-failure
+    /// threshold on top).
+    private static func hasUncoveredFailedSmokeProbe(_ health: TunnelHealthSnapshot) -> Bool {
+        // The probe must belong to the current context. Baseline off the network change
+        // when there is one, else the runtime reset / session start — on a cold start or
+        // right after a self-reconnect `lastNetworkChangeAt` is nil (fresh snapshot), and
+        // requiring it would skip both the floor and the escalation, letting fallback
+        // traffic paint a failing primary `.healthy`. (Mirrors `isUsingDeviceDNSFallback`'s
+        // `lastNetworkChangeAt ?? startedAt` baseline; staleness across a mid-session
+        // reset is separately handled by clearing the streak in the recovery reset.)
+        let contextBaseline = health.lastNetworkChangeAt
+            ?? health.lastResolverRuntimeResetAt
+            ?? health.startedAt
+
         guard let smokeProbeAt = health.lastDNSSmokeProbeAt,
               health.lastDNSSmokeProbeSucceeded == false,
-              health.consecutiveUpstreamFailureCount >= reconnectFailureThreshold,
-              let networkChangeAt = health.lastNetworkChangeAt,
-              smokeProbeAt >= networkChangeAt
+              health.consecutiveDNSSmokeProbeFailureCount >= 1,
+              smokeProbeAt >= contextBaseline
         else {
             return false
         }
@@ -189,8 +250,14 @@ public enum ProtectionConnectivityPolicy {
             return false
         }
 
-        if let successAt = health.lastUpstreamSuccessAt,
-           successAt >= smokeProbeAt {
+        // A genuine PRIMARY forwarding success that POSTDATES the failed probe means the
+        // configured resolver is working again — don't flag. Must use the primary-only
+        // signal: `recordUpstreamResult` bumps `lastUpstreamSuccessAt` for ANY success,
+        // including encrypted-fallback and device-DNS-fallback ones, so keying off it
+        // would let a fallback-carried query re-mask the wedged primary — the very bug
+        // this fixes. `lastPrimaryUpstreamSuccessAt` is set only on a real primary answer.
+        if let primarySuccessAt = health.lastPrimaryUpstreamSuccessAt,
+           primarySuccessAt >= smokeProbeAt {
             return false
         }
 

@@ -112,6 +112,7 @@ private final class ProtectionUserNotificationController {
         health: TunnelHealthSnapshot,
         now: Date = Date()
     ) {
+        LavaSecAppGroup.migrateProtectionNotificationStateIfNeeded(defaults)
         let history = notificationHistory
         let resolvedNotificationIdentifiers = ProtectionConnectivityNotificationPolicy
             .resolvedProblemNotificationIdentifiers(
@@ -583,7 +584,10 @@ private final class FilterPreparationProgressPresenter {
             phaseStartedAt = Date()
         }
 
-        setState(.preparing(progress: update.progress, message: FilterPreparationPresentation.message(for: update.phase)))
+        setState(.preparing(
+            progress: FilterPreparationPresentationPolicy.equalThirdsProgress(phase: update.phase, rawProgress: update.progress),
+            message: FilterPreparationPresentation.message(for: update.phase)
+        ))
     }
 
     func holdCurrentPhaseIfNeeded() async {
@@ -853,7 +857,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var usesLiveActivities = false
     @Published private(set) var isSyncingCatalog = false
     private var catalogSyncTask: Task<Void, Never>?
-    @Published private(set) var catalogStatusMessage = "Filters will update from Lava Security's source catalog."
+    @Published private(set) var catalogStatusMessage = "Filter will update from Lava Security's source catalog."
     @Published private(set) var catalogStatusIsError = false
     @Published private(set) var catalogVersion: String?
     @Published private(set) var catalogGeneratedAt: Date?
@@ -883,6 +887,10 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isLoadingLavaSecurityPlusProducts = false
     @Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false
     @Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false
+    /// Expiry of the active auto-renewable Lava Security Plus entitlement (nil for the
+    /// lifetime plan or when there is no active entitlement). Drives the subscriber
+    /// "Expiration" line and gates the Manage Subscription control.
+    @Published private(set) var lavaSecurityPlusExpiresAt: Date?
     @Published private(set) var isPurchasingLavaSecurityPlus = false
     @Published private(set) var lavaSecurityPlusMessage: String?
     @Published private(set) var lavaSecurityPlusMessageIsError = false
@@ -1183,10 +1191,15 @@ final class AppViewModel: ObservableObject {
             case .purchased(let entitlement):
                 applyLavaSecurityPlusEntitlement(entitlement)
                 await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
-                lavaSecurityPlusMessage = entitlement.isActive
-                    ? "Lava Security Plus is active."
-                    : "No active Lava Security Plus purchase was found."
-                lavaSecurityPlusMessageIsError = !entitlement.isActive
+                if entitlement.isActive {
+                    // The subscriber thank-you section already announces the
+                    // active state, so skip the redundant confirmation line.
+                    lavaSecurityPlusMessage = nil
+                    lavaSecurityPlusMessageIsError = false
+                } else {
+                    lavaSecurityPlusMessage = "No active Lava Security Plus purchase was found."
+                    lavaSecurityPlusMessageIsError = true
+                }
             case .pending:
                 lavaSecurityPlusMessage = "The App Store purchase is pending approval."
                 lavaSecurityPlusMessageIsError = false
@@ -1647,21 +1660,16 @@ final class AppViewModel: ObservableObject {
     }
 
     private var displayedCustomBlocklists: [CustomBlocklistSource] {
-        guard let filterEditDraft else {
-            return configuration.customBlocklists
+        // While editing, the draft is authoritative. It starts as a full copy of the
+        // saved custom blocklists (`FilterEditDraft.init(configuration:)`) and records
+        // both adds and deletes, so it already is the set to show. Merging it back with
+        // `configuration` would resurrect a custom list the draft just deleted — making
+        // a trash → Delete leave the row on screen. Order is preserved: the draft keeps
+        // the saved order, with any new additions appended.
+        if let filterEditDraft {
+            return filterEditDraft.customBlocklists
         }
-
-        var mergedByID = Dictionary(
-            uniqueKeysWithValues: configuration.customBlocklists.map { ($0.id, $0) }
-        )
-        for source in filterEditDraft.customBlocklists {
-            mergedByID[source.id] = source
-        }
-
-        let configuredIDs = Set(configuration.customBlocklists.map(\.id))
-        let displayOrder = configuration.customBlocklists.map(\.id)
-            + filterEditDraft.customBlocklists.map(\.id).filter { !configuredIDs.contains($0) }
-        return displayOrder.compactMap { mergedByID[$0] }
+        return configuration.customBlocklists
     }
 
     var allowlistConfigured: Bool {
@@ -1826,7 +1834,7 @@ final class AppViewModel: ObservableObject {
     var guardFiltersRowStat: String {
         let count = compiledRuleCount
         guard count > 0 else {
-            return "No filters active yet"
+            return "No filter active yet"
         }
 
         return count == 1
@@ -1846,10 +1854,6 @@ final class AppViewModel: ObservableObject {
             .percent.precision(.fractionLength(0))
         )
         return "%@ blocked today".lavaLocalizedFormat("\(blocked.formatted()) (\(percent))")
-    }
-
-    var localHistoryStatusText: String {
-        configuration.keepDomainDiagnostics ? "Local history on" : "Local history off"
     }
 
     var localLogsStatusText: String {
@@ -2040,10 +2044,10 @@ final class AppViewModel: ObservableObject {
 
     var filterFreshnessText: String {
         guard catalogGeneratedAt != nil else {
-            return "Filters not updated yet"
+            return "Filter not updated yet"
         }
 
-        return "Filters updated: \(catalogUpdatedAtText)"
+        return "Filter updated: \(catalogUpdatedAtText)"
     }
 
     var configuredBlockedDomainCountText: String {
@@ -2099,26 +2103,26 @@ final class AppViewModel: ObservableObject {
 
     var blocklistCatalogFreshnessTitle: String {
         if blocklistCatalogIsFresh {
-            return "Catalog checked"
+            return "Filter up to date"
         }
 
-        return "Catalog needs a refresh"
+        return "Update recommended"
     }
 
     var blocklistCatalogFreshnessDescription: String {
         guard let age = blocklistCatalogAge else {
-            return "Lava will fetch the source catalog before preparing filters."
+            return "Lava will fetch the source catalog before preparing the filter."
         }
 
         return "Last checked: \(Self.formatRelativeCatalogAge(age, maxFreshnessAge: catalogSyncFreshnessInterval))"
     }
 
     var blocklistCatalogFreshnessSystemImage: String {
-        blocklistCatalogIsFresh ? "checkmark.circle.fill" : "xmark.circle.fill"
+        blocklistCatalogIsFresh ? "checkmark.circle.fill" : "arrow.clockwise.circle.fill"
     }
 
     var blocklistCatalogFreshnessTint: Color {
-        blocklistCatalogIsFresh ? LavaStyle.safeGreen : LavaStyle.lavaOrange
+        blocklistCatalogIsFresh ? LavaStyle.safeGreen : LavaStyle.secondaryText
     }
 
     var catalogRefreshButtonTitle: String {
@@ -2226,7 +2230,7 @@ final class AppViewModel: ObservableObject {
             return blocklistRuleCountText(for: blocklist)
         }
 
-        guard displayedCustomBlocklists.contains(where: { $0.id == sourceID }) else {
+        guard customBlocklistSource(for: sourceID) != nil else {
             return nil
         }
 
@@ -2257,6 +2261,14 @@ final class AppViewModel: ObservableObject {
 
         /// At or over the displayed budget — drives the orange/error bar.
         var isAtOrOverBudget: Bool { knownRuleCount >= budget }
+
+        /// Rule count to render in the "X of budget" copy. Clamped to the budget
+        /// while the selection is still savable (within the soft-ceiling margin)
+        /// so a savable selection never reads as "506K of 500K"; shows the true
+        /// count once over the ceiling, when a save is no longer possible.
+        var displayedRuleCount: Int {
+            FilterRuleBudget.displayedRuleCount(knownRuleCount: knownRuleCount, budget: budget)
+        }
 
         /// Nothing is counted yet but lists are still resolving (catalog not
         /// synced / custom not fetched). The meter cannot honestly claim
@@ -2366,9 +2378,16 @@ final class AppViewModel: ObservableObject {
     }
 
     func cancelFilterEditingOnPageDisappear(_ scope: FilterEditScope) {
+        // Only auto-discard a *clean* draft when the page goes away. My filter is now a
+        // pushed page (not a modal cover), and hiding the Back button does not suppress
+        // the interactive edge-swipe-to-pop — so a draft with unsaved changes reaching
+        // here means an unconfirmed dismissal. Preserve it (re-opening resumes the edit)
+        // instead of silently dropping the user's changes; the explicit Cancel button is
+        // the only path that discards, and it confirms first.
         guard isFilterEditing(scope),
               !isFilterPreparationScreenPresented,
-              !filterPreparationState.isPreparing
+              !filterPreparationState.isPreparing,
+              !filterDraftHasChanges
         else {
             return
         }
@@ -2388,12 +2407,22 @@ final class AppViewModel: ObservableObject {
         isFilterPreparationScreenPresented = false
     }
 
+    /// Resolves a custom blocklist source by ID from the editing view *or* the saved
+    /// configuration. A saved list deleted in the draft is still shown as a pending
+    /// removal but is hidden from `displayedCustomBlocklists` (the picker rows); this
+    /// keeps its name/metadata resolvable so the shelf and review diff show the list
+    /// name instead of an opaque source ID.
+    private func customBlocklistSource(for sourceID: String) -> CustomBlocklistSource? {
+        displayedCustomBlocklists.first { $0.id == sourceID }
+            ?? configuration.customBlocklists.first { $0.id == sourceID }
+    }
+
     func blocklistName(for sourceID: String) -> String {
         if let catalogSource = catalogSourcesByID[sourceID] {
             return catalogSource.name
         }
 
-        if let customSource = displayedCustomBlocklists.first(where: { $0.id == sourceID }) {
+        if let customSource = customBlocklistSource(for: sourceID) {
             return customBlocklistPickerTitle(for: customSource)
         }
 
@@ -2486,7 +2515,7 @@ final class AppViewModel: ObservableObject {
 
     func addBlocklistsToDraft(_ sourceIDs: Set<String>) -> String? {
         guard var draft = filterEditDraft else {
-            return "Tap Edit before changing filters."
+            return "Tap Edit before changing your filter."
         }
 
         let updatedIDs = draft.enabledBlocklistIDs.union(sourceIDs)
@@ -2501,7 +2530,7 @@ final class AppViewModel: ObservableObject {
 
     func setDraftBlocklists(_ sourceIDs: Set<String>) -> String? {
         guard var draft = filterEditDraft else {
-            return "Tap Edit before changing filters."
+            return "Tap Edit before changing your filter."
         }
 
         let updatedIDs = sourceIDs
@@ -2520,7 +2549,7 @@ final class AppViewModel: ObservableObject {
         }
 
         guard var draft = filterEditDraft else {
-            return "Tap Edit before changing filters."
+            return "Tap Edit before changing your filter."
         }
 
         do {
@@ -2605,7 +2634,7 @@ final class AppViewModel: ObservableObject {
 
     func addBlockedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
         guard let draft = filterEditDraft else {
-            return .rejected(title: "Edit first", message: "Tap Edit before changing filters.")
+            return .rejected(title: "Edit first", message: "Tap Edit before changing your filter.")
         }
 
         let outcome = FilterEditDraftEditor.addBlockedDomain(
@@ -2645,7 +2674,7 @@ final class AppViewModel: ObservableObject {
 
     func addAllowedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
         guard let draft = filterEditDraft else {
-            return .rejected(title: "Edit first", message: "Tap Edit before changing filters.")
+            return .rejected(title: "Edit first", message: "Tap Edit before changing your filter.")
         }
 
         let outcome = FilterEditDraftEditor.addAllowedDomain(
@@ -2839,6 +2868,11 @@ final class AppViewModel: ObservableObject {
         do {
             let prepared = try await prepareFilterSnapshot(for: nextConfiguration)
             configuration = nextConfiguration
+            // Drop any preserved (unsaved) My-filter draft: it was based on the
+            // pre-import configuration, so resuming it after this replacement could
+            // silently overwrite the just-imported setup.
+            filterEditDraft = nil
+            filterEditScope = nil
             updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
             applyCatalogSyncResult(prepared.catalogResult)
             try await persistSharedState(preparedSnapshot: prepared.snapshot)
@@ -2856,25 +2890,26 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// The *reason* a preparation failed, as user copy. The failure view frames it
+    /// (title = "We couldn't update your filter", plus a separate "Your previous filter
+    /// is still active." reassurance) — so this returns only the reason, no prefix.
     private static func filterPreparationFailureMessage(for error: Error) -> String {
-        let prefix = "Previous filters are still active. "
-
         if let syncError = error as? BlocklistCatalogSyncError {
             switch syncError {
             case .checksumMismatch, .noAcceptedSourceHashes:
-                return prefix + "Lava is still preparing an update for this blocklist source. Try again shortly."
+                return "Lava is still preparing an update for this blocklist source. Try again shortly."
             case .noCachedCatalog:
-                return prefix + "Lava could not reach the source catalog. Check your connection and try again."
+                return "Lava could not reach the source catalog. Check your connection and try again."
             case .invalidHTTPStatus, .invalidCatalog:
-                return prefix + "Lava could not refresh the source catalog. Try again shortly."
-            case .invalidBlocklistEncoding, .blocklistTooLarge, .noRulesAvailable:
-                return prefix + syncError.localizedDescription
+                return "Lava could not refresh the source catalog. Try again shortly."
+            case .invalidBlocklistEncoding, .blocklistTooLarge, .noRulesAvailable, .customBlocklistUnavailable:
+                return syncError.localizedDescription
             case .missingEnabledBlocklistSource:
-                return prefix + "A selected blocklist is no longer available. Choose another list and try again."
+                return "A selected blocklist is no longer available. Choose another list and try again."
             }
         }
 
-        return prefix + error.localizedDescription
+        return error.localizedDescription
     }
 
     private static func domainHistoryDomainActionRejectionTitle(for error: DomainHistoryDomainActionError) -> String {
@@ -3974,7 +4009,24 @@ final class AppViewModel: ObservableObject {
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: configuration.lavaGuardUnlocks,
             deviceDebugLog: loadDeviceDebugLogEntriesForExport(),
+            metadata: makeLocalLogExportMetadata(),
             generatedAt: generatedAt
+        )
+    }
+
+    // Build/environment provenance for the export manifest, from the same
+    // Info.plist / device values the bug-report bundle uses. `source_revision`
+    // (Info.plist LavaSourceRevision) is the field that pins an export to an
+    // exact commit — empty on local builds, the 12-char SHA on release builds.
+    private func makeLocalLogExportMetadata() -> LocalLogExportMetadata {
+        LocalLogExportMetadata(
+            appVersion: Self.bundleInfoValue("CFBundleShortVersionString"),
+            build: Self.bundleInfoValue("CFBundleVersion"),
+            sourceRevision: Self.bundleInfoValue("LavaSourceRevision"),
+            osVersion: "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
+            deviceFamily: Self.deviceFamilyDescription(UIDevice.current.userInterfaceIdiom),
+            locale: Locale.current.identifier,
+            catalogVersion: catalogVersion
         )
     }
 
@@ -4009,12 +4061,21 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        guard networkActivityLogReadGate.shouldRead(modifiedAt: modifiedAt, force: force) else {
-            return
+        if networkActivityLogReadGate.shouldRead(modifiedAt: modifiedAt, force: force) {
+            // File changed: prune on disk and reload, capturing the pruned log and
+            // its post-prune mtime atomically under the lock, so a tunnel append
+            // landing mid-refresh is not silently marked as already read.
+            let pruned = NetworkActivityLogPersistence.loadPruned(at: networkActivityLogURL)
+            networkActivityLog = pruned.log
+            networkActivityLogReadGate.markRead(modifiedAt: pruned.modifiedAt)
+        } else if networkActivityLog.pruneExpired() {
+            // File unchanged, but the clock crossed the 7-day window while the app
+            // sat idle with no new appends. Re-prune and reload atomically so the
+            // trimmed file and the gate's mtime stay consistent.
+            let pruned = NetworkActivityLogPersistence.loadPruned(at: networkActivityLogURL)
+            networkActivityLog = pruned.log
+            networkActivityLogReadGate.markRead(modifiedAt: pruned.modifiedAt)
         }
-
-        networkActivityLog = NetworkActivityLogPersistence.load(from: networkActivityLogURL)
-        networkActivityLogReadGate.markRead(modifiedAt: modifiedAt)
     }
 
     func clearNetworkActivityLog(notifyTunnel: Bool = true) {
@@ -4592,12 +4653,24 @@ final class AppViewModel: ObservableObject {
         }
 
         guard diagnosticsReadGate.shouldRead(modifiedAt: modifiedAt, force: shouldForceLocalLogClear) else {
+            // File unchanged, but the clock may have crossed the 7-day window while
+            // the app sat idle with no new DNS writes. Expire the in-memory store by
+            // time — independent of the file-change gate — so Top Domains and exports
+            // never show stale detail, and write the trim back to disk.
+            if diagnostics.pruneExpiredFineGrainedData() {
+                try? persistDiagnostics()
+                diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
+            }
             return
         }
 
         var store = DiagnosticsPersistence.load(from: diagnosticsURL)
+        store.pruneExpiredFineGrainedData()
         diagnosticsReadGate.markRead(modifiedAt: modifiedAt)
-        var shouldPersistClearedLogs = false
+        // Persist when any fine-grained prune removed events — including one
+        // `load` already performed in its day-rollover reset — so aged-out domain
+        // history does not linger in the file past the 7-day window.
+        var shouldPersistClearedLogs = store.consumePendingFineGrainedPrunePersist()
 
         if !configuration.keepFilteringCounts, store.hasFilteringCountData {
             store.clearFilteringCounts()
@@ -4776,7 +4849,14 @@ final class AppViewModel: ObservableObject {
             await self.performCatalogSync()
         }
         catalogSyncTask = task
-        await task.value
+        // Forward cancellation from the awaiting context (e.g. an expired background
+        // refresh's BGTask) into the unstructured sync task, which in turn forwards it
+        // to the detached network/compile work in `performCatalogSync`.
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private func waitForCatalogSyncToFinish() async {
@@ -4820,23 +4900,68 @@ final class AppViewModel: ObservableObject {
         do {
             let enabledIDs = configuration.enabledBlocklistIDs
             let customSources = enabledCustomBlocklists(in: configuration)
-            let result = try await Task.detached(priority: .utility) {
+            // Free-tier (e.g. lapsed Plus) keeps its existing custom lists but their
+            // contents are frozen: serve the cached payload and never refresh from
+            // the network here. The curated catalog still syncs as usual.
+            let refreshesCustomBlocklists = configuration.limits.allowsCustomBlocklists
+            let syncTask = Task.detached(priority: .utility) {
                 let synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL)
                 let catalogResult = try await synchronizer.sync(enabledSourceIDs: enabledIDs)
-                let customResult = try await synchronizer.syncCustomBlocklists(customSources)
+                // Free tier is strictly cache-only: never network-fetch custom lists
+                // here. We deliberately don't fall back to a network sync on a cache
+                // miss — doing so would re-fetch (and overwrite) every enabled list,
+                // not just the missing one, unfreezing the others. If a payload is
+                // genuinely absent this throws and the outer handler keeps the last
+                // good snapshot instead.
+                let customResult = refreshesCustomBlocklists
+                    ? try await synchronizer.syncCustomBlocklists(customSources)
+                    : try await synchronizer.loadCachedCustomBlocklists(customSources)
                 return (catalogResult, customResult)
-            }.value
+            }
+            // Detached work doesn't inherit cancellation; forward it so an expired
+            // background refresh stops the network/compile work promptly instead of
+            // running past the system deadline.
+            let result = try await withTaskCancellationHandler {
+                try await syncTask.value
+            } onCancel: {
+                syncTask.cancel()
+            }
+
+            guard !Task.isCancelled else {
+                actionStatus = "cancelled"
+                finishCatalogSyncTask()
+                return
+            }
 
             applySyncResults(catalogResult: result.0, customResult: result.1)
-            try await persistSharedState()
-            await notifyTunnelSnapshotUpdated(operationID: operationID)
+
+            // Smart refresh: only pay the snapshot re-encode + tunnel reload (and the
+            // reconnect it triggers) when a list actually changed upstream. A refresh
+            // that finds nothing new stops here — cheap, and no spurious reconnect.
+            let snapshotChanged = didSnapshotIdentityChangeAfterSync()
+            if snapshotChanged {
+                try await persistSharedState()
+                await notifyTunnelSnapshotUpdated(operationID: operationID)
+            }
 
             catalogStatusMessage = "Refreshed"
             catalogStatusIsError = false
 
+            // Keep the expensive snapshot reload + reconnect gated on an actual
+            // upstream change, but always attempt the protection restore: a successful
+            // refresh that finds nothing new must still bring a downed tunnel back
+            // online (e.g. on launch after iOS dropped the VPN).
             shouldAttemptProtectionRestore = true
-            actionStatus = "refreshed"
+            actionStatus = snapshotChanged ? "refreshed" : "unchanged"
         } catch {
+            if Task.isCancelled {
+                // Cancelled refresh (e.g. an expired background BGTask): bail without
+                // restoring from cache or touching protection.
+                actionStatus = "cancelled"
+                finishCatalogSyncTask()
+                return
+            }
+
             let restoredFromCache = await loadCachedCatalogAfterSyncFailure(
                 cacheURL: cacheURL,
                 originalError: error,
@@ -4851,6 +4976,23 @@ final class AppViewModel: ObservableObject {
         if shouldAttemptProtectionRestore {
             await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
         }
+    }
+
+    /// True when the just-synced configuration + catalog produces a different compiled
+    /// identity than the one already persisted on disk — i.e. a list actually changed.
+    /// True (rebuild) when no manifest exists yet (first prepare). Lets `performCatalogSync`
+    /// skip the expensive persist + tunnel reload when nothing changed upstream.
+    private func didSnapshotIdentityChangeAfterSync() -> Bool {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return true
+        }
+
+        let manifest = try? FilterArtifactStore(directoryURL: containerURL).loadManifest()
+        guard let previousIdentity = manifest?.snapshotIdentity else {
+            return true
+        }
+
+        return PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: currentCatalog) != previousIdentity
     }
 
     func syncCatalogIfStale() async {
@@ -4887,10 +5029,10 @@ final class AppViewModel: ObservableObject {
             }.value
 
             applySyncResults(catalogResult: result.0, customResult: result.1)
-            catalogStatusMessage = "Using saved downloaded filters."
+            catalogStatusMessage = "Using saved downloaded filter."
             catalogStatusIsError = false
         } catch {
-            catalogStatusMessage = "Filters will update from Lava Security's source catalog."
+            catalogStatusMessage = "Filter will update from Lava Security's source catalog."
             catalogStatusIsError = false
         }
     }
@@ -5247,6 +5389,14 @@ final class AppViewModel: ObservableObject {
     }
 
     private func applyLavaSecurityPlusEntitlement(_ entitlement: LavaSecurityPlusEntitlement) {
+        // Surface the auto-renewable expiry (nil for the lifetime plan / no entitlement)
+        // before the early-return below, so the subscriber UI stays current even when the
+        // active flag itself is unchanged (e.g. a renewal that only moves the expiry date).
+        let nextExpiresAt = entitlement.isActive ? entitlement.expiresAt : nil
+        if lavaSecurityPlusExpiresAt != nextExpiresAt {
+            lavaSecurityPlusExpiresAt = nextExpiresAt
+        }
+
         let hasLavaSecurityPlus = entitlement.isActive
         guard configuration.hasLavaSecurityPlus != hasLavaSecurityPlus else {
             return
@@ -5522,7 +5672,7 @@ final class AppViewModel: ObservableObject {
     ) async throws -> ProtectionStartupSnapshot {
         if let reusable = await loadReusablePreparedSnapshotForProtectionStartup() {
             applyReusablePreparedSnapshot(reusable)
-            catalogStatusMessage = "Using prepared local filters."
+            catalogStatusMessage = "Using prepared local filter."
             catalogStatusIsError = false
 
             #if DEBUG
@@ -5728,6 +5878,15 @@ final class AppViewModel: ObservableObject {
 
         migrateLowRiskLaunchCacheIfNeeded(cacheURL: cacheURL)
         let customSources = enabledCustomBlocklists(in: configuration)
+        // A plan that no longer allows custom blocklists (e.g. a lapsed Plus
+        // subscriber) keeps the lists it already had, but we never refresh their
+        // contents from the network — the cached payload is frozen in place. This
+        // is strictly cache-only (not cache-first): even a cache miss or stored-hash
+        // mismatch must not fall back to a network fetch, which would re-download and
+        // re-hash the frozen list. The catalog still syncs normally; only custom-list
+        // fetching is held back.
+        let effectiveCustomListPolicy: CustomBlocklistSyncPolicy =
+            configuration.limits.allowsCustomBlocklists ? customListPolicy : .cacheOnly
         var bridgedProgress: FilterSnapshotPreparationService.ProgressHandler?
         if let reportProgress {
             bridgedProgress = { @MainActor @Sendable update in
@@ -5738,7 +5897,7 @@ final class AppViewModel: ObservableObject {
             configuration: configuration,
             customSources: customSources,
             catalogFreshnessMaxAge: catalogSyncFreshnessInterval,
-            customListPolicy: customListPolicy,
+            customListPolicy: effectiveCustomListPolicy,
             tierRuleLimit: FilterRuleTierLimit(
                 limit: configuration.limits.maxFilterRules,
                 isPaid: configuration.hasLavaSecurityPlus
@@ -6220,7 +6379,7 @@ final class AppViewModel: ObservableObject {
             actionStatus = "resumed"
         } catch {
             actionStatus = "error"
-            vpnMessage = Self.vpnErrorMessage(prefix: "Resumed protection, but could not refresh filters", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Resumed protection, but could not refresh filter", error: error)
             vpnMessageIsError = true
         }
     }
@@ -6609,6 +6768,14 @@ final class AppViewModel: ObservableObject {
     // immediately; this refreshes them from the network afterwards and runs the
     // full refresh pipeline only when content actually changed.
     private func scheduleBackgroundCustomBlocklistRefresh() {
+        // Free tier freezes custom-list contents: skip the post-turn-on network
+        // refresh entirely, matching the cache-only prepare/sync paths. Otherwise a
+        // lapsed-Plus user would re-fetch (and overwrite) their lists right after
+        // protection connects.
+        guard configuration.limits.allowsCustomBlocklists else {
+            return
+        }
+
         let customSources = enabledCustomBlocklists(in: configuration)
         guard !customSources.isEmpty, let service = filterSnapshotPreparationService else {
             return
@@ -6698,11 +6865,11 @@ final class AppViewModel: ObservableObject {
             try await persistSharedState()
             await notifyTunnelSnapshotUpdated(operationID: operationID)
 
-            catalogStatusMessage = "Using saved downloaded filters. Update failed: \(originalError.localizedDescription)"
+            catalogStatusMessage = "Using saved downloaded filter. Update failed: \(originalError.localizedDescription)"
             catalogStatusIsError = false
             return true
         } catch {
-            catalogStatusMessage = "Could not update filters: \(originalError.localizedDescription)"
+            catalogStatusMessage = "Could not update filter: \(originalError.localizedDescription)"
             catalogStatusIsError = true
             return false
         }
@@ -7062,7 +7229,7 @@ final class AppViewModel: ObservableObject {
     private func notifyTunnelSnapshotUpdated(operationID: LatencyOperationID? = nil) async {
         await sendTunnelMessage(
             LavaSecAppGroup.reloadSnapshotMessage,
-            fallbackMessage: "Updated filters. Restart protection if the VPN does not pick them up.",
+            fallbackMessage: "Updated filter. Restart protection if the VPN does not pick it up.",
             operationID: operationID
         )
     }

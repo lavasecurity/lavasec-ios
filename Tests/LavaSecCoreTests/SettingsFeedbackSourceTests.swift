@@ -582,7 +582,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(sheetBlock.contains(".navigationTitle(\"Account\")"))
         XCTAssertTrue(sheetBlock.contains(".navigationBarTitleDisplayMode(.inline)"))
         XCTAssertTrue(sheetBlock.contains("ToolbarItem(placement: .cancellationAction)"))
-        XCTAssertTrue(sheetBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", action: dismiss.callAsFunction)"))
+        XCTAssertTrue(sheetBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", role: .close, action: dismiss.callAsFunction)"))
         XCTAssertFalse(sheetBlock.contains("LavaToolbarIconButton("))
         XCTAssertFalse(sheetBlock.contains("Text(\"Account\")"))
     }
@@ -601,12 +601,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(passcodeBlock.contains("ToolbarItem(placement: .cancellationAction)"))
-        XCTAssertTrue(passcodeBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Cancel\", action: dismiss.callAsFunction)"))
+        XCTAssertTrue(passcodeBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Cancel\", role: .cancel, action: dismiss.callAsFunction)"))
         XCTAssertFalse(passcodeBlock.contains("LavaToolbarIconButton("))
 
         XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: requestDismiss)"))
         XCTAssertTrue(feedbackBlock.contains("ToolbarItem(placement: .cancellationAction)"))
-        XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", action: requestDismiss)"))
+        XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", role: .close, action: requestDismiss)"))
         XCTAssertFalse(feedbackBlock.contains("LavaToolbarIconButton("))
     }
 
@@ -712,9 +712,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         XCTAssertTrue(privacyBlock.contains("LavaSectionGroup(\"Local Logs\")"))
         XCTAssertTrue(privacyBlock.contains("title: \"All local logs stay on this iPhone\""))
-        XCTAssertTrue(privacyBlock.contains("description: \"Counts, domain history, network activity and Lava Guard progress can be kept or cleared independently\""))
+        XCTAssertTrue(privacyBlock.contains("description: \"Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below.\""))
+        XCTAssertTrue(privacyBlock.contains("Text(\"Detailed activity is kept for 7 days — export to keep a copy.\")"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Filtering Counts\", isOn: keepFilteringCountsBinding)"))
-        XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Domain History\", isOn: keepDomainHistoryBinding)"))
+        XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Domain Logs\", isOn: keepDomainHistoryBinding)"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Network Activity\", isOn: keepNetworkActivityBinding)"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Lava Guard Progress\", isOn: keepLavaGuardProgressBinding)"))
         XCTAssertTrue(privacyBlock.contains("ExportLocalLogsRow()"))

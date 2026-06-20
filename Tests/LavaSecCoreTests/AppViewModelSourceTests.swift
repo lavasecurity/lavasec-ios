@@ -345,13 +345,18 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "var allowlistConfigured: Bool"
         )
 
-        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("guard let filterEditDraft else"))
-        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("configuration.customBlocklists"))
-        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("filterEditDraft.customBlocklists"))
-        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("mergedByID"))
+        // While editing, the draft is authoritative. It copies the saved custom
+        // blocklists and keeps disabled ("pending-removal") sources — disabling only
+        // drops the ID from `enabledBlocklistIDs`, not the source — so they still
+        // render with their saved name/metadata. Only a trash → Delete removes the
+        // source from the draft. Merging the draft back with `configuration` (the old
+        // implementation) resurrected trash-deleted sources, leaving a stale row.
+        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("if let filterEditDraft"))
+        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("return filterEditDraft.customBlocklists"))
+        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("return configuration.customBlocklists"))
         XCTAssertFalse(
-            displayedCustomBlocklistsBlock.contains("filterEditDraft?.customBlocklists ?? configuration.customBlocklists"),
-            "Pending-removal custom blocklists should still render with their saved display name and metadata."
+            displayedCustomBlocklistsBlock.contains("mergedByID"),
+            "A trash-deleted custom blocklist must not be resurrected by merging the draft back with configuration."
         )
     }
 

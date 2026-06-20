@@ -149,6 +149,170 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertNil(notification)
     }
 
+    func testReconnectNeededEscalatesOverOutstandingDeviceDNSFallbackBanner() {
+        // The headline escalation: a wedge after a Device-DNS fallback must surface the
+        // actionable "Reconnect" prompt immediately — superseding the stale "switched to
+        // Device DNS" banner — instead of waiting out the 600s problem cooldown.
+        let now = Date(timeIntervalSince1970: 1000)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "device-dns-fallback:900",
+            lastDeliveredAt: now.addingTimeInterval(-20), // well within the 600s cooldown
+            unresolvedProblemNotificationID: "device-dns-fallback:900",
+            unresolvedProblemKind: .deviceDNSFallback
+        )
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(
+                severity: .needsReconnect,
+                primaryAction: .reconnect
+            ),
+            health: TunnelHealthSnapshot(
+                lastDNSSmokeProbeAt: eventAt,
+                lastDNSSmokeProbeSucceeded: false,
+                lastNetworkChangeAt: now.addingTimeInterval(-30)
+            ),
+            history: history,
+            now: now
+        )
+
+        XCTAssertEqual(notification?.kind, .reconnectNeeded)
+        XCTAssertEqual(notification?.identifier, "reconnect-needed:997")
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["device-dns-fallback:900"])
+    }
+
+    func testReconnectNeededEscalatesOverOutstandingNetworkUnavailableBanner() {
+        // Network returned but DNS is wedged: the "needs a network" banner should be
+        // superseded by the actionable "Reconnect" prompt, again bypassing the cooldown.
+        let now = Date(timeIntervalSince1970: 1100)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "network-unavailable:1000",
+            lastDeliveredAt: now.addingTimeInterval(-20),
+            unresolvedProblemNotificationID: "network-unavailable:1000",
+            unresolvedProblemKind: .networkUnavailable
+        )
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(
+                severity: .needsReconnect,
+                primaryAction: .reconnect
+            ),
+            health: TunnelHealthSnapshot(
+                lastDNSSmokeProbeAt: eventAt,
+                lastDNSSmokeProbeSucceeded: false,
+                lastNetworkChangeAt: now.addingTimeInterval(-30)
+            ),
+            history: history,
+            now: now
+        )
+
+        XCTAssertEqual(notification?.kind, .reconnectNeeded)
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["network-unavailable:1000"])
+    }
+
+    func testOutstandingReconnectBannerIsNotDowngradedByLesserProblem() {
+        // Escalation is upward-only: once the actionable "Reconnect" banner is up, a
+        // lower-ranked problem (a Device-DNS fallback here) must NOT replace it mid-cooldown.
+        let now = Date(timeIntervalSince1970: 1200)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:1100",
+            lastDeliveredAt: now.addingTimeInterval(-20),
+            unresolvedProblemNotificationID: "reconnect-needed:1100",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(
+                severity: .usingDeviceDNSFallback,
+                primaryAction: .turnOff
+            ),
+            health: TunnelHealthSnapshot(
+                lastDeviceDNSFallbackActivatedAt: eventAt,
+                lastNetworkChangeAt: now.addingTimeInterval(-30)
+            ),
+            history: history,
+            now: now
+        ))
+    }
+
+    func testSlowDNSProducesItsOwnNotificationKind() {
+        // Slow DNS no longer reuses the reconnect-needed kind — it has a distinct kind
+        // (and identifier prefix) so history can tell a soft "slow" banner apart from a
+        // hard outage.
+        let now = Date(timeIntervalSince1970: 1500)
+        let eventAt = now.addingTimeInterval(-3)
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(severity: .dnsSlow, primaryAction: .reconnect),
+            health: TunnelHealthSnapshot(
+                lastNetworkChangeAt: now.addingTimeInterval(-30),
+                lastSlowUpstreamResponseAt: eventAt
+            ),
+            history: .empty,
+            now: now
+        )
+
+        XCTAssertEqual(notification?.kind, .dnsSlow)
+        XCTAssertEqual(notification?.identifier, "dns-slow:1497")
+        XCTAssertEqual(notification?.title, "Lava DNS is slow")
+    }
+
+    func testSlowDNSDoesNotEscalateOverOutstandingDeviceDNSFallbackBanner() {
+        // Slow DNS is a soft degradation, not a hard outage — it ranks with the
+        // non-actionable banners and must not steal a standing one.
+        let now = Date(timeIntervalSince1970: 1300)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "device-dns-fallback:1200",
+            lastDeliveredAt: now.addingTimeInterval(-20),
+            unresolvedProblemNotificationID: "device-dns-fallback:1200",
+            unresolvedProblemKind: .deviceDNSFallback
+        )
+
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(severity: .dnsSlow, primaryAction: .reconnect),
+            health: TunnelHealthSnapshot(
+                lastNetworkChangeAt: now.addingTimeInterval(-30),
+                lastSlowUpstreamResponseAt: eventAt
+            ),
+            history: history,
+            now: now
+        ))
+    }
+
+    func testReconnectNeededEscalatesOverOutstandingSlowDNSBanner() {
+        // The regression Codex caught: once a "DNS is slow" banner is outstanding, DNS
+        // worsening to a full outage must upgrade the user to the actionable "Reconnect"
+        // copy. Because dnsSlow is now a distinct kind (rank 1) from reconnectNeeded
+        // (rank 2), the hard-outage candidate outranks it and supersedes the stale banner
+        // instead of being blocked by the unresolved-problem guard.
+        let now = Date(timeIntervalSince1970: 1400)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "dns-slow:1300",
+            lastDeliveredAt: now.addingTimeInterval(-20),
+            unresolvedProblemNotificationID: "dns-slow:1300",
+            unresolvedProblemKind: .dnsSlow
+        )
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect),
+            health: TunnelHealthSnapshot(
+                lastDNSSmokeProbeAt: eventAt,
+                lastDNSSmokeProbeSucceeded: false,
+                lastNetworkChangeAt: now.addingTimeInterval(-30)
+            ),
+            history: history,
+            now: now
+        )
+
+        XCTAssertEqual(notification?.kind, .reconnectNeeded)
+        XCTAssertEqual(notification?.title, "Reconnect Lava")
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["dns-slow:1300"])
+    }
+
     func testProblemNotificationsRespectCooldownEvenAfterPreviousProblemResolved() {
         let now = Date(timeIntervalSince1970: 600)
         let eventAt = now.addingTimeInterval(-5)
@@ -414,6 +578,86 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             ),
             ["network-unavailable:870"]
         )
+    }
+
+    func testLegacyReconnectMarkerIsDemotedToSlowDNSOnce() {
+        let suite = "test.protection.migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let keys = ProtectionConnectivityNotificationStore.DefaultsKeys(
+            schemaVersion: "schemaVersion",
+            unresolvedProblemKind: "unresolvedKind"
+        )
+
+        // An old build's outstanding slow-DNS banner was stored under the reconnect kind.
+        defaults.set("reconnect-needed", forKey: keys.unresolvedProblemKind)
+
+        XCTAssertTrue(ProtectionConnectivityNotificationStore.migrateLegacyKindSchemaIfNeeded(
+            in: defaults,
+            keys: keys
+        ))
+        // Demoted, not erased — recovery still has the marker to clear/acknowledge.
+        XCTAssertEqual(defaults.string(forKey: keys.unresolvedProblemKind), "dns-slow")
+        XCTAssertEqual(
+            defaults.integer(forKey: keys.schemaVersion),
+            ProtectionConnectivityNotificationStore.currentKindSchemaVersion
+        )
+
+        // Idempotent: once stamped, a genuine post-migration reconnect marker is untouched.
+        defaults.set("reconnect-needed", forKey: keys.unresolvedProblemKind)
+        XCTAssertFalse(ProtectionConnectivityNotificationStore.migrateLegacyKindSchemaIfNeeded(
+            in: defaults,
+            keys: keys
+        ))
+        XCTAssertEqual(defaults.string(forKey: keys.unresolvedProblemKind), "reconnect-needed")
+    }
+
+    func testKindSchemaMigrationLeavesNonReconnectMarkersUntouched() {
+        let suite = "test.protection.migration.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let keys = ProtectionConnectivityNotificationStore.DefaultsKeys(
+            schemaVersion: "schemaVersion",
+            unresolvedProblemKind: "unresolvedKind"
+        )
+        // network-unavailable was never affected by the slow-DNS kind change.
+        defaults.set("network-unavailable", forKey: keys.unresolvedProblemKind)
+
+        XCTAssertTrue(ProtectionConnectivityNotificationStore.migrateLegacyKindSchemaIfNeeded(
+            in: defaults,
+            keys: keys
+        ))
+        XCTAssertEqual(defaults.string(forKey: keys.unresolvedProblemKind), "network-unavailable")
+    }
+
+    func testReconnectNeededSupersedesDemotedLegacySlowDNSMarker() {
+        // End-to-end: after migration demotes a legacy banner to .dnsSlow while keeping its
+        // original "reconnect-needed:" id, a hard outage supersedes that exact id so the
+        // stale banner is removed from Notification Center.
+        let now = Date(timeIntervalSince1970: 1600)
+        let eventAt = now.addingTimeInterval(-3)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:1500",
+            lastDeliveredAt: now.addingTimeInterval(-20),
+            unresolvedProblemNotificationID: "reconnect-needed:1500", // id preserved by the demote
+            unresolvedProblemKind: .dnsSlow                            // kind demoted by the migration
+        )
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect),
+            health: TunnelHealthSnapshot(
+                lastDNSSmokeProbeAt: eventAt,
+                lastDNSSmokeProbeSucceeded: false,
+                lastNetworkChangeAt: now.addingTimeInterval(-30)
+            ),
+            history: history,
+            now: now
+        )
+
+        XCTAssertEqual(notification?.kind, .reconnectNeeded)
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["reconnect-needed:1500"])
     }
 
     private static var healthyAssessment: ProtectionConnectivityAssessment {

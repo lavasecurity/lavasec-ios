@@ -107,4 +107,55 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
             ["10.0.0.1"]
         )
     }
+
+    func testCaptureRetryContinuesWhileMaskedUnderAttemptCap() {
+        XCTAssertTrue(
+            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
+                attemptsMade: 1,
+                capturedNonEmpty: false
+            )
+        )
+        XCTAssertTrue(
+            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
+                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts - 1,
+                capturedNonEmpty: false
+            )
+        )
+    }
+
+    func testCaptureRetryStopsAtAttemptCap() {
+        XCTAssertFalse(
+            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
+                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts,
+                capturedNonEmpty: false
+            )
+        )
+        XCTAssertFalse(
+            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
+                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts + 1,
+                capturedNonEmpty: false
+            )
+        )
+    }
+
+    func testCaptureRetryStopsImmediatelyOnceCaptureSucceeds() {
+        // A non-empty capture means the mask lifted — adopt it and stop, even with
+        // attempts still left in the window.
+        XCTAssertFalse(
+            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
+                attemptsMade: 1,
+                capturedNonEmpty: true
+            )
+        )
+    }
+
+    func testCaptureRetryWindowIsBoundedAndShorterThanRoutineProbe() {
+        XCTAssertGreaterThan(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts, 0)
+        XCTAssertGreaterThan(DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval, 0)
+        // The whole retry window must resolve well inside the 300s routine cadence
+        // so a masked handoff recovers promptly, not on the next routine probe.
+        let totalWindow = DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
+            * Double(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts)
+        XCTAssertLessThan(totalWindow, DeviceDNSFallbackPolicy.routineSmokeProbeInterval)
+    }
 }
