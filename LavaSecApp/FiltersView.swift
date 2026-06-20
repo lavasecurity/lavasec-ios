@@ -9,6 +9,7 @@ struct FiltersView: View {
 
     @State private var isSharingFilters = false
     @State private var isImportingFilters = false
+    @State private var isShowingMyList = false
 
     init(scrollToTopTrigger: Int = 0, embedsNavigationStack: Bool = true) {
         self.scrollToTopTrigger = scrollToTopTrigger
@@ -25,10 +26,6 @@ struct FiltersView: View {
                 filtersScreen
             }
         }
-        .fullScreenCover(isPresented: $viewModel.isFilterPreparationScreenPresented) {
-            FilterPreparationScreen(origin: .filters)
-                .environmentObject(viewModel)
-        }
         .sheet(isPresented: $isSharingFilters) {
             ShareFiltersSheet()
                 .environmentObject(viewModel)
@@ -37,7 +34,7 @@ struct FiltersView: View {
             ImportFiltersFlow(
                 startMode: .chooseMethod,
                 authorizeImport: {
-                    await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filters")
+                    await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filter")
                 }
             )
             .environmentObject(viewModel)
@@ -46,40 +43,30 @@ struct FiltersView: View {
 
     private var filtersScreen: some View {
         LavaPrimaryTabScreenContent(
-            title: "Filters",
+            title: "Filter",
             scrollToTopTrigger: scrollToTopTrigger,
             refreshAction: {
-                await viewModel.refreshFilterNumberSummaries()
+                await viewModel.syncCatalog()
             }
         ) {
             FiltersOverviewPanel()
         } content: {
-            LavaSectionGroup("Manage filters") {
-                VStack(spacing: 10) {
-                    LavaNavigationRow(
-                        icon: .blocked,
-                        title: "Blocked Domains",
-                        summary: viewModel.blockedFiltersSummaryText
-                    ) {
-                        BlockedDomainsDetailView()
-                    }
-
-                    LavaNavigationRow(
-                        icon: .allowed,
-                        title: "Allowed Exceptions",
-                        summary: viewModel.allowedExceptionsSummaryText
-                    ) {
-                        AllowedExceptionsDetailView()
-                    }
+            LavaSectionGroup("My filter") {
+                ImportOptionRow(
+                    systemImage: "slider.horizontal.3",
+                    title: "View & edit",
+                    subtitle: "What Lava blocks and lets through"
+                ) {
+                    isShowingMyList = true
                 }
                 .frame(maxWidth: .infinity)
             }
 
-            LavaSectionGroup("Share & import") {
+            LavaSectionGroup("Got a good filter?") {
                 VStack(spacing: 10) {
                     ImportOptionRow(
                         systemImage: "square.and.arrow.up",
-                        title: "Share my filters",
+                        title: "Share my filter",
                         subtitle: "Share via QR or code"
                     ) {
                         isSharingFilters = true
@@ -87,7 +74,7 @@ struct FiltersView: View {
 
                     ImportOptionRow(
                         systemImage: "square.and.arrow.down",
-                        title: "Import filters",
+                        title: "Import a filter",
                         subtitle: "Scan a QR or code"
                     ) {
                         isImportingFilters = true
@@ -96,51 +83,100 @@ struct FiltersView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .navigationDestination(isPresented: $isShowingMyList) {
+            MyListCover()
+                .environmentObject(viewModel)
+                .environmentObject(security)
+        }
     }
 }
 
 private struct FiltersOverviewPanel: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-
     var body: some View {
-        LavaTabOverviewCard {
-            VStack(spacing: 18) {
-                LavaOverviewMetricBlock(
-                    value: viewModel.configuredProtectedDomainNumberText,
-                    label: "rules in effect"
-                )
+        // Diagram + explainer back together inside the card (the "below the panel"
+        // placement read too faint); the card stays content-sized.
+        LavaInfoCard {
+            VStack(spacing: 14) {
+                FiltersFlowDiagram()
 
-                VStack(spacing: 10) {
-                    LavaOverviewBannerRow(
-                        systemImage: "hand.raised.fill",
-                        title: viewModel.configuredBlockedDomainCountText,
-                        tint: LavaStyle.lavaOrange,
-                        background: LavaStyle.lavaOrangeSoft
-                    )
-
-                    LavaOverviewBannerRow(
-                        systemImage: "arrow.right.circle.fill",
-                        title: viewModel.configuredAllowlistExceptionCountText,
-                        tint: LavaStyle.safeGreen,
-                        background: LavaStyle.softGreen
-                    )
-
-                    LavaOverviewBannerRow(
-                        systemImage: "arrow.right.circle.fill",
-                        title: "Other domains pass through",
-                        tint: LavaStyle.secondaryText,
-                        background: LavaStyle.secondaryText.opacity(0.12)
-                    )
-                }
+                Text("Lava uses a local filter to block your phone's access to unwanted sites.".lavaLocalized)
+                    .lavaBodySupportingText()
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
         }
     }
 }
 
-private struct BlockedDomainsDetailView: View {
+/// One-glance explanation of where Lava sits: your phone reaches the internet
+/// through Lava acting as a local filter. Laid out with fixed object:arrow width
+/// ratios (≈3.5:1) so the nodes stay large and the spacing scales with the card.
+private struct FiltersFlowDiagram: View {
+    private let iconBoxHeight: CGFloat = 62
+    private let nodeRatio: CGFloat = 0.28
+    private let arrowRatio: CGFloat = 0.08
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            HStack(alignment: .top, spacing: 0) {
+                node(label: "Phone".lavaLocalized) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 40, weight: .regular))
+                        .foregroundStyle(LavaStyle.secondaryText)
+                }
+                .frame(width: width * nodeRatio)
+
+                connector.frame(width: width * arrowRatio)
+
+                node(label: "Lava") {
+                    SoftShieldGuardian(size: 62, state: .awake, animates: false)
+                }
+                .frame(width: width * nodeRatio)
+
+                connector.frame(width: width * arrowRatio)
+
+                node(label: "Internet".lavaLocalized) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 40, weight: .regular))
+                        .foregroundStyle(LavaStyle.secondaryText)
+                }
+                .frame(width: width * nodeRatio)
+            }
+            .frame(width: width)
+        }
+        .frame(height: iconBoxHeight + 24)
+    }
+
+    @ViewBuilder
+    private func node<Icon: View>(label: String, @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: 8) {
+            icon()
+                .frame(height: iconBoxHeight)
+
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(LavaStyle.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var connector: some View {
+        Image(systemName: "arrow.right")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(LavaStyle.secondaryText.opacity(0.6))
+            .frame(height: iconBoxHeight)
+    }
+}
+
+/// Consolidated "My list" surface: the two-shelf (block / allow) view presented as a
+/// full-screen cover with one unified Edit + Save. The edit draft is whole, so a single
+/// `FilterEditScope` (`.blockedDomains`) is reused only as the edit-mode flag.
+private struct MyListCover: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
     @State private var activeSheet: BlockedDomainSheet?
+    @State private var showingAddException = false
     @State private var showingConfirmation = false
     @State private var showingDiscardConfirmation = false
 
@@ -151,73 +187,36 @@ private struct BlockedDomainsDetailView: View {
                 await viewModel.syncCatalog()
             }
         ) {
-            CatalogSyncPanel()
+            rulesPanel
 
-            LavaSectionGroup(blocklistsTitle) {
+            LavaSectionGroup("Lava blocks these") {
                 LavaCondensedList {
-                    let sourceIDs = viewModel.stagedBlocklistIDsForDisplay()
-                    if sourceIDs.isEmpty {
-                        EmptyFilterRow(
-                            title: "No blocklists enabled",
-                            subtitle: editSubtitle("Add a curated blocklist to start blocking known domains")
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    } else {
-                        ForEach(sourceIDs, id: \.self) { sourceID in
-                            BlocklistEffectRow(
-                                sourceID: sourceID,
-                                isEditing: isEditing
-                            )
-
-                            if sourceID != sourceIDs.last {
-                                LavaCondensedDivider()
-                            }
-                        }
-                    }
+                    blockShelfRows
 
                     if isEditing {
-                        FilterAddButton(title: "Add Blocklist", systemImage: "plus") {
+                        FilterAddButton(title: "Add a blocklist", systemImage: "plus") {
                             activeSheet = .blocklist
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
+
+                        FilterAddButton(title: "Block a domain", systemImage: "plus") {
+                            activeSheet = .blockedDomain
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
                         .padding(.bottom, 10)
                     }
                 }
             }
 
-            LavaSectionGroup(extraBlockedDomainsTitle) {
+            LavaSectionGroup("Lava lets these through") {
                 LavaCondensedList {
-                    let domains = viewModel.stagedBlockedDomainsForDisplay()
-                    if domains.isEmpty {
-                        EmptyFilterRow(
-                            title: "No additional blocked domains",
-                            subtitle: nil,
-                            titleFont: .body
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    } else {
-                        ForEach(domains, id: \.self) { domain in
-                            DomainEffectRow(
-                                domain: domain,
-                                isNew: viewModel.isBlockedDomainNewInDraft(domain),
-                                isPendingRemoval: viewModel.isBlockedDomainPendingRemoval(domain),
-                                isEditing: isEditing,
-                                remove: { viewModel.removeBlockedDomainFromDraft(domain) },
-                                undo: { viewModel.undoBlockedDomainDraftChange(domain) }
-                            )
-
-                            if domain != domains.last {
-                                LavaCondensedDivider()
-                            }
-                        }
-                    }
+                    allowShelfRows
 
                     if isEditing {
-                        FilterAddButton(title: "Add Blocked Domain", systemImage: "plus") {
-                            activeSheet = .blockedDomain
+                        FilterAddButton(title: "Add an exception", systemImage: "plus") {
+                            showingAddException = true
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
@@ -226,22 +225,49 @@ private struct BlockedDomainsDetailView: View {
                 }
             }
         }
-        .navigationTitle((isEditing ? "Edit: Blocked Domain" : "Blocked Domains").lavaLocalized)
+        .navigationTitle("My filter".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        // Hide the system Back button while editing so a stray tap can't abandon the
+        // draft. An interactive edge-swipe can still pop the page; that path preserves a
+        // dirty draft (see cancelFilterEditingOnPageDisappear), so no edits are lost.
         .navigationBarBackButtonHidden(isEditing)
         .toolbar {
-            FilterEditToolbar(
-                isEditing: isEditing,
-                canSave: viewModel.filterDraftHasChanges,
-                beginEditing: beginEditing,
-                closeEditing: closeEditing,
-                save: saveChanges
-            )
+            if isEditing {
+                FilterEditToolbar(
+                    isEditing: true,
+                    canSave: viewModel.filterDraftHasChanges,
+                    beginEditing: beginEditing,
+                    closeEditing: closeEditing,
+                    save: saveChanges
+                )
+            } else {
+                // A ToolbarItemGroup lets the system merge the two glyphs into one
+                // native glass capsule (with a divider) — no custom background. The
+                // page is pushed, so the system Back button handles dismissal.
+                ToolbarItemGroup(placement: .primaryAction) {
+                    NativeToolbarIconButton(
+                        systemName: "arrow.clockwise",
+                        accessibilityLabel: "Refresh now",
+                        action: { Task { await viewModel.syncCatalog() } }
+                    )
+                    .disabled(viewModel.isSyncingCatalog)
+
+                    NativeToolbarIconButton(
+                        systemName: "square.and.pencil",
+                        accessibilityLabel: "Edit",
+                        action: beginEditing
+                    )
+                }
+            }
         }
         .onDisappear {
             viewModel.cancelFilterEditingOnPageDisappear(.blockedDomains)
         }
         .task {
-            await viewModel.syncCatalogIfNeeded()
+            // Auto-refresh on open: cheap when nothing changed (the snapshot-identity
+            // gate skips the re-encode + tunnel reload), so opening My list keeps the
+            // lists current without a heavy rebuild or a spurious reconnect.
+            await viewModel.syncCatalog()
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -255,8 +281,16 @@ private struct BlockedDomainsDetailView: View {
                     .environmentObject(viewModel)
             }
         }
+        .sheet(isPresented: $showingAddException) {
+            AddAllowedExceptionSheet()
+                .environmentObject(viewModel)
+        }
         .sheet(isPresented: $showingConfirmation) {
             FilterConfirmationSheet(origin: .filters)
+                .environmentObject(viewModel)
+        }
+        .fullScreenCover(isPresented: $viewModel.isFilterPreparationScreenPresented) {
+            FilterPreparationScreen(origin: .filters)
                 .environmentObject(viewModel)
         }
         .lavaConfirmationAlert { host in
@@ -266,7 +300,90 @@ private struct BlockedDomainsDetailView: View {
                     viewModel.cancelFilterEditing()
                 }
             } message: {
-                Text("Your draft changes will be removed. The current saved filters will stay active.")
+                Text("Your draft changes will be removed. The current saved filter will stay active.")
+            }
+        }
+    }
+
+    @ViewBuilder private var rulesPanel: some View {
+        LavaInfoCard {
+            VStack(alignment: .leading, spacing: 12) {
+                LavaOverviewMetricBlock(
+                    value: viewModel.configuredProtectedDomainNumberText,
+                    label: "rules in effect"
+                )
+
+                (Text(Image(systemName: viewModel.blocklistCatalogFreshnessSystemImage))
+                    .foregroundColor(viewModel.blocklistCatalogFreshnessTint)
+                    + Text(" \(viewModel.blocklistCatalogFreshnessTitle.lavaLocalized)")
+                    .foregroundColor(LavaStyle.secondaryText))
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    @ViewBuilder private var blockShelfRows: some View {
+        let sourceIDs = viewModel.stagedBlocklistIDsForDisplay()
+        let blockedDomains = viewModel.stagedBlockedDomainsForDisplay()
+        if sourceIDs.isEmpty && blockedDomains.isEmpty {
+            EmptyFilterRow(
+                title: "No blocklists enabled",
+                subtitle: editSubtitle("Add a curated blocklist to start blocking known domains"),
+                titleFont: .body
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        } else {
+            ForEach(sourceIDs, id: \.self) { sourceID in
+                BlocklistEffectRow(sourceID: sourceID, isEditing: isEditing)
+
+                if sourceID != sourceIDs.last || !blockedDomains.isEmpty {
+                    LavaCondensedDivider()
+                }
+            }
+
+            ForEach(blockedDomains, id: \.self) { domain in
+                DomainEffectRow(
+                    domain: domain,
+                    isNew: viewModel.isBlockedDomainNewInDraft(domain),
+                    isPendingRemoval: viewModel.isBlockedDomainPendingRemoval(domain),
+                    isEditing: isEditing,
+                    remove: { viewModel.removeBlockedDomainFromDraft(domain) },
+                    undo: { viewModel.undoBlockedDomainDraftChange(domain) }
+                )
+
+                if domain != blockedDomains.last {
+                    LavaCondensedDivider()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var allowShelfRows: some View {
+        let domains = viewModel.stagedAllowedDomainsForDisplay()
+        if domains.isEmpty {
+            EmptyFilterRow(
+                title: "No allowed exceptions",
+                subtitle: isEditing ? "Add only domains you trust" : nil,
+                titleFont: .body
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        } else {
+            ForEach(domains, id: \.self) { domain in
+                DomainEffectRow(
+                    domain: domain,
+                    isNew: viewModel.isAllowedDomainNewInDraft(domain),
+                    isPendingRemoval: viewModel.isAllowedDomainPendingRemoval(domain),
+                    isEditing: isEditing,
+                    remove: { viewModel.removeAllowedDomainFromDraft(domain) },
+                    undo: { viewModel.undoAllowedDomainDraftChange(domain) }
+                )
+
+                if domain != domains.last {
+                    LavaCondensedDivider()
+                }
             }
         }
     }
@@ -289,7 +406,7 @@ private struct BlockedDomainsDetailView: View {
 
     private func beginEditing() {
         Task {
-            guard await security.requireAuthentication(for: .filterEditing, reason: "Edit blocked domains") else {
+            guard await security.requireAuthentication(for: .filterEditing, reason: "Edit filter") else {
                 return
             }
 
@@ -297,27 +414,26 @@ private struct BlockedDomainsDetailView: View {
         }
     }
 
+    /// Fresh auth on every Save. Safe edits (only strengthening/neutral changes) apply
+    /// straight to the prepare screen; edits that weaken protection (remove a blocklist
+    /// or blocked domain, or add an allowed exception) show the review confirmation first.
     private func saveChanges() {
         Task {
-            guard await security.requireFreshAuthentication(for: .filterEditing, reason: "Save blocked domains") else {
+            guard await security.requireFreshAuthentication(for: .filterEditing, reason: "Save filter") else {
                 return
             }
 
-            showingConfirmation = true
+            let diff = viewModel.filterDraftDiff
+            let weakensProtection = !diff.removedBlocklistIDs.isEmpty
+                || !diff.removedBlockedDomains.isEmpty
+                || !diff.addedAllowedDomains.isEmpty
+
+            if weakensProtection {
+                showingConfirmation = true
+            } else {
+                await viewModel.prepareAndApplyFilterDraft()
+            }
         }
-    }
-
-    private var blocklistsTitle: String {
-        let status = viewModel.stagedFilterRuleBudgetStatus
-        let used = AppViewModel.abbreviatedRuleCount(status.knownRuleCount)
-        let budget = AppViewModel.abbreviatedRuleCount(status.budget)
-        return "Blocklists in Effect (~\(used)/\(budget) rules)"
-    }
-
-    private var extraBlockedDomainsTitle: String {
-        let count = viewModel.stagedBlockedDomainCount
-        let limit = viewModel.configuration.limits.maxBlockedDomains
-        return "Blocked Domains (\(count)/\(limit))"
     }
 }
 
@@ -336,133 +452,10 @@ private struct LavaPlusUpgradeSheet: View {
             LavaPlusUpgradeDestination()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", action: dismiss.callAsFunction)
+                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
                     }
                 }
         }
-    }
-}
-
-private struct AllowedExceptionsDetailView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-    @EnvironmentObject private var security: SecurityController
-    @State private var showingAddException = false
-    @State private var showingConfirmation = false
-    @State private var showingDiscardConfirmation = false
-
-    var body: some View {
-        LavaScreenContent(spacing: 22) {
-            AllowedExceptionReminderPanel()
-
-            LavaSectionGroup(allowedExceptionsTitle) {
-                LavaCondensedList {
-                    let domains = viewModel.stagedAllowedDomainsForDisplay()
-                    if domains.isEmpty {
-                        EmptyFilterRow(
-                            title: "No allowed exceptions",
-                            subtitle: isEditing ? "Add only domains you trust" : nil,
-                            titleFont: .body
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    } else {
-                        ForEach(domains, id: \.self) { domain in
-                            DomainEffectRow(
-                                domain: domain,
-                                isNew: viewModel.isAllowedDomainNewInDraft(domain),
-                                isPendingRemoval: viewModel.isAllowedDomainPendingRemoval(domain),
-                                isEditing: isEditing,
-                                remove: { viewModel.removeAllowedDomainFromDraft(domain) },
-                                undo: { viewModel.undoAllowedDomainDraftChange(domain) }
-                            )
-
-                            if domain != domains.last {
-                                LavaCondensedDivider()
-                            }
-                        }
-                    }
-
-                    if isEditing {
-                        FilterAddButton(title: "Add Exception", systemImage: "plus") {
-                            showingAddException = true
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 10)
-                    }
-                }
-            }
-        }
-        .navigationTitle((isEditing ? "Edit: Allowed Exceptions" : "Allowed Exceptions").lavaLocalized)
-        .navigationBarBackButtonHidden(isEditing)
-        .toolbar {
-            FilterEditToolbar(
-                isEditing: isEditing,
-                canSave: viewModel.filterDraftHasChanges,
-                beginEditing: beginEditing,
-                closeEditing: closeEditing,
-                save: saveChanges
-            )
-        }
-        .onDisappear {
-            viewModel.cancelFilterEditingOnPageDisappear(.allowedExceptions)
-        }
-        .sheet(isPresented: $showingAddException) {
-            AddAllowedExceptionSheet()
-                .environmentObject(viewModel)
-        }
-        .sheet(isPresented: $showingConfirmation) {
-            FilterConfirmationSheet(origin: .filters)
-                .environmentObject(viewModel)
-        }
-        .lavaConfirmationAlert { host in
-            host.alert("Discard changes?", isPresented: $showingDiscardConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Discard", role: .destructive) {
-                    viewModel.cancelFilterEditing()
-                }
-            } message: {
-                Text("Your draft changes will be removed. The current saved filters will stay active.")
-            }
-        }
-    }
-
-    private var isEditing: Bool {
-        viewModel.isFilterEditing(.allowedExceptions)
-    }
-
-    private func closeEditing() {
-        if viewModel.filterDraftHasChanges {
-            showingDiscardConfirmation = true
-        } else {
-            viewModel.cancelFilterEditing()
-        }
-    }
-
-    private func beginEditing() {
-        Task {
-            guard await security.requireAuthentication(for: .filterEditing, reason: "Edit allowed exceptions") else {
-                return
-            }
-
-            viewModel.beginFilterEditing(.allowedExceptions)
-        }
-    }
-
-    private func saveChanges() {
-        Task {
-            guard await security.requireFreshAuthentication(for: .filterEditing, reason: "Save allowed exceptions") else {
-                return
-            }
-
-            showingConfirmation = true
-        }
-    }
-
-    private var allowedExceptionsTitle: String {
-        let count = viewModel.stagedAllowedDomainCount
-        let limit = viewModel.configuration.limits.maxAllowedDomains
-        return "Allowed Exceptions (\(count)/\(limit))"
     }
 }
 
@@ -476,11 +469,11 @@ private struct FilterEditToolbar: ToolbarContent {
     var body: some ToolbarContent {
         if isEditing {
             ToolbarItem(placement: .cancellationAction) {
-                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", action: closeEditing)
+                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, action: closeEditing)
             }
 
             ToolbarItem(placement: .confirmationAction) {
-                NativeToolbarIconButton(systemName: "checkmark", accessibilityLabel: "Save", action: save)
+                NativeToolbarIconButton(systemName: "checkmark", accessibilityLabel: "Save", role: .confirm, action: save)
                     .disabled(!canSave)
             }
         } else {
@@ -491,69 +484,6 @@ private struct FilterEditToolbar: ToolbarContent {
     }
 }
 
-private struct CatalogSyncPanel: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-
-    var body: some View {
-        LavaInfoCard {
-            VStack(alignment: .leading, spacing: 12) {
-                LavaInlineInfoContent(
-                    title: viewModel.blocklistCatalogFreshnessTitle,
-                    description: viewModel.blocklistCatalogFreshnessDescription,
-                    systemImage: viewModel.blocklistCatalogFreshnessSystemImage,
-                    tint: viewModel.blocklistCatalogFreshnessTint
-                )
-
-                FilterAddButton(title: viewModel.catalogRefreshButtonTitle, systemImage: "arrow.clockwise") {
-                    Task {
-                        await viewModel.syncCatalog()
-                    }
-                }
-                .disabled(viewModel.isSyncingCatalog)
-                .accessibilityLabel("Refresh blocklists now")
-            }
-        }
-    }
-}
-
-private struct AllowedExceptionReminderPanel: View {
-    var body: some View {
-        LavaInfoCard {
-            VStack(alignment: .leading, spacing: 14) {
-                LavaInlineInfoContent(
-                    title: "Be extra careful",
-                    description: "Allowed exceptions can let a domain through even when a blocklist catches it. Double-check before saving",
-                    systemImage: "exclamationmark.triangle.fill",
-                    tint: LavaStyle.lavaOrange
-                )
-
-                VStack(alignment: .leading, spacing: 12) {
-                    LavaOverviewBannerRow(
-                        systemImage: "questionmark.circle.fill",
-                        title: "Do you know this domain",
-                        tint: LavaStyle.lavaOrange,
-                        background: LavaStyle.lavaOrangeSoft,
-                        allowsTitleWrapping: true
-                    )
-                    LavaOverviewBannerRow(
-                        systemImage: "questionmark.circle.fill",
-                        title: "Is the domain spelling correct",
-                        tint: LavaStyle.lavaOrange,
-                        background: LavaStyle.lavaOrangeSoft,
-                        allowsTitleWrapping: true
-                    )
-                    LavaOverviewBannerRow(
-                        systemImage: "questionmark.circle.fill",
-                        title: "Is the domain flagged suspicious",
-                        tint: LavaStyle.lavaOrange,
-                        background: LavaStyle.lavaOrangeSoft,
-                        allowsTitleWrapping: true
-                    )
-                }
-            }
-        }
-    }
-}
 
 private struct LavaInlineInfoContent: View {
     let title: String
@@ -864,6 +794,13 @@ struct AddBlocklistSheet: View {
     @Environment(\.dismiss) private var dismiss
     let usage: Usage
     let onSelect: ((Set<String>) -> Void)?
+    /// The selection captured when the picker first appeared. Held as `@State` (set
+    /// once via `State(initialValue:)`) so it survives SwiftUI re-creating this value-
+    /// type view when the draft changes. A plain `let` would be re-assigned from the
+    /// live `initialSelection` argument on every re-render — after a custom-list add it
+    /// drifts to match the mutated draft and re-greys Save. The Save button compares
+    /// the live `selectedIDs` against this open-time snapshot.
+    @State private var initialSelectedIDs: Set<String>
     @State private var navigationPath: [AddBlocklistRoute] = []
     @State private var selectedIDs = Set<String>()
     @State private var searchText = ""
@@ -878,6 +815,7 @@ struct AddBlocklistSheet: View {
     ) {
         self.usage = usage
         self.onSelect = onSelect
+        _initialSelectedIDs = State(initialValue: initialSelection)
         _selectedIDs = State(initialValue: initialSelection)
     }
 
@@ -939,7 +877,7 @@ struct AddBlocklistSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", action: dismiss.callAsFunction)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
                 }
 
                 if usage == .filterDraft {
@@ -994,10 +932,6 @@ struct AddBlocklistSheet: View {
         )
     }
 
-    private var draftIDs: Set<String> {
-        viewModel.filterEditDraft?.enabledBlocklistIDs ?? viewModel.configuration.enabledBlocklistIDs
-    }
-
     private var pickerItems: [BlocklistPickerItem] {
         let catalogItems = availableBlocklists.map(BlocklistPickerItem.catalog)
         guard usage == .filterDraft else {
@@ -1036,7 +970,7 @@ struct AddBlocklistSheet: View {
             return "Calculating rule usage… (\(status.pendingLists) \(lists) pending)"
         }
 
-        let used = AppViewModel.abbreviatedRuleCount(status.knownRuleCount)
+        let used = AppViewModel.abbreviatedRuleCount(status.displayedRuleCount)
         let budget = AppViewModel.abbreviatedRuleCount(status.budget)
         var text: String
         if isFreeOverLimit {
@@ -1071,7 +1005,7 @@ struct AddBlocklistSheet: View {
 
         switch usage {
         case .filterDraft:
-            return selectedIDs != draftIDs && !selectionStatusIsError
+            return selectedIDs != initialSelectedIDs && !selectionStatusIsError
         case .onboardingSelection:
             return !selectedIDs.isEmpty && !selectionStatusIsError
         }
@@ -1379,7 +1313,7 @@ private struct CustomBlocklistPickerRow: View {
             }
             .buttonStyle(.plain)
 
-            Button {
+            Button(role: .destructive) {
                 requestDelete(source)
             } label: {
                 Image(systemName: "trash")
@@ -1548,18 +1482,19 @@ private struct BringYourOwnListView: View {
                 showUpgrade()
             } label: {
                 HStack(spacing: 12) {
-                    HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text("Upgrade".lavaLocalized)
-                            .font(.footnote.weight(.bold))
-                            .foregroundStyle(LavaStyle.safeGreen)
-
-                        Text(" to Lava Security Plus to bring your own list".lavaLocalized)
-                            .font(.footnote)
-                            .foregroundStyle(LavaStyle.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .multilineTextAlignment(.leading)
-                    .layoutPriority(1)
+                    // One concatenated Text so the line flows and wraps as a single
+                    // paragraph instead of "Upgrade" sitting in its own column beside
+                    // a separately-wrapping remainder.
+                    (Text("Upgrade".lavaLocalized)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(LavaStyle.safeGreen)
+                     + Text(" to Lava Security Plus to bring your own list".lavaLocalized)
+                        .font(.footnote)
+                        .foregroundStyle(LavaStyle.secondaryText))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
 
                     Spacer(minLength: 12)
 
@@ -1630,7 +1565,7 @@ private struct AddBlockedDomainSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", action: dismiss.callAsFunction)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
                 }
             }
         }
@@ -1717,7 +1652,7 @@ private struct AddAllowedExceptionSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", action: dismiss.callAsFunction)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
                 }
             }
         }

@@ -275,6 +275,46 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
         XCTAssertEqual(result.snapshot.summary.blocklistSourceRuleCounts?["custom-1"], 1)
     }
 
+    func testCustomSourceFetchFailureSurfacesNamedListError() async throws {
+        // No customPayloadText → the fixture fetcher throws URLError for the custom URL,
+        // and there is no custom cache (brand-new source). The prepare must fail with an
+        // actionable error that NAMES the list (not the masked "latest.txt" file error,
+        // and not a bare URLError that doesn't say which list).
+        let fixture = try Fixture(payloadText: payloadText)
+        let customSource = try CustomBlocklistSource(
+            id: "custom-1",
+            displayName: "My List",
+            rawURL: "https://example.com/custom.txt"
+        )
+        var configuration = fixture.configuration
+        configuration.customBlocklists = [customSource]
+        configuration.enabledBlocklistIDs.insert("custom-1")
+
+        do {
+            _ = try await fixture.fetchingService().prepare(
+                configuration: configuration,
+                customSources: [customSource],
+                catalogFreshnessMaxAge: 3_600
+            )
+            XCTFail("A custom source that can't be fetched and has no cache must fail preparation.")
+        } catch {
+            let ns = error as NSError
+            XCTAssertFalse(
+                ns.domain == NSCocoaErrorDomain && ns.code == NSFileReadNoSuchFileError,
+                "Custom-source fetch failure was masked by the no-cache latest.txt read error: \(error)"
+            )
+            guard case let .customBlocklistUnavailable(displayName, reason) = (error as? BlocklistCatalogSyncError) else {
+                return XCTFail("Expected a named customBlocklistUnavailable error, got \(error)")
+            }
+            XCTAssertEqual(displayName, "My List")
+            XCTAssertFalse(reason.isEmpty, "the underlying network reason must be preserved")
+            XCTAssertTrue(
+                error.localizedDescription.contains("My List"),
+                "the surfaced message must name the list: \(error.localizedDescription)"
+            )
+        }
+    }
+
     func testPersistArtifactsWritesPreparedCompactAndManifestLast() async throws {
         let fixture = try Fixture(payloadText: payloadText)
         let service = fixture.fetchingService()

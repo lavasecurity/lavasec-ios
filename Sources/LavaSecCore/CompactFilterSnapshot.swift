@@ -394,6 +394,16 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
         else {
             throw CompactFilterSnapshotError.invalidRuleTable
         }
+
+        // The lookup is a binary search, so it silently returns wrong decisions if
+        // the on-disk entry tables aren't byte-sorted (a bit-rot or future-writer
+        // bug). Verify monotonic order on decode (O(total bytes), once) and fail
+        // CLOSED via the throw rather than serve a snapshot that under-blocks.
+        guard Self.entriesAreSorted(exactEntries, domainData: domainData),
+              Self.entriesAreSorted(suffixEntries, domainData: domainData)
+        else {
+            throw CompactFilterSnapshotError.invalidRuleTable
+        }
     }
 
     public var count: Int {
@@ -612,6 +622,52 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
             let length = Int(entry.length)
             return offset >= 0 && length > 0 && offset + length <= dataCount
         }
+    }
+
+    // Entries must be in non-decreasing byte-lexicographic order of their stored
+    // domain bytes — the invariant the binary-search lookup relies on. Call only
+    // after `entriesAreValid` (offsets/lengths must be in-bounds to read here).
+    private static func entriesAreSorted(_ entries: [Entry], domainData: Data) -> Bool {
+        guard entries.count > 1 else {
+            return true
+        }
+
+        return domainData.withUnsafeBytes { table -> Bool in
+            for index in 1..<entries.count {
+                let previous = entries[index - 1]
+                let current = entries[index]
+                if compareTableSlices(
+                    table,
+                    offset: Int(previous.offset), length: Int(previous.length),
+                    otherOffset: Int(current.offset), otherLength: Int(current.length)
+                ) > 0 {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    private static func compareTableSlices(
+        _ table: UnsafeRawBufferPointer,
+        offset: Int, length: Int,
+        otherOffset: Int, otherLength: Int
+    ) -> Int {
+        let shared = min(length, otherLength)
+        var index = 0
+        while index < shared {
+            let lhs = table[offset + index]
+            let rhs = table[otherOffset + index]
+            if lhs != rhs {
+                return lhs < rhs ? -1 : 1
+            }
+            index += 1
+        }
+
+        if length == otherLength {
+            return 0
+        }
+        return length < otherLength ? -1 : 1
     }
 }
 

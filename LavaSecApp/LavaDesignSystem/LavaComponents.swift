@@ -395,21 +395,6 @@ struct LavaInfoCard<Content: View>: View {
     }
 }
 
-struct LavaTabOverviewCard<Content: View>: View {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    var body: some View {
-        LavaInfoCard {
-            content
-                .frame(height: 262, alignment: .center)
-        }
-    }
-}
-
 struct LavaOverviewMetricBlock: View {
     let value: String
     let label: String

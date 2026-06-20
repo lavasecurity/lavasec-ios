@@ -88,10 +88,10 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         let toolbarBlock = try Self.sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
-            endingBefore: "private struct CatalogSyncPanel: View"
+            endingBefore: "private struct LavaInlineInfoContent: View"
         )
 
-        XCTAssertTrue(toolbarBlock.contains("NativeToolbarIconButton(systemName: \"checkmark\", accessibilityLabel: \"Save\", action: save)"))
+        XCTAssertTrue(toolbarBlock.contains("NativeToolbarIconButton(systemName: \"checkmark\", accessibilityLabel: \"Save\", role: .confirm, action: save)"))
         XCTAssertTrue(toolbarBlock.contains("NativeToolbarIconButton(systemName: \"square.and.pencil\", accessibilityLabel: \"Edit\", action: beginEditing)"))
         XCTAssertFalse(toolbarBlock.contains("Button(\"Save\""))
         XCTAssertFalse(toolbarBlock.contains("Button(\"Edit\""))
@@ -99,81 +99,60 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
     func testFilterDiscardUsesPopupDialogWithStandardActions() throws {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blockedDomainsDetailBlock = try Self.sourceBlock(
+        let myListBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BlockedDomainsDetailView: View",
+            startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
-        let allowedExceptionsDetailBlock = try Self.sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct AllowedExceptionsDetailView: View",
-            endingBefore: "private struct FilterEditToolbar: ToolbarContent"
-        )
 
-        for detailBlock in [blockedDomainsDetailBlock, allowedExceptionsDetailBlock] {
-            XCTAssertTrue(detailBlock.contains(".alert(\"Discard changes?\", isPresented: $showingDiscardConfirmation)"))
-            XCTAssertTrue(detailBlock.contains("Button(\"Cancel\", role: .cancel)"))
-            XCTAssertTrue(detailBlock.contains("Button(\"Discard\", role: .destructive)"))
-            XCTAssertTrue(detailBlock.contains("Text(\"Your draft changes will be removed. The current saved filters will stay active.\")"))
-            XCTAssertFalse(detailBlock.contains(".sheet(isPresented: $showingDiscardConfirmation)"))
-            XCTAssertFalse(detailBlock.contains("DiscardFilterChangesSheet"))
-            XCTAssertFalse(detailBlock.contains("Discard Changes"))
-        }
+        XCTAssertTrue(myListBlock.contains(".alert(\"Discard changes?\", isPresented: $showingDiscardConfirmation)"))
+        XCTAssertTrue(myListBlock.contains("Button(\"Cancel\", role: .cancel)"))
+        XCTAssertTrue(myListBlock.contains("Button(\"Discard\", role: .destructive)"))
+        XCTAssertTrue(myListBlock.contains("Text(\"Your draft changes will be removed. The current saved filter will stay active.\")"))
+        XCTAssertFalse(myListBlock.contains(".sheet(isPresented: $showingDiscardConfirmation)"))
+        XCTAssertFalse(myListBlock.contains("DiscardFilterChangesSheet"))
+        XCTAssertFalse(myListBlock.contains("Discard Changes"))
 
         XCTAssertFalse(filtersViewSource.contains("private struct DiscardFilterChangesSheet: View"))
     }
 
-    func testFilterSectionCountsUsePostSaveDraftCounts() throws {
+    func testMyListPanelShowsActiveRuleCountNotRawDisplayCountsOrBudgetBar() throws {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blockedDomainsDetailBlock = try Self.sourceBlock(
+        let myListBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BlockedDomainsDetailView: View",
+            startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
 
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("viewModel.stagedFilterRuleBudgetStatus"))
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("viewModel.stagedBlockedDomainCount"))
-        XCTAssertFalse(blockedDomainsDetailBlock.contains("viewModel.stagedBlocklistIDsForDisplay().count"))
-        XCTAssertFalse(blockedDomainsDetailBlock.contains("viewModel.stagedBlockedDomainsForDisplay().count"))
+        XCTAssertTrue(myListBlock.contains("viewModel.configuredProtectedDomainNumberText"))
+        XCTAssertFalse(myListBlock.contains("viewModel.stagedBlocklistIDsForDisplay().count"))
+        XCTAssertFalse(myListBlock.contains("viewModel.stagedBlockedDomainsForDisplay().count"))
+        // The budget meter lives only in the add-a-blocklist picker — not duplicated on the cover.
+        XCTAssertFalse(myListBlock.contains("FilterRuleBudgetBar("))
     }
 
-    func testBlockedDomainsDetailPullToRefreshUsesCatalogSync() throws {
+    func testMyListPullToRefreshUsesCatalogSync() throws {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blockedDomainsDetailBlock = try Self.sourceBlock(
+        let myListBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BlockedDomainsDetailView: View",
+            startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
-        let catalogSyncPanelBlock = try Self.sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct CatalogSyncPanel: View",
-            endingBefore: "private struct AllowedExceptionReminderPanel: View"
-        )
 
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("refreshAction: {"))
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("await viewModel.syncCatalog()"))
-        XCTAssertTrue(
-            catalogSyncPanelBlock.contains("await viewModel.syncCatalog()"),
-            "Pull-to-refresh should use the same catalog sync action as the refresh button."
+        XCTAssertTrue(myListBlock.contains("refreshAction: {"))
+        XCTAssertTrue(myListBlock.contains("await viewModel.syncCatalog()"))
+        XCTAssertFalse(
+            filtersViewSource.contains("private struct CatalogSyncPanel: View"),
+            "The catalog refresh panel is replaced by pull-to-refresh on the My list cover."
         )
     }
 
     func testFilterActionButtonsUseLeadingGlyphsWithStableLabelSpacing() throws {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blockedDomainsDetailBlock = try Self.sourceBlock(
+        let myListBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BlockedDomainsDetailView: View",
+            startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
-        )
-        let allowedExceptionsDetailBlock = try Self.sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct AllowedExceptionsDetailView: View",
-            endingBefore: "private struct CatalogSyncPanel: View"
-        )
-        let catalogSyncPanelBlock = try Self.sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct CatalogSyncPanel: View",
-            endingBefore: "private struct AllowedExceptionReminderPanel: View"
         )
         let filterAddButtonBlock = try Self.sourceBlock(
             in: filtersViewSource,
@@ -181,10 +160,9 @@ final class BlocklistSelectionSourceTests: XCTestCase {
             endingBefore: "private struct DomainEntryForm: View"
         )
 
-        XCTAssertTrue(catalogSyncPanelBlock.contains("FilterAddButton(title: viewModel.catalogRefreshButtonTitle, systemImage: \"arrow.clockwise\")"))
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("FilterAddButton(title: \"Add Blocklist\", systemImage: \"plus\")"))
-        XCTAssertTrue(blockedDomainsDetailBlock.contains("FilterAddButton(title: \"Add Blocked Domain\", systemImage: \"plus\")"))
-        XCTAssertTrue(allowedExceptionsDetailBlock.contains("FilterAddButton(title: \"Add Exception\", systemImage: \"plus\")"))
+        XCTAssertTrue(myListBlock.contains("FilterAddButton(title: \"Add a blocklist\", systemImage: \"plus\")"))
+        XCTAssertTrue(myListBlock.contains("FilterAddButton(title: \"Block a domain\", systemImage: \"plus\")"))
+        XCTAssertTrue(myListBlock.contains("FilterAddButton(title: \"Add an exception\", systemImage: \"plus\")"))
         XCTAssertTrue(filterAddButtonBlock.contains("private enum FilterActionLabelMetrics"))
         XCTAssertTrue(filterAddButtonBlock.contains("static let iconFrameSize: CGFloat = 16"))
         XCTAssertTrue(filterAddButtonBlock.contains("static let iconPointSize: CGFloat = 13"))
@@ -483,7 +461,9 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
 
         XCTAssertFalse(freshnessTitleBlock.contains("Blocklists are fresh"))
-        XCTAssertTrue(freshnessTitleBlock.contains("Catalog checked"))
+        XCTAssertFalse(freshnessTitleBlock.contains("\"Catalog checked\""))
+        XCTAssertFalse(freshnessTitleBlock.contains("\"Catalog needs a refresh\""))
+        XCTAssertTrue(freshnessTitleBlock.contains("Filter up to date"))
         XCTAssertTrue(appViewModelSource.contains("private static func filterPreparationFailureMessage(for error: Error) -> String"))
         XCTAssertTrue(preparationBlock.contains("Self.filterPreparationFailureMessage(for: error)"))
         XCTAssertTrue(appViewModelSource.contains("Lava is still preparing an update for this blocklist source."))
@@ -524,7 +504,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(confirmationSheetBlock.contains("ToolbarItem(placement: .cancellationAction)"))
-        XCTAssertTrue(confirmationSheetBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Cancel\")"))
+        XCTAssertTrue(confirmationSheetBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Cancel\", role: .cancel)"))
         XCTAssertFalse(confirmationSheetBlock.contains("LavaToolbarIconButton("))
         XCTAssertTrue(confirmationSheetBlock.contains("cancelIfStandaloneReview()"))
         XCTAssertTrue(confirmationSheetBlock.contains("dismiss()"))
@@ -537,7 +517,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         let lavaPlusSheetBlock = try Self.sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct LavaPlusUpgradeSheet: View",
-            endingBefore: "private struct AllowedExceptionsDetailView: View"
+            endingBefore: "private struct FilterEditToolbar: ToolbarContent"
         )
         let addBlocklistSheetBlock = try Self.sourceBlock(
             in: filtersViewSource,
@@ -642,7 +622,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         let editToolbarBlock = try Self.sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
-            endingBefore: "private struct CatalogSyncPanel: View"
+            endingBefore: "private struct LavaInlineInfoContent: View"
         )
 
         XCTAssertTrue(editToolbarBlock.contains("ToolbarItem(placement: .cancellationAction)"))

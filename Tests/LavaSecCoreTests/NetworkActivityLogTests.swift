@@ -63,6 +63,49 @@ final class NetworkActivityLogTests: XCTestCase {
         try? FileManager.default.removeItem(at: directoryURL)
     }
 
+    func testPersistencePruneExpiredRemovesStaleEntriesFromDisk() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directoryURL.appendingPathComponent("network-activity-log.json")
+        let now = Date()
+        let staleTimestamp = now.addingTimeInterval(-TimeInterval(LocalLogRetention.fineGrainedDays + 2) * 86_400)
+        let log = NetworkActivityLog(entries: [
+            Self.entry(timestamp: now, event: .protectionConnected),
+            Self.entry(timestamp: staleTimestamp, event: .userAction(.turnProtectionOn))
+        ])
+        try NetworkActivityLogPersistence.save(log, to: url)
+
+        NetworkActivityLogPersistence.pruneExpired(at: url, now: now)
+
+        let reloaded = NetworkActivityLogPersistence.load(from: url)
+        XCTAssertEqual(reloaded.entries.map(\.event), [.protectionConnected])
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+
+    func testLoadPrunedReturnsTrimmedLogAndModificationDateUnderLock() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directoryURL.appendingPathComponent("network-activity-log.json")
+        let now = Date()
+        let staleTimestamp = now.addingTimeInterval(-TimeInterval(LocalLogRetention.fineGrainedDays + 2) * 86_400)
+        let log = NetworkActivityLog(entries: [
+            Self.entry(timestamp: now, event: .protectionConnected),
+            Self.entry(timestamp: staleTimestamp, event: .userAction(.turnProtectionOn))
+        ])
+        try NetworkActivityLogPersistence.save(log, to: url)
+
+        let pruned = NetworkActivityLogPersistence.loadPruned(at: url, now: now)
+
+        XCTAssertEqual(pruned.log.entries.map(\.event), [.protectionConnected])
+        XCTAssertNotNil(pruned.modifiedAt)
+        // The on-disk file is trimmed to match the returned log.
+        XCTAssertEqual(
+            NetworkActivityLogPersistence.load(from: url).entries.map(\.event),
+            [.protectionConnected]
+        )
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+
     func testLogLoadsLegacyEntriesWithoutDeviceFallbackFields() throws {
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

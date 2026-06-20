@@ -151,7 +151,7 @@ struct LavaOnboardingView: View {
                     )
                     OnboardingFeatureRow(
                         systemImage: "lock.shield.fill",
-                        title: "Local filters make it safe, private and free"
+                        title: "Local filter makes it safe, private and free"
                     )
                     OnboardingFeatureRow(
                         systemImage: "slider.horizontal.3",
@@ -169,7 +169,7 @@ struct LavaOnboardingView: View {
         OnboardingStepLayout(
             step: "Step 1",
             title: "Install Lava's local VPN",
-            description: "This enforces the filters and does not route traffic to a server at all",
+            description: "This enforces the filter and does not route traffic to a server at all",
             contentPlacement: .centered
         ) {
             OnboardingVPNPermissionDialogIllustration()

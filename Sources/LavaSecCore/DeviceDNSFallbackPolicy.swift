@@ -27,17 +27,12 @@ public enum DeviceDNSFallbackPolicy {
         deviceDNSFallbackModeActive || consecutiveFallbackEvidenceCount > 0
     }
 
-    // FUTURE (dns-recovery optimization C, pending rc/debug-log evidence):
-    // preserveOnEmptyCapture is a stability heuristic — it stops a transient
-    // masked read (iOS surfacing only Lava's tunnel DNS) from wiping working
-    // resolvers. Its failure mode is the `send-failed` wedge: on a real handoff an
-    // empty read PRESERVES the previous network's (now unreachable) resolvers.
-    // #23 narrows the window by re-capturing at settle, but the residual hole is
-    // an empty capture even at settle. A bounded capture-RETRY (re-read every ~1s
-    // for N tries until non-empty, then give up and preserve) would make capture
-    // genuinely nimble. Trade-off: a few extra reads during a transition. The
-    // device-dns-captured count events (now exported via #23) should confirm how
-    // often settle-time captures still come back empty before this is worth doing.
+    // preserveOnEmptyCapture is a stability heuristic — it stops a transient masked
+    // read (iOS surfacing only Lava's tunnel DNS) from wiping working resolvers.
+    // Its failure mode is the `send-failed` wedge: on a real handoff an empty read
+    // PRESERVES the previous network's (now unreachable) resolvers. The bounded
+    // capture-retry below (dns-recovery optimization C) narrows that hole by
+    // re-reading until the capture comes back non-empty.
     public static func refreshedResolverAddresses(
         current: [String],
         captured: [String],
@@ -48,5 +43,37 @@ public enum DeviceDNSFallbackPolicy {
         }
 
         return preserveOnEmptyCapture ? current : []
+    }
+
+    // dns-recovery optimization C — bounded device-DNS capture retry.
+    //
+    // preserveOnEmptyCapture (above) keeps working resolvers across a transient
+    // masked read, but on a resolver-CHANGING handoff an empty read strands a
+    // Device-DNS user on the previous network's unreachable resolvers — the silent
+    // wedge UR-37 reported, where a tunnel restart was the only thing that
+    // re-captured. The retry narrows that: after a handoff/wake, re-read the system
+    // resolvers every `deviceDNSCaptureRetryInterval` for up to
+    // `deviceDNSCaptureMaxRetryAttempts` tries until the capture is non-empty (then
+    // the caller adopts it and stops). On networks/iOS versions where the mask
+    // lifts a beat after the path settles this recovers in place with no restart;
+    // on a fully-masked network it gives up after the cap and leaves the
+    // wedge-recovery probe + (on-demand-gated) self-reconnect as the backstops.
+    // Cost: a few extra reads during a transition.
+    public static let deviceDNSCaptureRetryInterval: TimeInterval = 1
+    public static let deviceDNSCaptureMaxRetryAttempts = 5
+
+    /// Whether to schedule another bounded capture retry. Stops as soon as a
+    /// non-empty capture is seen (the caller adopts the fresh addresses) or the
+    /// attempt cap is reached. `attemptsMade` counts retries already performed
+    /// (1-based: pass 1 after the first retry).
+    public static func shouldRetryDeviceDNSCapture(
+        attemptsMade: Int,
+        capturedNonEmpty: Bool
+    ) -> Bool {
+        guard !capturedNonEmpty else {
+            return false
+        }
+
+        return attemptsMade < deviceDNSCaptureMaxRetryAttempts
     }
 }

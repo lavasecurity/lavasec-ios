@@ -100,7 +100,7 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertTrue(store.recentEvents.isEmpty)
     }
 
-    func testDailyRolloverResetsCountsAndEvents() throws {
+    func testDailyRolloverResetsCountsButKeepsRecentEventsWithinWindow() throws {
         let calendar = Calendar(identifier: .gregorian)
         let yesterday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 15, hour: 12)))
         let today = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 16, hour: 12)))
@@ -109,10 +109,66 @@ final class DiagnosticsStoreTests: XCTestCase {
 
         store.resetForCurrentDayIfNeeded(now: today, calendar: calendar)
 
+        // The running counters reset on rollover (history lives in dayCounts), but
+        // domain-history events are no longer wiped daily — they roll on the 7-day
+        // fine-grained window, so a fresh event survives into the next day.
         XCTAssertEqual(store.summary.blockedCount, 0)
         XCTAssertEqual(store.summary.allowedCount, 0)
-        XCTAssertTrue(store.recentEvents.isEmpty)
+        XCTAssertEqual(store.recentEvents.map(\.domain), ["ads.example.com"])
         XCTAssertTrue(calendar.isDate(store.summary.startedAt, inSameDayAs: today))
+    }
+
+    func testFineGrainedEventsPruneOncePastTheRetentionWindow() {
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertEqual(store.recentEvents.count, 1)
+
+        let pastWindow = Date().addingTimeInterval(TimeInterval(LocalLogRetention.fineGrainedDays + 1) * 86_400)
+        let removedExpired = store.pruneExpiredFineGrainedData(now: pastWindow)
+
+        XCTAssertTrue(removedExpired)
+        XCTAssertTrue(store.recentEvents.isEmpty)
+        // A second prune has nothing to remove and reports no change, so callers
+        // can skip a redundant write.
+        XCTAssertFalse(store.pruneExpiredFineGrainedData(now: pastWindow))
+    }
+
+    func testDayRolloverPruneMarksStoreForPersistence() throws {
+        // `DiagnosticsPersistence.load` prunes inside `resetForCurrentDayIfNeeded`,
+        // so a later explicit prune would report no change. The store must instead
+        // remember it pruned, so the owner still writes the trimmed file (otherwise
+        // an idle device keeps >7-day history on disk).
+        let calendar = Calendar(identifier: .gregorian)
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertFalse(store.consumePendingFineGrainedPrunePersist())
+
+        let afterWindow = Date().addingTimeInterval(TimeInterval(LocalLogRetention.fineGrainedDays + 3) * 86_400)
+        store.resetForCurrentDayIfNeeded(now: afterWindow, calendar: calendar)
+
+        XCTAssertTrue(store.recentEvents.isEmpty)
+        XCTAssertTrue(store.consumePendingFineGrainedPrunePersist())
+        // Consuming clears the flag.
+        XCTAssertFalse(store.consumePendingFineGrainedPrunePersist())
+    }
+
+    func testTopDomainsCanBeScopedToADayRange() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+
+        let today = Date()
+        let withinRange = store.topDomains(action: .block, from: today, to: today, calendar: calendar, limit: 3)
+        let pastRange = store.topDomains(
+            action: .block,
+            from: today.addingTimeInterval(-30 * 86_400),
+            to: today.addingTimeInterval(-20 * 86_400),
+            calendar: calendar,
+            limit: 3
+        )
+
+        XCTAssertEqual(withinRange.first, DomainFrequency(domain: "ads.example.com", count: 1))
+        XCTAssertTrue(pastRange.isEmpty)
     }
 
     func testSummaryOnDateUsesDailyAggregateCounts() throws {

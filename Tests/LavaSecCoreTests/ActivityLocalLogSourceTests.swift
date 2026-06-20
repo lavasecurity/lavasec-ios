@@ -5,7 +5,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let networkBlock = try Self.sourceBlock(
             in: source,
-            startingAt: "private struct NetworkActivityLogView: View",
+            startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
 
@@ -20,11 +20,11 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         let chromeBlock = try Self.sourceBlock(
             in: source,
             startingAt: "private struct LocalLogSubpageChrome",
-            endingBefore: "private struct NetworkActivityLogView: View"
+            endingBefore: "struct NetworkActivityLogView: View"
         )
         let networkBlock = try Self.sourceBlock(
             in: source,
-            startingAt: "private struct NetworkActivityLogView: View",
+            startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
         let domainBlock = try Self.sourceBlock(
@@ -34,7 +34,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(chromeBlock.contains("ToolbarItem(placement: .primaryAction)"))
-        XCTAssertTrue(chromeBlock.contains("NativeToolbarIconButton(systemName: \"trash\", accessibilityLabel: \"Clear\", action: clear)"))
+        XCTAssertTrue(chromeBlock.contains("NativeToolbarIconButton(systemName: \"trash\", accessibilityLabel: \"Clear\", role: .destructive, action: clear)"))
         XCTAssertFalse(chromeBlock.contains("LavaToolbarIconButton("))
         XCTAssertFalse(chromeBlock.contains("Button(\"Clear\""))
         XCTAssertTrue(chromeBlock.contains(".navigationBarTitleDisplayMode(.large)"))
@@ -113,7 +113,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let networkBlock = try Self.sourceBlock(
             in: source,
-            startingAt: "private struct NetworkActivityLogView: View",
+            startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
         let domainBlock = try Self.sourceBlock(
@@ -160,7 +160,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         let diagnosticsSource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let networkBlock = try Self.sourceBlock(
             in: diagnosticsSource,
-            startingAt: "private struct NetworkActivityLogView: View",
+            startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct ActivityDateScopeButton"
         )
 

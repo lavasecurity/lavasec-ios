@@ -391,6 +391,8 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "compiledRuleCount",
         "connectionStatus",
         "consecutiveUpstreamFailureCount",
+        "consecutiveSmokeFailures",
+        "consecutiveRejectedResponses",
         "count",
         // Self-reconnect suppression diagnostics (why a wedge did not restart the
         // tunnel): a decision label + the gating booleans. Privacy-safe — no
@@ -487,7 +489,14 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "protocol",
         "resolverCount",
         "succeeded",
-        "underlyingError"
+        "underlyingError",
+
+        // Build provenance stamped on startTunnel-begin so every captured tunnel
+        // session is attributable to an exact app version / build / source commit
+        // (a single export can span an app update). Not PII — version/build/SHA only.
+        "appVersion",
+        "appBuild",
+        "sourceRevision"
     ]
 
     private static func stringValue(_ value: Any) -> String? {

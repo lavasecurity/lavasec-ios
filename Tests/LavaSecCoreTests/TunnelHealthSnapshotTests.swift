@@ -38,6 +38,7 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertNil(snapshot.lastDNSSmokeProbeSucceeded)
         XCTAssertEqual(snapshot.dnsSmokeProbeSuccessCount, 0)
         XCTAssertEqual(snapshot.dnsSmokeProbeFailureCount, 0)
+        XCTAssertEqual(snapshot.consecutiveDNSSmokeProbeFailureCount, 0)
         XCTAssertFalse(snapshot.deviceDNSFallbackModeActive)
         XCTAssertNil(snapshot.lastDeviceDNSFallbackActivatedAt)
         XCTAssertEqual(snapshot.deviceDNSFallbackActivationCount, 0)
@@ -59,6 +60,7 @@ final class TunnelHealthSnapshotTests: XCTestCase {
             lastDNSSmokeProbeSucceeded: false,
             dnsSmokeProbeSuccessCount: 5,
             dnsSmokeProbeFailureCount: 6,
+            consecutiveDNSSmokeProbeFailureCount: 4,
             deviceDNSFallbackModeActive: true,
             lastDeviceDNSFallbackActivatedAt: Date(timeIntervalSinceReferenceDate: 800_720_020),
             deviceDNSFallbackActivationCount: 7
@@ -78,6 +80,7 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.lastDNSSmokeProbeSucceeded, false)
         XCTAssertEqual(decoded.dnsSmokeProbeSuccessCount, 5)
         XCTAssertEqual(decoded.dnsSmokeProbeFailureCount, 6)
+        XCTAssertEqual(decoded.consecutiveDNSSmokeProbeFailureCount, 4)
         XCTAssertTrue(decoded.deviceDNSFallbackModeActive)
         XCTAssertEqual(decoded.lastDeviceDNSFallbackActivatedAt, Date(timeIntervalSinceReferenceDate: 800_720_020))
         XCTAssertEqual(decoded.deviceDNSFallbackActivationCount, 7)
@@ -114,6 +117,9 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.networkChangeCount, 0)
         XCTAssertEqual(snapshot.resolverRuntimeResetCount, 0)
         XCTAssertEqual(snapshot.consecutiveUpstreamFailureCount, 0)
+        XCTAssertEqual(snapshot.consecutiveDNSSmokeProbeFailureCount, 0)
+        XCTAssertEqual(snapshot.consecutiveRejectedSmokeResponseCount, 0)
+        XCTAssertNil(snapshot.rejectedSmokeResponseResolverIdentity)
         XCTAssertNil(snapshot.lastUpstreamDurationMilliseconds)
         XCTAssertEqual(snapshot.slowUpstreamResponseCount, 0)
         XCTAssertEqual(snapshot.consecutiveSlowUpstreamResponseCount, 0)
@@ -184,5 +190,22 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.lastNetworkSettingsReapplyFailureAt, now)
         XCTAssertEqual(decoded.lastNetworkSettingsReapplyFailureReason, "network-path-changed: failed")
         XCTAssertEqual(decoded.networkSettingsReapplyFailureCount, 2)
+    }
+
+    func testHealthRoundTripPreservesRejectedSmokeResponseFields() throws {
+        let snapshot = TunnelHealthSnapshot(
+            lastFailureReason: "rejected-response",
+            consecutiveRejectedSmokeResponseCount: 3,
+            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201"
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.consecutiveRejectedSmokeResponseCount, 3)
+        XCTAssertEqual(
+            decoded.rejectedSmokeResponseResolverIdentity,
+            "device:220.159.212.200,220.159.212.201"
+        )
     }
 }

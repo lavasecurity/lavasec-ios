@@ -425,6 +425,7 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
     case missingEnabledBlocklistSource(sourceID: String)
     case noCachedCatalog
     case noRulesAvailable
+    case customBlocklistUnavailable(displayName: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -446,7 +447,23 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
             "No saved Lava Security catalog is available yet."
         case .noRulesAvailable:
             "No enabled downloaded filters are available yet."
+        case .customBlocklistUnavailable(let displayName, let reason):
+            "Couldn’t load the custom blocklist “\(displayName)”. \(reason)"
         }
+    }
+}
+
+/// Thrown when a streamed download exceeds the byte ceiling before its body is fully
+/// materialized. Deliberately not a `BlocklistCatalogSyncError` case so it needs no
+/// public enum/switch changes: built-in sources fail closed (falling back to cache when
+/// one exists), the custom-source path wraps it as `customBlocklistUnavailable` (named),
+/// and the catalog loader treats it as just another failed remote attempt.
+struct BlocklistDownloadSizeLimitExceeded: LocalizedError {
+    let byteSize: Int
+    let maximumByteCount: Int
+
+    var errorDescription: String? {
+        "The download exceeded the \(maximumByteCount / (1024 * 1024)) MB size limit (\(byteSize) bytes)."
     }
 }
 
@@ -680,7 +697,24 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     public static func defaultDataFetcher(url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        // Stream the body to a temp file instead of buffering it in RAM. `data(from:)`
+        // fully materializes the response in memory before any size check, so a remote
+        // (or MITM / hostile custom-URL) oversized body could spike memory — a real
+        // hazard given the sync can run inside the memory-constrained extension budget.
+        // `download(from:)` writes the body to disk as it arrives, so peak memory stays
+        // bounded regardless of body size; we only load the bytes into `Data` after
+        // confirming the on-disk size is within the cap, which preserves the downstream
+        // SHA-256 / acceptedHash verification.
+        //
+        // Scope note: this bounds *memory*. We don't abort mid-download on disk growth —
+        // the async `download(from:delegate:)` can't carry a download delegate without
+        // the `didFinishDownloadingTo` file-ownership footgun — so a hostile server can
+        // still write up to a full body to the sandboxed, transient temp dir before the
+        // size check rejects it. That residual is far weaker than the unbounded RAM
+        // buffering this replaces.
+        let (tempURL, response) = try await URLSession.shared.download(from: url)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw BlocklistCatalogSyncError.invalidCatalog
         }
@@ -689,7 +723,19 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             throw BlocklistCatalogSyncError.invalidHTTPStatus(httpResponse.statusCode)
         }
 
-        return data
+        if let byteCount = downloadedFileByteCount(at: tempURL),
+           byteCount > maximumBlocklistBytes {
+            throw BlocklistDownloadSizeLimitExceeded(
+                byteSize: byteCount,
+                maximumByteCount: maximumBlocklistBytes
+            )
+        }
+
+        return try Data(contentsOf: tempURL)
+    }
+
+    static func downloadedFileByteCount(at url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
     }
 
     private func compile(
@@ -997,9 +1043,13 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
     private func parsePayload(_ data: Data, sourceID: String, format: BlocklistFormat) throws -> DomainRuleSet {
         try validateBlocklistSize(data.count, sourceID: sourceID)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw BlocklistCatalogSyncError.invalidBlocklistEncoding(sourceID)
-        }
+        // Decode leniently: a single invalid UTF-8 byte must not reject the whole
+        // list, which for an enabled source under fail-CLOSED would block all DNS.
+        // Malformed bytes become U+FFFD and fail per-line domain validation in the
+        // parser instead, so only the offending line is dropped. (The
+        // invalidBlocklistEncoding error stays in the public enum for the app's
+        // error UI, but lenient decoding no longer produces it here.)
+        let text = String(decoding: data, as: UTF8.self)
 
         return BlocklistParser()
             .parseRuleSet(text, format: format)
@@ -1048,7 +1098,30 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         allowsNetwork: Bool
     ) async throws -> CompiledCustomSourceResult {
         try Task.checkCancellation()
-        let payload = try await loadCustomBlocklistPayload(for: source, allowsNetwork: allowsNetwork)
+        let payload: LoadedBlocklistPayload
+        do {
+            payload = try await loadCustomBlocklistPayload(for: source, allowsNetwork: allowsNetwork)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession surfaces a cancelled in-flight download as URLError(.cancelled),
+            // not CancellationError — propagate it as cancellation too, so a cancelled
+            // refresh isn't reported to direct callers as a download failure.
+            throw urlError
+        } catch let syncError as BlocklistCatalogSyncError {
+            // Already a specific, descriptive case (checksum mismatch, too large, …) —
+            // propagate as-is so callers can still distinguish them.
+            throw syncError
+        } catch {
+            // A foreign error (URLError download failure, or a no-cache file error):
+            // name the specific list and keep the underlying reason so it surfaces as
+            // an actionable "Couldn't load 'My List'. <why>" instead of a raw URLError
+            // (or, pre-fix, a phantom latest.txt file error).
+            throw BlocklistCatalogSyncError.customBlocklistUnavailable(
+                displayName: source.displayName,
+                reason: error.localizedDescription
+            )
+        }
         let ruleSet = try cachedOrParsedRuleSet(
             payload: payload,
             sourceID: source.id,

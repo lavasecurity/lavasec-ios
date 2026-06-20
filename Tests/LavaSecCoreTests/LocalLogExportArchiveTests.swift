@@ -119,6 +119,103 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertFalse(String(decoding: archive.data, as: UTF8.self).contains("device-debug-log-"))
     }
 
+    func testManifestDeclaresFormatV2AndCarriesBuildProvenance() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 20, hour: 19, minute: 15)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: DiagnosticsStore(startedAt: generatedAt),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            metadata: LocalLogExportMetadata(
+                appVersion: "1.0.0",
+                build: "1781939878",
+                sourceRevision: "859665babc12",
+                osVersion: "iOS 26.5",
+                deviceFamily: "Phone",
+                locale: "en_US",
+                catalogVersion: "20260620T061709Z"
+            ),
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        let archiveText = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertTrue(archiveText.contains("lava-local-logs-zip-v2"))
+        XCTAssertTrue(archiveText.contains("app_version"))
+        XCTAssertTrue(archiveText.contains("1781939878"))
+        // The SHA is the field that pins an export to merged PRs.
+        XCTAssertTrue(archiveText.contains("source_revision"))
+        XCTAssertTrue(archiveText.contains("859665babc12"))
+        XCTAssertTrue(archiveText.contains("catalog_version"))
+        XCTAssertTrue(archiveText.contains("20260620T061709Z"))
+    }
+
+    func testEmptyOrUnknownMetadataValuesAreOmittedFromManifest() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 20, hour: 19, minute: 15)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        // Local builds: no injected source commit, no synced catalog.
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: DiagnosticsStore(startedAt: generatedAt),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            metadata: LocalLogExportMetadata(
+                appVersion: "1.0.0",
+                build: "1",
+                sourceRevision: "",
+                osVersion: "Unknown",
+                catalogVersion: nil
+            ),
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        let archiveText = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertTrue(archiveText.contains("lava-local-logs-zip-v2"))
+        XCTAssertTrue(archiveText.contains("app_version"))
+        XCTAssertFalse(archiveText.contains("source_revision")) // empty -> omitted
+        XCTAssertFalse(archiveText.contains("os_version"))      // "Unknown" -> omitted
+        XCTAssertFalse(archiveText.contains("catalog_version")) // nil -> omitted
+    }
+
+    func testStartTunnelBuildStampSurvivesRedactionIntoExport() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 20, hour: 19, minute: 15)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        // The tunnel stamps appVersion/appBuild/sourceRevision onto startTunnel-begin;
+        // they must be allowlisted so they survive into the export (a non-allowlisted
+        // key on the same line must still be dropped).
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data("""
+        {"component":"tunnel","event":"startTunnel-begin","timestamp":"2026-06-20T07:32:46Z","appVersion":"1.0.0","appBuild":"1781939878","sourceRevision":"859665babc12","hasOptions":"true","privateNote":"checkout.example"}
+        """.utf8))
+
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: DiagnosticsStore(startedAt: generatedAt),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            deviceDebugLog: entries,
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        let archiveText = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertTrue(archiveText.contains("startTunnel-begin"))
+        XCTAssertTrue(archiveText.contains("appVersion"))
+        XCTAssertTrue(archiveText.contains("1781939878"))
+        XCTAssertTrue(archiveText.contains("sourceRevision"))
+        XCTAssertTrue(archiveText.contains("859665babc12"))
+        // A non-allowlisted key on the same line is still redacted out.
+        XCTAssertFalse(archiveText.contains("privateNote"))
+        XCTAssertFalse(archiveText.contains("checkout.example"))
+    }
+
     private static func date(
         year: Int,
         month: Int,

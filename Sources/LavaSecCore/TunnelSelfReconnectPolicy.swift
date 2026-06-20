@@ -39,7 +39,13 @@ public enum TunnelSelfReconnectPolicy {
     /// Attempt timestamps trimmed to the active window — the value the caller
     /// should persist (so the window doesn't grow without bound).
     public static func prunedAttemptTimes(_ times: [Date], now: Date = Date()) -> [Date] {
-        times.filter { now.timeIntervalSince($0) < attemptWindow && $0 <= now }
+        // A backward wall-clock jump can make persisted attempts look future-dated.
+        // Clamp them to `now` rather than dropping them: discarding would erase the
+        // attempt history and let the cooldown/cap be bypassed, reopening the
+        // restart loop the window exists to prevent.
+        times
+            .map { min($0, now) }
+            .filter { now.timeIntervalSince($0) < attemptWindow }
     }
 
     public static func decision(

@@ -1,5 +1,14 @@
 import Foundation
 
+/// Hard cap on how long fine-grained, identity-level local logs (domain history
+/// events, top-domain frequency, network activity) are retained on device.
+/// Aggregate counts, protection uptime, and Lava Guard usage-day streaks are
+/// deliberately exempt — the rule is "details expire, trends don't."
+public enum LocalLogRetention {
+    public static let fineGrainedDays = 7
+    public static var fineGrainedWindow: TimeInterval { TimeInterval(fineGrainedDays) * 86_400 }
+}
+
 public struct DNSQueryEvent: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public let timestamp: Date
@@ -185,6 +194,12 @@ public struct DiagnosticsStore: Codable, Sendable {
     private var dayCounts: [String: DiagnosticsDayCount]
     private var activeLocalProtectionStartedAt: Date?
     public private(set) var startedAt: Date
+
+    /// Set whenever a fine-grained prune actually removes events — on load's
+    /// day-rollover reset, on record, or on an explicit prune — so the owner can
+    /// persist the trimmed store. Transient bookkeeping: never encoded, and reset
+    /// once consumed.
+    private var pendingFineGrainedPrunePersist = false
 
     public init(maxEvents: Int = 250, startedAt: Date = Date()) {
         self.maxEvents = maxEvents
@@ -379,6 +394,8 @@ public struct DiagnosticsStore: Codable, Sendable {
         if events.count > maxEvents {
             events.removeFirst(events.count - maxEvents)
         }
+
+        pruneExpiredEvents(now: Date())
     }
 
     public mutating func clearDomainHistory() {
@@ -423,18 +440,92 @@ public struct DiagnosticsStore: Codable, Sendable {
             return
         }
 
-        events.removeAll(keepingCapacity: true)
+        // The day rolled over. The prior day's aggregate counts already live in
+        // `dayCounts`, so the running counters reset — but domain-history events
+        // are no longer wiped daily; they roll on a 7-day window (the fine-grained
+        // retention cap) so Activity can show the last week of detail.
         allowedCount = 0
         blockedCount = 0
         localProtectionUptime = 0
         startedAt = now
+        pruneExpiredEvents(now: now)
         seedCurrentDayCountIfNeeded(calendar: calendar)
     }
 
+    /// Drops domain-history events older than the fine-grained retention window
+    /// and reports whether anything was removed, so callers can persist the pruned
+    /// store. Aggregate `dayCounts` (and Lava Guard streaks) are left untouched.
+    @discardableResult
+    public mutating func pruneExpiredFineGrainedData(now: Date = Date()) -> Bool {
+        pruneExpiredEvents(now: now)
+    }
+
+    /// Reports whether a fine-grained prune has removed events since the last
+    /// consume — including a prune `DiagnosticsPersistence.load` performed inside
+    /// `resetForCurrentDayIfNeeded`, where an immediate re-prune would report no
+    /// change yet the on-disk file is still stale — and clears the flag. The owner
+    /// persists the store when this returns true so retention holds on disk, not
+    /// just in the in-memory copy shown in the UI.
+    public mutating func consumePendingFineGrainedPrunePersist() -> Bool {
+        defer { pendingFineGrainedPrunePersist = false }
+        return pendingFineGrainedPrunePersist
+    }
+
+    @discardableResult
+    private mutating func pruneExpiredEvents(now: Date) -> Bool {
+        let cutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
+        let countBefore = events.count
+        events.removeAll { $0.timestamp < cutoff }
+        let didRemove = events.count != countBefore
+        if didRemove {
+            pendingFineGrainedPrunePersist = true
+        }
+        return didRemove
+    }
+
     public func topDomains(action: FilterAction, limit: Int = 10) -> [DomainFrequency] {
+        rankedDomains(action: action, limit: limit) { _ in true }
+    }
+
+    /// Top domains restricted to the inclusive day range `[from, to]`. Used by the
+    /// Activity "lens" so Top Domains follows the same window as the digest. Bounded
+    /// by the fine-grained retention cap — ranges older than that resolve to empty.
+    public func topDomains(
+        action: FilterAction,
+        from startDate: Date,
+        to endDate: Date,
+        searchText: String = "",
+        calendar: Calendar = .current,
+        limit: Int = 10
+    ) -> [DomainFrequency] {
+        let start = calendar.startOfDay(for: min(startDate, endDate))
+        let end = calendar.startOfDay(for: max(startDate, endDate))
+        let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let endExclusive = calendar.date(byAdding: .day, value: 1, to: end) else {
+            return topDomains(action: action, limit: limit)
+        }
+
+        return rankedDomains(action: action, limit: limit) { event in
+            guard event.timestamp >= start, event.timestamp < endExclusive else {
+                return false
+            }
+
+            guard !normalizedSearch.isEmpty else {
+                return true
+            }
+
+            return event.domain.localizedCaseInsensitiveContains(normalizedSearch)
+        }
+    }
+
+    private func rankedDomains(
+        action: FilterAction,
+        limit: Int,
+        where isIncluded: (DNSQueryEvent) -> Bool
+    ) -> [DomainFrequency] {
         var counts: [String: Int] = [:]
 
-        for event in events where event.decision.action == action {
+        for event in events where event.decision.action == action && isIncluded(event) {
             counts[event.domain, default: 0] += 1
         }
 

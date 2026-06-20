@@ -49,8 +49,11 @@ public enum DNSResolverSmokeProbe {
     }
 
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {
-        guard let response,
-              response.count >= 12,
+        guard let response = response.map({ zeroBased($0) }) else {
+            return false
+        }
+        let query = zeroBased(query)
+        guard response.count >= 12,
               query.count >= 12,
               readUInt16(response, at: 0) == readUInt16(query, at: 0)
         else {
@@ -88,7 +91,10 @@ public enum DNSResolverSmokeProbe {
     /// are authoritative answers that MUST pass through untouched — we must not
     /// reroute every "does not exist" reply to the fallback resolver.
     public static func indicatesResolverFailure(_ response: Data?) -> Bool {
-        guard let response, response.count >= 12 else {
+        guard let response = response.map({ zeroBased($0) }) else {
+            return false
+        }
+        guard response.count >= 12 else {
             return false
         }
 
@@ -128,6 +134,13 @@ public enum DNSResolverSmokeProbe {
         }
 
         return nil
+    }
+
+    // The parsers above index by absolute offset, valid only on a 0-indexed Data.
+    // Normalize at the public entries: no-op (no copy) when already 0-based, copy a
+    // non-zero-start slice so a future slice-passing caller can't misread or trap.
+    private static func zeroBased(_ data: Data) -> Data {
+        data.startIndex == 0 ? data : Data(data)
     }
 
     private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {

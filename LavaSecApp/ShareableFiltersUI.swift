@@ -63,11 +63,11 @@ struct ShareFiltersSheet: View {
                     codeCard(for: code)
                 }
             }
-            .navigationTitle("Share my filters".lavaLocalized)
+            .navigationTitle("Share my filter".lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close") {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close) {
                         dismiss()
                     }
                 }
@@ -248,19 +248,24 @@ struct ImportFiltersFlow: View {
     }
 
     var body: some View {
-        content
-            .background(LavaStyle.groupedBackground.ignoresSafeArea())
-            .alert(
-                "Couldn't import",
-                isPresented: Binding(
-                    get: { applyError != nil },
-                    set: { if !$0 { applyError = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { applyError = nil }
-            } message: {
-                Text(applyError ?? "")
-            }
+        // One NavigationStack hosts every stage so each step renders a native
+        // navigation bar (title + back/skip toolbar items). The stage machine
+        // swaps the stack's root content; back is driven by `stage`, not a push.
+        NavigationStack {
+            content
+                .background(LavaStyle.groupedBackground.ignoresSafeArea())
+                .alert(
+                    "Couldn't import",
+                    isPresented: Binding(
+                        get: { applyError != nil },
+                        set: { if !$0 { applyError = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) { applyError = nil }
+                } message: {
+                    Text(applyError ?? "")
+                }
+        }
     }
 
     @ViewBuilder
@@ -339,33 +344,31 @@ private struct ImportMethodChooserView: View {
     let onClose: () -> Void
 
     var body: some View {
-        NavigationStack {
-            LavaSheetScaffold(spacing: 18) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Import a setup someone shared with you. This replaces your blocklists and blocked domains.")
-                        .lavaSupportingText()
+        LavaSheetScaffold(spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Import a setup someone shared with you. This replaces your blocklists and blocked domains.")
+                    .lavaSupportingText()
 
-                    ImportOptionRow(
-                        systemImage: "qrcode.viewfinder",
-                        title: "Scan a QR code",
-                        subtitle: "Point your camera at the shared QR",
-                        action: onScanCode
-                    )
+                ImportOptionRow(
+                    systemImage: "qrcode.viewfinder",
+                    title: "Scan a QR code",
+                    subtitle: "Point your camera at the shared QR",
+                    action: onScanCode
+                )
 
-                    ImportOptionRow(
-                        systemImage: "character.cursor.ibeam",
-                        title: "Enter a code",
-                        subtitle: "Paste or type the config code",
-                        action: onEnterCode
-                    )
-                }
+                ImportOptionRow(
+                    systemImage: "character.cursor.ibeam",
+                    title: "Enter a code",
+                    subtitle: "Paste or type the config code",
+                    action: onEnterCode
+                )
             }
-            .navigationTitle("Import filters".lavaLocalized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", action: onClose)
-                }
+        }
+        .navigationTitle("Import a filter".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: onClose)
             }
         }
     }
@@ -422,13 +425,6 @@ private struct ImportCodeEntryView: View {
 
     var body: some View {
         LavaSheetScaffold(spacing: 16) {
-            importFlowHeader(
-                title: "Enter a code",
-                showsSkip: showsSkip,
-                onBack: onBack,
-                onSkip: onSkip
-            )
-        } content: {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Paste the config code that was shared with you. It usually starts with \"LF1-\".")
                     .lavaSupportingText()
@@ -456,13 +452,18 @@ private struct ImportCodeEntryView: View {
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(enteredCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+        .navigationTitle("Enter a code".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            importFlowToolbar(showsSkip: showsSkip, onBack: onBack, onSkip: onSkip)
+        }
     }
 
     private func continueTapped() {
         do {
             let config = try ShareableFilterConfiguration.decode(configurationCode: enteredCode)
             guard !config.isEmpty else {
-                errorMessage = "This code doesn't contain any filters to import."
+                errorMessage = "This code doesn't contain a filter to import."
                 return
             }
             onDecoded(config)
@@ -487,13 +488,6 @@ private struct ImportQRScannerView: View {
 
     var body: some View {
         LavaSheetScaffold(spacing: 16) {
-            importFlowHeader(
-                title: "Scan a QR code",
-                showsSkip: showsSkip,
-                onBack: onBack,
-                onSkip: onSkip
-            )
-        } content: {
             VStack(alignment: .leading, spacing: 14) {
                 if cameraDenied {
                     cameraDeniedCard
@@ -519,6 +513,11 @@ private struct ImportQRScannerView: View {
                     }
                 }
             }
+        }
+        .navigationTitle("Scan a QR code".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            importFlowToolbar(showsSkip: showsSkip, onBack: onBack, onSkip: onSkip)
         }
         .onChange(of: scenePhase) { _, phase in
             // Returning from Settings (where the user may have granted access)
@@ -560,7 +559,7 @@ private struct ImportQRScannerView: View {
         do {
             let config = try ShareableFilterConfiguration.decode(configurationCode: scanned)
             guard !config.isEmpty else {
-                errorMessage = "That QR code doesn't contain any filters to import."
+                errorMessage = "That QR code doesn't contain a filter to import."
                 return
             }
             hasHandledMatch = true
@@ -835,16 +834,9 @@ private struct ImportPreviewView: View {
         let hiddenDomainCount = blockedDomains.count - shownDomains.count
 
         return LavaSheetScaffold(spacing: 18) {
-            importFlowHeader(
-                title: "Review import",
-                showsSkip: false,
-                onBack: onBack,
-                onSkip: {}
-            )
-        } content: {
             VStack(alignment: .leading, spacing: 16) {
                 LavaInfoPanel(
-                    title: "This overrides your lists",
+                    title: "This replaces your filter",
                     description: "Importing replaces your blocklists and blocked domains. Your allowed exceptions and resolver stay as they are.",
                     systemImage: "exclamationmark.triangle.fill",
                     tint: LavaStyle.lavaOrange,
@@ -900,11 +892,16 @@ private struct ImportPreviewView: View {
                 }
             }
         } footer: {
-            Button(plan.applied.isEmpty ? "Nothing to import" : "Replace my filters") {
+            Button(plan.applied.isEmpty ? "Nothing to import" : "Replace my filter") {
                 onConfirm()
             }
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(plan.applied.isEmpty)
+        }
+        .navigationTitle("Review import".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            importFlowToolbar(showsSkip: false, onBack: onBack, onSkip: {})
         }
     }
 
@@ -1008,46 +1005,37 @@ private struct ImportApplyingView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .controlSize(.large)
-            Text("Applying filters…")
+            Text("Applying filter…")
                 .lavaSupportingText()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LavaStyle.groupedBackground.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 
-// MARK: Shared flow header (chevron back + optional skip)
+// MARK: Shared flow toolbar (native back chevron + optional skip)
 
-// Builds @MainActor UI (LavaToolbarIconButton) and forwards the callbacks into it,
-// so the helper itself must be main-actor-isolated — otherwise Swift 6 flags
-// sending `onBack`/`onSkip` from a nonisolated context into a @MainActor init as a
-// data race. All callers are SwiftUI view bodies (already @MainActor).
+// Builds @MainActor toolbar items (NativeToolbarIconButton) and forwards the
+// callbacks into them, so the helper itself must be main-actor-isolated —
+// otherwise Swift 6 flags sending `onBack`/`onSkip` from a nonisolated context
+// into a @MainActor init as a data race. All callers are SwiftUI view bodies
+// (already @MainActor). The "back" chevron drives the flow's own stage machine
+// rather than a NavigationStack pop, so it's an explicit leading item.
 @MainActor
-@ViewBuilder
-private func importFlowHeader(
-    title: String,
+@ToolbarContentBuilder
+private func importFlowToolbar(
     showsSkip: Bool,
     onBack: @escaping () -> Void,
     onSkip: @escaping () -> Void
-) -> some View {
-    HStack {
-        LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: onBack)
+) -> some ToolbarContent {
+    ToolbarItem(placement: .topBarLeading) {
+        NativeToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: onBack)
+    }
 
-        Spacer()
-
-        Text(title.lavaLocalized)
-            .font(.headline)
-            .foregroundStyle(LavaStyle.ink)
-
-        Spacer()
-
-        if showsSkip {
+    if showsSkip {
+        ToolbarItem(placement: .topBarTrailing) {
             Button("Skip", action: onSkip)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.panelActionGreen)
-                .frame(minWidth: 44, minHeight: 44)
-        } else {
-            Color.clear.frame(width: 44, height: 44)
         }
     }
 }

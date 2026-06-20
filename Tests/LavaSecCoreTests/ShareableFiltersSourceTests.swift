@@ -14,9 +14,10 @@ final class ShareableFiltersSourceTests: XCTestCase {
             endingBefore: "private struct FiltersOverviewPanel"
         )
 
-        XCTAssertTrue(screen.contains("LavaSectionGroup(\"Share & import\")"))
-        XCTAssertTrue(screen.contains("title: \"Share my filters\""))
-        XCTAssertTrue(screen.contains("title: \"Import filters\""))
+        XCTAssertTrue(screen.contains("LavaSectionGroup(\"My filter\")"))
+        XCTAssertTrue(screen.contains("LavaSectionGroup(\"Got a good filter?\")"))
+        XCTAssertTrue(screen.contains("title: \"Share my filter\""))
+        XCTAssertTrue(screen.contains("title: \"Import a filter\""))
         XCTAssertTrue(filtersSource.contains("ShareFiltersSheet()"))
         XCTAssertTrue(filtersSource.contains("ImportFiltersFlow("))
         XCTAssertTrue(filtersSource.contains("startMode: .chooseMethod"))
@@ -53,7 +54,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("struct QRCodeScannerRepresentable: UIViewControllerRepresentable"))
         XCTAssertTrue(source.contains("output.metadataObjectTypes = [.qr]"))
         // Replace confirmation.
-        XCTAssertTrue(source.contains("Replace my filters"))
+        XCTAssertTrue(source.contains("Replace my filter"))
     }
 
     func testScannerHandlesMultiLensAndAdjustableFocus() throws {
@@ -121,7 +122,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
         // Override warning uses the shared info-panel scaffold.
         XCTAssertTrue(preview.contains("LavaInfoPanel("))
-        XCTAssertTrue(preview.contains("This overrides your lists"))
+        XCTAssertTrue(preview.contains("This replaces your filter"))
         // The preview breaks down the actual content being imported (resolved
         // names + domains), not bare counts — and reflects the planned subset.
         XCTAssertTrue(preview.contains("LavaSectionGroup(\"Curated blocklists\")"))

@@ -249,7 +249,7 @@ final class SecuritySettingsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["View Activity"].waitForExistence(timeout: 2))
 
         enterPasscode("1234", in: app)
-        XCTAssertTrue(app.staticTexts["Local Logs"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Domain Logs"].waitForExistence(timeout: 5))
     }
 
     func testBiometricEnableRequestDoesNotCrashAfterPasscodeSetup() throws {

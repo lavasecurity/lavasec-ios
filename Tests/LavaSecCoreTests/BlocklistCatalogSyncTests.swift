@@ -1086,6 +1086,59 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         }
     }
 
+    func testCustomBlocklistStreamingSizeLimitSurfacesNamedError() async throws {
+        // The streaming layer (`defaultDataFetcher`) aborts an oversized body before it
+        // is fully buffered, throwing `BlocklistDownloadSizeLimitExceeded`. Simulate that
+        // by injecting it: the custom-source path must wrap it as the named
+        // `customBlocklistUnavailable` (not pass through a generic error), so the user
+        // sees which list failed.
+        let sourceURL = URL(string: "https://user.example.com/huge.txt")!
+        let source = try CustomBlocklistSource(
+            id: "custom-huge",
+            displayName: "Huge",
+            rawURL: sourceURL.absoluteString
+        )
+
+        do {
+            _ = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: makeTemporaryCacheDirectory(),
+                dataFetcher: { url in
+                    if url == sourceURL {
+                        throw BlocklistDownloadSizeLimitExceeded(
+                            byteSize: BlocklistCatalogSynchronizer.maximumBlocklistBytes + 1,
+                            maximumByteCount: BlocklistCatalogSynchronizer.maximumBlocklistBytes
+                        )
+                    }
+
+                    throw URLError(.unsupportedURL)
+                }
+            ).syncCustomBlocklists([source])
+            XCTFail("Expected the oversized streamed download to be rejected.")
+        } catch BlocklistCatalogSyncError.customBlocklistUnavailable(let displayName, _) {
+            XCTAssertEqual(displayName, "Huge")
+        }
+    }
+
+    func testCustomBlocklistDownloadCancellationPropagatesAsURLError() async throws {
+        let source = try CustomBlocklistSource(
+            id: "custom-cancel",
+            displayName: "Cancelled",
+            rawURL: "https://user.example.com/cancelled.txt"
+        )
+
+        do {
+            _ = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: makeTemporaryCacheDirectory(),
+                dataFetcher: { _ in throw URLError(.cancelled) }
+            ).syncCustomBlocklists([source])
+            XCTFail("Expected the cancelled download to propagate.")
+        } catch let error as URLError {
+            // A cancelled in-flight download (URLError.cancelled) must pass through as
+            // cancellation, NOT be wrapped as customBlocklistUnavailable.
+            XCTAssertEqual(error.code, .cancelled)
+        }
+    }
+
     func testParallelSourceCompilationProducesEveryEnabledRuleSet() async throws {
         let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
         let count = 5

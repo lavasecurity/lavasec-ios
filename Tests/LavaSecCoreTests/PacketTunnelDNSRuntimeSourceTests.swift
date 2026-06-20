@@ -782,12 +782,35 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
 
         XCTAssertFalse(source.contains("loadLegacyPersistedSnapshot"))
         XCTAssertTrue(loadBlock.contains("let baseSnapshot = configuration.filterSnapshot()"))
+        // The in-extension compile fallback must enforce the rule budget before its
+        // result can become resident (the compact-header guard only covers on-disk
+        // artifacts), so a post-upgrade v2 re-parse that overshoots fails closed
+        // instead of jetsamming the extension.
+        XCTAssertTrue(loadBlock.contains("FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: compiledRuleCount)"))
         XCTAssertTrue(loadBlock.contains("configuration.enabledBlocklistIDs.isEmpty ? (baseSnapshot, expectedIdentity) : nil"))
         XCTAssertTrue(loadBlock.contains("CachedFilterSnapshotCompiler(\n                cacheDirectoryURL: catalogCacheURL\n            )"))
         XCTAssertTrue(initialStateBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
         XCTAssertTrue(loadSnapshotBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
         XCTAssertTrue(loadSnapshotBlock.contains("\"resolver\": configuration.resolverDiagnosticDisplayName"))
         XCTAssertFalse(loadSnapshotBlock.contains("\"resolver\": runtimeSnapshot.resolver.displayName"))
+    }
+
+    func testLoadInitialSharedStatePersistsAPruneThatHappenedDuringLoad() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let initialStateBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadInitialSharedState()",
+            endingBefore: "private func refreshConfigurationIfNeeded"
+        )
+
+        // A prune performed inside DiagnosticsPersistence.load (the fine-grained retention
+        // window elapsed at an idle start) sets the store's pending-prune flag, NOT the
+        // persistence controller's dirty flag — so loadInitialSharedState must consume that
+        // flag and force a persist, or the stale on-disk events linger until the next DNS
+        // event dirties diagnostics, breaking the on-disk retention guarantee.
+        XCTAssertTrue(initialStateBlock.contains("consumePendingFineGrainedPrunePersist()"))
+        XCTAssertTrue(initialStateBlock.contains("prunedDuringLoad || diagnosticsPersistence.isDirty"))
+        XCTAssertTrue(initialStateBlock.contains("persistDiagnosticsIfNeeded(force: true)"))
     }
 
     func testProtectionStateRefreshClearsInFlightQueriesEvenWhenResolverIsUnchanged() throws {
@@ -1785,6 +1808,61 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
         XCTAssertTrue(probeBlock.contains("DNSResolverSmokeProbe.probeDomain(forSequence: generation)"))
         XCTAssertTrue(probeBlock.contains("domain: probeDomain"))
+    }
+
+    func testConsecutiveSmokeFailureCounterResetsOnlyOnPrimaryProvenHealth() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let smokeProbeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func applyResolverSmokeProbeResult",
+            endingBefore: "private func resetHealth"
+        )
+
+        // The consecutive smoke-failure counter (what the connectivity policy escalates
+        // on) is incremented on a failed probe and reset by smoke-probe success.
+        XCTAssertEqual(
+            smokeProbeBlock.components(separatedBy: "health.consecutiveDNSSmokeProbeFailureCount = 0").count - 1,
+            2,
+            "Counter must reset in exactly the two smoke-success branches (primary + device-fallback)."
+        )
+        XCTAssertTrue(smokeProbeBlock.contains("health.consecutiveDNSSmokeProbeFailureCount += 1"))
+
+        // A genuine PRIMARY forwarding success also clears the streak, but ONLY under the
+        // same primary-only guard that sets lastPrimaryUpstreamSuccessAt — so a
+        // fallback-carried success never resets it (streak survives a wedged primary).
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+        let primaryTimestampIndex = try XCTUnwrap(
+            recordBlock.range(of: "health.lastPrimaryUpstreamSuccessAt = now")
+        ).lowerBound
+        let streakResetIndex = try XCTUnwrap(
+            recordBlock.range(of: "health.consecutiveDNSSmokeProbeFailureCount = 0")
+        ).lowerBound
+        XCTAssertLessThan(
+            primaryTimestampIndex,
+            streakResetIndex,
+            "The streak reset must sit alongside the primary-only success timestamp."
+        )
+        // The encrypted-fallback branch must NOT reset the streak.
+        let encryptedFallbackBranch = try sourceBlock(
+            in: recordBlock,
+            startingAt: "if result.usedEncryptedFallback {",
+            endingBefore: "} else {"
+        )
+        XCTAssertFalse(encryptedFallbackBranch.contains("consecutiveDNSSmokeProbeFailureCount"))
+
+        // A network/path change is a fresh primary-health context, so the recovery reset
+        // (shared by the network-change + wake paths) must also clear the streak —
+        // otherwise failures from the previous network carry into the next one.
+        let recoveryResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetFailureAndFallbackStateForRecovery",
+            endingBefore: "private func invalidateInFlightSmokeProbes"
+        )
+        XCTAssertTrue(recoveryResetBlock.contains("health.consecutiveDNSSmokeProbeFailureCount = 0"))
     }
 
     func testRecoveryContextProbesUseAShorterTimeoutForFasterDetection() throws {

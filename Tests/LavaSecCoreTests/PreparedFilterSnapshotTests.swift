@@ -241,6 +241,68 @@ final class PreparedFilterSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.summary.blockedDomainRuleCount, 3)
     }
 
+    func testLegacyArtifactWithoutParserRulesVersionIsNotReused() throws {
+        // Emulates an on-disk artifact compiled before parserRulesVersion existed:
+        // its persisted JSON has no parserRulesVersion key, so it must decode as a
+        // legacy version (0) and be rejected for reuse — forcing regeneration on
+        // upgrade rather than serving a snapshot built by the old parser (e.g. one
+        // that kept only the first host of a multi-host `0.0.0.0 a b c` line).
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: catalog),
+            snapshot: configuration.filterSnapshot(),
+            summary: PreparedFilterSnapshotSummary(
+                snapshot: configuration.filterSnapshot(),
+                blocklistRuleCount: 1,
+                blocklistSourceRuleCounts: ["source-a": 1]
+            )
+        )
+
+        // An artifact compiled under the current parser reuses fine.
+        XCTAssertTrue(prepared.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: catalog))
+
+        // Strip the parserRulesVersion key to simulate a pre-field artifact.
+        let encoded = try JSONEncoder().encode(prepared)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var identity = try XCTUnwrap(object["identity"] as? [String: Any])
+        identity.removeValue(forKey: "parserRulesVersion")
+        object["identity"] = identity
+        let legacy = try JSONDecoder().decode(
+            PreparedFilterSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(legacy.identity.parserRulesVersion, 0)
+        XCTAssertFalse(legacy.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: catalog))
+    }
+
+    func testParserRulesVersionMismatchRejectsManualRulesWarmStartReuse() {
+        // The no-cached-catalog (manual-rules-only) warm-start branch must also reject
+        // an artifact compiled under an older parser.
+        let configuration = AppConfiguration(blockedDomains: ["block.example"])
+        let current = PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: nil)
+        XCTAssertTrue(current.hasSameConfigurationInputs(as: configuration))
+
+        let legacy = PreparedFilterSnapshotIdentity(
+            enabledBlocklistIDs: current.enabledBlocklistIDs,
+            blockedDomains: current.blockedDomains,
+            allowedDomains: current.allowedDomains,
+            resolverTransport: current.resolverTransport,
+            qaProbeSet: current.qaProbeSet,
+            catalogVersion: current.catalogVersion,
+            selectedSourceVersionIDs: current.selectedSourceVersionIDs,
+            selectedSourceHashes: current.selectedSourceHashes,
+            customBlocklistFingerprints: current.customBlocklistFingerprints,
+            guardrailVersionIDs: current.guardrailVersionIDs,
+            guardrailHashes: current.guardrailHashes,
+            parserRulesVersion: BlocklistParsingRules.rulesVersion - 1
+        )
+
+        XCTAssertFalse(legacy.hasSameConfigurationInputs(as: configuration))
+        XCTAssertEqual(legacy.snapshotInputMismatches(against: current), ["parserRulesVersion"])
+    }
+
     private static func catalog(
         sourceVersionID: String,
         guardrailVersionID: String

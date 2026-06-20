@@ -38,6 +38,12 @@ public enum CustomBlocklistSyncPolicy: Sendable {
     // actionable without waiting on third-party hosts; network only on a miss.
     // Callers schedule a network refresh after protection is up.
     case cacheFirst
+    // Frozen semantics: serve cached custom payloads only and never touch the
+    // network — not even on a cache miss or stored-hash mismatch. Used when the
+    // plan no longer allows custom blocklists (a lapsed Plus user keeps the lists
+    // it already had, but their contents are never refreshed). A genuine miss
+    // surfaces as an error instead of silently re-downloading the frozen list.
+    case cacheOnly
 }
 
 public actor FilterSnapshotPreparationService {
@@ -104,8 +110,21 @@ public actor FilterSnapshotPreparationService {
         case .networkFirst:
             do {
                 customResult = try await synchronizer.syncCustomBlocklists(customSources)
-            } catch {
-                customResult = try await synchronizer.loadCachedCustomBlocklists(customSources)
+            } catch let networkError {
+                do {
+                    customResult = try await synchronizer.loadCachedCustomBlocklists(customSources)
+                } catch is CancellationError {
+                    // Custom compilation starts with Task.checkCancellation(), so a prepare
+                    // cancelled during the fallback must propagate cleanly — not be masked as
+                    // a download failure by the networkError rethrow below.
+                    throw CancellationError()
+                } catch {
+                    // A brand-new custom source has no cache, so the cache fallback throws a
+                    // misleading "latest.txt … no such file" that masks why the *download*
+                    // actually failed. Surface the real network error so the user sees the
+                    // actionable cause (e.g. host unreachable) instead of a phantom file error.
+                    throw networkError
+                }
             }
         case .cacheFirst:
             do {
@@ -113,6 +132,11 @@ public actor FilterSnapshotPreparationService {
             } catch {
                 customResult = try await synchronizer.syncCustomBlocklists(customSources)
             }
+        case .cacheOnly:
+            // Strictly cache-only: a cache miss or hash mismatch propagates rather
+            // than falling back to the network, so a frozen (downgraded) list is
+            // never re-downloaded or re-hashed behind the user's back.
+            customResult = try await synchronizer.loadCachedCustomBlocklists(customSources)
         }
         syncSpan?.end(details: ["sourceCount": "\(catalogResult.sourceRuleSets.count)"])
 

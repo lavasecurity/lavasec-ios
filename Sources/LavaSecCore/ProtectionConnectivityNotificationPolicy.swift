@@ -3,12 +3,13 @@ import Foundation
 public enum ProtectionConnectivityNotificationKind: String, Equatable, Sendable {
     case deviceDNSFallback = "device-dns-fallback"
     case networkUnavailable = "network-unavailable"
+    case dnsSlow = "dns-slow"
     case reconnectNeeded = "reconnect-needed"
     case reconnected
 
     public var isProblem: Bool {
         switch self {
-        case .deviceDNSFallback, .networkUnavailable, .reconnectNeeded:
+        case .deviceDNSFallback, .networkUnavailable, .dnsSlow, .reconnectNeeded:
             return true
         case .reconnected:
             return false
@@ -110,7 +111,7 @@ public enum ProtectionConnectivityNotificationPolicy {
             )
         case .dnsSlow:
             candidate = (
-                .reconnectNeeded,
+                .dnsSlow,
                 health.lastSlowUpstreamResponseAt,
                 "Lava DNS is slow",
                 "The selected DNS resolver is responding slowly. Tap to reconnect protection."
@@ -127,8 +128,42 @@ public enum ProtectionConnectivityNotificationPolicy {
         }
 
         let identifier = "\(candidate.kind.rawValue):\(Int(eventAt.timeIntervalSince1970))"
-        guard identifier != history.lastDeliveredNotificationID,
-              history.unresolvedProblemNotificationID == nil,
+
+        // Never re-emit the exact notification we last delivered.
+        guard identifier != history.lastDeliveredNotificationID else {
+            return nil
+        }
+
+        // Escalation: a strictly more-urgent problem supersedes a lower-ranked banner
+        // that's still outstanding, bypassing both the "a problem is already outstanding"
+        // guard and the min-delivery throttle. Without this, a wedge that follows a
+        // Device-DNS fallback leaves the user staring at a reassuring "switched to Device
+        // DNS — filtering on" banner while DNS is actually down, never surfacing the
+        // actionable "Reconnect" prompt for up to the full 600s cooldown.
+        //
+        // Only a real reconnect-needed outage (`reconnectNeeded`) outranks the rest.
+        // `deviceDNSFallback`, `networkUnavailable`, and the soft `dnsSlow` degradation
+        // are equal-rank peers that never supersede one another — none warrants stealing
+        // a standing banner. Crucially `dnsSlow` is a distinct kind from `reconnectNeeded`
+        // (the slow-DNS severity used to reuse `reconnectNeeded`), so when DNS progresses
+        // from slow to a hard outage the `reconnectNeeded` candidate genuinely outranks
+        // the outstanding `dnsSlow` banner and upgrades the user from "DNS is slow" to the
+        // actionable "Reconnect" copy. Escalation is upward-only and the ladder has a
+        // single step, so at most one supersede per problem episode — no flapping spam,
+        // and the recovery path still clears whatever ends up outstanding.
+        if let outstandingKind = history.unresolvedProblemKind,
+           let outstandingID = history.unresolvedProblemNotificationID,
+           problemRank(candidate.kind) > problemRank(outstandingKind) {
+            return ProtectionConnectivityNotification(
+                kind: candidate.kind,
+                identifier: identifier,
+                title: candidate.title,
+                body: candidate.body,
+                supersededNotificationIdentifiers: [outstandingID]
+            )
+        }
+
+        guard history.unresolvedProblemNotificationID == nil,
               canDeliver(after: history.lastDeliveredAt, now: now, interval: minimumProblemDeliveryInterval)
         else {
             return nil
@@ -140,6 +175,22 @@ public enum ProtectionConnectivityNotificationPolicy {
             title: candidate.title,
             body: candidate.body
         )
+    }
+
+    /// Relative urgency of a problem notification. A strictly higher rank may supersede a
+    /// lower-ranked outstanding banner (see `notification(for:…)`). The non-actionable
+    /// banners and the soft slow-DNS degradation share a rank so they never displace each
+    /// other; only a real reconnect-needed outage sits above them. `reconnected` is a
+    /// non-problem acknowledgement and never participates in escalation.
+    private static func problemRank(_ kind: ProtectionConnectivityNotificationKind) -> Int {
+        switch kind {
+        case .reconnected:
+            return 0
+        case .deviceDNSFallback, .networkUnavailable, .dnsSlow:
+            return 1
+        case .reconnectNeeded:
+            return 2
+        }
     }
 
     public static func resolvedProblemNotificationIdentifiers(
@@ -284,5 +335,61 @@ public enum ProtectionConnectivityNotificationPolicy {
         }
 
         return now.timeIntervalSince(lastDeliveredAt) >= interval
+    }
+}
+
+/// Persistence-layer migration for the connectivity-notification policy. Lives next to
+/// the policy because it exists only to keep persisted history compatible with changes
+/// to the notification-kind vocabulary.
+public enum ProtectionConnectivityNotificationStore {
+    /// Bump when a change to the persisted notification-kind vocabulary can wedge the
+    /// escalation logic against state written by an older build.
+    public static let currentKindSchemaVersion = 2
+
+    /// The defaults keys the migration touches. Injected by the app-group layer (which
+    /// owns the literal key strings) so the migration stays unit-testable in the package.
+    public struct DefaultsKeys: Sendable {
+        public let schemaVersion: String
+        public let unresolvedProblemKind: String
+
+        public init(schemaVersion: String, unresolvedProblemKind: String) {
+            self.schemaVersion = schemaVersion
+            self.unresolvedProblemKind = unresolvedProblemKind
+        }
+    }
+
+    /// One-time, version-gated migration of the outstanding-problem marker.
+    ///
+    /// Builds before schema v2 delivered the slow-DNS severity under the `.reconnectNeeded`
+    /// kind. A slow-DNS banner left outstanding across an upgrade is therefore
+    /// indistinguishable from a real reconnect banner, so the new escalation can't
+    /// supersede it (same kind/rank) and the user stays on "DNS is slow" during a hard
+    /// outage. Rather than erase the marker — which would rob recovery of the id it needs
+    /// to clear the delivered banner and post the acknowledgement on the first healthy pass
+    /// — *demote* an outstanding `reconnect-needed` marker to the new `.dnsSlow` kind. The
+    /// id is preserved, so recovery still works; and because `dnsSlow` now ranks below a
+    /// real outage, a genuine `needsReconnect` can supersede it (bypassing the throttle).
+    /// Safe regardless of the legacy marker's true origin: a mis-demoted genuine reconnect
+    /// is simply re-posted once by the next hard-outage tick (same "Reconnect" copy) and
+    /// then re-recorded under the correct kind. Other kinds were unaffected by the
+    /// vocabulary change and are left untouched. Returns whether a migration ran.
+    @discardableResult
+    public static func migrateLegacyKindSchemaIfNeeded(
+        in defaults: UserDefaults,
+        keys: DefaultsKeys
+    ) -> Bool {
+        guard defaults.integer(forKey: keys.schemaVersion) < currentKindSchemaVersion else {
+            return false
+        }
+
+        if defaults.string(forKey: keys.unresolvedProblemKind)
+            == ProtectionConnectivityNotificationKind.reconnectNeeded.rawValue {
+            defaults.set(
+                ProtectionConnectivityNotificationKind.dnsSlow.rawValue,
+                forKey: keys.unresolvedProblemKind
+            )
+        }
+        defaults.set(currentKindSchemaVersion, forKey: keys.schemaVersion)
+        return true
     }
 }

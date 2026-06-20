@@ -208,6 +208,9 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(routeBlock.contains("return .requires(.appSettings)"))
         XCTAssertTrue(routeBlock.contains("case .legalNotices:"))
         XCTAssertTrue(routeBlock.contains("return .readOnly"))
+        // Nerd Stats and Network Activity share the diagnostics-viewing lock.
+        XCTAssertTrue(routeBlock.contains("case .versionNerdStats:"))
+        XCTAssertTrue(routeBlock.contains("return .requires(.activityViewing)"))
         XCTAssertFalse(routeBlock.contains("default:"))
         XCTAssertFalse(routeBlock.contains("appStateMutation"))
     }
@@ -388,8 +391,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(root.contains("reason: \"Pause Lava protection\""))
         XCTAssertTrue(root.contains("for: .protectionPause,\n                                    reason: \"Pause Lava protection\""))
         XCTAssertTrue(root.contains("if viewModel.isProtectionTemporarilyPaused {\n                        viewModel.resumeProtectionNow()"))
-        XCTAssertTrue(filters.contains("security.requireFreshAuthentication(for: .filterEditing, reason: \"Save blocked domains\")"))
-        XCTAssertTrue(filters.contains("security.requireFreshAuthentication(for: .filterEditing, reason: \"Save allowed exceptions\")"))
+        XCTAssertTrue(filters.contains("security.requireFreshAuthentication(for: .filterEditing, reason: \"Save filter\")"))
         XCTAssertTrue(diagnostics.contains("security.requireFreshAuthentication(for: .filterEditing, reason: \"Update domains and lists\")"))
     }
 

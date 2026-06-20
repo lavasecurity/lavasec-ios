@@ -17,7 +17,7 @@
 // version doesn't match it — so a hand-typed tag can't ship the wrong/older version.
 // Bump it when the dev target moves; cut tags as v<this>-rcN (internal) or v<this>
 // (prod). Apple requires 1-3 period-separated integers (no -rc/suffix).
-MARKETING_VERSION = 0.4.0
+MARKETING_VERSION = 1.0.0
 // Short git SHA of the source the build came from. Empty for local builds; the
 // release pipeline injects the checked-out lavasec-ios commit for traceability.
 // Surfaced in Settings (Info.plist key LavaSourceRevision).

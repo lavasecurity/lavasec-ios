@@ -154,7 +154,7 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
         )
     }
 
-    func testPrunedAttemptTimesKeepsOnlyWindowedPastTimestamps() {
+    func testPrunedAttemptTimesKeepsWindowedPastAndClampsFutureToNow() {
         let inWindow = now.addingTimeInterval(-60)
         let outOfWindow = now.addingTimeInterval(-(TunnelSelfReconnectPolicy.attemptWindow + 1))
         let future = now.addingTimeInterval(60)
@@ -164,6 +164,29 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(pruned, [inWindow])
+        // The past in-window attempt is kept verbatim; the stale one is dropped; the
+        // future-dated one (a backward clock jump) is clamped to `now` and retained
+        // so it still counts against the cooldown/cap.
+        XCTAssertEqual(pruned, [inWindow, now])
+    }
+
+    func testBackwardClockJumpDoesNotBypassCooldown() {
+        // Two attempts persisted before the device clock jumped backward now look
+        // future-dated. They must still throttle the next self-reconnect rather than
+        // vanish and let the restart loop fire immediately.
+        let futureAttempts = [
+            now.addingTimeInterval(120),
+            now.addingTimeInterval(240)
+        ]
+
+        let decision = TunnelSelfReconnectPolicy.decision(
+            assessment: assessment(.needsReconnect, .reconnect),
+            protectionEnabled: true,
+            onDemandEnabled: true,
+            recentReconnectTimes: futureAttempts,
+            now: now
+        )
+
+        XCTAssertEqual(decision, .throttled)
     }
 }

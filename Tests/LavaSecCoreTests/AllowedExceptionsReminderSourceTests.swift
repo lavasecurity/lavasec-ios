@@ -1,51 +1,25 @@
 import XCTest
 
 final class AllowedExceptionsReminderSourceTests: XCTestCase {
-    func testAllowedExceptionsUsesCareReminderInsteadOfGuardrailPage() throws {
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let allowedExceptionsBlock = try Self.sourceBlock(
-            in: filtersSource,
-            startingAt: "private struct AllowedExceptionsDetailView",
-            endingBefore: "private struct FilterEditToolbar"
+    func testAllowedExceptionCautionLivesInReviewSheetNotGuardrailPage() throws {
+        let reviewSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
+        let confirmationBlock = try Self.sourceBlock(
+            in: reviewSource,
+            startingAt: "struct FilterConfirmationSheet: View",
+            endingBefore: "struct DiffGroup: View"
         )
 
-        XCTAssertTrue(allowedExceptionsBlock.contains("AllowedExceptionReminderPanel()"))
-        XCTAssertTrue(filtersSource.contains("Be extra careful"))
-        XCTAssertTrue(filtersSource.contains("title: \"Do you know this domain\""))
-        XCTAssertTrue(filtersSource.contains("title: \"Is the domain spelling correct\""))
-        XCTAssertTrue(filtersSource.contains("title: \"Is the domain flagged suspicious\""))
-        XCTAssertFalse(filtersSource.contains("title: \"Do you know this domain?\""))
-        XCTAssertFalse(filtersSource.contains("title: \"Is the domain spelling correct?\""))
-        XCTAssertFalse(filtersSource.contains("title: \"Is the domain flagged suspicious?\""))
-        XCTAssertFalse(filtersSource.contains("Do you know and trust this domain?"))
-        XCTAssertFalse(filtersSource.contains("Is this site flagged as suspicious anywhere?"))
-        XCTAssertFalse(filtersSource.contains("Has the domain been flagged suspicious anywhere?"))
-        XCTAssertFalse(filtersSource.contains("Is it the exact site you meant to allow?"))
-        XCTAssertFalse(filtersSource.contains("Does the spelling match the site you trust?"))
-        XCTAssertFalse(filtersSource.contains("Can you confirm it from an official source?"))
-        XCTAssertFalse(filtersSource.contains("Could allowing it bypass a blocklist you rely on?"))
+        // The "be extra careful" caution is surfaced in the review sheet — gated to
+        // changes that actually add an allowed exception — not as a standalone panel
+        // on the My list cover, and not a separate guardrail page.
+        XCTAssertTrue(confirmationBlock.contains("if !diff.addedAllowedDomains.isEmpty {"))
+        XCTAssertTrue(confirmationBlock.contains("title: \"Be extra careful\""))
+        XCTAssertTrue(confirmationBlock.contains("Allowed exceptions let a site through even when a blocklist would catch it."))
+
+        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        XCTAssertFalse(filtersSource.contains("AllowedExceptionReminderPanel"))
         XCTAssertFalse(filtersSource.contains("ProtectionGuardrailsHelpView"))
         XCTAssertFalse(filtersSource.contains("Learn more about guardrails"))
-    }
-
-    func testAllowedExceptionReminderPointsUseOverviewBanners() throws {
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let reminderBlock = try Self.sourceBlock(
-            in: filtersSource,
-            startingAt: "private struct AllowedExceptionReminderPanel",
-            endingBefore: "private struct LavaInlineInfoContent"
-        )
-
-        XCTAssertTrue(reminderBlock.contains("LavaOverviewBannerRow("))
-        XCTAssertEqual(reminderBlock.components(separatedBy: "systemImage: \"questionmark.circle.fill\"").count - 1, 3)
-        XCTAssertEqual(reminderBlock.components(separatedBy: "background: LavaStyle.lavaOrangeSoft").count - 1, 3)
-        XCTAssertEqual(reminderBlock.components(separatedBy: "tint: LavaStyle.lavaOrange,\n                        background: LavaStyle.lavaOrangeSoft").count - 1, 3)
-        XCTAssertFalse(reminderBlock.contains("systemImage: \"scope\""))
-        XCTAssertFalse(reminderBlock.contains("systemImage: \"text.magnifyingglass\""))
-        XCTAssertFalse(reminderBlock.contains("background: LavaStyle.softGreen"))
-        XCTAssertFalse(reminderBlock.contains("background: LavaStyle.secondaryText.opacity(0.12)"))
-        XCTAssertTrue(reminderBlock.contains("allowsTitleWrapping: true"))
-        XCTAssertFalse(reminderBlock.contains("LavaDetailRow("))
     }
 
     func testOverviewBannerRowSupportsOptInWrappingWithCenteredIcon() throws {

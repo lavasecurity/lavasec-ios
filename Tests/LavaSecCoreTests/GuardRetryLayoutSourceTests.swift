@@ -483,7 +483,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(pickerBlock.contains("ToolbarItem(placement: .topBarLeading)"))
-        XCTAssertTrue(pickerBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", action: dismiss.callAsFunction)"))
+        XCTAssertTrue(pickerBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", role: .close, action: dismiss.callAsFunction)"))
         XCTAssertFalse(pickerBlock.contains("Button(\"Cancel\")"))
     }
 
