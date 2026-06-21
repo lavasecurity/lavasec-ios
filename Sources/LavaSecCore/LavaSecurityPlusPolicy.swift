@@ -37,7 +37,7 @@ public enum LavaSecurityPlusPolicy {
         kind: .monthly,
         productID: "lava_security_plus_monthly",
         displayName: "Monthly",
-        fallbackDisplayPrice: "$0.99/month",
+        fallbackDisplayPrice: "$3.99/month",
         isSubscription: true
     )
 
@@ -45,7 +45,7 @@ public enum LavaSecurityPlusPolicy {
         kind: .yearly,
         productID: "lava_security_plus_yearly",
         displayName: "Yearly",
-        fallbackDisplayPrice: "$9.99/year",
+        fallbackDisplayPrice: "$29.99/year",
         isSubscription: true
     )
 
@@ -53,7 +53,7 @@ public enum LavaSecurityPlusPolicy {
         kind: .lifetime,
         productID: "lava_security_plus_lifetime",
         displayName: "Lifetime",
-        fallbackDisplayPrice: "$29.99 lifetime",
+        fallbackDisplayPrice: "$59.99 lifetime",
         isSubscription: false
     )
 

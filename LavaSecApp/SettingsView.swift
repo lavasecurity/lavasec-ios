@@ -88,6 +88,10 @@ enum SettingsRoute: Hashable {
 
 private enum LavaWebLinks {
     static let support = URL(string: "https://lavasecurity.app/support/")!
+    static let privacy = URL(string: "https://lavasecurity.app/privacy/")!
+    // No custom EULA is hosted; Apple's standard EULA is the compliant default
+    // for the Guideline 3.1.2 "Terms of Use" link.
+    static let terms = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
 }
 
 private struct SettingsRouteDestinationView: View {
@@ -1176,6 +1180,8 @@ private struct UpgradeSettingsView: View {
                 .padding(16)
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
+
+            UpgradeLegalFooter()
         }
     }
 
@@ -1196,7 +1202,7 @@ private struct UpgradeSettingsView: View {
     private func planPitch(for kind: LavaSecurityPlusPlanKind) -> String {
         switch kind {
         case .yearly:
-            "\"We are saving 16%! This has the best value.\""
+            "\"We are saving 37%! This has the best value.\""
         case .monthly:
             "\"We already saved this by unplugging appliances.\""
         case .lifetime:
@@ -1293,6 +1299,30 @@ private struct UpgradeSettingsView: View {
         if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
             _ = await UIApplication.shared.open(url)
         }
+    }
+}
+
+/// Guideline 3.1.2 disclosure: auto-renew terms + functional Terms (EULA) and
+/// Privacy Policy links, shown on the paywall wherever subscriptions are offered.
+private struct UpgradeLegalFooter: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings. Lifetime is a one-time purchase.")
+                .font(.caption2)
+                .foregroundStyle(LavaStyle.secondaryText)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 6) {
+                Link("Terms of Use", destination: LavaWebLinks.terms)
+                Text("•")
+                    .foregroundStyle(LavaStyle.secondaryText)
+                Link("Privacy Policy", destination: LavaWebLinks.privacy)
+            }
+            .font(.caption2.weight(.semibold))
+            .tint(LavaStyle.lavaOrange)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
 }
 
