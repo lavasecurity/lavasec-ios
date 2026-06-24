@@ -2,7 +2,7 @@ import Foundation
 
 // Persistent cache of PARSED blocklist rules, keyed by the raw payload's full
 // SHA-256, the parse format, and BlocklistParsingRules.rulesVersion. A hit
-// skips reading and hashing up to 25 MB of raw text and the dominant
+// skips reading and hashing up to 45 MB of raw text and the dominant
 // parse + double-normalization pass; entries store post-lavaSecProtectedDomains
 // rule lists, so they are safe to use as-is.
 //

@@ -31,7 +31,9 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(setupSource.contains("case validatePasskey"))
         XCTAssertTrue(setupSource.contains("try await viewModel.validateBackupPasskey()"))
         XCTAssertTrue(setupSource.contains("Validate the passkey"))
-        XCTAssertTrue(setupSource.contains("step = .validatePasskey"))
+        // Registration advances to the validate step — now routed through the
+        // animated `go(to:)` step transition rather than a bare assignment.
+        XCTAssertTrue(setupSource.contains("go(to: .validatePasskey)"))
     }
 
     func testRestoreUsesSavedDeviceSecretAndRecoveryPhraseFallback() throws {
@@ -56,7 +58,7 @@ final class BackupSetupSourceTests: XCTestCase {
     func testPasskeyCopyReferencesSelectedPasswordManager() throws {
         let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
 
-        XCTAssertTrue(source.contains("Saved in your password manager and used to restore on a new device"))
+        XCTAssertTrue(source.contains("Saved in your password manager to restore on a new device"))
         // The passkey path is zero-knowledge now: copy must not imply Lava assists decryption.
         XCTAssertFalse(source.contains("lets Lava help restore on a new device"))
         XCTAssertFalse(source.contains("Saved by iOS for lavasecurity.app."))
@@ -99,7 +101,7 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
         XCTAssertTrue(source.contains("Text(step.title.lavaLocalized)"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
-        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."))
+        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. Only you can unlock them — with your recovery phrase or a Passkey. Lava only ever stores encrypted data."))
         XCTAssertFalse(source.contains("Lava stores only ciphertext"))
         // The passkey path no longer escrows a recovery secret.
         XCTAssertFalse(source.contains("stores a recovery secret"))

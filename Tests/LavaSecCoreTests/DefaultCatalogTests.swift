@@ -15,43 +15,59 @@ final class DefaultCatalogTests: XCTestCase {
         XCTAssertTrue(gplSources.allSatisfy { !AppConfiguration.lavaRecommendedDefaults.enabledBlocklistIDs.contains($0.id) })
     }
 
-    func testPhishingAndScamAreRecommendedDefaults() {
-        XCTAssertEqual(DefaultCatalog.blockListProjectPhishing.id, "blocklistproject-phishing")
-        XCTAssertEqual(DefaultCatalog.blockListProjectPhishing.name, "Block List Project Phishing")
-        XCTAssertEqual(DefaultCatalog.blockListProjectPhishing.licenseName, "Unlicense")
+    func testBalancedRecommendedDefaultIsBasicPlusStevenBlack() {
+        // The fresh-install default is the **Balanced** tier: Block List Project Basic
+        // (security) + StevenBlack Unified Hosts (the curated multi-purpose default).
+        // Both permissively licensed (Unlicense / MIT) — a GPL list can never be default
+        // (codegen guard) — and matching the backend `default_enabled` column.
+        XCTAssertEqual(DefaultCatalog.blockListProjectBasic.id, "blocklistproject-basic")
+        XCTAssertEqual(DefaultCatalog.blockListProjectBasic.name, "Block List Basic")
+        XCTAssertEqual(DefaultCatalog.blockListProjectBasic.licenseName, "Unlicense")
         XCTAssertEqual(
-            DefaultCatalog.blockListProjectPhishing.sourceURL.absoluteString,
-            "https://blocklistproject.github.io/Lists/phishing.txt"
+            DefaultCatalog.blockListProjectBasic.sourceURL.absoluteString,
+            "https://blocklistproject.github.io/Lists/basic.txt"
         )
-        XCTAssertEqual(DefaultCatalog.blockListProjectScam.id, "blocklistproject-scam")
-        XCTAssertEqual(DefaultCatalog.blockListProjectScam.name, "Block List Project Scam")
-        XCTAssertEqual(DefaultCatalog.blockListProjectScam.licenseName, "Unlicense")
-        XCTAssertEqual(
-            DefaultCatalog.blockListProjectScam.sourceURL.absoluteString,
-            "https://blocklistproject.github.io/Lists/scam.txt"
-        )
+        XCTAssertTrue(DefaultCatalog.blockListProjectBasic.defaultEnabled)
+        XCTAssertTrue(DefaultCatalog.stevenBlackUnifiedHosts.defaultEnabled)
         XCTAssertEqual(
             AppConfiguration.lavaRecommendedDefaults.enabledBlocklistIDs,
-            [DefaultCatalog.blockListProjectPhishing.id, DefaultCatalog.blockListProjectScam.id]
+            [DefaultCatalog.blockListProjectBasic.id, DefaultCatalog.stevenBlackUnifiedHosts.id]
         )
+    }
+
+    func testPhishingAndScamRemainSelectableButNotDefault() {
+        let ids = Set(DefaultCatalog.curatedSources.map(\.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectPhishing.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectScam.id))
+        XCTAssertFalse(DefaultCatalog.blockListProjectPhishing.defaultEnabled)
+        XCTAssertFalse(DefaultCatalog.blockListProjectScam.defaultEnabled)
     }
 
     func testRecommendedDefaultsAreDerivedFromDefaultEnabledFlag() {
         // Single source of truth: the recommended default is whatever the catalog
-        // marks `defaultEnabled`, not a hardcoded list. Phishing + Scam are on;
-        // Basic is off — mirroring the backend `default_enabled` column.
-        XCTAssertTrue(DefaultCatalog.blockListProjectPhishing.defaultEnabled)
-        XCTAssertTrue(DefaultCatalog.blockListProjectScam.defaultEnabled)
-        XCTAssertFalse(DefaultCatalog.blockListProjectBasic.defaultEnabled)
+        // marks `defaultEnabled`, not a hardcoded list. Basic (security) + StevenBlack
+        // Unified (multi-purpose) are on; phishing + scam are off — mirroring the backend
+        // `default_enabled` column.
+        XCTAssertTrue(DefaultCatalog.blockListProjectBasic.defaultEnabled)
+        XCTAssertTrue(DefaultCatalog.stevenBlackUnifiedHosts.defaultEnabled)
+        XCTAssertFalse(DefaultCatalog.blockListProjectPhishing.defaultEnabled)
+        XCTAssertFalse(DefaultCatalog.blockListProjectScam.defaultEnabled)
 
         XCTAssertEqual(
             DefaultCatalog.recommendedDefaultSourceIDs,
-            ["blocklistproject-phishing", "blocklistproject-scam"]
+            ["blocklistproject-basic", "stevenblack-unified"]
         )
         XCTAssertEqual(
             AppConfiguration.lavaRecommendedDefaults.enabledBlocklistIDs,
             DefaultCatalog.recommendedDefaultSourceIDs
         )
+    }
+
+    func testRecommendedDefaultIsPermissivelyLicensed() {
+        // A GPL list must never be the default; the default must be MIT/Unlicense.
+        let defaults = DefaultCatalog.curatedSources.filter { DefaultCatalog.recommendedDefaultSourceIDs.contains($0.id) }
+        XCTAssertFalse(defaults.isEmpty)
+        XCTAssertTrue(defaults.allSatisfy { !$0.licenseName.hasPrefix("GPL") })
     }
 
     func testPhishingDatabaseActiveIsSelectable() {
@@ -73,13 +89,65 @@ final class DefaultCatalogTests: XCTestCase {
         XCTAssertEqual(DefaultCatalog.oisdSmall.licenseName, "GPL-3.0")
     }
 
-    func testNoisyBlocklistSourcesStayOutOfSelectableCatalog() {
+    func testExpandedCatalogSurfacesPreviouslyHiddenAndNewSources() {
+        // The category expansion brings previously-hidden lists into the catalog and
+        // adds new category families (threat-intel, NSFW, social, gambling, piracy,
+        // plus StevenBlack). Spot-check a representative set is now selectable.
         let ids = Set(DefaultCatalog.curatedSources.map(\.id))
 
-        XCTAssertFalse(ids.contains(DefaultCatalog.blockListProjectMalware.id))
-        XCTAssertFalse(ids.contains(DefaultCatalog.hageziMultiProPlusMini.id))
-        XCTAssertFalse(ids.contains(DefaultCatalog.hageziMultiUltimateMini.id))
-        XCTAssertFalse(ids.contains(DefaultCatalog.oisdBig.id))
+        // Previously excluded "noisy" lists, now selectable.
+        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectMalware.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.hageziMultiProPlusMini.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.hageziMultiUltimateMini.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.oisdBig.id))
+
+        // New category families.
+        XCTAssertTrue(ids.contains(DefaultCatalog.hageziThreatIntelligenceFeedMini.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.hageziNSFW.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectPiracy.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectGambling.id))
+        XCTAssertTrue(ids.contains(DefaultCatalog.stevenBlackUnifiedHosts.id))
+    }
+
+    func testStevenBlackUnifiedIsTheBalancedMultiPurposeDefault() {
+        // StevenBlack Unified Hosts is MIT-licensed (so the codegen GPL-default guard
+        // permits it) and is the one curated multi-purpose list shipped default-on for
+        // the Balanced tier. The GPL multi-purpose lists (HaGeZi/OISD/AdGuard) stay
+        // selectable but never default.
+        let stevenBlack = DefaultCatalog.stevenBlackUnifiedHosts
+        XCTAssertEqual(stevenBlack.licenseName, "MIT")
+        XCTAssertEqual(stevenBlack.category, .multiPurpose)
+        XCTAssertTrue(stevenBlack.defaultEnabled)
+        XCTAssertTrue(DefaultCatalog.recommendedDefaultSourceIDs.contains(stevenBlack.id))
+
+        // It is the ONLY default-on multi-purpose source (the rest are GPL, barred from
+        // default by the codegen guard).
+        let defaultMultiPurpose = DefaultCatalog.curatedSources.filter {
+            $0.category == .multiPurpose && $0.defaultEnabled
+        }
+        XCTAssertEqual(defaultMultiPurpose.map(\.id), ["stevenblack-unified"])
+    }
+
+    func testEverySourceHasACategoryAndGroupingIsComplete() {
+        let grouped = DefaultCatalog.curatedSourcesByCategory
+        // Grouping covers every curated source exactly once.
+        let groupedIDs = grouped.flatMap { $0.sources.map(\.id) }
+        XCTAssertEqual(Set(groupedIDs), Set(DefaultCatalog.curatedSources.map(\.id)))
+        XCTAssertEqual(groupedIDs.count, DefaultCatalog.curatedSources.count)
+        // Sections are ordered by category sortOrder and none are empty.
+        XCTAssertEqual(grouped.map(\.category), grouped.map(\.category).sorted { $0.sortOrder < $1.sortOrder })
+        XCTAssertTrue(grouped.allSatisfy { !$0.sources.isEmpty })
+        // The expansion ships every taxonomy category with at least one source.
+        XCTAssertEqual(Set(grouped.map(\.category)), Set(BlocklistCategory.allCases))
+    }
+
+    func testCategoryRawValuesMatchBackendColumn() {
+        XCTAssertEqual(BlocklistCategory.security.rawValue, "security")
+        XCTAssertEqual(BlocklistCategory.adsTracking.rawValue, "ads_tracking")
+        XCTAssertEqual(BlocklistCategory.social.rawValue, "social")
+        XCTAssertEqual(BlocklistCategory.nsfw.rawValue, "nsfw")
+        XCTAssertEqual(BlocklistCategory.gambling.rawValue, "gambling")
+        XCTAssertEqual(BlocklistCategory.piracy.rawValue, "piracy")
     }
 
     func testKnownBlocklistURLMatcherRoutesOISDURLToCatalogSource() {
@@ -111,11 +179,12 @@ final class DefaultCatalogTests: XCTestCase {
         )
         .map(\.id)
 
+        // Order follows curatedSources (category order, then name).
         XCTAssertEqual(visibleIDs, [
             DefaultCatalog.blockListProjectBasic.id,
             DefaultCatalog.blockListProjectPhishing.id,
-            DefaultCatalog.blockListProjectScam.id,
             DefaultCatalog.blockListProjectRansomware.id,
+            DefaultCatalog.blockListProjectScam.id,
         ])
         XCTAssertFalse(visibleIDs.contains(DefaultCatalog.phishingDatabaseActive.id))
     }
@@ -134,9 +203,9 @@ final class DefaultCatalogTests: XCTestCase {
         ])
     }
 
-    func testSelectableCuratedSourcesDoesNotResurfaceRemovedSourcesFromAvailability() {
+    func testSelectableCuratedSourcesDoesNotResurfaceUnknownAvailabilityIDs() {
         let visibleIDs = DefaultCatalog.selectableCuratedSources(
-            availableSourceIDs: [DefaultCatalog.blockListProjectMalware.id],
+            availableSourceIDs: ["totally-unknown-source"],
             enabledSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
         )
         .map(\.id)
@@ -146,10 +215,10 @@ final class DefaultCatalogTests: XCTestCase {
         ])
     }
 
-    func testSelectableCuratedSourcesKeepsEnabledRemovedSourcesHidden() {
+    func testSelectableCuratedSourcesKeepsUnknownEnabledIDsHidden() {
         let visibleIDs = DefaultCatalog.selectableCuratedSources(
             availableSourceIDs: [DefaultCatalog.blockListProjectPhishing.id],
-            enabledSourceIDs: [DefaultCatalog.blockListProjectBasic.id, DefaultCatalog.blockListProjectMalware.id]
+            enabledSourceIDs: [DefaultCatalog.blockListProjectBasic.id, "totally-unknown-source"]
         )
         .map(\.id)
 

@@ -1,5 +1,18 @@
 import AppIntents
 
+public struct PauseLavaProtectionIntent: AppIntent, LiveActivityIntent {
+    nonisolated(unsafe) public static var title: LocalizedStringResource = "Pause Lava Protection"
+    nonisolated(unsafe) public static var description = IntentDescription("Pause Lava protection for your chosen length.")
+    nonisolated(unsafe) public static var isDiscoverable = false
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult {
+        try await LavaProtectionCommandService.perform(.pauseConfigured)
+        return .result()
+    }
+}
+
 public struct PauseLavaProtectionFiveMinutesIntent: AppIntent, LiveActivityIntent {
     nonisolated(unsafe) public static var title: LocalizedStringResource = "Pause Lava Protection for 5 Minutes"
     nonisolated(unsafe) public static var description = IntentDescription("Pause Lava protection for five minutes.")

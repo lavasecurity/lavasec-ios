@@ -301,6 +301,22 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         return ipv4Addresses + ipv6Addresses + otherAddresses
     }
 
+    /// The identity of the PRIMARY resolver alone (its effective transport + addresses/endpoints),
+    /// WITHOUT the `|fallback:…` / `|mode:…` components that `cacheIdentifier` also folds in.
+    /// Recomputed from the plan's stored primary fields, so it stays stable when only a fallback
+    /// wrapper changes (e.g. the encrypted fallback resolver, or — for a Device-DNS primary, which
+    /// is this feature's scope — there is no device-DNS-fallback MODE to flip the effective transport).
+    /// Used to detect a genuine primary-resolver switch vs a fallback-only runtime reset.
+    public var primaryCacheIdentifier: String {
+        Self.cacheIdentifier(
+            transport: transport,
+            plainAddresses: plainAddresses,
+            dohEndpoints: dohEndpoints,
+            dotEndpoints: dotEndpoints,
+            doqEndpoints: doqEndpoints
+        )
+    }
+
     private static func cacheIdentifier(
         transport: DNSResolverTransport,
         plainAddresses: [String],

@@ -179,45 +179,39 @@ public struct CachedFilterSnapshotCompiler: Sendable {
         self.includesGuardrails = includesGuardrails
     }
 
+    /// Compiles the in-extension runtime snapshot. Delegates to
+    /// `StreamingCompactSnapshotCompiler`, which NEVER holds the dirty `DomainRuleSet`
+    /// union of all enabled sources in memory — it streams each source's domains into an
+    /// on-disk blob, keeps only the compact entry table (~8 B/rule) resident, and
+    /// memory-maps the resulting artifact. So the packet-tunnel ~50 MiB jetsam budget is
+    /// respected even for a large multi-list configuration, and the result is the same
+    /// 9 B/rule mapped-compact shape the foreground app produces. Over the streaming
+    /// aggregate budget (`FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount`) it
+    /// throws `StreamingCompileBudgetExceeded`; the caller falls back fail-CLOSED and the
+    /// app re-prepares the full snapshot.
+    ///
+    /// `stampIdentity` lets the tunnel stamp the snapshot with the identity it computed
+    /// from the cached catalog (preserving the prior resident-identity behavior); when nil
+    /// the identity is derived from the resolved catalog.
     public func compile(
         baseSnapshot: FilterSnapshot,
-        configuration: AppConfiguration
-    ) async throws -> FilterSnapshot {
-        let synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheDirectoryURL)
-        let result = try await synchronizer.loadCached(
-            enabledSourceIDs: configuration.enabledBlocklistIDs,
+        configuration: AppConfiguration,
+        stampIdentity: PreparedFilterSnapshotIdentity? = nil
+    ) async throws -> CompactFilterSnapshot {
+        try await StreamingCompactSnapshotCompiler(
+            cacheDirectoryURL: cacheDirectoryURL,
             includesGuardrails: includesGuardrails
+        ).compile(
+            baseSnapshot: baseSnapshot,
+            configuration: configuration,
+            stampIdentity: stampIdentity
         )
-        let enabledCustomSources = configuration.customBlocklists.filter { source in
-            configuration.enabledBlocklistIDs.contains(source.id)
-        }
-        let customResult = try await synchronizer.loadCachedCustomBlocklists(enabledCustomSources)
-        for sourceID in configuration.enabledBlocklistIDs
-            where result.sourceRuleSets[sourceID] == nil && customResult.sourceRuleSets[sourceID] == nil {
-            throw BlocklistCatalogSyncError.missingEnabledBlocklistSource(sourceID: sourceID)
-        }
+    }
 
-        var blockRules = DomainRuleSet()
-        for sourceID in configuration.enabledBlocklistIDs {
-            if let rules = result.sourceRuleSets[sourceID] {
-                blockRules.formUnion(rules)
-            }
-            if let rules = customResult.sourceRuleSets[sourceID] {
-                blockRules.formUnion(rules)
-            }
-        }
-        blockRules.formUnion(configuration.manualBlockRuleSet)
-
-        let effectiveThreatRules = includesGuardrails
-            ? configuration.nonAllowableRulesForAllowedDomains(from: result.guardrailRuleSet)
-            : DomainRuleSet()
-
-        return FilterSnapshot(
-            blockRules: blockRules,
-            allowRules: baseSnapshot.allowRules,
-            nonAllowableThreatRules: effectiveThreatRules,
-            resolver: configuration.resolverPreset
-        )
-        .applyingQAProbeSet(configuration.qaProbeSet)
+    /// Removes any scratch directories a jetsam-killed in-extension compile may have left
+    /// behind. Safe to call at tunnel start / before a compile (a live mapped artifact is
+    /// never rooted in scratch). See `StreamingCompactSnapshotCompiler.sweepStaleScratch`.
+    public static func sweepStaleScratch(cacheDirectoryURL: URL) {
+        StreamingCompactSnapshotCompiler.sweepStaleScratch(cacheDirectoryURL: cacheDirectoryURL)
     }
 }

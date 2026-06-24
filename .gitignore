@@ -8,6 +8,7 @@
 # ---- Xcode ----
 DerivedData/
 build/
+.build-xcode/
 *.xcuserstate
 xcuserdata/
 *.xcscmblueprint

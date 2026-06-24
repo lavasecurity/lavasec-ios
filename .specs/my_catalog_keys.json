@@ -1,0 +1,3896 @@
+{
+ "\"Transport\" is how the lookup travels. IP is plain and unencrypted. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) scramble the lookup so others on your network cannot read which sites you visit.": {
+  "comment": "DNS Transport section footer explaining what the transport options mean.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "„Transport“ beschreibt, wie die Anfrage verschickt wird. IP ist offen und unverschlüsselt. DNS over HTTPS (DoH), TLS (DoT) und QUIC (DoQ) verschlüsseln die Anfrage, damit andere in deinem Netzwerk nicht sehen können, welche Seiten du besuchst."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "\"Transport\" is how the lookup travels. IP is plain and unencrypted. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) scramble the lookup so others on your network cannot read which sites you visit."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "«Transport» es la forma en que viaja la consulta. IP es texto sin cifrar. DNS over HTTPS (DoH), TLS (DoT) y QUIC (DoQ) cifran la consulta para que otras personas de tu red no puedan ver qué sitios visitas."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "« Transport » désigne la façon dont la requête circule. IP est en clair et non chiffré. DNS over HTTPS (DoH), TLS (DoT) et QUIC (DoQ) chiffrent la requête pour que les autres personnes sur votre réseau ne puissent pas voir quels sites vous visitez."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "«Transport» è il modo in cui viaggia la richiesta. IP è in chiaro e non cifrato. DNS over HTTPS (DoH), TLS (DoT) e QUIC (DoQ) cifrano la richiesta così che altre persone sulla tua rete non possano vedere quali siti visiti."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「Transport」は、問い合わせがどのように送られるかを指します。IP はそのままで暗号化されません。DNS over HTTPS (DoH)、TLS (DoT)、QUIC (DoQ) は問い合わせを暗号化するので、同じネットワーク上の他の人があなたの訪れたサイトを読み取れなくなります。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「Transport」는 조회가 전달되는 방식이에요. IP는 암호화되지 않은 일반 텍스트예요. DNS over HTTPS (DoH), TLS (DoT), QUIC (DoQ)는 조회를 암호화해서, 같은 네트워크에 있는 다른 사람이 당신이 방문한 사이트를 볼 수 없게 해요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "\"Transport\" é a forma como a consulta viaja. IP é texto comum, sem criptografia. DNS over HTTPS (DoH), TLS (DoT) e QUIC (DoQ) embaralham a consulta para que outras pessoas na sua rede não consigam ver quais sites você visita."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "“Transport”是指查询以何种方式传送。IP 是未加密的明文。DNS over HTTPS (DoH)、TLS (DoT) 和 QUIC (DoQ) 会把查询加密，让同一网络上的其他人无法看到你访问了哪些网站。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「Transport」是指查詢以何種方式傳送。IP 是未加密的明文。DNS over HTTPS (DoH)、TLS (DoT) 和 QUIC (DoQ) 會將查詢加密，讓同一網路上的其他人無法看到你造訪了哪些網站。"
+    }
+   }
+  }
+ },
+ "A local unlock key is kept safe on this phone. Lava never sees it.": {
+  "comment": "Footer noting the unlock key stays on the device only.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ein lokaler Entsperrschlüssel wird sicher auf diesem Smartphone aufbewahrt. Lava sieht ihn nie."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A local unlock key is kept safe on this phone. Lava never sees it."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Una clave de desbloqueo local se guarda de forma segura en este teléfono. Lava nunca la ve."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Une clé de déverrouillage locale est conservée en sécurité sur ce téléphone. Lava ne la voit jamais."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Una chiave di sblocco locale è conservata in modo sicuro su questo telefono. Lava non la vede mai."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ロック解除キーはこのスマートフォン内に安全に保管されます。Lava がそれを見ることはありません。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "로컬 잠금 해제 키는 이 휴대폰에 안전하게 보관돼요. Lava는 절대 볼 수 없어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Uma chave de desbloqueio local fica guardada com segurança neste telefone. A Lava nunca a vê."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解锁密钥会安全地保存在这部手机上，Lava 永远看不到它。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解鎖金鑰會安全地保存在這支手機上，Lava 永遠看不到它。"
+    }
+   }
+  }
+ },
+ "A provider is the company that answers your phone's \"where is this website?\" questions. Any of these are trustworthy choices.": {
+  "comment": "DNS Providers section footer explaining what a provider is.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ein Anbieter ist das Unternehmen, das die Frage deines Smartphones „Wo ist diese Website?“ beantwortet. Jede dieser Optionen ist vertrauenswürdig."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A provider is the company that answers your phone's \"where is this website?\" questions. Any of these are trustworthy choices."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un proveedor es la empresa que responde a las preguntas de tu teléfono del tipo «¿dónde está este sitio web?». Cualquiera de estas es una opción de confianza."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un fournisseur est l'entreprise qui répond aux questions « où se trouve ce site web ? » de votre téléphone. Chacun de ces choix est digne de confiance."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un fornitore è l'azienda che risponde alle domande del tuo telefono del tipo «dove si trova questo sito web?». Ognuna di queste è una scelta affidabile."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "プロバイダーとは、あなたのスマートフォンの「このウェブサイトはどこ?」という問い合わせに答える会社のことです。ここにあるものはどれも信頼できる選択肢です。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "공급자는 당신의 휴대폰이 던지는 「이 웹사이트는 어디에 있나요?」라는 질문에 답하는 회사예요. 여기 있는 것들은 모두 믿을 수 있는 선택지예요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Um provedor é a empresa que responde às perguntas do seu telefone do tipo \"onde fica este site?\". Qualquer uma destas é uma escolha confiável."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "提供商是指回答你手机“这个网站在哪里?”这类问题的公司。这里的每一个都是值得信赖的选择。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "供應商是指回答你手機「這個網站在哪裡?」這類問題的公司。這裡的每一個都是值得信賴的選擇。"
+    }
+   }
+  }
+ },
+ "A resolver is the service your phone asks to find a website. \"Device DNS\" means Lava uses whatever your phone or network already set, which is the safe default.": {
+  "comment": "DNS Resolver section footer explaining resolver and the Device DNS option.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ein Resolver ist der Dienst, den dein Smartphone fragt, um eine Website zu finden. „Device DNS“ bedeutet, dass Lava das verwendet, was dein Smartphone oder Netzwerk bereits eingestellt hat – die sichere Standardeinstellung."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A resolver is the service your phone asks to find a website. \"Device DNS\" means Lava uses whatever your phone or network already set, which is the safe default."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un resolutor es el servicio al que tu teléfono pregunta para encontrar un sitio web. «Device DNS» significa que Lava usa lo que tu teléfono o tu red ya tengan configurado, que es la opción segura por defecto."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un résolveur est le service que votre téléphone interroge pour trouver un site web. « Device DNS » signifie que Lava utilise ce que votre téléphone ou réseau a déjà défini, ce qui est le réglage sûr par défaut."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un resolver è il servizio a cui il tuo telefono chiede di trovare un sito web. «Device DNS» significa che Lava usa ciò che il tuo telefono o la tua rete hanno già impostato, ovvero l'impostazione sicura predefinita."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "リゾルバーとは、ウェブサイトを見つけるためにあなたのスマートフォンが問い合わせるサービスです。「Device DNS」は、スマートフォンやネットワークがすでに設定しているものを Lava が使うという意味で、安全な初期設定です。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "리졸버는 당신의 휴대폰이 웹사이트를 찾기 위해 물어보는 서비스예요. 「Device DNS」는 휴대폰이나 네트워크가 이미 설정해 둔 것을 Lava가 그대로 사용한다는 뜻이며, 안전한 기본값이에요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Um resolvedor é o serviço que o seu telefone consulta para encontrar um site. \"Device DNS\" significa que a Lava usa o que o seu telefone ou a sua rede já tiverem definido, que é a opção segura padrão."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解析器是你手机用来查找网站的服务。“Device DNS”表示 Lava 会使用你手机或网络已经设好的选项,这是安全的默认设置。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解析器是你手機用來尋找網站的服務。「Device DNS」表示 Lava 會使用你手機或網路已經設定好的選項，這是安全的預設值。"
+    }
+   }
+  }
+ },
+ "Add a passcode or Face ID so only you can change Lava's protection or settings. You pick which screens ask for it below.": {
+  "comment": "Security screen intro panel describing passcode/Face ID lock.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Richte einen Code oder Face ID ein, damit nur du Lavas Schutz oder Einstellungen ändern kannst. Unten wählst du, welche Bildschirme danach fragen."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Add a passcode or Face ID so only you can change Lava's protection or settings. You pick which screens ask for it below."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Añade un código o Face ID para que solo tú puedas cambiar la protección o los ajustes de Lava. Más abajo eliges qué pantallas lo piden."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ajoutez un code ou Face ID pour que vous seul puissiez modifier la protection ou les réglages de Lava. Vous choisissez ci-dessous quels écrans le demandent."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Aggiungi un codice o Face ID così solo tu puoi modificare la protezione o le impostazioni di Lava. Più sotto scegli quali schermate lo richiedono."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "パスコードか Face ID を設定すると、あなただけが Lava の保護や設定を変更できます。どの画面で確認を求めるかは下で選べます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "암호나 Face ID를 추가하면 당신만 Lava의 보호나 설정을 바꿀 수 있어요. 어떤 화면에서 물어볼지는 아래에서 직접 고르세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Adicione um código ou o Face ID para que só você possa mudar a proteção ou os ajustes da Lava. Você escolhe abaixo quais telas vão pedir."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "设置密码或 Face ID,只有你能更改 Lava 的防护或设置。你可以在下方选择哪些屏幕需要验证。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "設定密碼或 Face ID,只有你能變更 Lava 的防護或設定。你可以在下方挑選哪些畫面需要驗證。"
+    }
+   }
+  }
+ },
+ "All local logs stay on this iPhone": {
+  "comment": "Reassurance label stating local logs never leave the device.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Alle lokalen Protokolle bleiben auf diesem iPhone"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "All local logs stay on this iPhone"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Todos los registros locales permanecen en este iPhone"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tous les journaux locaux restent sur cet iPhone"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tutti i registri locali restano su questo iPhone"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "すべてのローカルログはこの iPhone 内にとどまります"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "모든 로컬 기록은 이 iPhone에만 보관돼요"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Todos os registros locais ficam neste iPhone"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "所有本地日志都会留在这部 iPhone 上"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "所有本機記錄都會留在這支 iPhone 上"
+    }
+   }
+  }
+ },
+ "Bring your settings back": {
+  "comment": "Restore-backup action title or section header.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Hol deine Einstellungen zurück"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Bring your settings back"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Recupera tus ajustes"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Récupérez vos réglages"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Recupera le tue impostazioni"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "設定を元に戻す"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "설정을 다시 가져오기"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Traga os seus ajustes de volta"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "把你的设置找回来"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "把你的設定找回來"
+    }
+   }
+  }
+ },
+ "Custom Resolver": {
+  "comment": "DNS settings label for a user-supplied resolver address.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Eigener Resolver"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Custom Resolver"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Resolutor personalizado"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Résolveur personnalisé"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Resolver personalizzato"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "カスタムリゾルバー"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "사용자 지정 리졸버"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Resolvedor personalizado"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "自定义解析器"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "自訂解析器"
+    }
+   }
+  }
+ },
+ "Customization": {
+  "comment": "Settings section title for appearance/customization options.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Anpassung"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Customization"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Personalización"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Personnalisation"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Personalizzazione"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "カスタマイズ"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "사용자 지정"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Personalização"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "个性化"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "個人化"
+    }
+   }
+  }
+ },
+ "DNS Providers": {
+  "comment": "DNS settings section title listing trusted providers.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS-Anbieter"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS Providers"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Proveedores de DNS"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Fournisseurs DNS"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Fornitori DNS"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS プロバイダー"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 공급자"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Provedores de DNS"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 提供商"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 供應商"
+    }
+   }
+  }
+ },
+ "DNS Transport": {
+  "comment": "DNS settings section title for the transport/encryption choice.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS-Transport"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS Transport"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Transporte DNS"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Transport DNS"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Trasporto DNS"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS トランスポート"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 전송 방식"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Transporte de DNS"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 传输方式"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 傳輸方式"
+    }
+   }
+  }
+ },
+ "DNS is how your phone looks up the address of a website before it loads. The setting we picked is safe and works for almost everyone. Only change it if you know you want to.": {
+  "comment": "DNS Resolver screen intro panel explaining DNS in plain language.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS ist die Art, wie dein Smartphone die Adresse einer Website nachschlägt, bevor sie geladen wird. Die von uns gewählte Einstellung ist sicher und passt für fast alle. Ändere sie nur, wenn du genau weißt, dass du das willst."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS is how your phone looks up the address of a website before it loads. The setting we picked is safe and works for almost everyone. Only change it if you know you want to."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "El DNS es la forma en que tu teléfono busca la dirección de un sitio web antes de cargarlo. El ajuste que elegimos es seguro y sirve para casi todo el mundo. Cámbialo solo si sabes que quieres hacerlo."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Le DNS est la façon dont votre téléphone recherche l'adresse d'un site web avant de le charger. Le réglage que nous avons choisi est sûr et convient à presque tout le monde. Ne le modifiez que si vous savez vraiment vouloir le faire."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Il DNS è il modo in cui il tuo telefono cerca l'indirizzo di un sito web prima di caricarlo. L'impostazione che abbiamo scelto è sicura e va bene per quasi tutti. Cambiala solo se sai di volerlo fare."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS は、ウェブサイトが読み込まれる前にその住所をスマートフォンが調べる仕組みです。私たちが選んだ設定は安全で、ほとんどの人に向いています。変更したいとはっきりわかっている場合だけ変えてください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS는 당신의 휴대폰이 웹사이트를 불러오기 전에 그 주소를 찾는 방식이에요. 우리가 골라 둔 설정은 안전하고 거의 모든 사람에게 잘 맞아요. 정말 바꾸고 싶을 때만 바꾸세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "O DNS é a forma como o seu telefone busca o endereço de um site antes de carregá-lo. O ajuste que escolhemos é seguro e funciona para quase todo mundo. Só mude se tiver certeza de que quer fazer isso."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 是你的手机在加载网站前用来查出网站地址的方式。我们挑选的设置既安全又适合几乎所有人。除非你确定想要更改,否则请保持原样。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "DNS 是你的手機在載入網站前用來查出網站位址的方式。我們挑選的設定既安全又適合幾乎所有人。除非你確定想要更改,否則請保持原樣。"
+    }
+   }
+  }
+ },
+ "Delete online backup copy": {
+  "comment": "Destructive action label to remove the online backup.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Online-Backup-Kopie löschen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Delete online backup copy"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Eliminar la copia de seguridad en línea"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Supprimer la copie de sauvegarde en ligne"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Elimina la copia di backup online"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "オンラインバックアップを削除"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "온라인 백업 사본 삭제"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Excluir a cópia de backup on-line"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "删除在线备份副本"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "刪除線上備份副本"
+    }
+   }
+  }
+ },
+ "Delete online backup copy?": {
+  "comment": "Confirmation prompt before deleting the online backup.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Online-Backup-Kopie löschen?"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Delete online backup copy?"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "¿Eliminar la copia de seguridad en línea?"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Supprimer la copie de sauvegarde en ligne ?"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Eliminare la copia di backup online?"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "オンラインバックアップを削除しますか?"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "온라인 백업 사본을 삭제할까요?"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Excluir a cópia de backup on-line?"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "要删除在线备份副本吗?"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "要刪除線上備份副本嗎?"
+    }
+   }
+  }
+ },
+ "Device DNS": {
+  "comment": "DNS option label meaning the phone's existing DNS settings; keep the on-screen control name 'Device DNS' but add a short native gloss so the value is not byte-identical to English (CI gate).",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS (Geräte-DNS)"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS (DNS del dispositivo)"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS (DNS de l'appareil)"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS (DNS del dispositivo)"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS(端末のDNS)"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS(기기 DNS)"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS (DNS do dispositivo)"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS(设备 DNS)"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Device DNS(裝置 DNS)"
+    }
+   }
+  }
+ },
+ "Domains your phone reaches most": {
+  "comment": "Top Domains section subtitle.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Domains, die dein Smartphone am häufigsten erreicht"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Domains your phone reaches most"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Los dominios que tu teléfono más contacta"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Domaines que votre téléphone contacte le plus"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "I domini che il tuo telefono contatta di più"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "スマートフォンが最もよくアクセスするドメイン"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "당신의 휴대폰이 가장 자주 연결하는 도메인"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Os domínios que o seu telefone mais acessa"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你手机最常连到的域名"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你手機最常連到的網域"
+    }
+   }
+  }
+ },
+ "Feedback": {
+  "comment": "Settings section title for sending feedback.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Feedback geben"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Feedback"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Comentarios"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Commentaires"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Feedback e commenti"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "フィードバック"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "의견"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Comentário"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "意见反馈"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "意見回饋"
+    }
+   }
+  }
+ },
+ "For advanced users: type the address of a DNS service you trust. If you're not sure, leave this alone and pick a provider above.": {
+  "comment": "Custom Resolver field footer aimed at advanced users.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Für fortgeschrittene Nutzer: Gib die Adresse eines DNS-Diensts ein, dem du vertraust. Wenn du unsicher bist, lass dies unverändert und wähle oben einen Anbieter."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "For advanced users: type the address of a DNS service you trust. If you're not sure, leave this alone and pick a provider above."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Para usuarios avanzados: escribe la dirección de un servicio DNS en el que confíes. Si no estás seguro, déjalo como está y elige un proveedor más arriba."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Pour les utilisateurs avancés : saisissez l'adresse d'un service DNS auquel vous faites confiance. En cas de doute, n'y touchez pas et choisissez un fournisseur ci-dessus."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Per utenti esperti: digita l'indirizzo di un servizio DNS di cui ti fidi. Se non sei sicuro, lascia stare e scegli un fornitore qui sopra."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "上級者向け: 信頼できる DNS サービスの住所を入力してください。よくわからない場合は、ここはそのままにして上のプロバイダーを選んでください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "고급 사용자용: 신뢰하는 DNS 서비스의 주소를 입력하세요. 잘 모르겠다면 그대로 두고 위에서 공급자를 고르세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Para usuários avançados: digite o endereço de um serviço DNS em que você confia. Se não tiver certeza, deixe como está e escolha um provedor acima."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "高级用户适用:输入你信任的 DNS 服务地址。如果不确定,请保持原样并从上方挑选一个提供商。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "進階使用者適用:輸入你信任的 DNS 服務位址。如果不確定,請保持原樣並從上方挑選一個供應商。"
+    }
+   }
+  }
+ },
+ "How websites get found": {
+  "comment": "DNS Resolver section header phrased in plain language.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "So werden Websites gefunden"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "How websites get found"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Cómo se encuentran los sitios web"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Comment les sites web sont trouvés"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Come vengono trovati i siti web"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ウェブサイトが見つかる仕組み"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "웹사이트를 찾아내는 방법"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Como os sites são encontrados"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "网站是怎么被找到的"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "網站是怎麼被找到的"
+    }
+   }
+  }
+ },
+ "Lava works without an account. Sign in only if you want to save an encrypted copy of your settings online so you can get them back on a new phone. Only you hold the key.": {
+  "comment": "Account screen intro panel explaining optional sign-in for backups.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava funktioniert ohne Konto. Melde dich nur an, wenn du eine verschlüsselte Kopie deiner Einstellungen online speichern möchtest, um sie auf einem neuen Smartphone zurückzuholen. Nur du hast den Schlüssel."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava works without an account. Sign in only if you want to save an encrypted copy of your settings online so you can get them back on a new phone. Only you hold the key."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava funciona sin cuenta. Inicia sesión solo si quieres guardar en línea una copia cifrada de tus ajustes para poder recuperarlos en un teléfono nuevo. Solo tú tienes la clave."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava fonctionne sans compte. Connectez-vous uniquement si vous voulez enregistrer une copie chiffrée de vos réglages en ligne pour les retrouver sur un nouveau téléphone. Vous seul détenez la clé."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava funziona senza account. Accedi solo se vuoi salvare online una copia cifrata delle tue impostazioni per poterle recuperare su un nuovo telefono. Solo tu hai la chiave."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava はアカウントなしで使えます。設定の暗号化されたコピーをオンラインに保存して、新しいスマートフォンで元に戻したい場合だけサインインしてください。キーを持っているのはあなただけです。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava는 계정 없이도 작동해요. 설정의 암호화된 사본을 온라인에 저장해 새 휴대폰에서 다시 가져오고 싶을 때만 로그인하세요. 키는 당신만 가지고 있어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A Lava funciona sem conta. Entre apenas se quiser salvar on-line uma cópia criptografada dos seus ajustes para recuperá-los em um telefone novo. Só você tem a chave."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 不需要账户也能使用。只有当你想把设置的加密副本存到线上、以便在新手机上找回时,才需要登录。只有你掌握密钥。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 不需要帳號也能使用。只有當你想把設定的加密副本存到線上、以便在新手機上找回時,才需要登入。只有你掌握金鑰。"
+    }
+   }
+  }
+ },
+ "Lava's behind-the-scenes counters": {
+  "comment": "Nerd Stats subtitle describing the internal counters shown.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lavas Zähler hinter den Kulissen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava's behind-the-scenes counters"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Los contadores internos de Lava"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Les compteurs en coulisses de Lava"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "I contatori dietro le quinte di Lava"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava の舞台裏のカウンター"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava의 비하인드 카운터"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Os contadores dos bastidores da Lava"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 幕后的计数器"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 幕後的計數器"
+    }
+   }
+  }
+ },
+ "Lock Lava with a passcode": {
+  "comment": "Security toggle label to enable a passcode lock.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava mit einem Code sperren"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lock Lava with a passcode"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Bloquear Lava con un código"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Verrouiller Lava avec un code"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Blocca Lava con un codice"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "パスコードで Lava をロック"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "암호로 Lava 잠그기"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Bloquear a Lava com um código"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "用密码锁定 Lava"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "用密碼鎖定 Lava"
+    }
+   }
+  }
+ },
+ "Make Lava yours": {
+  "comment": "Customization screen intro panel title.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Mach Lava zu deinem"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Make Lava yours"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Haz que Lava sea tuyo"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Faites de Lava le vôtre"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Rendi Lava tua"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava を自分好みに"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava를 나만의 것으로"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Deixe a Lava com a sua cara"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "把 Lava 变成你的样子"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "把 Lava 變成你的樣子"
+    }
+   }
+  }
+ },
+ "Nerd Stats": {
+  "comment": "Playful screen title for advanced diagnostics; convey friendly geeky-details spirit, not literal.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Technik-Details"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Nerd Stats"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Datos para curiosos"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Stats pour les pros"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Statistiche per smanettoni"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "技術者向けデータ"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "덕후용 통계"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estatísticas para curiosos"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "技术宅数据"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "技術宅數據"
+    }
+   }
+  }
+ },
+ "Optional (iOS 18+). Saved in your password manager and used to restore on a new device — your phone makes the unlock key itself, so Lava still can't read your backup.": {
+  "comment": "Backup/Passkey option footer; note iOS 18+ and on-device key generation.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Optional (iOS 18+). Wird in deinem Passwort-Manager gespeichert und zum Wiederherstellen auf einem neuen Gerät verwendet — dein Smartphone erstellt den Entsperrschlüssel selbst, sodass Lava dein Backup weiterhin nicht lesen kann."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Optional (iOS 18+). Saved in your password manager and used to restore on a new device — your phone makes the unlock key itself, so Lava still can't read your backup."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Opcional (iOS 18+). Se guarda en tu gestor de contraseñas y se usa para restaurar en un dispositivo nuevo — tu teléfono crea la clave de desbloqueo por sí mismo, así que Lava sigue sin poder leer tu copia de seguridad."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Facultatif (iOS 18+). Enregistré dans votre gestionnaire de mots de passe et utilisé pour restaurer sur un nouvel appareil — votre téléphone crée lui-même la clé de déverrouillage, donc Lava ne peut toujours pas lire votre sauvegarde."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Facoltativo (iOS 18+). Viene salvato nel tuo gestore di password e usato per ripristinare su un nuovo dispositivo — il tuo telefono crea da solo la chiave di sblocco, quindi Lava continua a non poter leggere il tuo backup."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "任意 (iOS 18+)。パスワードマネージャーに保存され、新しいデバイスでの復元に使われます — ロック解除キーはスマートフォン自身が作るので、Lava はバックアップを読み取れません。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "선택 사항 (iOS 18+). 비밀번호 관리자에 저장되어 새 기기에서 복원할 때 쓰여요 — 잠금 해제 키는 당신의 휴대폰이 직접 만들기 때문에, Lava는 여전히 백업을 읽을 수 없어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Opcional (iOS 18+). Fica salvo no seu gerenciador de senhas e é usado para restaurar em um novo dispositivo — o seu telefone cria a chave de desbloqueio sozinho, então a Lava continua sem conseguir ler o seu backup."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "可选 (iOS 18+)。会保存在你的密码管理器中,用于在新设备上恢复 — 解锁密钥是你手机自己生成的,因此 Lava 仍然无法读取你的备份。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "選用 (iOS 18+)。會儲存在你的密碼管理工具中,用於在新裝置上復原 — 解鎖金鑰是你手機自己產生的,因此 Lava 仍然無法讀取你的備份。"
+    }
+   }
+  }
+ },
+ "Pick how Lava looks and feels. None of these change how it protects you, so try anything.": {
+  "comment": "Customization screen footer reassuring that appearance changes are safe.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Wähle, wie Lava aussieht und sich anfühlt. Nichts davon ändert, wie es dich schützt, also probier ruhig alles aus."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Pick how Lava looks and feels. None of these change how it protects you, so try anything."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Elige el aspecto y la sensación de Lava. Nada de esto cambia cómo te protege, así que prueba lo que quieras."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Choisissez l'apparence et l'ambiance de Lava. Rien de tout cela ne change la façon dont il vous protège, alors essayez librement."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Scegli l'aspetto e lo stile di Lava. Nessuna di queste opzioni cambia il modo in cui ti protegge, quindi prova quello che vuoi."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava の見た目や雰囲気を選びましょう。どれも保護のしかたには影響しないので、自由に試してください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava의 모습과 느낌을 골라 보세요. 이 중 어떤 것도 당신을 보호하는 방식을 바꾸지 않으니, 무엇이든 마음껏 시도해 보세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Escolha a aparência e o estilo da Lava. Nada disso muda como ela protege você, então experimente à vontade."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "挑选 Lava 的外观与感觉。这些都不会改变它保护你的方式,所以尽管放心尝试。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "挑選 Lava 的外觀與感覺。這些都不會改變它保護你的方式,所以儘管放心嘗試。"
+    }
+   }
+  }
+ },
+ "Recent lookups on this phone": {
+  "comment": "Network Activity / lookups list subtitle.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Letzte Abfragen auf diesem Smartphone"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Recent lookups on this phone"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Consultas recientes en este teléfono"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Recherches récentes sur ce téléphone"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ricerche recenti su questo telefono"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "このスマートフォンでの最近の問い合わせ"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이 휴대폰의 최근 조회"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Consultas recentes neste telefone"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这部手机上的近期查询"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這支手機上的近期查詢"
+    }
+   }
+  }
+ },
+ "Security": {
+  "comment": "Settings section title for security/lock options.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Sicherheit"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Security"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Seguridad"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Sécurité"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Sicurezza"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "セキュリティ"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "보안"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Segurança"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "安全"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "安全性"
+    }
+   }
+  }
+ },
+ "Show": {
+  "comment": "Short UI label/toggle to reveal or display something.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Anzeigen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Show"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Mostrar"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Afficher"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Mostra"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "表示"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "표시"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Mostrar"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "显示"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "顯示"
+    }
+   }
+  }
+ },
+ "These are local tallies for how Lava handles your internet traffic. Nothing here shows which websites you visited. It is safe to look around.": {
+  "comment": "Nerd Stats intro panel reassuring the counters reveal no browsing history.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dies sind lokale Zählungen dazu, wie Lava deinen Internetverkehr verarbeitet. Nichts hier zeigt, welche Websites du besucht hast. Du kannst dich gefahrlos umsehen."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "These are local tallies for how Lava handles your internet traffic. Nothing here shows which websites you visited. It is safe to look around."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estos son recuentos locales sobre cómo gestiona Lava tu tráfico de internet. Aquí no se muestra qué sitios web has visitado. Puedes mirar con total tranquilidad."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ce sont des comptages locaux sur la façon dont Lava gère votre trafic internet. Rien ici ne montre quels sites web vous avez visités. Vous pouvez explorer en toute sécurité."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questi sono conteggi locali su come Lava gestisce il tuo traffico internet. Qui non viene mostrato quali siti web hai visitato. Puoi guardare in tutta tranquillità."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これらは、Lava がインターネット通信をどう扱ったかのローカルな集計です。ここにあなたが訪れたウェブサイトが表示されることはありません。安心して見て回れます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이것들은 Lava가 당신의 인터넷 트래픽을 어떻게 처리했는지에 대한 로컬 집계예요. 여기에는 당신이 방문한 웹사이트가 표시되지 않아요. 안심하고 둘러봐도 돼요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estes são totais locais sobre como a Lava lida com o seu tráfego de internet. Nada aqui mostra quais sites você visitou. Pode olhar à vontade."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这些是 Lava 处理你网络流量方式的本地统计。这里不会显示你访问过哪些网站,可以放心查看。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這些是 Lava 處理你網路流量方式的本機統計。這裡不會顯示你造訪過哪些網站,可以放心查看。"
+    }
+   }
+  }
+ },
+ "These switches turn on after you set a passcode or Face ID above. Each one decides which screen asks before it lets you in.": {
+  "comment": "Security section footer explaining the per-screen lock toggles.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Diese Schalter werden aktiv, sobald du oben einen Code oder Face ID eingerichtet hast. Jeder bestimmt, welcher Bildschirm fragt, bevor er dich hineinlässt."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "These switches turn on after you set a passcode or Face ID above. Each one decides which screen asks before it lets you in."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estos interruptores se activan después de que configures un código o Face ID más arriba. Cada uno decide qué pantalla te pide la verificación antes de dejarte entrar."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ces interrupteurs s'activent après avoir défini un code ou Face ID ci-dessus. Chacun décide quel écran demande une vérification avant de vous laisser entrer."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questi interruttori si attivano dopo che imposti un codice o Face ID qui sopra. Ognuno decide quale schermata chiede la verifica prima di farti entrare."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これらのスイッチは、上でパスコードか Face ID を設定すると有効になります。それぞれ、どの画面が入る前に確認を求めるかを決めます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이 스위치들은 위에서 암호나 Face ID를 설정한 뒤에 켜져요. 각 스위치는 어떤 화면이 들어가기 전에 확인을 요청할지 정해요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estes botões são ativados depois que você define um código ou o Face ID acima. Cada um decide qual tela pede a verificação antes de deixar você entrar."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "在上方设置密码或 Face ID 后,这些开关才会启用。每一个都决定哪个屏幕在让你进入前会先要求验证。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "在上方設定密碼或 Face ID 後,這些開關才會啟用。每一個都決定哪個畫面在讓你進入前會先要求驗證。"
+    }
+   }
+  }
+ },
+ "This counts the website addresses (domains) your phone contacted most often. The list is built right on your phone and stays here.": {
+  "comment": "Top Domains screen intro/footer explaining how the list is built locally.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dies zählt die Website-Adressen (Domains), die dein Smartphone am häufigsten kontaktiert hat. Die Liste wird direkt auf deinem Smartphone erstellt und bleibt hier."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "This counts the website addresses (domains) your phone contacted most often. The list is built right on your phone and stays here."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Esto cuenta las direcciones de sitios web (dominios) que tu teléfono ha contactado con más frecuencia. La lista se crea directamente en tu teléfono y se queda aquí."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ceci compte les adresses des sites web (domaines) que votre téléphone a contactés le plus souvent. La liste est créée directement sur votre téléphone et y reste."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questo conta gli indirizzi dei siti web (domini) che il tuo telefono ha contattato più spesso. L'elenco viene creato direttamente sul tuo telefono e resta qui."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これは、あなたのスマートフォンが最もよく接続したウェブサイトの住所 (ドメイン) を数えたものです。このリストはスマートフォン上で作られ、ここにとどまります。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이것은 당신의 휴대폰이 가장 자주 연결한 웹사이트 주소(도메인)를 센 거예요. 이 목록은 당신의 휴대폰에서 바로 만들어지고, 여기에만 머물러요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Isto conta os endereços de sites (domínios) que o seu telefone mais acessou. A lista é criada direto no seu telefone e fica aqui."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这会统计你手机最常连到的网站地址 (域名)。这份列表就在你手机上生成,并留在这里。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這會統計你手機最常連到的網站位址 (網域)。這份清單就在你手機上產生,並留在這裡。"
+    }
+   }
+  }
+ },
+ "This is a list of the websites your apps recently looked up, kept on this iPhone for 7 days. It never leaves your phone unless you export it or attach it to a bug report.": {
+  "comment": "Network Activity / lookups screen footer on local retention and export.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dies ist eine Liste der Websites, die deine Apps kürzlich nachgeschlagen haben; sie wird 7 Tage lang auf diesem iPhone aufbewahrt. Sie verlässt dein Smartphone nie, es sei denn, du exportierst sie oder hängst sie an einen Fehlerbericht an."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "This is a list of the websites your apps recently looked up, kept on this iPhone for 7 days. It never leaves your phone unless you export it or attach it to a bug report."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Esta es una lista de los sitios web que tus apps han consultado recientemente, conservada en este iPhone durante 7 días. Nunca sale de tu teléfono a menos que la exportes o la adjuntes a un informe de error."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ceci est une liste des sites web que vos apps ont récemment recherchés, conservée 7 jours sur cet iPhone. Elle ne quitte jamais votre téléphone, sauf si vous l'exportez ou la joignez à un rapport de bogue."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questo è un elenco dei siti web che le tue app hanno cercato di recente, conservato su questo iPhone per 7 giorni. Non lascia mai il tuo telefono, a meno che tu non lo esporti o lo alleghi a una segnalazione di problema."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これは、あなたのアプリが最近調べたウェブサイトの一覧で、この iPhone に 7 日間保存されます。書き出すかバグレポートに添付しない限り、スマートフォンから外に出ることはありません。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이것은 당신의 앱이 최근에 조회한 웹사이트 목록으로, 이 iPhone에 7일간 보관돼요. 직접 내보내거나 버그 신고에 첨부하지 않는 한 휴대폰 밖으로 나가지 않아요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Esta é uma lista dos sites que os seus apps consultaram recentemente, mantida neste iPhone por 7 dias. Ela nunca sai do seu telefone, a menos que você a exporte ou a anexe a um relatório de problema."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这是你的 App 近期查询过的网站列表,会在这部 iPhone 上保留 7 天。除非你导出它或将它附加到错误报告,否则它绝不会离开你的手机。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這是你的 App 近期查詢過的網站清單,會在這支 iPhone 上保留 7 天。除非你匯出它或將它附加到錯誤報告,否則它絕不會離開你的手機。"
+    }
+   }
+  }
+ },
+ "This unlocks your saved backup right on this iPhone and turns your protection settings back on. Nothing is changed until you tap Restore Backup.": {
+  "comment": "Restore screen footer; explains on-device unlock and the Restore Backup confirm step.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dies entsperrt dein gespeichertes Backup direkt auf diesem iPhone und schaltet deine Schutzeinstellungen wieder ein. Nichts ändert sich, bis du auf „Backup wiederherstellen“ tippst."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "This unlocks your saved backup right on this iPhone and turns your protection settings back on. Nothing is changed until you tap Restore Backup."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Esto desbloquea tu copia de seguridad guardada directamente en este iPhone y vuelve a activar tus ajustes de protección. No se cambia nada hasta que tocas Restaurar copia de seguridad."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ceci déverrouille votre sauvegarde enregistrée directement sur cet iPhone et réactive vos réglages de protection. Rien n'est modifié tant que vous n'avez pas touché « Restaurer la sauvegarde »."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questo sblocca il tuo backup salvato direttamente su questo iPhone e riattiva le tue impostazioni di protezione. Non viene modificato nulla finché non tocchi Ripristina il backup."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これは保存されたバックアップをこの iPhone 上で解除し、保護設定を元に戻します。「バックアップを復元」をタップするまで何も変更されません。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이것은 저장된 백업을 이 iPhone에서 바로 잠금 해제하고, 당신의 보호 설정을 다시 켜요. 백업 복원을 탭하기 전까지는 아무것도 바뀌지 않아요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Isto desbloqueia o seu backup salvo direto neste iPhone e reativa os seus ajustes de proteção. Nada é alterado até você tocar em Restaurar backup."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这会在这部 iPhone 上直接解锁你保存的备份,并重新开启你的防护设置。在你点一下“恢复备份”前,不会有任何更改。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這會在這支 iPhone 上直接解鎖你儲存的備份,並重新開啟你的防護設定。在你點一下「復原備份」前,不會有任何變更。"
+    }
+   }
+  }
+ },
+ "Turn off & delete backup": {
+  "comment": "Destructive action label to disable backup and delete it.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Backup ausschalten & löschen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Turn off & delete backup"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Desactivar y eliminar la copia de seguridad"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Désactiver et supprimer la sauvegarde"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Disattiva ed elimina il backup"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "バックアップをオフにして削除"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "백업 끄고 삭제"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Desativar e excluir o backup"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "关闭并删除备份"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "關閉並刪除備份"
+    }
+   }
+  }
+ },
+ "Turn off & delete backup?": {
+  "comment": "Confirmation prompt before disabling and deleting the backup.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Backup ausschalten & löschen?"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Turn off & delete backup?"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "¿Desactivar y eliminar la copia de seguridad?"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Désactiver et supprimer la sauvegarde ?"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Disattivare ed eliminare il backup?"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "バックアップをオフにして削除しますか?"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "백업을 끄고 삭제할까요?"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Desativar e excluir o backup?"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "要关闭并删除备份吗?"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "要關閉並刪除備份嗎?"
+    }
+   }
+  }
+ },
+ "Unlocking happens on this iPhone — nothing is sent to us. Your iPhone's keychain is the secure, built-in spot where it keeps your unlock key.": {
+  "comment": "Restore/backup footer explaining on-device unlock and keychain storage.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Das Entsperren passiert auf diesem iPhone — nichts wird an uns gesendet. Der Schlüsselbund deines iPhones ist der sichere, integrierte Ort, an dem dein Entsperrschlüssel aufbewahrt wird."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Unlocking happens on this iPhone — nothing is sent to us. Your iPhone's keychain is the secure, built-in spot where it keeps your unlock key."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "El desbloqueo ocurre en este iPhone — no se nos envía nada. El llavero de tu iPhone es el lugar seguro e integrado donde se guarda tu clave de desbloqueo."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Le déverrouillage se fait sur cet iPhone — rien ne nous est envoyé. Le trousseau de votre iPhone est l'emplacement intégré et sécurisé où votre clé de déverrouillage est conservée."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lo sblocco avviene su questo iPhone — non ci viene inviato nulla. Il Portachiavi del tuo iPhone è il luogo sicuro e integrato in cui viene conservata la tua chiave di sblocco."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ロック解除はこの iPhone 上で行われ — 当社には何も送信されません。iPhone のキーチェーンは、ロック解除キーを保管する安全な内蔵の場所です。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "잠금 해제는 이 iPhone에서 이루어지며 — 우리에게는 아무것도 전송되지 않아요. iPhone의 키체인은 당신의 잠금 해제 키를 보관하는 안전한 내장 공간이에요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "O desbloqueio acontece neste iPhone — nada é enviado para nós. O Porta-chaves do seu iPhone é o local seguro e integrado onde a sua chave de desbloqueio fica guardada."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解锁在这部 iPhone 上完成 — 不会有任何东西发送给我们。你 iPhone 的钥匙串是内置的安全位置,用来保管你的解锁密钥。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "解鎖在這支 iPhone 上完成 — 不會有任何東西傳送給我們。你 iPhone 的鑰匙圈是內建的安全位置,用來保管你的解鎖金鑰。"
+    }
+   }
+  }
+ },
+ "Information Sent": {
+  "comment": "Title of the diagnostics-preview subpage reached from Feedback's 'See what information is sent'. Folded into SettingsSubpageContent(title:).",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Gesendete Informationen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Information Sent"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Información enviada"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Informations envoyées"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Informazioni inviate"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "送信される情報"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "전송되는 정보"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Informações enviadas"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "发送的信息"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "傳送的資訊"
+    }
+   }
+  }
+ },
+ "Delete online backup copy removes the saved copy from Lava's servers but keeps backup turned on for this phone. Turn off & delete backup also stops backups on this phone. Either way, the online copy cannot be recovered.": {
+  "comment": "Account & Backup: caveat under the two destructive backup options, disambiguating 'Delete online backup copy' (keeps backup on this device) from 'Turn off & delete backup' (stops backups too).",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "„Online-Backup-Kopie löschen“ entfernt die gespeicherte Kopie von den Servern von Lava, lässt Backups auf diesem Telefon aber aktiviert. „Backup ausschalten und löschen“ stoppt zusätzlich Backups auf diesem Telefon. In beiden Fällen kann die Online-Kopie nicht wiederhergestellt werden."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Delete online backup copy removes the saved copy from Lava's servers but keeps backup turned on for this phone. Turn off & delete backup also stops backups on this phone. Either way, the online copy cannot be recovered."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "«Eliminar la copia de seguridad en línea» quita la copia guardada de los servidores de Lava, pero deja la copia de seguridad activada en este teléfono. «Desactivar y eliminar la copia de seguridad» también detiene las copias de seguridad en este teléfono. En ambos casos, la copia en línea no se puede recuperar."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "« Supprimer la copie de sauvegarde en ligne » retire la copie enregistrée des serveurs de Lava mais laisse la sauvegarde activée sur ce téléphone. « Désactiver et supprimer la sauvegarde » arrête aussi les sauvegardes sur ce téléphone. Dans les deux cas, la copie en ligne ne peut pas être récupérée."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "«Elimina la copia di backup online» rimuove la copia salvata dai server di Lava ma lascia il backup attivo su questo telefono. «Disattiva ed elimina il backup» interrompe anche i backup su questo telefono. In entrambi i casi, la copia online non può essere recuperata."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「オンラインバックアップのコピーを削除」は、Lava のサーバーに保存されたコピーを削除しますが、この iPhone ではバックアップを有効なままにします。「バックアップをオフにして削除」は、この iPhone でのバックアップも停止します。どちらの場合も、オンラインのコピーは復元できません。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「온라인 백업 사본 삭제」는 Lava의 서버에서 저장된 사본을 지우지만, 이 휴대폰에서는 백업을 켜진 상태로 유지해요. 「백업 끄고 삭제」는 이 휴대폰의 백업도 멈춰요. 어느 쪽이든 온라인 사본은 복구할 수 없어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "\"Excluir a cópia de backup on-line\" remove a cópia salva dos servidores da Lava, mas mantém o backup ativado neste telefone. \"Desativar e excluir o backup\" também interrompe os backups neste telefone. De qualquer forma, a cópia on-line não pode ser recuperada."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "“删除在线备份副本”会从 Lava 的服务器删除已保存的副本，但仍在本机保持备份开启。“关闭并删除备份”还会停止本机的备份。无论哪种方式，在线副本都无法恢复。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "「刪除線上備份副本」會從 Lava 的伺服器刪除已儲存的副本，但仍在此手機保持備份開啟。「關閉並刪除備份」還會停止此手機的備份。無論哪種方式，線上副本都無法復原。"
+    }
+   }
+  }
+ },
+ "These are local tallies about how Lava reaches the internet — no website names are included. The numbers count how often address lookups worked, failed, or had to retry, plus when Lava briefly fell back to your phone's normal settings.": {
+  "comment": "Nerd Stats: footer under the Tunnel Health section. Plain-language, scannable summary of what the diagnostic counters mean; reassures that no website names are stored.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dies sind lokale Zählwerte dazu, wie Lava das Internet erreicht – es sind keine Website-Namen enthalten. Die Zahlen zeigen, wie oft Adressabfragen geklappt haben, fehlgeschlagen sind oder wiederholt werden mussten, und wann Lava kurz auf die normalen Einstellungen deines Telefons zurückgegriffen hat."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "These are local tallies about how Lava reaches the internet — no website names are included. The numbers count how often address lookups worked, failed, or had to retry, plus when Lava briefly fell back to your phone's normal settings."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estos son recuentos locales sobre cómo se conecta Lava a internet — no se incluyen nombres de sitios web. Los números cuentan cuántas veces las búsquedas de direcciones funcionaron, fallaron o tuvieron que reintentarse, además de cuándo Lava recurrió brevemente a los ajustes normales de tu teléfono."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ce sont des décomptes locaux sur la façon dont Lava accède à Internet — aucun nom de site n'est inclus. Les chiffres indiquent combien de fois les recherches d'adresse ont réussi, échoué ou dû être réessayées, et quand Lava est brièvement revenu aux réglages normaux de votre téléphone."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questi sono conteggi locali su come Lava raggiunge internet — non è incluso alcun nome di sito web. I numeri indicano quante volte le ricerche di indirizzi sono riuscite, fallite o hanno dovuto essere ripetute, oltre a quando Lava è tornata per un attimo alle normali impostazioni del tuo telefono."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これらは Lava がインターネットに接続する方法に関するこの端末内の集計で、ウェブサイト名は含まれません。アドレスの照会が成功・失敗・再試行された回数や、Lava が一時的に端末の通常の設定に戻った回数を示します。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이것들은 Lava가 인터넷에 어떻게 연결하는지에 대한 로컬 집계로 — 웹사이트 이름은 포함되지 않아요. 이 숫자들은 주소 조회가 성공·실패하거나 다시 시도해야 했던 횟수와, Lava가 잠깐 당신의 휴대폰 기본 설정으로 되돌아간 때를 세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Estes são totais locais sobre como a Lava se conecta à internet — nenhum nome de site é incluído. Os números contam quantas vezes as buscas de endereço funcionaram, falharam ou tiveram que ser repetidas, além de quando a Lava recorreu por um instante aos ajustes normais do seu telefone."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这些是关于 Lava 如何连接互联网的本机统计，不包含任何网站名称。这些数字记录地址查询成功、失败或需要重试的次数，以及 Lava 临时切换回手机正常设置的情况。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這些是關於 Lava 如何連接網際網路的本機統計，不包含任何網站名稱。這些數字記錄位址查詢成功、失敗或需要重試的次數，以及 Lava 暫時切換回手機正常設定的情況。"
+    }
+   }
+  }
+ },
+ "A site you allow here always gets through, even if a blocklist would block it. Only add sites you fully trust.": {
+  "comment": "Caution under the allowed-exceptions list. 'allow'/'blocklist' should match the catalog's Allowed Exceptions / blocklist renderings. Plain, reassuring tone.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Eine Website, die du hier erlaubst, kommt immer durch, auch wenn eine Blockliste sie blockieren würde. Füge nur Websites hinzu, denen du voll vertraust."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A site you allow here always gets through, even if a blocklist would block it. Only add sites you fully trust."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un sitio que permitas aquí siempre pasa, aunque una lista de bloqueo lo bloquearía. Añade solo sitios en los que confíes plenamente."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un site que vous autorisez ici passe toujours, même si une liste de blocage le bloquerait. N'ajoutez que des sites en lesquels vous avez pleine confiance."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Un sito che consenti qui passa sempre, anche se una lista di blocco lo bloccherebbe. Aggiungi solo siti di cui ti fidi pienamente."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ここで許可したサイトは、ブロックリストがブロックする場合でも常に通過します。完全に信頼できるサイトだけを追加してください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "여기서 허용한 사이트는 차단 목록이 막더라도 항상 통과해요. 완전히 믿을 수 있는 사이트만 추가하세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Um site que você libera aqui sempre passa, mesmo que uma lista de bloqueio fosse bloqueá-lo. Adicione apenas sites em que você confia totalmente."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "在这里允许的网站一律会通过,即使拦截列表会拦截它。请只添加你完全信任的网站。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "在這裡允許的網站一律會通過,即使封鎖清單會封鎖它。請只新增你完全信任的網站。"
+    }
+   }
+  }
+ },
+ "Add Allowed Exception": {
+  "comment": "UI button label. Match catalog 'Allowed Exceptions' wording; keep concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Erlaubte Ausnahme hinzufügen"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Add Allowed Exception"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Añadir excepción permitida"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ajouter une exception autorisée"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Aggiungi eccezione consentita"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "許可する例外を追加"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "허용 예외 추가"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Adicionar exceção liberada"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "添加允许例外"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "新增允許例外"
+    }
+   }
+  }
+ },
+ "Anyone with this code can copy your blocklists and blocked sites onto their phone. Share it only with people you trust.": {
+  "comment": "Caution near the share/setup code. 'blocklists' and 'blocked sites' match catalog blocklist/blocked-domain renderings. Calm warning tone.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Jeder, der diesen Code hat, kann deine Blocklisten und blockierten Websites auf sein Telefon kopieren. Teile ihn nur mit Menschen, denen du vertraust."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Anyone with this code can copy your blocklists and blocked sites onto their phone. Share it only with people you trust."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Cualquiera que tenga este código puede copiar tus listas de bloqueo y tus sitios bloqueados en su teléfono. Compártelo solo con personas en las que confíes."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Toute personne disposant de ce code peut copier vos listes de blocage et vos sites bloqués sur son téléphone. Ne le partagez qu'avec des personnes de confiance."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Chiunque abbia questo codice può copiare le tue liste di blocco e i siti bloccati sul proprio telefono. Condividilo solo con persone di cui ti fidi."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "このコードを持っている人は誰でも、あなたのブロックリストとブロック済みサイトを自分の携帯電話にコピーできます。信頼できる人にだけ共有してください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이 코드를 가진 사람은 누구나 당신의 차단 목록과 차단한 사이트를 자기 휴대폰으로 복사할 수 있어요. 믿을 수 있는 사람에게만 공유하세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Qualquer pessoa com este código pode copiar as suas listas de bloqueio e os sites bloqueados para o telefone dela. Compartilhe apenas com pessoas em quem você confia."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "拿到这个代码的任何人,都能把你的拦截列表和已拦截网站复制到自己的手机上。请只分享给你信任的人。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "拿到這個代碼的任何人,都能把你的封鎖清單和已封鎖網站複製到自己的手機上。請只分享給你信任的人。"
+    }
+   }
+  }
+ },
+ "Blocklists are curated lists of sites to block. Turn on the ones you want — Lava can hold a limited number, so pick the ones that matter most.": {
+  "comment": "Intro panel for blocklists. Keep 'Lava' untranslated and preserve the em dash. Match catalog 'curated blocklist' tone.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Blocklisten sind geprüfte Listen mit Websites, die blockiert werden sollen. Schalte die ein, die du möchtest — Lava kann nur eine begrenzte Anzahl aufnehmen, wähle also die wichtigsten aus."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Blocklists are curated lists of sites to block. Turn on the ones you want — Lava can hold a limited number, so pick the ones that matter most."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Las listas de bloqueo son listas seleccionadas de sitios para bloquear. Activa las que quieras — Lava puede contener una cantidad limitada, así que elige las que más importan."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Les listes de blocage sont des listes sélectionnées de sites à bloquer. Activez celles que vous voulez — Lava ne peut en contenir qu'un nombre limité, choisissez donc les plus importantes."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Le liste di blocco sono elenchi curati di siti da bloccare. Attiva quelli che vuoi — Lava può contenerne un numero limitato, quindi scegli quelli più importanti."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ブロックリストは、ブロックするサイトを集めて整理したリストです。使いたいものをオンにしてください — Lava で扱える数には限りがあるので、いちばん大切なものを選びましょう。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "차단 목록은 막을 사이트를 엄선해 모아 놓은 목록이에요. 원하는 것을 켜세요 — Lava가 담을 수 있는 개수에는 한계가 있으니 가장 중요한 것을 고르세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "As listas de bloqueio são listas selecionadas de sites para bloquear. Ative as que você quiser — a Lava comporta um número limitado, então escolha as que mais importam."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "拦截列表是经过整理、用来拦截网站的清单。开启你想要的清单 — Lava 能容纳的数量有限,所以请挑最重要的。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "封鎖清單是經過整理、用來封鎖網站的清單。開啟你想要的清單 — Lava 能容納的數量有限,所以請挑最重要的。"
+    }
+   }
+  }
+ },
+ "Bring in a setup someone shared with you. This replaces your blocklists and blocked domains. Your allowed exceptions stay as they are.": {
+  "comment": "Intro panel for importing a shared filter. 'setup' = shared configuration; 'blocklists'/'blocked domains'/'allowed exceptions' match catalog. Reassuring.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Übernimm eine Einrichtung, die jemand mit dir geteilt hat. Dadurch werden deine Blocklisten und blockierten Domains ersetzt. Deine erlaubten Ausnahmen bleiben unverändert."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Bring in a setup someone shared with you. This replaces your blocklists and blocked domains. Your allowed exceptions stay as they are."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Incorpora una configuración que alguien compartió contigo. Esto reemplaza tus listas de bloqueo y tus dominios bloqueados. Tus excepciones permitidas se quedan como están."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importez une configuration que quelqu'un a partagée avec vous. Cela remplace vos listes de blocage et vos domaines bloqués. Vos exceptions autorisées restent telles quelles."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importa una configurazione che qualcuno ha condiviso con te. Questo sostituisce le tue liste di blocco e i domini bloccati. Le tue eccezioni consentite restano come sono."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "誰かが共有してくれた設定を取り込みます。これによりブロックリストとブロック済みドメインが置き換わります。許可する例外はそのまま残ります。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "누군가 공유해 준 설정을 가져와요. 이렇게 하면 차단 목록과 차단 도메인이 바뀌어요. 허용 예외는 그대로 유지돼요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Traga uma configuração que alguém compartilhou com você. Isso substitui as suas listas de bloqueio e os domínios bloqueados. As suas exceções liberadas continuam como estão."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "导入别人分享给你的设置。这会替换你的拦截列表和已拦截域名。你的允许例外会保持原样。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "匯入別人分享給你的設定。這會取代你的封鎖清單和已封鎖網域。你的允許例外會維持原樣。"
+    }
+   }
+  }
+ },
+ "Bring your own list": {
+  "comment": "UI label/option to add a custom (user-provided) list. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Eigene Liste verwenden"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Bring your own list"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Usar tu propia lista"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Utiliser votre propre liste"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Usa la tua lista"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "自分のリストを追加"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "내 목록 사용"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Usar a sua própria lista"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "使用自己的列表"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "使用自己的清單"
+    }
+   }
+  }
+ },
+ "Enter a setup code": {
+  "comment": "UI label/title for entering a setup code. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Einrichtungscode eingeben"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Enter a setup code"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Introduce un código de configuración"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Saisir un code de configuration"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Inserisci un codice di configurazione"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "セットアップコードを入力"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "설정 코드 입력"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Inserir um código de configuração"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "输入设置代码"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "輸入設定代碼"
+    }
+   }
+  }
+ },
+ "Everything Lava blocks and lets through": {
+  "comment": "Short descriptive label (filters section). Keep 'Lava' untranslated. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Alles, was Lava blockiert und durchlässt"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Everything Lava blocks and lets through"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Todo lo que Lava bloquea y deja pasar"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tout ce que Lava bloque et laisse passer"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tutto ciò che Lava blocca e lascia passare"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava がブロックするものと通すもののすべて"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava가 막는 것과 통과시키는 것 전부"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tudo o que a Lava bloqueia e deixa passar"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 拦截与放行的所有内容"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Lava 封鎖與放行的所有內容"
+    }
+   }
+  }
+ },
+ "Import a shared filter": {
+  "comment": "UI title/button. 'filter' matches catalog filter renderings. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Geteilten Filter importieren"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Import a shared filter"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importar un filtro compartido"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importer un filtre partagé"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importa un filtro condiviso"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "共有されたフィルターを取り込む"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "공유된 필터 가져오기"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importar um filtro compartilhado"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "导入分享的过滤器"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "匯入分享的過濾器"
+    }
+   }
+  }
+ },
+ "Importing replaces your blocklists and blocked domains. Your allowed exceptions and DNS choice stay as they are.": {
+  "comment": "Footer caution on the import screen. Keep 'DNS' untranslated; 'blocklists'/'blocked domains'/'allowed exceptions' match catalog.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Beim Importieren werden deine Blocklisten und blockierten Domains ersetzt. Deine erlaubten Ausnahmen und deine DNS-Auswahl bleiben unverändert."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importing replaces your blocklists and blocked domains. Your allowed exceptions and DNS choice stay as they are."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Importar reemplaza tus listas de bloqueo y tus dominios bloqueados. Tus excepciones permitidas y tu elección de DNS se quedan como están."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "L'importation remplace vos listes de blocage et vos domaines bloqués. Vos exceptions autorisées et votre choix de DNS restent tels quels."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "L'importazione sostituisce le tue liste di blocco e i domini bloccati. Le tue eccezioni consentite e la scelta del DNS restano come sono."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "取り込むと、ブロックリストとブロック済みドメインが置き換わります。許可する例外と DNS の選択はそのまま残ります。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "가져오면 차단 목록과 차단 도메인이 바뀌어요. 허용 예외와 DNS 선택은 그대로 유지돼요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "A importação substitui as suas listas de bloqueio e os domínios bloqueados. As suas exceções liberadas e a sua escolha de DNS continuam como estão."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "导入会替换你的拦截列表和已拦截域名。你的允许例外和 DNS 选择会保持原样。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "匯入會取代你的封鎖清單和已封鎖網域。你的允許例外和 DNS 選擇會維持原樣。"
+    }
+   }
+  }
+ },
+ "Paste or type the setup code": {
+  "comment": "UI placeholder/instruction for the setup-code field. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Einrichtungscode einfügen oder eingeben"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Paste or type the setup code"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Pega o escribe el código de configuración"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Collez ou saisissez le code de configuration"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Incolla o digita il codice di configurazione"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "セットアップコードを貼り付けるか入力"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "설정 코드를 붙여넣거나 입력하세요"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Cole ou digite o código de configuração"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "粘贴或输入设置代码"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "貼上或輸入設定代碼"
+    }
+   }
+  }
+ },
+ "Paste the setup code someone shared with you. It usually starts with \"LF1-\".": {
+  "comment": "Helper text. Keep the quoted \"LF1-\" prefix exactly as-is and untranslated.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Füge den Einrichtungscode ein, den jemand mit dir geteilt hat. Er beginnt meist mit \"LF1-\"."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Paste the setup code someone shared with you. It usually starts with \"LF1-\"."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Pega el código de configuración que alguien compartió contigo. Suele empezar por \"LF1-\"."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Collez le code de configuration que quelqu'un a partagé avec vous. Il commence généralement par \"LF1-\"."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Incolla il codice di configurazione che qualcuno ha condiviso con te. Di solito inizia con \"LF1-\"."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "誰かが共有してくれたセットアップコードを貼り付けてください。通常は \"LF1-\" で始まります。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "누군가 공유해 준 설정 코드를 붙여넣으세요. 보통 \"LF1-\"로 시작해요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Cole o código de configuração que alguém compartilhou com você. Ele geralmente começa com \"LF1-\"."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "粘贴别人分享给你的设置代码。它通常以 \"LF1-\" 开头。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "貼上別人分享給你的設定代碼。它通常以 \"LF1-\" 開頭。"
+    }
+   }
+  }
+ },
+ "Ready-made lists of bad sites": {
+  "comment": "Short subtitle for blocklists. 'bad sites' = harmful/unwanted sites in plain language. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Fertige Listen mit schädlichen Websites"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ready-made lists of bad sites"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Listas listas para usar de sitios dañinos"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Listes toutes prêtes de sites malveillants"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Elenchi già pronti di siti dannosi"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "悪質なサイトをまとめた既成のリスト"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "유해 사이트를 미리 모아 둔 목록"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Listas prontas de sites nocivos"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "现成的不良网站列表"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "現成的不良網站清單"
+    }
+   }
+  }
+ },
+ "Setup code": {
+  "comment": "UI label for the setup code. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Einrichtungscode"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Setup code"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Código de configuración"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Code de configuration"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Codice di configurazione"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "セットアップコード"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "설정 코드"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Código de configuração"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "设置代码"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "設定代碼"
+    }
+   }
+  }
+ },
+ "Share the setup code below instead — it carries the same setup.": {
+  "comment": "Alternative-share hint. Preserve em dash. 'setup' = the same configuration. Calm tone.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Teile stattdessen den Einrichtungscode unten — er enthält dieselbe Einrichtung."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Share the setup code below instead — it carries the same setup."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Comparte mejor el código de configuración de abajo — contiene la misma configuración."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Partagez plutôt le code de configuration ci-dessous — il contient la même configuration."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Condividi invece il codice di configurazione qui sotto — contiene la stessa configurazione."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "代わりに下のセットアップコードを共有してください — 同じ設定を引き継ぎます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "대신 아래의 설정 코드를 공유하세요 — 같은 설정이 그대로 담겨 있어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Em vez disso, compartilhe o código de configuração abaixo — ele leva a mesma configuração."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "改为分享下方的设置代码 — 它带有相同的设置。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "改為分享下方的設定代碼 — 它帶有相同的設定。"
+    }
+   }
+  }
+ },
+ "Sites on these lists are blocked everywhere on this phone.": {
+  "comment": "Footer for blocklists section. 'this phone' matches catalog phrasing about local/device-wide blocking.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Websites auf diesen Listen werden überall auf diesem Telefon blockiert."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Sites on these lists are blocked everywhere on this phone."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Los sitios de estas listas se bloquean en todo este teléfono."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Les sites figurant sur ces listes sont bloqués partout sur ce téléphone."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "I siti presenti in questi elenchi vengono bloccati ovunque su questo telefono."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これらのリストにあるサイトは、この携帯電話のどこでもブロックされます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이 목록에 있는 사이트는 이 휴대폰 어디에서나 차단돼요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Os sites destas listas ficam bloqueados em todo este telefone."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这些列表上的网站,会在这部手机的任何地方都被拦截。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這些清單上的網站,會在這支手機的任何地方都被封鎖。"
+    }
+   }
+  }
+ },
+ "Sites you add here are always allowed, even if a list would block them — add only ones you trust.": {
+  "comment": "Footer for allowed exceptions. Preserve em dash. 'allowed' matches catalog Allowed Exceptions tone.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Websites, die du hier hinzufügst, sind immer erlaubt, auch wenn eine Liste sie blockieren würde — füge nur welche hinzu, denen du vertraust."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Sites you add here are always allowed, even if a list would block them — add only ones you trust."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Los sitios que añadas aquí siempre se permiten, aunque una lista los bloquearía — añade solo los que te inspiren confianza."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Les sites que vous ajoutez ici sont toujours autorisés, même si une liste les bloquerait — n'ajoutez que ceux en lesquels vous avez confiance."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "I siti che aggiungi qui sono sempre consentiti, anche se una lista li bloccherebbe — aggiungi solo quelli di cui ti fidi."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "ここに追加したサイトは、リストがブロックする場合でも常に許可されます — 信頼できるものだけを追加してください。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "여기에 추가한 사이트는 어떤 목록이 막더라도 항상 허용돼요 — 믿을 수 있는 것만 추가하세요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Os sites que você adiciona aqui são sempre liberados, mesmo que uma lista fosse bloqueá-los — adicione apenas os que você confia."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你在这里添加的网站一律会被允许,即使某个列表会拦截它们 — 请只添加你信任的网站。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你在這裡新增的網站一律會被允許,即使某個清單會封鎖它們 — 請只新增你信任的網站。"
+    }
+   }
+  }
+ },
+ "This is your filter. Changes stay as a draft until you tap Save.": {
+  "comment": "Intro line for the filter editor. 'filter'/'draft'/'Save' match catalog renderings (filtro/Filter, bozza/Entwurf/borrador/rascunho/草稿/下書き/작성 중, Save button label).",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Das ist dein Filter. Änderungen bleiben als Entwurf, bis du auf Speichern tippst."
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "This is your filter. Changes stay as a draft until you tap Save."
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Este es tu filtro. Los cambios se quedan como borrador hasta que toques Guardar."
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Ceci est votre filtre. Les modifications restent en brouillon jusqu'à ce que vous touchiez Enregistrer."
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Questo è il tuo filtro. Le modifiche restano come bozza finché non tocchi Salva."
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "これはあなたのフィルターです。変更は、保存をタップするまで下書きとして保持されます。"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "이건 당신의 필터예요. 변경 사항은 저장을 누를 때까지 임시 저장 상태로 남아 있어요."
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Este é o seu filtro. As alterações ficam como rascunho até você tocar em Salvar."
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "这是你的过滤器。在你点一下保存之前,更改会保留为草稿。"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "這是你的過濾器。在你點一下儲存之前,變更會保留為草稿。"
+    }
+   }
+  }
+ },
+ "Your backup stays private": {
+  "comment": "Reassurance label near Encrypted Backup. 'backup' matches catalog backup renderings. Concise.",
+  "extractionState": "manual",
+  "localizations": {
+   "de": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Dein Backup bleibt privat"
+    }
+   },
+   "en": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Your backup stays private"
+    }
+   },
+   "es": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Tu copia de seguridad sigue siendo privada"
+    }
+   },
+   "fr": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Votre sauvegarde reste privée"
+    }
+   },
+   "it": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Il tuo backup resta privato"
+    }
+   },
+   "ja": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "バックアップは非公開のまま"
+    }
+   },
+   "ko": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "당신의 백업은 비공개로 유지돼요"
+    }
+   },
+   "pt-BR": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "Seu backup continua privado"
+    }
+   },
+   "zh-Hans": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你的备份保持私密"
+    }
+   },
+   "zh-Hant": {
+    "stringUnit": {
+     "state": "translated",
+     "value": "你的備份保持私密"
+    }
+   }
+  }
+ }
+}

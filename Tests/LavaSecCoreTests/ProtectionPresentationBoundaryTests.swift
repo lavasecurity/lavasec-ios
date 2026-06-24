@@ -20,7 +20,7 @@ final class ProtectionPresentationBoundaryTests: XCTestCase {
     func testConnectivityCopyLivesAppSideAndIsExhaustive() throws {
         let pres = try source("LavaSecApp/ProtectionConnectivityPresentation.swift")
         for severity in ["healthy", "recovering", "usingDeviceDNSFallback",
-                         "dnsSlow", "networkUnavailable", "needsReconnect"] {
+                         "usingEncryptedFallback", "dnsSlow", "networkUnavailable", "needsReconnect"] {
             XCTAssertTrue(pres.contains("case .\(severity)"), "presentation missing severity .\(severity)")
         }
         XCTAssertTrue(pres.contains("\"Network Lost\""))

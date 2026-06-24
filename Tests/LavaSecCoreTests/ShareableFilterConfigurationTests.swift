@@ -68,6 +68,74 @@ final class ShareableFilterConfigurationTests: XCTestCase {
         XCTAssertEqual(shared.customBlocklists, [enabledCustom])
     }
 
+    func testInitFromFilterKeepsBlockSideAndDropsDisabledCustom() throws {
+        let enabledCustom = try CustomBlocklistSource(
+            id: "c-on",
+            displayName: "On",
+            rawURL: "https://lists.example.com/on.txt"
+        )
+        let disabledCustom = try CustomBlocklistSource(
+            id: "c-off",
+            displayName: "Off",
+            rawURL: "https://lists.example.com/off.txt"
+        )
+        let filter = Filter(
+            name: "Test",
+            enabledBlocklistIDs: ["list-a", "c-on"],
+            customBlocklists: [enabledCustom, disabledCustom],
+            blockedDomains: ["bad.example"],
+            allowedDomains: ["allow.example"]
+        )
+
+        let shared = ShareableFilterConfiguration(filter: filter)
+
+        XCTAssertEqual(shared.enabledBlocklistIDs, ["list-a", "c-on"])
+        XCTAssertEqual(shared.blockedDomains, ["bad.example"])
+        // Only the enabled custom list travels; the disabled one is dropped. Allowlist
+        // exceptions never leave the device (the share has no allowed field).
+        XCTAssertEqual(shared.customBlocklists, [enabledCustom])
+    }
+
+    func testFitsShareableCodeCapacityGatesOversizedSetups() throws {
+        // A normal setup fits the shareable code capacity (the higher QR/code limit).
+        let normal = ShareableFilterConfiguration(
+            enabledBlocklistIDs: ["a-list", "b-list"],
+            blockedDomains: ["bad.example", "worse.example"]
+        )
+        XCTAssertTrue(normal.fitsShareableCodeCapacity())
+
+        // Tens of thousands of high-entropy manual blocks can't fit a decodable code →
+        // too big to share. Deterministic scramble (no Math.random / hashValue) so the
+        // payload doesn't just compress away.
+        func scrambled(_ i: Int) -> String {
+            let mixed = UInt64(bitPattern: Int64(i)) &* 0x9E3779B97F4A7C15 &+ 0xD1B54A32D192ED03
+            return String(mixed, radix: 36)
+        }
+        let huge = ShareableFilterConfiguration(
+            blockedDomains: Set((0..<20_000).map { "\(scrambled($0))-\($0).example" })
+        )
+        XCTAssertFalse(huge.fitsShareableCodeCapacity())
+
+        // Highly compressible but huge: an overlong custom-list name deflates to a tiny
+        // code, yet the uncompressed JSON blows the recipient's inflate limit — so it's
+        // still too big to share even though the code length is small (Codex).
+        let overlongName = try CustomBlocklistSource(
+            id: "huge",
+            displayName: String(repeating: "x", count: 600_000),
+            rawURL: "https://lists.example.com/x.txt"
+        )
+        let compressibleHuge = ShareableFilterConfiguration(
+            enabledBlocklistIDs: ["huge"],
+            customBlocklists: [overlongName]
+        )
+        XCTAssertLessThan(
+            compressibleHuge.encodedConfigurationCode().count,
+            16 * 1024,
+            "The overlong name should compress to a short code (isolating the inflate-size gate)."
+        )
+        XCTAssertFalse(compressibleHuge.fitsShareableCodeCapacity())
+    }
+
     // MARK: Code round-trip
 
     func testEncodeDecodeRoundTrip() throws {

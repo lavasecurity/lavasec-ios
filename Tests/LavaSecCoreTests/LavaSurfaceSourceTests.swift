@@ -68,7 +68,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
         let diagnosticsSource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
         let historyTypeBlock = try Self.sourceBlock(
             in: diagnosticsSource,
-            startingAt: "LavaSectionGroup(\"History Type\")",
+            startingAt: "LavaSectionGroup(\"Show\")",
             endingBefore: "LavaSectionGroup(\n                selectedFilter.rawValue"
         )
         let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")

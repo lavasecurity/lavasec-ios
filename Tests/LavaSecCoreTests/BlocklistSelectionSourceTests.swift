@@ -139,7 +139,9 @@ final class BlocklistSelectionSourceTests: XCTestCase {
             endingBefore: "private enum BlockedDomainSheet"
         )
 
-        XCTAssertTrue(myListBlock.contains("refreshAction: {"))
+        // Pull-to-refresh syncs the catalog — but only for the active filter; a non-active
+        // "View" target passes a nil refreshAction (it isn't loaded, nothing to refresh).
+        XCTAssertTrue(myListBlock.contains("refreshAction: viewModel.isViewingNonActiveFilter ? nil : {"))
         XCTAssertTrue(myListBlock.contains("await viewModel.syncCatalog()"))
         XCTAssertFalse(
             filtersViewSource.contains("private struct CatalogSyncPanel: View"),
@@ -201,7 +203,9 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
         XCTAssertTrue(domainRowBlock.contains("Text(domain.lavaLocalized)"))
         XCTAssertTrue(domainRowBlock.contains(".strikethrough(isPendingRemoval"))
-        XCTAssertTrue(domainRowBlock.contains(".frame(minHeight: 56)"))
+        // Matches BlocklistEffectRow's floor so the row keeps one height across view
+        // and edit (the 44pt edit-mode delete button + 18pt padding = 62 must clear it).
+        XCTAssertTrue(domainRowBlock.contains(".frame(minHeight: 64)"))
         XCTAssertFalse(domainRowBlock.contains("status:"))
         XCTAssertFalse(domainRowBlock.contains("private var status"))
         XCTAssertFalse(domainRowBlock.contains(".pendingRemoval"))
@@ -265,6 +269,10 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(rowBlock.contains("Button {"))
         XCTAssertTrue(rowBlock.contains("toggle(blocklist.id)"))
         XCTAssertTrue(rowBlock.contains(".contentShape(Rectangle())"))
+        // Rows route through the shared selectable-row scaffold (trailing checkmark)
+        // rather than a bespoke leading selection glyph.
+        XCTAssertTrue(rowBlock.contains("LavaSelectableRow("))
+        XCTAssertFalse(rowBlock.contains("BlocklistPickerSelectionGlyph("))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedList {"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedListItem("))
     }
@@ -280,7 +288,16 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(addBlocklistSheetBlock.contains("@State private var navigationPath: [AddBlocklistRoute] = []"))
         XCTAssertTrue(addBlocklistSheetBlock.contains("@State private var searchText = \"\""))
         XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistSearchField(text: $searchText)"))
-        XCTAssertTrue(addBlocklistSheetBlock.contains("LavaSectionGroup(\"All blocklists\")"))
+        // The single "All blocklists" section is replaced by category sections plus a
+        // row of jump-pills under the search box.
+        XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistCategoryJumpPills("))
+        XCTAssertTrue(addBlocklistSheetBlock.contains("private var visibleSections: [BlocklistPickerSection]"))
+        XCTAssertTrue(addBlocklistSheetBlock.contains("ForEach(visibleSections)"))
+        XCTAssertTrue(addBlocklistSheetBlock.contains("LavaSectionGroup(section.title)"))
+        // The jump-pills scroll to a section via an anchor placed slightly above it (so
+        // the section title clears the pinned header) rather than the section's own `.id`.
+        XCTAssertTrue(addBlocklistSheetBlock.contains(".blocklistJumpAnchor(id: section.id)"))
+        XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"All blocklists\")"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"Third-party blocklists\")"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"Bring your own list\")"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("BringYourOwnListEntryRow"))
@@ -306,7 +323,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(searchFieldBlock.contains("Image(systemName: \"magnifyingglass\")"))
-        XCTAssertTrue(searchFieldBlock.contains("TextField(\"Search list name\", text: $text)"))
+        XCTAssertTrue(searchFieldBlock.contains("TextField(\"Search lists or categories\", text: $text)"))
         XCTAssertTrue(searchFieldBlock.contains("Image(systemName: \"xmark.circle.fill\")"))
         XCTAssertTrue(searchFieldBlock.contains(".frame(height: 48)"))
         XCTAssertTrue(searchFieldBlock.contains(".lavaSurface(.panel, cornerRadius: LavaSurface.compactCornerRadius, borderTint: LavaSurface.panelStroke.opacity(0.65))"))
@@ -326,7 +343,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
             endingBefore: "private var upgradeRow"
         )
 
-        XCTAssertTrue(byolBlock.contains(".navigationTitle(\"Bring your own list\")"))
+        XCTAssertTrue(byolBlock.contains(".navigationTitle(\"Bring your own list\".lavaLocalized)"))
         XCTAssertTrue(byolBlock.contains("@Environment(\\.dismiss) private var dismiss"))
         XCTAssertFalse(byolBlock.contains(".navigationBarBackButtonHidden(true)"))
         XCTAssertFalse(byolBlock.contains("NativeToolbarIconButton(systemName: \"chevron.left\""))
@@ -456,7 +473,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
         let preparationBlock = try Self.sourceBlock(
             in: appViewModelSource,
-            startingAt: "func prepareAndApplyFilterDraft() async",
+            startingAt: "func prepareAndApplyFilterDraft(",
             endingBefore: "func retryFilterPreparation()"
         )
 
@@ -516,7 +533,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
         let lavaPlusSheetBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct LavaPlusUpgradeSheet: View",
+            startingAt: "struct LavaPlusUpgradeSheet: View",
             endingBefore: "private struct FilterEditToolbar: ToolbarContent"
         )
         let addBlocklistSheetBlock = try Self.sourceBlock(
@@ -600,7 +617,11 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(toolbarTemplateBlock.contains("case \"trash\""))
         XCTAssertTrue(toolbarTemplateBlock.contains(".frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)"))
         XCTAssertTrue(toolbarTemplateBlock.contains(".frame(width: LavaToolbarMetrics.buttonSize, height: LavaToolbarMetrics.buttonSize)"))
-        XCTAssertTrue(onboardingSource.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: goBack)"))
+        // The onboarding header uses its OWN circular bordered back button: the shared
+        // template is intentionally chrome-less (see the assertions above), which read as
+        // "on the edge" inside onboarding's custom bar, so it's not used there anymore.
+        XCTAssertFalse(onboardingSource.contains("LavaToolbarIconButton(systemName: \"chevron.left\""))
+        XCTAssertTrue(onboardingSource.contains(".background(.regularMaterial, in: Circle())"))
     }
 
     func testNativeToolbarIconButtonUsesSharedSquareLabelFrame() throws {

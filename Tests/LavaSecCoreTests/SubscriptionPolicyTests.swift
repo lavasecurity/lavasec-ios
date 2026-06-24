@@ -5,25 +5,21 @@ final class SubscriptionPolicyTests: XCTestCase {
     func testLavaSecurityPlusProductIDsMatchAppStoreConnectSetup() {
         XCTAssertEqual(LavaSecurityPlusPolicy.monthly.productID, "lava_security_plus_monthly")
         XCTAssertEqual(LavaSecurityPlusPolicy.yearly.productID, "lava_security_plus_yearly")
-        XCTAssertEqual(LavaSecurityPlusPolicy.lifetime.productID, "lava_security_plus_lifetime")
         XCTAssertEqual(
             LavaSecurityPlusPolicy.recommendedOfferOrder.map(\.productID),
             [
                 "lava_security_plus_yearly",
-                "lava_security_plus_monthly",
-                "lava_security_plus_lifetime"
+                "lava_security_plus_monthly"
             ]
         )
     }
 
-    func testLavaSecurityPlusProductKindsDistinguishSubscriptionsAndLifetime() {
+    func testLavaSecurityPlusPlansAreAutoRenewableSubscriptions() {
         XCTAssertTrue(LavaSecurityPlusPolicy.monthly.isSubscription)
         XCTAssertTrue(LavaSecurityPlusPolicy.yearly.isSubscription)
-        XCTAssertFalse(LavaSecurityPlusPolicy.lifetime.isSubscription)
         XCTAssertEqual(LavaSecurityPlusPolicy.productIDs, [
             "lava_security_plus_monthly",
-            "lava_security_plus_yearly",
-            "lava_security_plus_lifetime"
+            "lava_security_plus_yearly"
         ])
     }
 

@@ -107,11 +107,13 @@ final class OnboardingAnimationTests: XCTestCase {
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let defaultsBlock = try Self.sourceBlock(
             in: appViewModelSource,
-            startingAt: "func applyOnboardingRecommendedDefaults()",
+            startingAt: "func applyOnboardingRecommendedDefaults(",
             endingBefore: "func selectOnboardingBlocklists"
         )
 
         XCTAssertTrue(defaultsBlock.contains("startOnboardingDefaultBlocklistSyncIfNeeded()"))
+        XCTAssertTrue(defaultsBlock.contains("library = .seededDefaults(active: protectionLevel)"),
+                      "Finishing onboarding seeds the three default filters with the chosen level active.")
     }
 
     func testFeaturePageDoesNotMountRowsUntilTransitionAllowsLayout() throws {

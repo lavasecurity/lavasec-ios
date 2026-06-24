@@ -208,7 +208,13 @@ public enum ThirdPartyLegalNotices {
         let ownerName = blocklistOwnerName(for: source.id)
         let projectURL = blocklistProjectURL(for: source.id)
         let isGPL = source.licenseName.hasPrefix("GPL")
-        let licenseTextURL = isGPL ? URL(string: "https://www.gnu.org/licenses/gpl-3.0.en.html") : nil
+        let licenseTextURL: URL? = if isGPL {
+            URL(string: "https://www.gnu.org/licenses/gpl-3.0.en.html")
+        } else if source.licenseName.hasPrefix("MPL") {
+            URL(string: "https://www.mozilla.org/en-US/MPL/2.0/")
+        } else {
+            nil
+        }
         let distributionMode = isGPL
             ? "The app fetches the upstream source URL directly and processes the downloaded list locally on this device."
             : "The app fetches the upstream source URL directly and processes the downloaded list locally on this device."
@@ -235,6 +241,12 @@ public enum ThirdPartyLegalNotices {
             "HaGeZi DNS Blocklists"
         case let id where id.hasPrefix("oisd-"):
             "OISD"
+        case let id where id.hasPrefix("stevenblack-"):
+            "Steven Black"
+        case let id where id.hasPrefix("adguard-"):
+            "AdGuard"
+        case let id where id.hasPrefix("1hosts-"):
+            "1Hosts (badmojr)"
         case DefaultCatalog.phishingDatabaseActive.id:
             "Phishing.Database"
         default:
@@ -250,6 +262,12 @@ public enum ThirdPartyLegalNotices {
             URL(string: "https://github.com/hagezi/dns-blocklists")
         case let id where id.hasPrefix("oisd-"):
             URL(string: "https://github.com/sjhgvr/oisd")
+        case let id where id.hasPrefix("stevenblack-"):
+            URL(string: "https://github.com/StevenBlack/hosts")
+        case let id where id.hasPrefix("adguard-"):
+            URL(string: "https://github.com/AdguardTeam/AdGuardSDNSFilter")
+        case let id where id.hasPrefix("1hosts-"):
+            URL(string: "https://github.com/badmojr/1Hosts")
         case DefaultCatalog.phishingDatabaseActive.id:
             URL(string: "https://github.com/Phishing-Database/Phishing.Database")
         default:

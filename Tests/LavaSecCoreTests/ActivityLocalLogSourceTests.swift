@@ -80,7 +80,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
 
         let historyTypeSection = try Self.sourceBlock(
             in: domainBlock,
-            startingAt: "LavaSectionGroup(\"History Type\")",
+            startingAt: "LavaSectionGroup(\"Show\")",
             endingBefore: "LavaSectionGroup(\n                selectedFilter.rawValue"
         )
 
@@ -240,7 +240,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let applyDraftBlock = try Self.sourceBlock(
             in: appViewModelSource,
-            startingAt: "func prepareAndApplyFilterDraft() async",
+            startingAt: "func prepareAndApplyFilterDraft(",
             endingBefore: "private static func filterPreparationFailureMessage"
         )
         let persistFilterChangesBlock = try Self.sourceBlock(

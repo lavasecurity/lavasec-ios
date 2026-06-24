@@ -80,7 +80,7 @@ struct ActivityView: View {
                             LavaNavigationRow(
                                 icon: .domainHistory,
                                 title: "Domain History",
-                                summary: "Recent domain lookups & decisions"
+                                summary: "Recent lookups & decisions"
                             ) {
                                 DomainHistoryView()
                             }
@@ -160,7 +160,6 @@ private struct LocalLogsPrivacyFooter: View {
                 Text("Review Privacy & Data")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
-                    .padding(.horizontal, 4)
             }
             .buttonStyle(.plain)
         }
@@ -376,6 +375,9 @@ private struct LocalLogSubpageChrome: ViewModifier {
                         .disabled(!canClear)
                 }
             }
+            // Every local-log subpage (Network Activity, Domain History, Top Domains) is a
+            // Workshop-depth power-user surface, so they all declare the technical tier here.
+            .lavaTier(.technical)
     }
 }
 
@@ -474,7 +476,7 @@ private struct NetworkActivityPrivacyInfoPanel: View {
                 }
                 .font(.headline)
 
-                Text("Network activity is a local log of connection and protection events on this device. It is sent to us only if you attach it to a bug report.")
+                Text("A local log of connection and protection events on this device. It's sent to us only if you attach it to a bug report.")
                     .lavaSupportingText()
 
                 Text("Kept on this iPhone for 7 days.")
@@ -1152,6 +1154,16 @@ private struct DomainHistoryDomainActionAlert: Identifiable {
     let message: String
 }
 
+/// Quiet reminder shown directly above the domain rows (Top Domains / Domain
+/// History) that a long-press exposes the allow/block actions. Kept at the top of
+/// the list — not in the section footer — so it reads as a reminder before you act.
+private struct DomainRowActionHint: View {
+    var body: some View {
+        Text("Touch and hold a domain to allow or block it.")
+            .lavaQuietNoteText()
+    }
+}
+
 private struct DomainHistoryView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
@@ -1171,7 +1183,7 @@ private struct DomainHistoryView: View {
         ) {
             LocalLogSearchField(text: $searchText)
 
-            LavaSectionGroup("History Type") {
+            LavaSectionGroup("Show") {
                 LavaCondensedList {
                     Picker("History Type", selection: $selectedFilter) {
                         ForEach(DomainHistoryFilter.allCases) { filter in
@@ -1222,7 +1234,10 @@ private struct DomainHistoryView: View {
             FilterConfirmationSheet(origin: .domainHistory)
                 .environmentObject(viewModel)
         }
-        .fullScreenCover(isPresented: $viewModel.isFilterPreparationScreenPresented) {
+        .fullScreenCover(isPresented: Binding(
+            get: { viewModel.isFilterPreparationScreenPresented && viewModel.filterPreparationOrigin == .domainHistory },
+            set: { if !$0 { viewModel.isFilterPreparationScreenPresented = false } }
+        )) {
             FilterPreparationScreen(origin: .domainHistory) {
                 activeReviewSheet = .domainHistory
             }
@@ -1255,31 +1270,37 @@ private struct DomainHistoryView: View {
         )
         let visibleEvents = Array(events.prefix(visibleEventCount))
 
-        LavaCondensedList {
-            if events.isEmpty {
-                Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
-                    .lavaSupportingText()
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-            } else {
-                ForEach(Array(visibleEvents.enumerated()), id: \.element.id) { index, event in
-                    DomainHistoryRow(
-                        event: event,
-                        addToBlocked: {
-                            stageDomainAction(event.domain, target: .blocked)
-                        },
-                        addToAllowed: {
-                            stageDomainAction(event.domain, target: .allowed)
+        VStack(alignment: .leading, spacing: 10) {
+            if !events.isEmpty {
+                DomainRowActionHint()
+            }
+
+            LavaCondensedList {
+                if events.isEmpty {
+                    Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
+                        .lavaSupportingText()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                } else {
+                    ForEach(Array(visibleEvents.enumerated()), id: \.element.id) { index, event in
+                        DomainHistoryRow(
+                            event: event,
+                            addToBlocked: {
+                                stageDomainAction(event.domain, target: .blocked)
+                            },
+                            addToAllowed: {
+                                stageDomainAction(event.domain, target: .allowed)
+                            }
+                        )
+
+                        if index < visibleEvents.count - 1 {
+                            LavaCondensedDivider(leadingInset: 54)
                         }
-                    )
-
-                    if index < visibleEvents.count - 1 {
-                        LavaCondensedDivider(leadingInset: 54)
                     }
-                }
 
-                LocalLogLoadMoreSentinel(hasMore: events.count > visibleEvents.count) {
-                    visibleEventCount += LocalLogPagination.pageSize
+                    LocalLogLoadMoreSentinel(hasMore: events.count > visibleEvents.count) {
+                        visibleEventCount += LocalLogPagination.pageSize
+                    }
                 }
             }
         }
@@ -1343,6 +1364,7 @@ private struct DomainHistoryRow: View {
         .contextMenu {
             Button {
                 UIPasteboard.general.string = event.domain
+                ProtectionHapticFeedback.play(.selectionConfirmed)
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
@@ -1368,11 +1390,14 @@ private struct DomainHistoryRow: View {
 /// the query count ("N times").
 private struct TopDomainsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var security: SecurityController
     let rangeStart: Date
     let rangeEnd: Date
     @State private var selectedFilter: DomainHistoryFilter = .blocked
     @State private var searchText = ""
     @State private var showingClearHistoryConfirmation = false
+    @State private var activeReviewSheet: FilterReviewOrigin?
+    @State private var domainActionAlert: DomainHistoryDomainActionAlert?
 
     var body: some View {
         LavaScreenContent(
@@ -1383,7 +1408,7 @@ private struct TopDomainsView: View {
         ) {
             LocalLogSearchField(text: $searchText)
 
-            LavaSectionGroup("History Type") {
+            LavaSectionGroup("Show") {
                 LavaCondensedList {
                     Picker("History Type", selection: $selectedFilter) {
                         ForEach(DomainHistoryFilter.allCases) { filter in
@@ -1430,6 +1455,26 @@ private struct TopDomainsView: View {
                 Text("This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged.")
             }
         }
+        .sheet(item: $activeReviewSheet) { _ in
+            FilterConfirmationSheet(origin: .domainHistory)
+                .environmentObject(viewModel)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { viewModel.isFilterPreparationScreenPresented && viewModel.filterPreparationOrigin == .domainHistory },
+            set: { if !$0 { viewModel.isFilterPreparationScreenPresented = false } }
+        )) {
+            FilterPreparationScreen(origin: .domainHistory) {
+                activeReviewSheet = .domainHistory
+            }
+            .environmentObject(viewModel)
+        }
+        .alert(item: $domainActionAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     @ViewBuilder
@@ -1442,25 +1487,56 @@ private struct TopDomainsView: View {
             limit: 20
         )
 
-        LavaCondensedList {
-            if domains.isEmpty {
-                Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
-                    .lavaSupportingText()
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-            } else {
-                ForEach(Array(domains.enumerated()), id: \.element.domain) { index, item in
-                    TopDomainRow(
-                        domain: item.domain,
-                        count: item.count,
-                        action: selectedFilter.action
-                    )
+        VStack(alignment: .leading, spacing: 10) {
+            if !domains.isEmpty {
+                DomainRowActionHint()
+            }
 
-                    if index < domains.count - 1 {
-                        LavaCondensedDivider(leadingInset: 54)
+            LavaCondensedList {
+                if domains.isEmpty {
+                    Text((searchText.isEmpty ? selectedFilter.emptyText : "No domains match this search").lavaLocalized)
+                        .lavaSupportingText()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                } else {
+                    ForEach(Array(domains.enumerated()), id: \.element.domain) { index, item in
+                        TopDomainRow(
+                            domain: item.domain,
+                            count: item.count,
+                            action: selectedFilter.action,
+                            addToBlocked: {
+                                stageDomainAction(item.domain, target: .blocked)
+                            },
+                            addToAllowed: {
+                                stageDomainAction(item.domain, target: .allowed)
+                            }
+                        )
+
+                        if index < domains.count - 1 {
+                            LavaCondensedDivider(leadingInset: 54)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    private func stageDomainAction(_ domain: String, target: DomainHistoryDomainTarget) {
+        Task {
+            guard await security.requireFreshAuthentication(for: .filterEditing, reason: "Update domains and lists") else {
+                return
+            }
+
+            let result = viewModel.stageDomainHistoryDomainAction(domain, target: target)
+            guard result.isAccepted else {
+                domainActionAlert = DomainHistoryDomainActionAlert(
+                    title: result.title,
+                    message: result.message
+                )
+                return
+            }
+
+            activeReviewSheet = .domainHistory
         }
     }
 }
@@ -1469,6 +1545,8 @@ private struct TopDomainRow: View {
     let domain: String
     let count: Int
     let action: FilterAction
+    let addToBlocked: () -> Void
+    let addToAllowed: () -> Void
 
     var body: some View {
         LavaCondensedListItem(
@@ -1485,8 +1563,17 @@ private struct TopDomainRow: View {
         .contextMenu {
             Button {
                 UIPasteboard.general.string = domain
+                ProtectionHapticFeedback.play(.selectionConfirmed)
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            Button(action: addToBlocked) {
+                Label("Block", systemImage: "hand.raised.fill")
+            }
+
+            Button(action: addToAllowed) {
+                Label("Allow", systemImage: "arrow.right.circle.fill")
             }
         }
     }

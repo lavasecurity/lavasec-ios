@@ -204,6 +204,161 @@ final class FilterArtifactStoreTests: XCTestCase {
         XCTAssertNil(try store.reusableArtifact(configuration: configuration, cachedCatalog: catalog))
     }
 
+    // MARK: - Content-addressed pointer-swap substrate (LAV-90 Phase 1)
+
+    func testPersistVersionedWritesContentAddressedDirAndFlipsPointer() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog)
+        let writtenAt = Date(timeIntervalSince1970: 2_000)
+
+        let pointer = try store.persistVersioned(preparedSnapshot: prepared, writtenAt: writtenAt)
+
+        // Token is content-addressed (identity fingerprint + generation).
+        XCTAssertTrue(pointer.token.hasPrefix(prepared.identity.fingerprint))
+        XCTAssertEqual(pointer.snapshotIdentityFingerprint, prepared.identity.fingerprint)
+        XCTAssertEqual(pointer.writtenAt, writtenAt)
+
+        // All three artifacts live INSIDE the versioned dir, not at the root.
+        let versioned = store.versionedDirectoryURL(token: pointer.token)
+        for name in ["filter-snapshot.json", "filter-snapshot.compact", "filter-artifact-manifest.json"] {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: versioned.appendingPathComponent(name).path),
+                "\(name) must be written into the content-addressed directory"
+            )
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: store.preparedSnapshotURL.path),
+            "versioned publish must not write the legacy root-level artifacts"
+        )
+
+        // The pointer resolves to a reusable store for the live config.
+        let pointed = try XCTUnwrap(store.currentVersionedStore())
+        let selection = try XCTUnwrap(pointed.reusableArtifact(configuration: configuration, cachedCatalog: catalog))
+        XCTAssertEqual(selection.kind, .compact)
+        XCTAssertEqual(try pointed.loadManifest()?.snapshotIdentity, prepared.identity)
+    }
+
+    func testPointerFlipIsAtomicAcrossRepublishAndGarbageRetainsPreviousGeneration() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+
+        let catalogA = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let preparedA = Self.preparedSnapshot(configuration: configuration, catalog: catalogA)
+        let pointerA = try store.persistVersioned(
+            preparedSnapshot: preparedA,
+            writtenAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        // Second generation: a different catalog version yields a different identity
+        // and therefore a different, immutable directory.
+        let catalogB = Self.catalog(sourceVersionID: "source-v2", guardrailVersionID: "guardrail-v2")
+        let preparedB = Self.preparedSnapshot(configuration: configuration, catalog: catalogB)
+        let pointerB = try store.persistVersioned(
+            preparedSnapshot: preparedB,
+            writtenAt: Date(timeIntervalSince1970: 2_000)
+        )
+
+        XCTAssertNotEqual(pointerA.token, pointerB.token)
+        // The pointer now names the newest complete dir; both dirs still exist.
+        XCTAssertEqual(store.loadArtifactPointer()?.token, pointerB.token)
+        XCTAssertEqual(try store.currentVersionedStore()?.loadManifest()?.snapshotIdentity, preparedB.identity)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerA.token).path))
+
+        // GC retaining live + previous keeps both generations.
+        store.collectVersionedGarbage(retaining: [pointerB.token, pointerA.token])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerA.token).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerB.token).path))
+
+        // GC retaining only the live token drops the previous dir, never the pointer.
+        // graceInterval: 0 so the just-written dir isn't protected by the mtime grace
+        // window (which exists to shield a concurrently-staged peer dir, tested separately).
+        store.collectVersionedGarbage(retaining: [pointerB.token], graceInterval: 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerA.token).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerB.token).path))
+        XCTAssertEqual(store.loadArtifactPointer()?.token, pointerB.token)
+    }
+
+    func testGarbageCollectionRetainsFreshlyStagedPeerDirWithinGraceWindow() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let pointerA = try store.persistVersioned(
+            preparedSnapshot: Self.preparedSnapshot(
+                configuration: configuration,
+                catalog: Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            ),
+            writtenAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let pointerB = try store.persistVersioned(
+            preparedSnapshot: Self.preparedSnapshot(
+                configuration: configuration,
+                catalog: Self.catalog(sourceVersionID: "source-v2", guardrailVersionID: "guardrail-v2")
+            ),
+            writtenAt: Date(timeIntervalSince1970: 2_000)
+        )
+
+        // pointerA's dir was just written (mtime ~now). Even though it is NOT in the retain
+        // set, the default grace window protects it — this is what stops one writer's GC from
+        // reaping a peer writer's freshly-staged-but-not-yet-flipped dir.
+        store.collectVersionedGarbage(retaining: [pointerB.token])
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerA.token).path),
+            "A freshly-staged dir must survive GC within the grace window."
+        )
+
+        // With grace disabled, the non-retained dir is reaped as before.
+        store.collectVersionedGarbage(retaining: [pointerB.token], graceInterval: 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.versionedDirectoryURL(token: pointerA.token).path))
+    }
+
+    func testCurrentVersionedStoreIsNilWithoutAPointer() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        XCTAssertNil(store.loadArtifactPointer())
+        XCTAssertNil(store.currentVersionedStore())
+    }
+
+    func testStagingDoesNotRewriteAnAlreadyPublishedVersionedDir() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog)
+        let writtenAt = Date(timeIntervalSince1970: 2_000)
+
+        let pointer = try store.persistVersioned(preparedSnapshot: prepared, writtenAt: writtenAt)
+
+        // Tamper with a published artifact, then re-stage the SAME snapshot (identical
+        // token). Content-addressed immutability must skip the rewrite, so the tampered
+        // bytes survive — proving the live directory was not rewritten in place under a
+        // potential concurrent lock-free reader.
+        let compactURL = store.versionedDirectoryURL(token: pointer.token)
+            .appendingPathComponent("filter-snapshot.compact")
+        let sentinel = Data("tampered".utf8)
+        try sentinel.write(to: compactURL)
+
+        let pointer2 = try store.persistVersioned(preparedSnapshot: prepared, writtenAt: writtenAt)
+        XCTAssertEqual(pointer2.token, pointer.token)
+        XCTAssertEqual(
+            try Data(contentsOf: compactURL), sentinel,
+            "an already-published token directory must not be rewritten in place"
+        )
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

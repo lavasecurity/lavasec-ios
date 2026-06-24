@@ -332,7 +332,9 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
             compactSnapshotFilename: "filter-snapshot.compact"
         )
 
-        let store = FilterArtifactStore(directoryURL: container)
+        // The published artifacts live in the pointer-resolved versioned store now that
+        // the root dual-write is dropped; read through readableStore() (pointer -> versioned).
+        let store = FilterArtifactStore(directoryURL: container).readableStore()
         let manifest = try XCTUnwrap(store.loadManifest())
         XCTAssertEqual(manifest.snapshotIdentityFingerprint, result.snapshot.identity.fingerprint)
         XCTAssertEqual(manifest.availableArtifacts, [.prepared, .compact])
@@ -342,6 +344,82 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
             cachedCatalog: result.catalogResult.catalog
         ))
         XCTAssertEqual(selection.kind, .compact)
+    }
+
+    func testPersistArtifactsAlsoPublishesVersionedPointer() async throws {
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration,
+            customSources: [],
+            catalogFreshnessMaxAge: 3_600
+        )
+
+        let container = try Fixture.makeTemporaryDirectory()
+        try await service.persistArtifacts(
+            result.snapshot,
+            containerURL: container,
+            snapshotFilename: "filter-snapshot.json",
+            compactSnapshotFilename: "filter-snapshot.compact"
+        )
+
+        let store = FilterArtifactStore(directoryURL: container)
+
+        // A pointer was flipped, naming a versioned dir whose manifest matches.
+        let pointer = try XCTUnwrap(store.loadArtifactPointer())
+        XCTAssertEqual(pointer.snapshotIdentityFingerprint, result.snapshot.identity.fingerprint)
+        let versioned = try XCTUnwrap(store.currentVersionedStore())
+        XCTAssertEqual(try versioned.loadManifest()?.snapshotIdentity, result.snapshot.identity)
+
+        // The legacy root dual-write is dropped: persistArtifacts writes NO root-level
+        // trio (on a fresh container the root files are simply absent).
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.manifestURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.preparedSnapshotURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.compactSnapshotURL.path))
+
+        // readableStore() resolves the published versioned dir.
+        XCTAssertEqual(store.readableStore().directoryURL, versioned.directoryURL)
+    }
+
+    func testPersistArtifactsPreservesPreExistingLegacyRootAsPassiveFallback() async throws {
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration,
+            customSources: [],
+            catalogFreshnessMaxAge: 3_600
+        )
+
+        let container = try Fixture.makeTemporaryDirectory()
+
+        // Simulate an upgrade from a dual-write build: a populated legacy root set already
+        // exists on disk before the new (versioned-only) publisher runs.
+        let seedStore = FilterArtifactStore(
+            directoryURL: container,
+            preparedSnapshotFilename: "filter-snapshot.json",
+            compactSnapshotFilename: "filter-snapshot.compact"
+        )
+        try seedStore.persist(preparedSnapshot: result.snapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: seedStore.manifestURL.path))
+
+        try await service.persistArtifacts(
+            result.snapshot,
+            containerURL: container,
+            snapshotFilename: "filter-snapshot.json",
+            compactSnapshotFilename: "filter-snapshot.compact"
+        )
+
+        // The publish flips the pointer to the versioned set...
+        let versioned = try XCTUnwrap(seedStore.currentVersionedStore())
+        XCTAssertEqual(try versioned.loadManifest()?.snapshotIdentity, result.snapshot.identity)
+        XCTAssertEqual(seedStore.readableStore().directoryURL, versioned.directoryURL)
+
+        // ...and DELIBERATELY preserves the pre-existing legacy root as a passive,
+        // identity-gated fallback (it is never swept here; deleting it could drop a
+        // root-falling-back reader into a cold compile). Reclaiming it is a follow-up.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: seedStore.manifestURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: seedStore.preparedSnapshotURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: seedStore.compactSnapshotURL.path))
     }
 
     private struct Fixture {

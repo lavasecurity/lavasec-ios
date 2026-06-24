@@ -57,9 +57,36 @@ public struct ShareableFilterConfiguration: Equatable, Sendable {
         )
     }
 
+    /// Captures the shareable slice of a stored library `Filter` (for sharing a filter
+    /// other than the one in effect). Mirrors `init(configuration:)` — only enabled
+    /// custom lists; allowlist exceptions are dropped.
+    public init(filter: Filter) {
+        let enabledCustomBlocklists = filter.customBlocklists.filter {
+            filter.enabledBlocklistIDs.contains($0.id)
+        }
+        self.init(
+            enabledBlocklistIDs: filter.enabledBlocklistIDs,
+            blockedDomains: filter.blockedDomains,
+            customBlocklists: enabledCustomBlocklists
+        )
+    }
+
     /// `true` when there is nothing meaningful to share or apply.
     public var isEmpty: Bool {
         enabledBlocklistIDs.isEmpty && blockedDomains.isEmpty && customBlocklists.isEmpty
+    }
+
+    /// Whether this configuration is small enough for a recipient to import — i.e. within
+    /// the HIGHER of the two share limits (a QR fits less than a copyable code). Gates on
+    /// BOTH caps `decode(configurationCode:)` enforces: the encoded-code length AND the
+    /// uncompressed payload size. The latter matters because a highly compressible but very
+    /// large setup (e.g. an overlong custom-list name) can yield a short code that still
+    /// blows the inflate limit on import (Codex). Beyond either, the setup is too big to share.
+    public func fitsShareableCodeCapacity() -> Bool {
+        guard Self.deterministicJSONData(for: self).count <= Self.maxInflatedPayloadBytes else {
+            return false
+        }
+        return encodedConfigurationCode().count - Self.codePrefix.count <= Self.maxEncodedCodeLength
     }
 }
 

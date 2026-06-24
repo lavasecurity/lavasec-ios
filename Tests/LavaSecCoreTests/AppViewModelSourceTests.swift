@@ -1,25 +1,31 @@
 import XCTest
 
 final class AppViewModelSourceTests: XCTestCase {
-    func testRecoveryAcknowledgementUsesPreClearHistoryAndDoesNotExtendProblemThrottle() throws {
+    func testNotifierUsesPreClearHistoryAndOnlyProblemsAdvanceThrottle() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
 
         // The app notifier must evaluate notification(for:) against the captured
         // pre-clear `history`, not a re-read (which would have dropped the
-        // unresolved-problem marker and never posted the .reconnected confirmation).
+        // unresolved-problem marker the silent banner-clear keys off).
         let scheduleBlock = try Self.sourceBlock(
             in: source,
             startingAt: "func scheduleIfNeeded(",
             endingBefore: "func requestAuthorization()"
         )
-        XCTAssertTrue(scheduleBlock.contains("clearResolvedProblemNotifications(resolvedNotificationIdentifiers)"))
+        XCTAssertTrue(
+            scheduleBlock.contains("clearResolvedProblemNotifications(")
+                && scheduleBlock.contains("resolvedNotificationIdentifiers,")
+                && scheduleBlock.contains("cooldownAnchor: ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear("),
+            "The clear must pass the encrypted-fallback cooldown anchor so a covered-then-lapsed wedge re-posts."
+        )
         XCTAssertFalse(
             scheduleBlock.contains("history: notificationHistory,"),
-            "Recovery acknowledgement must use the pre-clear `history`, not a re-read."
+            "The notifier must use the pre-clear `history`, not a re-read."
         )
 
         // The 600s problem throttle keys off the delivered-at timestamp, so only a
-        // problem delivery may advance it — a .reconnected delivery must not.
+        // problem delivery may advance it. (Only actionable problem banners are
+        // delivered now — no recovery acknowledgement.)
         let recordBlock = try Self.sourceBlock(
             in: source,
             startingAt: "private func recordDelivery(of notification:",
@@ -32,11 +38,53 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
         let problemBranch = try Self.sourceBlock(
-            in: recordBlock,
+            in: source,
             startingAt: "if notification.kind.isProblem {",
-            endingBefore: "} else if notification.kind == .reconnected {"
+            endingBefore: "private func removeSupersededNotifications("
         )
         XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        // No recovery-acknowledgement delivery path remains in recordDelivery.
+        XCTAssertFalse(recordBlock.contains(".reconnected"))
+    }
+
+    func testEncryptedFallbackSilentClearAlsoLiftsTheDuplicateGuardID() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        // Back-dating `lastDeliveredAt` alone is not enough: the silent supersede removed
+        // the reconnect banner, so the persisted last-delivered *id* must also be cleared.
+        // Otherwise a lapse back to `.needsReconnect` with the same event id is suppressed by
+        // notification(for:)'s exact-id duplicate guard until a later probe shifts the id,
+        // defeating the back-dated cooldown. The clear must live in the cooldown branch so a
+        // real `.healthy` recovery (cooldownAnchor == nil) keeps its duplicate guard intact.
+        let cooldownBranch = try Self.sourceBlock(
+            in: source,
+            startingAt: "if let cooldownAnchor {",
+            endingBefore: "let requestIdentifiers = identifiers.map {"
+        )
+        XCTAssertTrue(
+            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
+        )
+    }
+
+    func testEncryptedFallbackCoverageLiftsDuplicateGuardWithNoOutstandingBanner() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let scheduleBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func scheduleIfNeeded(",
+            endingBefore: "func requestAuthorization()"
+        )
+        // When coverage engages with no problem banner outstanding (the resolved-ids list is
+        // empty so clearResolvedProblemNotifications never runs), the duplicate-guard id must
+        // still be lifted, else a later lapse to a same-second reconnect id is suppressed.
+        let coverageBranch = try Self.sourceBlock(
+            in: scheduleBlock,
+            startingAt: "} else if assessment.severity == .usingEncryptedFallback {",
+            endingBefore: "// Use the pre-clear"
+        )
+        XCTAssertTrue(
+            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            "Coverage with no outstanding banner must lift the duplicate-guard id so a lapsed reconnect can re-post."
+        )
     }
 
     func testLiveDNSSmokeCanForceResolverPresetFromLaunchArguments() throws {
@@ -353,7 +401,9 @@ final class AppViewModelSourceTests: XCTestCase {
         // implementation) resurrected trash-deleted sources, leaving a stale row.
         XCTAssertTrue(displayedCustomBlocklistsBlock.contains("if let filterEditDraft"))
         XCTAssertTrue(displayedCustomBlocklistsBlock.contains("return filterEditDraft.customBlocklists"))
-        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("return configuration.customBlocklists"))
+        // The no-draft fallback is the detail baseline (the active filter, or a non-active
+        // "View" target) — not always the live `configuration`.
+        XCTAssertTrue(displayedCustomBlocklistsBlock.contains("return filterDetailBaseline.customBlocklists"))
         XCTAssertFalse(
             displayedCustomBlocklistsBlock.contains("mergedByID"),
             "A trash-deleted custom blocklist must not be resurrected by merging the draft back with configuration."
@@ -553,6 +603,49 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(restoreBlock.contains("await enableProtection(logUserAction: false, playsOutcomeHaptic: false)"))
     }
 
+    func testLavaHapticsToggleGatesEveryPlaybackAndOutcomeSurfaces() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let hapticBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "enum ProtectionHapticFeedback",
+            endingBefore: "final class AppViewModel"
+        )
+        let setterBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func setUsesLavaHaptics(_ isEnabled: Bool)",
+            endingBefore: "var protectionTitle: String"
+        )
+
+        // The single choke point reads the toggle so disabling it silences protection,
+        // guardian-tap, and every outcome haptic at once. Default-on preserves the
+        // prior always-on behavior for a missing key.
+        XCTAssertTrue(hapticBlock.contains("static let preferenceDefaultsKey = \"lavasec.customization.lavaHaptics\""))
+        XCTAssertTrue(hapticBlock.contains("static var isEnabled: Bool"))
+        XCTAssertTrue(hapticBlock.contains("UserDefaults.standard.object(forKey: preferenceDefaultsKey) as? Bool ?? true"))
+        XCTAssertTrue(hapticBlock.contains("guard isEnabled else {"))
+
+        // New outcome cases reuse the four physical feedback patterns.
+        XCTAssertTrue(hapticBlock.contains("case actionSucceeded"))
+        XCTAssertTrue(hapticBlock.contains("case actionFailed"))
+        XCTAssertTrue(hapticBlock.contains("case selectionRejected"))
+        XCTAssertTrue(hapticBlock.contains("case selectionConfirmed"))
+
+        // Setter persists, early-returns on no-op, and previews the feel on enable.
+        XCTAssertTrue(setterBlock.contains("guard usesLavaHaptics != isEnabled else {"))
+        XCTAssertTrue(setterBlock.contains("defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)"))
+        XCTAssertTrue(setterBlock.contains("if isEnabled {"))
+        XCTAssertTrue(setterBlock.contains("ProtectionHapticFeedback.play(.selectionConfirmed)"))
+
+        // Representative outcome surfaces are wired to the new cases.
+        XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.actionSucceeded)"))
+        XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.actionFailed)"))
+        XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.selectionRejected)"))
+
+        // The removed configuration-backed haptics preference stays gone.
+        XCTAssertFalse(source.contains("playsHapticFeedback"))
+        XCTAssertFalse(source.contains("setHapticFeedback"))
+    }
+
     func testCatalogSyncAndReconnectWaitWithoutBusyPolling() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let enableBlock = try Self.sourceBlock(
@@ -562,7 +655,7 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let syncBlock = try Self.sourceBlock(
             in: source,
-            startingAt: "func syncCatalog() async",
+            startingAt: "func syncCatalog(isBackgroundRefresh: Bool = false) async",
             endingBefore: "func syncCatalogIfStale() async"
         )
         let performSyncBlock = try Self.sourceBlock(
@@ -843,7 +936,10 @@ final class AppViewModelSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains("var protectionCommandRequest: LavaLiveActivityActionRequest"))
         XCTAssertTrue(source.contains(".pauseFifteenMinutes"))
-        XCTAssertTrue(pauseBlock.contains("let request = option.protectionCommandRequest"))
+        // The fixed-length entry point delegates to a shared request-based flow
+        // that also serves the Live Activity's configured-length Pause button.
+        XCTAssertTrue(pauseBlock.contains("pauseProtectionTemporarily(request: option.protectionCommandRequest)"))
+        XCTAssertTrue(pauseBlock.contains("private func pauseProtectionTemporarily(request: LavaLiveActivityActionRequest)"))
         XCTAssertTrue(pauseBlock.contains("try await LavaProtectionCommandService.perform(request, commandID: operationID.rawValue)"))
         XCTAssertTrue(pauseBlock.contains("loadTemporaryProtectionPause()"))
         XCTAssertTrue(pauseBlock.contains("scheduleTemporaryProtectionResume()"))
@@ -980,7 +1076,7 @@ final class AppViewModelSourceTests: XCTestCase {
         let persistBlock = try Self.sourceBlock(
             in: source,
             startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly()"
+            endingBefore: "private func persistConfigurationOnly("
         )
 
         XCTAssertTrue(summaryBlock.contains("preparedBlocklistSourceRuleCounts()"))
@@ -991,8 +1087,15 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         XCTAssertTrue(persistBlock.contains("summary.coversEnabledBlocklists(in: configuration)"))
         XCTAssertTrue(persistBlock.contains("persistPreparedSnapshotArtifacts(snapshotToPersist)"))
+        // The rewrite is gated on rewritesRuleArtifacts AND coverage, hoisted into a
+        // `didRewriteArtifacts` flag (multi-filter reuses the same flag to decide
+        // whether to record the active filter's compiled token). Same guarantee:
+        // reused or configuration-only persists must not rewrite identical rule
+        // artifacts (warm turn-on cost).
         XCTAssertTrue(
-            persistBlock.contains("if rewritesRuleArtifacts, snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)"),
+            persistBlock.contains("let didRewriteArtifacts = rewritesRuleArtifacts")
+                && persistBlock.contains("&& snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)")
+                && persistBlock.contains("if didRewriteArtifacts {"),
             "Reused or configuration-only persists must not rewrite identical rule artifacts (warm turn-on cost)."
         )
     }

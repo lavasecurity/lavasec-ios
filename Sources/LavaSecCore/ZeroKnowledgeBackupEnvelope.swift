@@ -460,6 +460,19 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         using secret: String,
         slotKind: ZeroKnowledgeBackupKeySlotKind
     ) throws -> BackupConfigurationPayload {
+        let payloadKey = SymmetricKey(data: try recoverRawPayloadKey(secret: secret, slotKind: slotKind))
+        let payloadCiphertextData = try decodeBase64(payloadCiphertext)
+        let payloadBox = try AES.GCM.SealedBox(combined: payloadCiphertextData)
+        let payloadData = try AES.GCM.open(payloadBox, using: payloadKey)
+
+        return try Self.makeJSONDecoder().decode(BackupConfigurationPayload.self, from: payloadData)
+    }
+
+    /// Recover the shared raw payload key by unwrapping it with the given slot's secret.
+    private func recoverRawPayloadKey(
+        secret: String,
+        slotKind: ZeroKnowledgeBackupKeySlotKind
+    ) throws -> Data {
         guard envelopeVersion == Self.currentEnvelopeVersion else {
             throw ZeroKnowledgeBackupEnvelopeError.unsupportedEnvelopeVersion(envelopeVersion)
         }
@@ -480,13 +493,118 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
             iterations: slot.iterations
         )
         let wrappedKeyBox = try AES.GCM.SealedBox(combined: wrappedPayloadKey)
-        let rawPayloadKey = try AES.GCM.open(wrappedKeyBox, using: wrappingKey)
-        let payloadKey = SymmetricKey(data: rawPayloadKey)
-        let payloadCiphertextData = try decodeBase64(payloadCiphertext)
-        let payloadBox = try AES.GCM.SealedBox(combined: payloadCiphertextData)
-        let payloadData = try AES.GCM.open(payloadBox, using: payloadKey)
+        return try AES.GCM.open(wrappedKeyBox, using: wrappingKey)
+    }
 
-        return try Self.makeJSONDecoder().decode(BackupConfigurationPayload.self, from: payloadData)
+    /// Re-encrypt the envelope's payload with an updated `BackupConfigurationPayload`,
+    /// keeping every existing key slot intact. The shared payload key is recovered from the
+    /// device-secret (`.keychain`) slot — the only secret available without user
+    /// interaction — and the new payload is re-sealed under it. Because the key slots are
+    /// unchanged, every existing unlock path (recovery phrase, passkey, assisted recovery)
+    /// still works. This lets a backup reflect post-turn-on config/library changes without a
+    /// full re-enrollment (the envelope is otherwise only built at turn-on/restore).
+    public func resealingPayload(
+        _ newPayload: BackupConfigurationPayload,
+        deviceSecret: String
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        let rawPayloadKey = try recoverRawPayloadKey(secret: deviceSecret, slotKind: .keychain)
+        let payloadKey = SymmetricKey(data: rawPayloadKey)
+        let payloadData = try Self.makeJSONEncoder().encode(newPayload)
+        let sealedPayload = try AES.GCM.seal(payloadData, using: payloadKey)
+
+        guard let payloadCiphertext = sealedPayload.combined else {
+            throw ZeroKnowledgeBackupEnvelopeError.invalidCiphertext
+        }
+
+        return ZeroKnowledgeBackupEnvelope(
+            schemaVersion: schemaVersion,
+            envelopeVersion: envelopeVersion,
+            cipher: cipher,
+            payloadCiphertext: payloadCiphertext.base64EncodedString(),
+            keySlots: keySlots,
+            serverRecoveryShare: serverRecoveryShare,
+            ciphertextByteSize: payloadCiphertext.count,
+            createdAt: createdAt
+        )
+    }
+
+    /// Replace the device-secret (`.keychain`) slot with one wrapped under a NEW device
+    /// secret, recovering the shared payload key via the assisted-recovery phrase. Used on a
+    /// recovery-phrase restore to a NEW device (which has no pre-existing device secret) so
+    /// the restoring device can later re-seal updates with its own device secret. The payload
+    /// and every other key slot are unchanged, so all unlock paths keep working.
+    public func rekeyingDeviceSlot(
+        newDeviceSecret: String,
+        unlockingAssistedRecoveryPhrase phrase: String
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        guard let serverRecoveryShare, !serverRecoveryShare.isEmpty else {
+            throw ZeroKnowledgeBackupEnvelopeError.missingServerRecoveryShare
+        }
+        let assistedRecoverySecret = BackupAssistedRecoverySecret.combinedSecret(
+            recoveryPhrase: phrase,
+            serverRecoveryShare: serverRecoveryShare
+        )
+        let rawPayloadKey = try recoverRawPayloadKey(secret: assistedRecoverySecret, slotKind: .assistedRecovery)
+        return try rekeyedDeviceSlot(rawPayloadKey: rawPayloadKey, newDeviceSecret: newDeviceSecret)
+    }
+
+    /// Re-key the device slot via a password-style `.recoveryPhrase` slot (older envelopes).
+    public func rekeyingDeviceSlot(
+        newDeviceSecret: String,
+        unlockingRecoveryPhrase phrase: String
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        let rawPayloadKey = try recoverRawPayloadKey(secret: phrase, slotKind: .recoveryPhrase)
+        return try rekeyedDeviceSlot(rawPayloadKey: rawPayloadKey, newDeviceSecret: newDeviceSecret)
+    }
+
+    /// Re-key the device slot via the passkey PRF output (passkey restore to a new device).
+    public func rekeyingDeviceSlot(
+        newDeviceSecret: String,
+        unlockingPasskeyPRFOutput prfOutput: Data
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        guard envelopeVersion == Self.currentEnvelopeVersion else {
+            throw ZeroKnowledgeBackupEnvelopeError.unsupportedEnvelopeVersion(envelopeVersion)
+        }
+        guard let slot = keySlots.first(where: { $0.kind == .passkey }) else {
+            throw ZeroKnowledgeBackupEnvelopeError.missingKeySlot
+        }
+        guard slot.kdf == Self.prfKeyDerivationFunction else {
+            throw ZeroKnowledgeBackupEnvelopeError.unsupportedKeyDerivationFunction(slot.kdf)
+        }
+        let salt = try decodeBase64(slot.salt)
+        let wrappedPayloadKey = try decodeBase64(slot.wrappedKey)
+        let wrappingKey = Self.derivePRFKey(prfOutput: prfOutput, salt: salt)
+        let wrappedKeyBox = try AES.GCM.SealedBox(combined: wrappedPayloadKey)
+        let rawPayloadKey = try AES.GCM.open(wrappedKeyBox, using: wrappingKey)
+        return try rekeyedDeviceSlot(rawPayloadKey: rawPayloadKey, newDeviceSecret: newDeviceSecret)
+    }
+
+    private func rekeyedDeviceSlot(
+        rawPayloadKey: Data,
+        newDeviceSecret: String
+    ) throws -> ZeroKnowledgeBackupEnvelope {
+        // Preserve the existing keychain slot's iteration count (so testing/production
+        // costs are unchanged); fall back to the production default if there's no keychain slot.
+        let iterations = keySlots.first(where: { $0.kind == .keychain })?.iterations
+            ?? Self.defaultPasswordIterations
+        let newKeychainSlot = try Self.makeKeySlot(
+            kind: .keychain,
+            secret: newDeviceSecret,
+            rawPayloadKey: rawPayloadKey,
+            iterations: iterations
+        )
+        var slots = keySlots.filter { $0.kind != .keychain }
+        slots.insert(newKeychainSlot, at: 0)
+        return ZeroKnowledgeBackupEnvelope(
+            schemaVersion: schemaVersion,
+            envelopeVersion: envelopeVersion,
+            cipher: cipher,
+            payloadCiphertext: payloadCiphertext,
+            keySlots: slots,
+            serverRecoveryShare: serverRecoveryShare,
+            ciphertextByteSize: ciphertextByteSize,
+            createdAt: createdAt
+        )
     }
 
     private static func deriveKey(secret: String, salt: Data, iterations: Int) throws -> SymmetricKey {

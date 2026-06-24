@@ -16,6 +16,7 @@ enum ProtectionConnectivityPresentation {
         case .healthy:                return "Protected"
         case .recovering:             return "Reconnecting"
         case .usingDeviceDNSFallback: return "Protected"
+        case .usingEncryptedFallback: return "Protected"
         case .dnsSlow:                return "DNS Slow"
         case .networkUnavailable:     return "Network Lost"
         case .needsReconnect:         return "Reconnect Needed"
@@ -30,6 +31,8 @@ enum ProtectionConnectivityPresentation {
             return "Connection changed, refreshing DNS protection"
         case .usingDeviceDNSFallback:
             return "Filtering is on with Device DNS fallback because the selected DNS resolver is unavailable"
+        case .usingEncryptedFallback:
+            return "Filtering is on using the encrypted DNS fallback because the selected resolver is briefly unavailable"
         case .dnsSlow:
             return "The selected DNS resolver is responding slowly. Reconnect or switch resolver."
         case .networkUnavailable:

@@ -122,12 +122,26 @@ private final class ProtectionUserNotificationController {
                 now: now
             )
         if !resolvedNotificationIdentifiers.isEmpty {
-            clearResolvedProblemNotifications(resolvedNotificationIdentifiers)
+            clearResolvedProblemNotifications(
+                resolvedNotificationIdentifiers,
+                cooldownAnchor: ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+                    for: assessment,
+                    history: history,
+                    now: now
+                )
+            )
+        } else if assessment.severity == .usingEncryptedFallback {
+            // Coverage is active with NO problem banner outstanding to clear. Still lift the
+            // exact-id duplicate guard so a later lapse back to a real problem with the same
+            // truncated-second event id isn't suppressed by notification(for:)'s id guard
+            // (the outstanding-problem case clears it via clearResolvedProblemNotifications).
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
         }
 
         // Use the pre-clear `history`: clearResolvedProblemNotifications wipes the
-        // unresolved-problem markers, but the recovery acknowledgement (.reconnected)
-        // needs to see the outstanding problem to fire. Re-reading would always miss it.
+        // unresolved-problem markers, but notification(for:)'s escalation / exact-id
+        // duplicate-guard logic needs to see the outstanding marker. Re-reading would
+        // always miss it.
         guard let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: assessment,
             health: health,
@@ -225,11 +239,12 @@ private final class ProtectionUserNotificationController {
             forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
         )
 
+        // Only actionable problem banners are delivered now, and they advance the
+        // throttle clock: the 600s minimum-problem-interval keys off this
+        // timestamp. (A self-recovery clears the outstanding markers silently via
+        // `clearResolvedProblemNotifications`, so there's no delivered
+        // acknowledgement to handle here.)
         if notification.kind.isProblem {
-            // Only problem deliveries advance the throttle clock; the 600s
-            // minimum-problem-interval keys off this timestamp, so a recovery
-            // acknowledgement must not extend it (a fresh problem after a flappy
-            // recovery would otherwise be suppressed for another full window).
             defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
             defaults.set(
                 notification.identifier,
@@ -239,9 +254,6 @@ private final class ProtectionUserNotificationController {
                 notification.kind.rawValue,
                 forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey
             )
-        } else if notification.kind == .reconnected {
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey)
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey)
         }
     }
 
@@ -257,9 +269,23 @@ private final class ProtectionUserNotificationController {
         notificationCenter.removeDeliveredNotifications(withIdentifiers: requestIdentifiers)
     }
 
-    private func clearResolvedProblemNotifications(_ identifiers: [String]) {
+    private func clearResolvedProblemNotifications(_ identifiers: [String], cooldownAnchor: Date?) {
         defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey)
         defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey)
+        // Back-date the delivery cooldown ONLY for the encrypted-fallback silent supersede
+        // (cooldownAnchor non-nil); a real `.healthy` recovery passes nil and keeps its
+        // anti-flap cooldown intact.
+        if let cooldownAnchor {
+            defaults.set(cooldownAnchor, forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
+            // Also lift the exact-id duplicate guard. The silent supersede removed the
+            // reconnect banner from the OS, so if coverage lapses before a new smoke probe
+            // shifts the event id, the recurring `reconnect-needed:<event>` candidate must be
+            // free to re-post. A stale id here would let `notification(for:)`'s duplicate
+            // guard suppress the actionable banner until some later probe changes the id,
+            // defeating the back-dated cooldown. The cooldown anchor stays the sole gate, so
+            // a flapping wedge is still bounded to one banner per `reFlapGraceInterval`.
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
+        }
 
         let requestIdentifiers = identifiers.map {
             LavaSecAppGroup.protectionNotificationRequestIdentifier(for: $0)
@@ -300,11 +326,6 @@ enum FilterPreparationState: Equatable {
     }
 }
 
-enum FilterEditScope: Equatable {
-    case blockedDomains
-    case allowedExceptions
-}
-
 enum BugReportSendState: Equatable {
     case idle
     case sending
@@ -325,66 +346,6 @@ private struct BugReportSubmitResponse: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case reportID = "report_id"
-    }
-}
-
-private struct AccountQADecisionResponse: Decodable {
-    let isDeveloper: Bool
-
-    private enum CodingKeys: String, CodingKey {
-        case isDeveloper = "is_developer"
-    }
-}
-
-private struct AccountQAAccessClient: Sendable {
-    let urlSession: URLSession
-
-    func isAccountDeveloper(accessToken: String) async throws -> Bool {
-        var lastError: Error?
-        for endpoint in Self.qaAccessEndpointURLs {
-            do {
-                var request = URLRequest(url: endpoint)
-                request.httpMethod = "GET"
-                request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-                request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-                let (responseData, response) = try await urlSession.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AccountQAAccessError(message: "The QA access server response was not valid.")
-                }
-
-                guard 200..<300 ~= httpResponse.statusCode else {
-                    let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body"
-                    throw AccountQAAccessError(
-                        message: "QA access returned HTTP \(httpResponse.statusCode): \(serverMessage)"
-                    )
-                }
-
-                let decoded = try JSONDecoder().decode(AccountQADecisionResponse.self, from: responseData)
-                return decoded.isDeveloper
-            } catch {
-                lastError = error
-            }
-        }
-
-        throw lastError ?? AccountQAAccessError(message: "Could not load QA access.")
-    }
-
-    private static var qaAccessEndpointURLs: [URL] {
-        [LavaSecAPI.productionBaseURL, LavaSecAPI.fallbackBaseURL].map {
-            $0
-                .appending(path: "v1")
-                .appending(path: "account")
-                .appending(path: "qa-access")
-        }
-    }
-}
-
-private struct AccountQAAccessError: LocalizedError {
-    let message: String
-
-    var errorDescription: String? {
-        message
     }
 }
 
@@ -517,9 +478,12 @@ enum EncryptedBackupError: Error, LocalizedError {
     case noPasskeyRecovery
     case invalidPasskeyUnlock
     case passkeyRestoreRequiresSignIn
+    case supersededByConcurrentConfigurationChange
 
     var errorDescription: String? {
         switch self {
+        case .supersededByConcurrentConfigurationChange:
+            "Your filter changed while the backup was restoring. Try the restore again."
         case .noBackupAvailable:
             "No encrypted backup is available on this device yet. Sign in is needed to download a server backup."
         case .noSavedDeviceSecret:
@@ -700,8 +664,28 @@ enum ProtectionHapticFeedback {
     case protectionStartFailed
     case protectionTurnedOff
     case guardianTapAcknowledged
+    // Outcome haptics for the rest of the app's consequential actions. They route
+    // through the same `play` choke point so the Customization toggle silences them
+    // alongside the protection and guardian-tap feedback.
+    case actionSucceeded
+    case actionFailed
+    case selectionRejected
+    case selectionConfirmed
+
+    /// Source of truth for the "Lava Haptics" Customization toggle. Lava haptics
+    /// default on, so a missing key reads as enabled and preserves the prior
+    /// always-on behavior. AppViewModel writes this key; `play` reads it.
+    static let preferenceDefaultsKey = "lavasec.customization.lavaHaptics"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: preferenceDefaultsKey) as? Bool ?? true
+    }
 
     @MainActor static func play(_ feedback: ProtectionHapticFeedback) {
+        guard isEnabled else {
+            return
+        }
+
         switch feedback {
         case .protectionOnSucceeded:
             let generator = UINotificationFeedbackGenerator()
@@ -716,6 +700,22 @@ enum ProtectionHapticFeedback {
             generator.prepare()
             generator.notificationOccurred(.warning)
         case .guardianTapAcknowledged:
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.prepare()
+            generator.impactOccurred()
+        case .actionSucceeded:
+            let generator = UINotificationFeedbackGenerator()
+            generator.prepare()
+            generator.notificationOccurred(.success)
+        case .actionFailed:
+            let generator = UINotificationFeedbackGenerator()
+            generator.prepare()
+            generator.notificationOccurred(.error)
+        case .selectionRejected:
+            let generator = UINotificationFeedbackGenerator()
+            generator.prepare()
+            generator.notificationOccurred(.warning)
+        case .selectionConfirmed:
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.prepare()
             generator.impactOccurred()
@@ -824,6 +824,41 @@ final class AppViewModel: ObservableObject {
     }
 
     @Published var configuration = AppConfiguration()
+    // The hosted filters + which one is active (multi-filter library). Source of truth
+    // for the SET of filters and the active selection; the active filter's four
+    // filter-scoped fields are mirrored write-through into `configuration`, so the
+    // ~25 existing readers of `configuration.enabledBlocklistIDs` et al. are untouched.
+    // At library size 1 this is byte-for-byte today's single-filter behaviour.
+    @Published private(set) var library = FilterLibrary(migratingLegacy: AppConfiguration())
+    // The background catalog-refresh runs on a HEADLESS instance whose
+    // loadPersistedConfiguration() must stay read-only — the migration write is gated on
+    // this so a bg refresh can't overwrite a foreground-created library (read→write race).
+    private let isHeadless: Bool
+    // True when the most recent loadOrMigrateFilterLibrary() had to REJECT the on-disk
+    // library and reseed the three defaults (pre-upgrade/old-schema library, or one that lost
+    // a two-file write race). The reseed mirrors Balanced into `configuration` in memory but
+    // persists it only in the foreground, so a headless background publish must NOT build from
+    // this state — it would flip published artifacts to Balanced while the on-disk config (and
+    // its generation) still describes the pre-upgrade filter. The background publish path
+    // consults this to abort until the foreground migration lands.
+    private var didReseedFilterLibraryOnLastLoad = false
+    // The filter a switch is currently targeting, kept so the shared preparation screen's
+    // "Try Again" can retry the SWITCH (not the edit-draft apply) after a transient failure.
+    private var pendingSwitchFilterID: String?
+    // Serializes EVERY wholesale config+library replacement — a filter switch, a backup restore,
+    // a shared-config import, AND a My-filter draft apply — against one another. Each replacer
+    // claims a token before its first await and re-checks it (1) before committing, (2) before its
+    // post-persist side-effect tail, and (3) before any rollback; a newer claim supersedes an
+    // older one, so the older bails instead of clobbering. persistSharedState ends in an artifact
+    // actor-hop await, so re-check (2) is what stops a superseded loser's tail (applyCatalogSyncResult
+    // rebuilds derived rule caches against the LIVE configuration) from desyncing caches vs the
+    // newer owner's config and serializing wrong rules on the next persist. Main-actor only, so the
+    // read-modify-write in begin() is not racy.
+    private var configurationReplacementGate = ExclusiveReplacementGate()
+    // Whether the CURRENT preparation failure can be retried. A switch whose target was deleted
+    // or frozen mid-prepare is a dead end (retrying re-fails), so it surfaces a non-retryable
+    // failure; ordinary transient failures stay retryable.
+    @Published private(set) var filterPreparationFailureIsRetryable = true
     @Published var diagnostics = DiagnosticsStore()
     @Published private(set) var networkActivityLog = NetworkActivityLog()
     @Published var allowlistDraft = ""
@@ -831,10 +866,29 @@ final class AppViewModel: ObservableObject {
     @Published var qaProbeSuffixDraft = ""
     #endif
     @Published var lastAllowlistMessage: String?
-    @Published var filterEditDraft: FilterEditDraft?
-    @Published private(set) var filterEditScope: FilterEditScope?
+    // Per-filter edit drafts, keyed by filter id. Each filter (the active one, any non-active
+    // "View" target, and the Domain History edit — which keys by the active id) owns its own
+    // in-progress draft, so opening/switching/staging never clobbers another filter's edit. The
+    // computed `filterEditDraft` proxy below reads/writes the entry for the filter the detail page
+    // is currently showing (`filterEditTargetID ?? activeFilterID`); the active-apply path keys by
+    // `activeFilterID` explicitly.
+    @Published private(set) var filterEditDrafts: [String: FilterEditDraft] = [:]
+    // The filter the My-filter detail page is currently showing/editing. `nil` means the
+    // ACTIVE filter (the common case) — every detail accessor below then reads `configuration`
+    // exactly as before. A non-nil id means a NON-active filter opened via "View": the page
+    // shows + edits that filter's saved fields without loading it (no prepare/recompile/tunnel
+    // reload — the "edit a playlist you're not playing" model). Set via beginViewingFilterDetail
+    // and cleared via endViewingFilterDetail, both scoped to the detail page's lifetime; the
+    // retargeted accessors are read ONLY inside that page (verified), so a stray non-nil value
+    // can't bleed into Home/Guard.
+    @Published private(set) var filterEditTargetID: String?
     @Published private(set) var filterPreparationState: FilterPreparationState = .idle
     @Published var isFilterPreparationScreenPresented = false
+    // Which surface owns the shared preparation cover. Multiple screens (Filters tab, Domain
+    // History in Diagnostics) bind covers to `isFilterPreparationScreenPresented`; each gates on
+    // this so only the originating surface presents — otherwise the always-mounted Filters cover
+    // would also fire for a Domain History action (wrong origin / missing "back to review").
+    @Published private(set) var filterPreparationOrigin: FilterReviewOrigin = .filters
     @Published var rageShakeDestination: RageShakeDestination?
     @Published var pendingRageShakeConfirmation: RageShakeDestination?
     @Published private(set) var bugReportDraft: BugReportBundle?
@@ -842,7 +896,13 @@ final class AppViewModel: ObservableObject {
     #if DEBUG || LAVA_QA_TOOLS
     @Published private(set) var adminQAStatusMessage: String?
     #endif
-    @Published private(set) var isAccountDeveloper = false
+    // QA-only: the Phone QA menu is gated solely by the build flag at its call
+    // sites (the account-developer runtime probe / qa_developers allowlist was
+    // retired). Kept a plain constant rather than a build-flag #if so the
+    // internal-only flag never lands in tracked source (contamination guard);
+    // every read of it is already compile-gated, so the value is never observed
+    // in a public build.
+    let isAccountDeveloper = true
     @Published private(set) var vpnStatus: NEVPNStatus = .invalid
     @Published private(set) var isVPNConfigurationInstalled = false
     @Published private(set) var isConfiguringVPN = false
@@ -855,6 +915,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var lavaGuardProgress = LavaGuardProgress()
     @Published private(set) var updatesAppIconWithLavaGuard = true
     @Published private(set) var usesLiveActivities = false
+    @Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes
+    @Published private(set) var usesLavaHaptics = true
     @Published private(set) var isSyncingCatalog = false
     private var catalogSyncTask: Task<Void, Never>?
     @Published private(set) var catalogStatusMessage = "Filter will update from Lava Security's source catalog."
@@ -887,9 +949,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var isLoadingLavaSecurityPlusProducts = false
     @Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false
     @Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false
-    /// Expiry of the active auto-renewable Lava Security Plus entitlement (nil for the
-    /// lifetime plan or when there is no active entitlement). Drives the subscriber
-    /// "Expiration" line and gates the Manage Subscription control.
+    /// Expiry of the active auto-renewable Lava Security Plus entitlement (nil when
+    /// there is no active entitlement). Drives the subscriber "Expiration" line and
+    /// gates the Manage Subscription control.
     @Published private(set) var lavaSecurityPlusExpiresAt: Date?
     @Published private(set) var isPurchasingLavaSecurityPlus = false
     @Published private(set) var lavaSecurityPlusMessage: String?
@@ -914,6 +976,7 @@ final class AppViewModel: ObservableObject {
     private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
     private let updatesAppIconWithLavaGuardDefaultsKey = "lavasec.customization.updatesAppIconWithLavaGuard"
     private let usesLiveActivitiesDefaultsKey = "lavasec.customization.liveActivities"
+    private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey
     private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000
     private let defaults = UserDefaults.standard
     private let appGroupDefaults = LavaSecAppGroup.sharedDefaults
@@ -985,7 +1048,8 @@ final class AppViewModel: ObservableObject {
         DefaultCatalog.oisdSmall.id: .pendingSourceUpdate
     ]
 
-    init(loadVPNState: Bool = true) {
+    init(loadVPNState: Bool = true, headless: Bool = false) {
+        isHeadless = headless
         accountAuthService = AccountAuthService()
         accountAuthState = accountAuthService.state
 
@@ -999,18 +1063,31 @@ final class AppViewModel: ObservableObject {
         #if DEBUG || LAVA_QA_TOOLS
         applyLiveDNSSmokeTestConfigurationIfRequested()
         #endif
-        startLavaSecurityPlusStore()
-        loadCustomizationPreferences()
-        loadLavaGuardProgress()
-        loadAutomaticBackupPreference()
-        loadEncryptedBackupState()
-        loadTemporaryProtectionPause()
-        scheduleTemporaryProtectionResume()
-        liveActivityController.startObservingAuthorizationChanges { [weak self] _ in
-            self?.reconcileLiveActivity()
-        }
-        Task {
-            await refreshAccountDeveloperAccess()
+        // The background catalog refresh runs on a HEADLESS instance and must install no
+        // side-effecting init work. Beyond loadPersistedConfiguration() above (a pure
+        // read), every call here either writes shared state or schedules work that does,
+        // any of which could clobber state the foreground/intents process owns:
+        //   • startLavaSecurityPlusStore       — entitlement listener → persistConfigurationOnly
+        //   • loadCustomizationPreferences      — persistLavaGuardLook / syncAppIcon / defaults.set (app-group)
+        //   • loadTemporaryProtectionPause      — pauseController.onPauseCleared() removes the app-group
+        //     pause keys, so a bg refresh seeing no pause would clear one the foreground just wrote
+        //     (read→cleanup race)
+        //   • scheduleTemporaryProtectionResume — resumes protection
+        //   • live-activity authorization observer — reconcile churn
+        // loadLavaGuardProgress / loadAutomaticBackupPreference / loadEncryptedBackupState are
+        // read-only but unneeded headless. The sync/publish path depends on none of these: it
+        // re-reads the live config and rebuilds rules from the sync results.
+        if !headless {
+            startLavaSecurityPlusStore()
+            loadCustomizationPreferences()
+            loadLavaGuardProgress()
+            loadAutomaticBackupPreference()
+            loadEncryptedBackupState()
+            loadTemporaryProtectionPause()
+            scheduleTemporaryProtectionResume()
+            liveActivityController.startObservingAuthorizationChanges { [weak self] _ in
+                self?.reconcileLiveActivity()
+            }
         }
 
         if loadVPNState {
@@ -1385,6 +1462,43 @@ final class AppViewModel: ObservableObject {
         reconcileLiveActivity()
     }
 
+    /// User-facing label for the Live Activity pause-length stepper, e.g.
+    /// "Pause length: 5 min".
+    var liveActivityPauseLengthLabel: String {
+        "Pause length: %d min".lavaLocalizedFormat(liveActivityPauseMinutes)
+    }
+
+    func setLiveActivityPauseMinutes(_ minutes: Int) {
+        let clampedMinutes = LiveActivityPausePreference.clamp(minutes)
+        guard liveActivityPauseMinutes != clampedMinutes else {
+            return
+        }
+
+        liveActivityPauseMinutes = clampedMinutes
+        // Persisted in the app-group defaults so the widget button label and the
+        // pause intent (both out of process) resolve the same length.
+        LiveActivityPausePreference.setMinutes(
+            clampedMinutes,
+            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)
+        )
+        reconcileLiveActivity()
+    }
+
+    func setUsesLavaHaptics(_ isEnabled: Bool) {
+        guard usesLavaHaptics != isEnabled else {
+            return
+        }
+
+        usesLavaHaptics = isEnabled
+        defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)
+
+        // Play a sample tap when turning haptics on so the user feels what they just
+        // enabled. Turning off stays silent — `play` is already gated by the new value.
+        if isEnabled {
+            ProtectionHapticFeedback.play(.selectionConfirmed)
+        }
+    }
+
     var protectionTitle: String {
         if isProtectionTemporarilyPaused {
             return "Paused"
@@ -1457,7 +1571,7 @@ final class AppViewModel: ObservableObject {
                 return "checkmark.shield.fill"
             case .recovering:
                 return "arrow.triangle.2.circlepath"
-            case .usingDeviceDNSFallback:
+            case .usingDeviceDNSFallback, .usingEncryptedFallback:
                 return "network"
             case .networkUnavailable:
                 return "wifi.slash"
@@ -1669,7 +1783,7 @@ final class AppViewModel: ObservableObject {
         if let filterEditDraft {
             return filterEditDraft.customBlocklists
         }
-        return configuration.customBlocklists
+        return filterDetailBaseline.customBlocklists
     }
 
     var allowlistConfigured: Bool {
@@ -1756,15 +1870,16 @@ final class AppViewModel: ObservableObject {
     }
 
     var filterDraftDiff: FilterConfigurationDiff {
+        let baseline = filterDetailBaseline
         guard let filterEditDraft else {
             return FilterConfigurationDiff(
-                from: configuration.filterSelection,
-                to: configuration.filterSelection
+                from: baseline.filterSelection,
+                to: baseline.filterSelection
             )
         }
 
         return FilterConfigurationDiff(
-            from: configuration.filterSelection,
+            from: baseline.filterSelection,
             to: filterEditDraft.selection
         )
     }
@@ -2285,14 +2400,15 @@ final class AppViewModel: ObservableObject {
     }
 
     private var stagedEnabledBlocklistIDs: Set<String> {
-        filterEditDraft?.enabledBlocklistIDs ?? configuration.enabledBlocklistIDs
+        filterEditDraft?.enabledBlocklistIDs ?? filterDetailBaseline.enabledBlocklistIDs
     }
 
     /// Manual blocked + allowed domains are each compiled as a filter rule, so
     /// they consume the same budget as the blocklists and are counted together.
     private var stagedManualRuleCount: Int {
-        let blocked = filterEditDraft?.blockedDomains ?? configuration.blockedDomains
-        let allowed = filterEditDraft?.allowedDomains ?? configuration.allowedDomains
+        let baseline = filterDetailBaseline
+        let blocked = filterEditDraft?.blockedDomains ?? baseline.blockedDomains
+        let allowed = filterEditDraft?.allowedDomains ?? baseline.allowedDomains
         return blocked.count + allowed.count
     }
 
@@ -2360,44 +2476,116 @@ final class AppViewModel: ObservableObject {
         await syncCatalog()
     }
 
-    func isFilterEditing(_ scope: FilterEditScope) -> Bool {
-        filterEditScope == scope && filterEditDraft != nil
+    /// The baseline filter fields the detail page displays and diffs an edit draft against:
+    /// the ACTIVE filter (already mirrored in `configuration`) when no non-active target is
+    /// set, otherwise the chosen non-active filter's saved fields. Only the four filter-scoped
+    /// fields are substituted; device-global fields (tier limits, protection-on) stay as the
+    /// live config's. When `filterEditTargetID == nil` this returns `configuration` unchanged,
+    /// so the active-filter path is byte-identical to before this feature.
+    /// Which filter the current edit context belongs to: the non-active "View" target if one is
+    /// set, otherwise the active filter. The detail-page draft accessors operate on this filter.
+    private var currentEditKey: String {
+        filterEditTargetID ?? activeFilterID
     }
 
-    func beginFilterEditing(_ scope: FilterEditScope) {
-        filterEditDraft = FilterEditDraft(configuration: configuration)
-        filterEditScope = scope
+    /// The edit draft for the filter the detail page is currently showing — a proxy over
+    /// `filterEditDrafts[currentEditKey]`. Reading/writing it transparently targets that filter's
+    /// own entry, so all the staged-display / predicate / diff / mutate accessors below need no
+    /// change. Setting nil removes the entry. (The active-apply path keys by `activeFilterID`
+    /// directly — see `activeFilterDraft` — so Domain History never depends on `filterEditTargetID`.)
+    var filterEditDraft: FilterEditDraft? {
+        get { filterEditDrafts[currentEditKey] }
+        set { filterEditDrafts[currentEditKey] = newValue }
+    }
+
+    /// The active filter's edit draft, addressed by `activeFilterID` regardless of which filter the
+    /// detail page is showing. The full prepare+publish+reload apply (active My-filter save and
+    /// Domain History) operates on this, so it's correct even if a non-active detail page is still
+    /// mounted with a different `filterEditTargetID`.
+    var activeFilterDraft: FilterEditDraft? {
+        get { filterEditDrafts[activeFilterID] }
+        set { filterEditDrafts[activeFilterID] = newValue }
+    }
+
+    private var filterDetailBaseline: AppConfiguration {
+        guard let id = filterEditTargetID, let target = library.filter(id: id) else {
+            return configuration
+        }
+        var baseline = configuration
+        baseline.enabledBlocklistIDs = target.enabledBlocklistIDs
+        baseline.customBlocklists = target.customBlocklists
+        baseline.blockedDomains = target.blockedDomains
+        baseline.allowedDomains = target.allowedDomains
+        return baseline
+    }
+
+    /// The filter the detail page is currently showing: the non-active "View" target if one is
+    /// set, otherwise the active filter. Drives the page title and the rules metric.
+    var detailFilter: Filter {
+        if let id = filterEditTargetID, let target = library.filter(id: id) {
+            return target
+        }
+        return library.activeFilter
+    }
+
+    /// Whether the detail page is showing a NON-active filter (opened via "View"). Such a
+    /// filter is edited library-only — no prepare, no tunnel reload, no auto-refresh.
+    var isViewingNonActiveFilter: Bool {
+        filterEditTargetID != nil
+    }
+
+    /// Whether the ACTIVE filter specifically has an unsaved draft (addressed by its own id, not
+    /// the current detail target). Domain History edits the active filter, so it gates on this —
+    /// a non-active filter's preserved draft lives under a different key and is irrelevant to it.
+    var hasUnsavedActiveFilterDraft: Bool {
+        guard let draft = activeFilterDraft else { return false }
+        return !FilterConfigurationDiff(from: configuration.filterSelection, to: draft.selection).isEmpty
+    }
+
+    /// Open the My-filter detail page for `id` (`nil`/active id = the active filter). Just points
+    /// the page at that filter; its own per-filter draft (in `filterEditDrafts`) resumes if present,
+    /// so opening any filter never disturbs another filter's draft.
+    func beginViewingFilterDetail(id: String?) {
+        filterEditTargetID = (id == nil || id == library.activeFilterID) ? nil : id
+        filterPreparationState = .idle
+    }
+
+    /// Called when the detail page disappears (a real pop). Drops a CLEAN draft for the filter the
+    /// page was showing (no edits worth keeping); a DIRTY draft stays in its per-filter slot so
+    /// re-opening that filter resumes the edit. Then stops targeting (the proxy falls back to the
+    /// active filter). Unified across active/non-active — per-filter keying means there's no shared
+    /// slot to leak between filters.
+    func endViewingFilterDetail() {
+        guard !isFilterPreparationScreenPresented, !filterPreparationState.isPreparing else {
+            return
+        }
+        if !filterDraftHasChanges {
+            filterEditDraft = nil   // removes the clean draft for the shown filter
+        }
+        filterEditTargetID = nil
+    }
+
+    /// Whether the filter the detail page is currently showing has an in-progress edit draft.
+    /// (Per-filter storage makes "is editing" simply "this filter has a draft" — the old edit-mode
+    /// flag was vestigial.)
+    var isFilterEditing: Bool {
+        filterEditDraft != nil
+    }
+
+    func beginFilterEditing() {
+        filterEditDraft = FilterEditDraft(configuration: filterDetailBaseline)
         filterPreparationState = .idle
     }
 
     func cancelFilterEditing() {
         filterEditDraft = nil
-        filterEditScope = nil
         filterPreparationState = .idle
         isFilterPreparationScreenPresented = false
     }
 
-    func cancelFilterEditingOnPageDisappear(_ scope: FilterEditScope) {
-        // Only auto-discard a *clean* draft when the page goes away. My filter is now a
-        // pushed page (not a modal cover), and hiding the Back button does not suppress
-        // the interactive edge-swipe-to-pop — so a draft with unsaved changes reaching
-        // here means an unconfirmed dismissal. Preserve it (re-opening resumes the edit)
-        // instead of silently dropping the user's changes; the explicit Cancel button is
-        // the only path that discards, and it confirms first.
-        guard isFilterEditing(scope),
-              !isFilterPreparationScreenPresented,
-              !filterPreparationState.isPreparing,
-              !filterDraftHasChanges
-        else {
-            return
-        }
-
-        cancelFilterEditing()
-    }
-
     func keepCurrentFiltersAfterPrepareFailure() {
         filterEditDraft = nil
-        filterEditScope = nil
+        pendingSwitchFilterID = nil
         filterPreparationState = .idle
         isFilterPreparationScreenPresented = false
     }
@@ -2407,6 +2595,26 @@ final class AppViewModel: ObservableObject {
         isFilterPreparationScreenPresented = false
     }
 
+    /// Whether the preparation-failure screen should offer "Back to Edit"/"Back to Review".
+    /// A filter SWITCH has no edit draft to return to (its only recoveries are "Try Again",
+    /// which re-runs the switch, and "Keep Current Filter"), so the secondary button is hidden
+    /// for it. An edit apply or a Domain History apply (no pending switch) still offers it.
+    var filterPreparationFailureOffersEditReturn: Bool {
+        pendingSwitchFilterID == nil
+    }
+
+    /// Called from a superseded switch / draft-apply bail. The preparation cover it presented is
+    /// only ever dismissed by a cover-driving owner (a switch or a draft apply). If the new owner
+    /// is a non-cover-driver (a backup restore or shared-config import) it never touches the cover,
+    /// so a silent return would strand the user on the full-screen spinner — dismiss it here. If the
+    /// new owner IS another cover-driver, leave the cover to it (it set its own state up).
+    private func dismissPreparationCoverIfStrandedBySupersession() {
+        guard !configurationReplacementGate.currentOwnerOwnsPreparationCover else { return }
+        filterPreparationState = .idle
+        isFilterPreparationScreenPresented = false
+        pendingSwitchFilterID = nil
+    }
+
     /// Resolves a custom blocklist source by ID from the editing view *or* the saved
     /// configuration. A saved list deleted in the draft is still shown as a pending
     /// removal but is hidden from `displayedCustomBlocklists` (the picker rows); this
@@ -2414,7 +2622,7 @@ final class AppViewModel: ObservableObject {
     /// name instead of an opaque source ID.
     private func customBlocklistSource(for sourceID: String) -> CustomBlocklistSource? {
         displayedCustomBlocklists.first { $0.id == sourceID }
-            ?? configuration.customBlocklists.first { $0.id == sourceID }
+            ?? filterDetailBaseline.customBlocklists.first { $0.id == sourceID }
     }
 
     func blocklistName(for sourceID: String) -> String {
@@ -2434,7 +2642,7 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return configuration.enabledBlocklistIDs.contains(sourceID)
+        return filterDetailBaseline.enabledBlocklistIDs.contains(sourceID)
             && !filterEditDraft.enabledBlocklistIDs.contains(sourceID)
     }
 
@@ -2443,7 +2651,7 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return !configuration.enabledBlocklistIDs.contains(sourceID)
+        return !filterDetailBaseline.enabledBlocklistIDs.contains(sourceID)
             && filterEditDraft.enabledBlocklistIDs.contains(sourceID)
     }
 
@@ -2452,7 +2660,7 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return configuration.blockedDomains.contains(domain)
+        return filterDetailBaseline.blockedDomains.contains(domain)
             && !filterEditDraft.blockedDomains.contains(domain)
     }
 
@@ -2461,7 +2669,7 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return !configuration.blockedDomains.contains(domain)
+        return !filterDetailBaseline.blockedDomains.contains(domain)
             && filterEditDraft.blockedDomains.contains(domain)
     }
 
@@ -2470,7 +2678,7 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return configuration.allowedDomains.contains(domain)
+        return filterDetailBaseline.allowedDomains.contains(domain)
             && !filterEditDraft.allowedDomains.contains(domain)
     }
 
@@ -2479,36 +2687,39 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
-        return !configuration.allowedDomains.contains(domain)
+        return !filterDetailBaseline.allowedDomains.contains(domain)
             && filterEditDraft.allowedDomains.contains(domain)
     }
 
     func stagedBlocklistIDsForDisplay() -> [String] {
+        let baseline = filterDetailBaseline
         guard let filterEditDraft else {
-            return configuration.enabledBlocklistIDs.sorted()
+            return baseline.enabledBlocklistIDs.sorted()
         }
 
-        return configuration.enabledBlocklistIDs
+        return baseline.enabledBlocklistIDs
             .union(filterEditDraft.enabledBlocklistIDs)
             .sorted { blocklistName(for: $0).localizedStandardCompare(blocklistName(for: $1)) == .orderedAscending }
     }
 
     func stagedBlockedDomainsForDisplay() -> [String] {
+        let baseline = filterDetailBaseline
         guard let filterEditDraft else {
-            return configuration.blockedDomains.sorted()
+            return baseline.blockedDomains.sorted()
         }
 
-        return configuration.blockedDomains
+        return baseline.blockedDomains
             .union(filterEditDraft.blockedDomains)
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     func stagedAllowedDomainsForDisplay() -> [String] {
+        let baseline = filterDetailBaseline
         guard let filterEditDraft else {
-            return configuration.allowedDomains.sorted()
+            return baseline.allowedDomains.sorted()
         }
 
-        return configuration.allowedDomains
+        return baseline.allowedDomains
             .union(filterEditDraft.allowedDomains)
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
@@ -2619,9 +2830,10 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        if configuration.enabledBlocklistIDs.contains(sourceID) {
+        let baseline = filterDetailBaseline
+        if baseline.enabledBlocklistIDs.contains(sourceID) {
             draft.enabledBlocklistIDs.insert(sourceID)
-            if let source = configuration.customBlocklists.first(where: { $0.id == sourceID }),
+            if let source = baseline.customBlocklists.first(where: { $0.id == sourceID }),
                !draft.customBlocklists.contains(where: { $0.id == sourceID }) {
                 draft.customBlocklists.append(source)
             }
@@ -2634,6 +2846,7 @@ final class AppViewModel: ObservableObject {
 
     func addBlockedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
         guard let draft = filterEditDraft else {
+            ProtectionHapticFeedback.play(.selectionRejected)
             return .rejected(title: "Edit first", message: "Tap Edit before changing your filter.")
         }
 
@@ -2644,6 +2857,9 @@ final class AppViewModel: ObservableObject {
         )
         if outcome.result.isAccepted {
             filterEditDraft = outcome.draft
+            ProtectionHapticFeedback.play(.selectionConfirmed)
+        } else {
+            ProtectionHapticFeedback.play(.selectionRejected)
         }
         return outcome.result
     }
@@ -2654,6 +2870,7 @@ final class AppViewModel: ObservableObject {
         }
 
         filterEditDraft = FilterEditDraftEditor.removeBlockedDomain(domain, from: draft)
+        ProtectionHapticFeedback.play(.selectionConfirmed)
     }
 
     func undoBlockedDomainDraftChange(_ domain: String) {
@@ -2664,7 +2881,7 @@ final class AppViewModel: ObservableObject {
         filterEditDraft = FilterEditDraftEditor.undoBlockedDomainChange(
             domain,
             in: draft,
-            configuredBlockedDomains: configuration.blockedDomains
+            configuredBlockedDomains: filterDetailBaseline.blockedDomains
         )
     }
 
@@ -2674,6 +2891,7 @@ final class AppViewModel: ObservableObject {
 
     func addAllowedDomainToDraft(_ rawDomain: String) -> DomainDraftResult {
         guard let draft = filterEditDraft else {
+            ProtectionHapticFeedback.play(.selectionRejected)
             return .rejected(title: "Edit first", message: "Tap Edit before changing your filter.")
         }
 
@@ -2685,11 +2903,25 @@ final class AppViewModel: ObservableObject {
         )
         if outcome.result.isAccepted {
             filterEditDraft = outcome.draft
+            ProtectionHapticFeedback.play(.selectionConfirmed)
+        } else {
+            ProtectionHapticFeedback.play(.selectionRejected)
         }
         return outcome.result
     }
 
     func stageDomainHistoryDomainAction(_ rawDomain: String, target: DomainHistoryDomainTarget) -> DomainDraftResult {
+        // Domain History edits the ACTIVE filter's draft (keyed by activeFilterID). Per-filter
+        // storage means a preserved draft for a *different* (non-active) filter is untouched — but
+        // an in-progress edit of the ACTIVE filter would still be overwritten, so refuse only in
+        // that case rather than losing those edits.
+        if hasUnsavedActiveFilterDraft {
+            ProtectionHapticFeedback.play(.selectionRejected)
+            return .rejected(
+                title: "Unsaved filter edits",
+                message: "You have unsaved changes to your active filter. Save or discard them in Filters before changing domains here."
+            )
+        }
         do {
             let result = try configuration.applyingDomainHistoryDomainAction(
                 rawDomain,
@@ -2697,10 +2929,16 @@ final class AppViewModel: ObservableObject {
                 allowlistValidator: AllowlistValidator(nonAllowableThreatRules: threatGuardrail)
             )
 
-            filterEditDraft = FilterEditDraft(configuration: result.configuration)
-            filterEditScope = nil
+            // Domain History edits the ACTIVE filter, so write its keyed draft directly and force
+            // the detail context to the active filter (target nil) so the review sheet diffs against
+            // the active configuration. Domain History lives under the Settings tab while a Filters
+            // "View" page may stay mounted on the Guard tab; resetting the target re-points the proxy
+            // at the active filter (MyListCover.onAppear re-asserts its own target on return).
+            filterEditTargetID = nil
+            activeFilterDraft = FilterEditDraft(configuration: result.configuration)
             filterPreparationState = .idle
             isFilterPreparationScreenPresented = false
+            ProtectionHapticFeedback.play(.selectionConfirmed)
 
             switch result.target {
             case .blocked:
@@ -2709,11 +2947,13 @@ final class AppViewModel: ObservableObject {
                 return .accepted(result.normalizedDomain, message: "This exception will take effect after you confirm.")
             }
         } catch let actionError as DomainHistoryDomainActionError {
+            ProtectionHapticFeedback.play(.selectionRejected)
             return .rejected(
                 title: Self.domainHistoryDomainActionRejectionTitle(for: actionError),
                 message: actionError.localizedDescription
             )
         } catch {
+            ProtectionHapticFeedback.play(.selectionRejected)
             return .rejected(title: "Domain cannot be added", message: error.localizedDescription)
         }
     }
@@ -2724,6 +2964,7 @@ final class AppViewModel: ObservableObject {
         }
 
         filterEditDraft = FilterEditDraftEditor.removeAllowedDomain(domain, from: draft)
+        ProtectionHapticFeedback.play(.selectionConfirmed)
     }
 
     func undoAllowedDomainDraftChange(_ domain: String) {
@@ -2734,11 +2975,19 @@ final class AppViewModel: ObservableObject {
         filterEditDraft = FilterEditDraftEditor.undoAllowedDomainChange(
             domain,
             in: draft,
-            configuredAllowedDomains: configuration.allowedDomains
+            configuredAllowedDomains: filterDetailBaseline.allowedDomains
         )
     }
 
-    func prepareAndApplyFilterDraft() async {
+    func prepareAndApplyFilterDraft(origin: FilterReviewOrigin = .filters) async {
+        // Record which surface is applying so the matching cover (and only it) presents the
+        // preparation / failure UI — set at the apply point, not at staging, so it can't go stale.
+        filterPreparationOrigin = origin
+        // A draft apply is now the retry target (supersedes any earlier switch attempt), and every
+        // fresh apply starts retryable — clearing any non-retryable state a prior dead-end switch
+        // left, so a transient edit/Domain-History failure still offers "Try Again".
+        pendingSwitchFilterID = nil
+        filterPreparationFailureIsRetryable = true
         guard let filterEditDraft else {
             return
         }
@@ -2750,6 +2999,7 @@ final class AppViewModel: ObservableObject {
         if let validationMessage = filterDraftValidationMessage {
             filterPreparationState = .failed(message: validationMessage)
             isFilterPreparationScreenPresented = true
+            ProtectionHapticFeedback.play(.actionFailed)
             return
         }
 
@@ -2760,6 +3010,12 @@ final class AppViewModel: ObservableObject {
         nextConfiguration.allowedDomains = filterEditDraft.allowedDomains
 
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
+        // A draft apply is a wholesale config replacement too: claim the replacement token before the
+        // first await so a switch/restore/import that completes mid-flight supersedes it (and vice
+        // versa) instead of one silently reverting the other. Claimed AFTER the early-return guards so
+        // a no-op apply can't needlessly bump the epoch and supersede a legitimate in-flight replacer.
+        // A draft apply drives the preparation cover, like a switch.
+        let draftToken = configurationReplacementGate.begin(ownsPreparationCover: true)
         isFilterPreparationScreenPresented = true
 
         do {
@@ -2777,10 +3033,23 @@ final class AppViewModel: ObservableObject {
             }
             await progressPresenter.holdCurrentPhaseIfNeeded()
 
+            // A newer replacement took ownership while we prepared — bail without committing;
+            // dismiss our cover if the new owner is a non-cover-driver that won't.
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
             configuration = nextConfiguration
             updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
-            applyCatalogSyncResult(prepared.catalogResult)
             try await persistSharedState(preparedSnapshot: prepared.snapshot)
+            // Re-check after the persist's artifact-actor await before the derived-cache tail (see
+            // switchToFilter): applyCatalogSyncResult is deferred past the persist + this gate so a
+            // superseded apply never desyncs the rule caches against the newer owner's config.
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+            applyCatalogSyncResult(prepared.catalogResult)
             appendAppNetworkActivity(.changeFilters)
 
             await notifyTunnelSnapshotUpdated()
@@ -2789,19 +3058,398 @@ final class AppViewModel: ObservableObject {
             let ruleLabel = protectedRuleCount == 1 ? "rule" : "rules"
             catalogStatusMessage = "Prepared \(protectedRuleCount.formatted()) \(ruleLabel) for local protection."
             catalogStatusIsError = false
-            self.filterEditDraft = nil
-            filterEditScope = nil
+            self.activeFilterDraft = nil
             filterPreparationState = .preparing(progress: 1, message: "Success")
+            ProtectionHapticFeedback.play(.actionSucceeded)
 
             try? await Task.sleep(nanoseconds: 650_000_000)
             filterPreparationState = .idle
             isFilterPreparationScreenPresented = false
         } catch {
+            // A newer replacement took ownership while we prepared (it owns the shared cover now),
+            // so a superseded apply must NOT stomp it with a spurious failure modal + haptic. Mirror
+            // switchToFilter's catch: bail if no longer current (dismissing our cover if the new
+            // owner won't). The apply mutates no config/library before the throw, nothing to roll back.
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
             filterPreparationState = .failed(
                 message: Self.filterPreparationFailureMessage(for: error)
             )
             isFilterPreparationScreenPresented = true
+            ProtectionHapticFeedback.play(.actionFailed)
         }
+    }
+
+    /// Save the current draft to the NON-active filter being viewed. Library-only: writes the
+    /// four filter fields into the target's library entry, invalidates its compiled token (so a
+    /// later switch recompiles), and persists via the rollback-safe library-only path. No
+    /// prepare, no tunnel reload, no replacement gate, and — unlike the active apply — NO
+    /// full-screen preparation cover: the filter isn't loaded, so this can't touch live
+    /// protection. On a validation or write failure it returns a message for the caller to show
+    /// inline (so a non-active save never flips the global catalog-error/protection indicators);
+    /// on success it clears the draft (the page drops to view mode) and returns nil. The target
+    /// is preserved so the page keeps showing the just-saved filter.
+    @discardableResult
+    func saveNonActiveFilterDraft() -> String? {
+        guard let targetID = filterEditTargetID,
+              let draft = filterEditDraft,
+              library.filter(id: targetID) != nil else {
+            return nil
+        }
+        // The target may have become frozen since the draft was started (Plus lapsed while a draft
+        // was preserved / mid-edit). A frozen filter is read-only, so report it instead of silently
+        // no-op'ing — the detail page also drops the draft on appear, but this covers a lapse that
+        // happens while the page stays mounted in edit mode.
+        guard !isFilterFrozen(targetID) else {
+            ProtectionHapticFeedback.play(.actionFailed)
+            return "This filter is locked. Upgrade to Lava Plus to edit it."
+        }
+        if let validationMessage = filterDraftValidationMessage {
+            ProtectionHapticFeedback.play(.actionFailed)
+            return validationMessage
+        }
+        let previousLibrary = library
+        library.mutateFilter(id: targetID) { filter in
+            filter.enabledBlocklistIDs = draft.enabledBlocklistIDs
+            filter.customBlocklists = draft.customBlocklists
+            filter.blockedDomains = draft.blockedDomains
+            filter.allowedDomains = draft.allowedDomains
+            // Its on-disk compiled artifacts no longer match the rules — force a fresh compile
+            // the next time this filter is switched to.
+            filter.lastCompiledToken = nil
+        }
+        guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else {
+            ProtectionHapticFeedback.play(.actionFailed)
+            return "Couldn't save your changes. Please try again."
+        }
+        filterEditDraft = nil
+        ProtectionHapticFeedback.play(.actionSucceeded)
+        return nil
+    }
+
+    // MARK: - Multi-filter library
+
+    /// Whether the user can create another filter. Free holds up to three (the seeded
+    /// Core / Balanced / Extra defaults); Plus hosts up to 10. The "+ new filter" affordance
+    /// gates on this — a free user at the cap trips the paywall, a Plus user at the cap sees a
+    /// "maximum reached" note.
+    var canCreateFilter: Bool {
+        library.filters.count < configuration.limits.maxFilters
+    }
+
+    /// A filter is *frozen* when the user holds more filters than their tier allows (Plus
+    /// lapsed): the excess non-active filters are kept and readable but cannot be switched to.
+    /// The active filter is never frozen, and a library that fits the cap (e.g. Free with its
+    /// three seeded filters) freezes nothing — all are switchable.
+    func isFilterFrozen(_ id: String) -> Bool {
+        let cap = configuration.limits.maxFilters
+        guard library.filters.count > cap, id != library.activeFilterID else { return false }
+        // The active filter takes one slot; the first (cap - 1) other filters by order stay usable.
+        let nonActive = library.filters.map(\.id).filter { $0 != library.activeFilterID }
+        return !nonActive.prefix(max(cap - 1, 0)).contains(id)
+    }
+
+    /// The library's filters in order, for the All-filters list.
+    var filters: [Filter] {
+        library.filters
+    }
+
+    var activeFilterID: String {
+        library.activeFilterID
+    }
+
+    func filter(id: String) -> Filter? {
+        library.filter(id: id)
+    }
+
+    /// Whether `name` is free to use for a filter — no other filter already has it (trimmed,
+    /// case-insensitive). `excluding` skips one filter (the one being renamed). A blank name is
+    /// never "available" (the UI requires a non-empty name). Filter names are unique so the All
+    /// filters list, the share/import pickers, and the import "add as new" flow never show two
+    /// indistinguishable rows.
+    func isFilterNameAvailable(_ name: String, excluding excludedID: String? = nil) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return !library.filters.contains { filter in
+            filter.id != excludedID
+                && filter.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    /// A filter name based on `base` that isn't already taken: `base`, then "base 2", "base 3"… .
+    /// Used when a name is derived (duplicate / import default) rather than user-entered.
+    private func uniqueFilterName(basedOn base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let root = trimmed.isEmpty ? "Filter".lavaLocalized : trimmed
+        if isFilterNameAvailable(root) { return root }
+        var index = 2
+        while !isFilterNameAvailable("\(root) \(index)") { index += 1 }
+        return "\(root) \(index)"
+    }
+
+    /// Create a new filter, optionally duplicating an existing one's contents. Writes
+    /// the library only (a new filter is never the active one, so nothing compiles or
+    /// republishes). Returns the new filter's id, or `nil` if blocked (at the filter cap, a
+    /// duplicate name, or a persistence failure). Callers gate on ``canCreateFilter`` first to
+    /// show the paywall, and validate the name with ``isFilterNameAvailable`` so the duplicate
+    /// rejection here is a backstop, not the primary UX.
+    @discardableResult
+    func createFilter(name: String, duplicatingFilterID: String? = nil) -> String? {
+        guard canCreateFilter else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An explicit name must be unique (UI enforces; reject as a backstop). A blank name derives
+        // a unique default from the duplicated filter (or a generic base).
+        let resolvedName: String
+        if trimmed.isEmpty {
+            let base = duplicatingFilterID
+                .flatMap { library.filter(id: $0)?.name }
+                .map(duplicateName(of:)) ?? "Filter".lavaLocalized
+            resolvedName = uniqueFilterName(basedOn: base)
+        } else {
+            guard isFilterNameAvailable(trimmed) else { return nil }
+            resolvedName = trimmed
+        }
+        let newID = "filter-\(UUID().uuidString)"
+        let newFilter: Filter
+        if let duplicatingFilterID, let source = library.filter(id: duplicatingFilterID) {
+            newFilter = Filter(
+                id: newID,
+                name: resolvedName,
+                enabledBlocklistIDs: source.enabledBlocklistIDs,
+                customBlocklists: source.customBlocklists,
+                blockedDomains: source.blockedDomains,
+                allowedDomains: source.allowedDomains
+            )
+        } else {
+            newFilter = Filter(id: newID, name: resolvedName)
+        }
+        let previousLibrary = library
+        library.append(newFilter)
+        guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else { return nil }
+        return newID
+    }
+
+    /// Persist a library-only mutation (create / rename / delete) and schedule an encrypted
+    /// backup, so hosted filters are captured by the backup the same way config changes are.
+    /// The caller has ALREADY applied its mutation to the in-memory `library`; `previousLibrary`
+    /// is the pre-mutation snapshot so a failed write can be rolled back.
+    @discardableResult
+    private func persistLibraryOnlyChange(rollingBackTo previousLibrary: FilterLibrary) -> Bool {
+        guard (try? persistFilterLibrary()) != nil else {
+            // A failed write must not leave the mutation live in the published library: the UI
+            // would show a change reported as failed, and a later successful config write
+            // (persistSharedState) would persist it. Roll back so the in-memory library matches
+            // what actually reached disk.
+            library = previousLibrary
+            return false
+        }
+        scheduleAutomaticBackupAfterConfigurationChange()
+        return true
+    }
+
+    /// Rename a filter (library-only; no recompile). No-ops on a blank name, unknown id, a
+    /// duplicate name (filter names are unique), or a frozen (lapsed-Plus, read-only) filter —
+    /// enforced here, below the UI, so a stale sheet or a direct caller can't mutate a frozen
+    /// filter or create a name collision.
+    func renameFilter(id: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              library.filter(id: id) != nil,
+              !isFilterFrozen(id),
+              isFilterNameAvailable(trimmed, excluding: id) else { return }
+        let previousLibrary = library
+        library.mutateFilter(id: id) { $0.name = trimmed }
+        persistLibraryOnlyChange(rollingBackTo: previousLibrary)
+    }
+
+    /// Delete a filter. Refuses the in-effect filter (switch first), the last remaining
+    /// filter (the ≥1 invariant), and a frozen (read-only) filter — the freeze is enforced
+    /// here, below the UI. Library-only; no recompile. Returns whether a deletion happened.
+    @discardableResult
+    func deleteFilter(id: String) -> Bool {
+        guard !isFilterFrozen(id) else { return false }
+        let previousLibrary = library
+        guard library.remove(id: id) else { return false }
+        guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else { return false }
+        // Drop the deleted filter's per-filter draft (its key is gone).
+        filterEditDrafts[id] = nil
+        return true
+    }
+
+    /// "Restore to default": reset the library to the three seeded default filters
+    /// (Core / Balanced / Extra) with Balanced loaded. Mirrors Balanced into the live config and
+    /// persists via the normal config-edit path — `persistSharedState` writes config + library
+    /// together at one bumped generation and reloads the tunnel, so this never trips the
+    /// library/config write-race. Replaces any custom filters the user made (a deliberate reset,
+    /// gated behind a confirm dialog in the UI).
+    func restoreFiltersToDefault() {
+        // Restore is a wholesale config+library replacement, so it must claim the replacement
+        // gate like switch/import/restore-backup/draft-apply: advancing the epoch makes any
+        // in-flight replacer (e.g. a switch suspended at its prepare) bail at its commit instead
+        // of silently reverting this restore. The swap below is synchronous, so this restore is
+        // the current owner through its commit.
+        _ = configurationReplacementGate.begin()
+        // The whole library is reseeded, so every per-filter draft + the detail target are now
+        // invalid — wipe them so a preserved edit can't resume over a freshly seeded filter.
+        filterEditDrafts.removeAll()
+        filterEditTargetID = nil
+        library = .seededDefaults(active: .balanced)
+        mirrorActiveFilterIntoConfiguration()
+        rebuildEnabledBlockRules()
+        persistFilterChanges()
+        // Balanced may enable a curated source not yet cached on this device — fetch any missing
+        // ones so the published snapshot covers Balanced rather than under-covering until a later
+        // sync (the onboarding/switch paths do the same).
+        startOnboardingDefaultBlocklistSyncIfNeeded()
+    }
+
+    /// Switch the active filter: mirror the target's four fields into the live config,
+    /// prepare + publish, and reload the tunnel. A cold target shows the preparation
+    /// screen ("Applying protection…"); on failure the previously-loaded filter is kept
+    /// (never a half-applied state). Refuses a no-op, an unknown id, or a frozen filter.
+    func switchToFilter(id: String) async {
+        guard id != library.activeFilterID,
+              let target = library.filter(id: id),
+              !isFilterFrozen(id)
+        else {
+            return
+        }
+
+        var nextConfiguration = configuration
+        nextConfiguration.enabledBlocklistIDs = target.enabledBlocklistIDs
+        nextConfiguration.customBlocklists = target.customBlocklists
+        nextConfiguration.blockedDomains = target.blockedDomains
+        nextConfiguration.allowedDomains = target.allowedDomains
+
+        let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
+        // Snapshot the loaded state so ANY failure restores the previously-loaded filter
+        // exactly — a cold-compile failure (before commit) or a mid-publish error (after).
+        let previousConfiguration = configuration
+        let previousActiveID = library.activeFilterID
+        // Remember the target so the shared failure screen's "Try Again" retries THIS
+        // switch (there is no edit draft in the switch path).
+        pendingSwitchFilterID = id
+        // A fresh attempt is retryable unless it dead-ends on a deleted/frozen target below.
+        filterPreparationFailureIsRetryable = true
+        // Claim the configuration-replacement token. A later switch/restore/import supersedes
+        // it, so this attempt bails at its commit/rollback gate instead of clobbering the
+        // newer owner (the silent switch-vs-restore revert as well as overlapping switches).
+        // A switch drives the preparation cover, so a superseded switch knows to dismiss it
+        // when the new owner is a non-cover-driver (restore/import).
+        let switchToken = configurationReplacementGate.begin(ownsPreparationCover: true)
+        // A switch is a Filters-tab action, so the Filters cover (not Domain History) owns it.
+        filterPreparationOrigin = .filters
+        isFilterPreparationScreenPresented = true
+
+        do {
+            let progressPresenter = FilterPreparationProgressPresenter()
+            let prepared = try await prepareFilterSnapshot(for: nextConfiguration) { update in
+                await progressPresenter.present(update) { state in
+                    self.filterPreparationState = state
+                }
+            }
+
+            await progressPresenter.present(
+                FilterPreparationProgressUpdate(progress: 0.86, phase: .saving)
+            ) { state in
+                self.filterPreparationState = state
+            }
+            await progressPresenter.holdCurrentPhaseIfNeeded()
+
+            // A newer replacement superseded this one while it was preparing. Don't touch
+            // config/library (the newer owner has them); dismiss the preparation cover this switch
+            // put up ONLY if the newer owner is a non-cover-driver (restore/import) that won't.
+            guard configurationReplacementGate.isCurrent(switchToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+
+            // The target may have been deleted, or Plus may have lapsed (freezing it),
+            // while the async prepare ran — re-validate before committing so a lapsed
+            // account can't activate a now-frozen, read-only filter.
+            guard library.filter(id: id) != nil, !isFilterFrozen(id) else {
+                // Surface the dead end instead of silently dropping the cover. Non-retryable
+                // (retrying a gone/frozen target just re-fails), so the failure screen offers
+                // only "Keep Current Filter". pendingSwitchFilterID stays set so "Back to Edit"
+                // stays hidden; keepCurrentFiltersAfterPrepareFailure clears it.
+                filterPreparationFailureIsRetryable = false
+                filterPreparationState = .failed(message: "That filter is no longer available.")
+                isFilterPreparationScreenPresented = true
+                return
+            }
+
+            // Commit the switch only after a successful prepare.
+            configuration = nextConfiguration
+            library.setActiveFilter(id: id)
+            updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
+            // Apply the (global) catalog sync result only AFTER the switch durably persists. It
+            // mutates derived rule state — currentCatalog, cachedBlockRuleSets, threatGuardrail,
+            // blockRules — that the failure rollback below does NOT restore. Deferring it past the
+            // throwing persist means a failed switch never leaves those caches describing the
+            // target filter (which a later preparedSnapshotForCurrentConfiguration could publish
+            // under the rolled-back configuration). persistSharedState uses the explicit
+            // prepared.snapshot, not these caches, so the deferral is safe.
+            try await persistSharedState(preparedSnapshot: prepared.snapshot)
+            // persistSharedState's last step awaits the artifact-publish actor, a main-actor
+            // suspension. A restore/import/switch/draft-apply that completed during it now owns the
+            // live configuration+library. Re-check BEFORE the side-effect tail: applyCatalogSyncResult
+            // rebuilds derived rule caches (cachedBlockRuleSets/threatGuardrail/blockRules) against
+            // the LIVE configuration, so running it here would leave caches describing THIS switch
+            // while config is the newer owner's — a later persist would then serialize wrong rules.
+            // The newer owner drives the UI/tunnel; dismiss our cover only if it's a non-cover-driver.
+            guard configurationReplacementGate.isCurrent(switchToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+            applyCatalogSyncResult(prepared.catalogResult)
+            appendAppNetworkActivity(.changeFilters)
+
+            await notifyTunnelSnapshotUpdated()
+            await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
+
+            // Per-filter drafts: the previously-active filter keeps its own draft under its key
+            // (no misattribution to the newly-active filter), so a switch no longer discards it.
+            // Just drop any non-active detail target so the detail accessors fall back to the
+            // (new) active filter.
+            filterEditTargetID = nil
+            pendingSwitchFilterID = nil
+
+            filterPreparationState = .preparing(progress: 1, message: "Success")
+            ProtectionHapticFeedback.play(.actionSucceeded)
+
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            filterPreparationState = .idle
+            isFilterPreparationScreenPresented = false
+        } catch {
+            // Only the current owner may roll back. A superseded attempt that failed must not
+            // restore its previousActiveID over a newer switch/restore/import that committed; it
+            // only dismisses its own cover if the new owner won't.
+            guard configurationReplacementGate.isCurrent(switchToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+            // Restore the previously-loaded filter exactly: a failed switch must never
+            // leave config/library pointing at a target it didn't finish publishing.
+            configuration = previousConfiguration
+            library.setActiveFilter(id: previousActiveID)
+            // Durably persist the rollback. persistSharedState writes app-configuration.json
+            // and filter-library.json BEFORE the artifact publish, so a publish-stage failure
+            // can leave the TARGET filter on disk; rewrite the previous config + library (no
+            // artifact publish, no tunnel reload) so a restart loads the filter still in effect.
+            try? persistConfigurationOnly()
+            filterPreparationState = .failed(
+                message: Self.filterPreparationFailureMessage(for: error)
+            )
+            isFilterPreparationScreenPresented = true
+            ProtectionHapticFeedback.play(.actionFailed)
+        }
+    }
+
+    private func duplicateName(of name: String) -> String {
+        "%@ copy".lavaLocalizedFormat(name)
     }
 
     // MARK: - Shareable filters
@@ -2817,9 +3465,48 @@ final class AppViewModel: ObservableObject {
         shareableFilterConfiguration.encodedConfigurationCode()
     }
 
-    /// Reconciles a shared config against this device's catalog and plan so the
-    /// import sheet can preview exactly what will apply and what can't.
+    /// Total rules a filter contributes in effect: the active filter's live compiled
+    /// count, or a saved filter's projected list count plus its manual blocked domains.
+    func filterRuleCount(for filter: Filter) -> Int {
+        if filter.id == activeFilterID {
+            return protectedRuleCount
+        }
+        return projectedFilterRuleCount(forEnabledIDs: filter.enabledBlocklistIDs).known
+            + filter.blockedDomains.count
+    }
+
+    /// The shareable text/QR code for a specific saved filter (for sharing a filter other
+    /// than the one in effect).
+    func shareableFilterCode(for filter: Filter) -> String {
+        ShareableFilterConfiguration(filter: filter).encodedConfigurationCode()
+    }
+
+    /// Whether a filter can be shared at all: it has something to share AND its code fits
+    /// the shareable capacity (the higher of the QR/code limits). An oversized setup is
+    /// "too big to share"; an empty filter has nothing to share.
+    func isFilterShareable(_ filter: Filter) -> Bool {
+        let shareable = ShareableFilterConfiguration(filter: filter)
+        return !shareable.isEmpty && shareable.fitsShareableCodeCapacity()
+    }
+
+    /// Reconciles a shared config against this device's catalog/plan for a PREVIEW shown BEFORE the
+    /// destination is chosen. Reserves the WORST-case rule budget — the largest allowlist among the
+    /// existing filters (the most any Replace target could consume; Add uses 0) — so the preview is
+    /// conservative and the apply (whatever destination, whose preserved count is ≤ this) never
+    /// drops a list that was shown as imported. Each apply path re-plans against its real
+    /// destination (a new filter = 0 exceptions; a replaced filter = that filter's exceptions).
     func importPlan(for shared: ShareableFilterConfiguration) -> ShareableFilterImportPlan {
+        let worstCasePreserved = library.filters.map { $0.allowedDomains.count }.max() ?? 0
+        return importPlan(for: shared, preservedAllowedDomainCount: worstCasePreserved)
+    }
+
+    /// Reconciles a shared config against this device's catalog and tier, with `preservedAllowedDomainCount`
+    /// allowlist exceptions counted against the rule budget (the destination filter keeps its own
+    /// exceptions, and they share the tier ceiling at snapshot-prep time).
+    func importPlan(
+        for shared: ShareableFilterConfiguration,
+        preservedAllowedDomainCount: Int
+    ) -> ShareableFilterImportPlan {
         let curatedIDs = Set(DefaultCatalog.curatedSources.map(\.id))
         let availableCuratedIDs = curatedIDs.union(catalogSourcesByID.keys)
         // An imported custom list may not claim any built-in list ID (curated or
@@ -2843,9 +3530,9 @@ final class AppViewModel: ObservableObject {
             maxBlockedDomains: configuration.limits.maxBlockedDomains,
             maxFilterRules: configuration.limits.maxFilterRules,
             blocklistRuleCounts: ruleCounts,
-            // Import preserves the recipient's allowlist, which also counts
-            // against the tier rule budget at snapshot-prep time.
-            preservedRuleCount: configuration.allowedDomains.count
+            // The destination filter's allowlist exceptions also count against the tier rule
+            // budget at snapshot-prep time, so reserve them here.
+            preservedRuleCount: preservedAllowedDomainCount
         )
         return shared.importPlan(capabilities: capabilities)
     }
@@ -2865,17 +3552,31 @@ final class AppViewModel: ObservableObject {
 
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
 
+        // Claim the configuration-replacement token so a switch/restore that completes while this
+        // import prepares supersedes it (and vice versa) instead of one silently reverting the other.
+        let importToken = configurationReplacementGate.begin()
+
         do {
             let prepared = try await prepareFilterSnapshot(for: nextConfiguration)
+            // A newer replacement took ownership while we prepared — abort without committing.
+            guard configurationReplacementGate.isCurrent(importToken) else {
+                return .failure(message: "Something else updated your filter while this imported. Try again.")
+            }
             configuration = nextConfiguration
-            // Drop any preserved (unsaved) My-filter draft: it was based on the
-            // pre-import configuration, so resuming it after this replacement could
-            // silently overwrite the just-imported setup.
-            filterEditDraft = nil
-            filterEditScope = nil
+            // The ACTIVE filter's content was just replaced, so its per-filter draft (built from
+            // the pre-import config) is stale — drop it. Other filters' drafts are untouched.
+            activeFilterDraft = nil
             updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
-            applyCatalogSyncResult(prepared.catalogResult)
             try await persistSharedState(preparedSnapshot: prepared.snapshot)
+            // Re-check after the persist's artifact-actor await (see switchToFilter): a newer
+            // replacement that took ownership during it must not have its caches/config desynced by
+            // this import's tail. Derived rule state (applyCatalogSyncResult) is therefore applied
+            // only AFTER the persist + this gate — persistSharedState used prepared.snapshot, not the
+            // caches, so deferring it is safe.
+            guard configurationReplacementGate.isCurrent(importToken) else {
+                return .failure(message: "Something else updated your filter while this imported. Try again.")
+            }
+            applyCatalogSyncResult(prepared.catalogResult)
             appendAppNetworkActivity(.changeFilters)
 
             await notifyTunnelSnapshotUpdated()
@@ -2890,6 +3591,77 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Import an already-reconciled shared setup (`applied` = the previewed plan) as a NEW filter
+    /// named `name` (additive — leaves every existing filter untouched). Library-only: the new
+    /// filter isn't switched to, so nothing compiles or reloads the tunnel. Takes the SAME plan the
+    /// preview showed (no re-plan) so what was previewed is exactly what's added. Gated on
+    /// ``canCreateFilter`` + a unique, non-empty name (UI validates; backstopped here). Returns the
+    /// new filter's id or nil if blocked / nothing to import.
+    @discardableResult
+    func addImportedShareableConfigurationAsNewFilter(
+        _ applied: ShareableFilterConfiguration,
+        name: String
+    ) -> String? {
+        guard canCreateFilter, !applied.isEmpty else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isFilterNameAvailable(trimmed) else { return nil }
+        let newID = "filter-\(UUID().uuidString)"
+        let newFilter = Filter(
+            id: newID,
+            name: trimmed,
+            enabledBlocklistIDs: applied.enabledBlocklistIDs,
+            customBlocklists: applied.customBlocklists,
+            blockedDomains: applied.blockedDomains,
+            // A shared code never carries allowlist exceptions, so a new imported filter starts
+            // with none (matching the active-replace path, which preserves the device's own).
+            allowedDomains: []
+        )
+        let previousLibrary = library
+        library.append(newFilter)
+        guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else { return nil }
+        return newID
+    }
+
+    /// Replace an existing filter's contents with a shared setup, keeping that filter's id, name,
+    /// and allowlist exceptions (a shared code never carries exceptions — same as the in-effect
+    /// import path). Replacing the ACTIVE filter goes through the full prepare+publish+reload (it's
+    /// loaded); a NON-active filter is replaced library-only (no recompile until it's next switched
+    /// to — its compiled token is invalidated). Refuses an empty import, an unknown id, or a frozen
+    /// (read-only) filter.
+    func replaceFilterWithImportedShareableConfiguration(
+        id: String,
+        _ applied: ShareableFilterConfiguration
+    ) async -> ShareableFilterImportResult {
+        guard !applied.isEmpty else {
+            return .failure(message: "There's nothing this device can import from that code.")
+        }
+        guard let target = library.filter(id: id), !isFilterFrozen(id) else {
+            return .failure(message: "That filter is no longer available.")
+        }
+        // The active filter is loaded — reuse the full apply path (prepare + publish + tunnel
+        // reload), which replaces the in-effect config and preserves the device's exceptions.
+        if id == library.activeFilterID {
+            return await applyImportedShareableConfiguration(applied)
+        }
+        // Non-active: library-only replace. Keep the filter's name + allowedDomains; swap the three
+        // shared fields and invalidate its compiled token so a later switch recompiles.
+        let previousLibrary = library
+        library.mutateFilter(id: id) { filter in
+            filter.enabledBlocklistIDs = applied.enabledBlocklistIDs
+            filter.customBlocklists = applied.customBlocklists
+            filter.blockedDomains = applied.blockedDomains
+            filter.lastCompiledToken = nil
+        }
+        guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else {
+            return .failure(message: "Couldn't save the imported filter. Please try again.")
+        }
+        // The replaced filter's contents changed, so its per-filter draft (built from the old
+        // contents) is stale — drop it.
+        filterEditDrafts[id] = nil
+        let updated = library.filter(id: id) ?? target
+        return .success(ruleCount: filterRuleCount(for: updated))
+    }
+
     /// The *reason* a preparation failed, as user copy. The failure view frames it
     /// (title = "We couldn't update your filter", plus a separate "Your previous filter
     /// is still active." reassurance) — so this returns only the reason, no prefix.
@@ -2902,7 +3674,8 @@ final class AppViewModel: ObservableObject {
                 return "Lava could not reach the source catalog. Check your connection and try again."
             case .invalidHTTPStatus, .invalidCatalog:
                 return "Lava could not refresh the source catalog. Try again shortly."
-            case .invalidBlocklistEncoding, .blocklistTooLarge, .noRulesAvailable, .customBlocklistUnavailable:
+            case .invalidBlocklistEncoding, .blocklistTooLarge, .blocklistExceedsRuleLimit,
+                 .noRulesAvailable, .customBlocklistUnavailable:
                 return syncError.localizedDescription
             case .missingEnabledBlocklistSource:
                 return "A selected blocklist is no longer available. Choose another list and try again."
@@ -2931,7 +3704,14 @@ final class AppViewModel: ObservableObject {
 
     func retryFilterPreparation() {
         Task {
-            await prepareAndApplyFilterDraft()
+            // Retry whatever the failure was: a filter switch (no draft) re-runs the
+            // switch; otherwise re-apply the edit draft.
+            if let id = pendingSwitchFilterID {
+                await switchToFilter(id: id)
+            } else {
+                // Retry keeps the original surface's origin (e.g. a Domain History apply).
+                await prepareAndApplyFilterDraft(origin: filterPreparationOrigin)
+            }
         }
     }
 
@@ -3033,11 +3813,18 @@ final class AppViewModel: ObservableObject {
     }
 
     func pauseProtectionTemporarily(for option: ProtectionPauseDuration) {
+        pauseProtectionTemporarily(request: option.protectionCommandRequest)
+    }
+
+    // Shared pause flow. `.pauseConfigured` (the Live Activity's single Pause
+    // button) resolves its length inside the command service from the shared
+    // preference; the app then loads the resulting pause window from the store
+    // exactly like the fixed-length options.
+    private func pauseProtectionTemporarily(request: LavaLiveActivityActionRequest) {
         guard showsTemporaryProtectionPauseControls else {
             return
         }
 
-        let request = option.protectionCommandRequest
         let operationID = LatencyOperationID.make()
         Task {
             let trace = makeLatencyTrace(operationID: operationID, operationKind: "pause")
@@ -3113,6 +3900,7 @@ final class AppViewModel: ObservableObject {
                 protectionState: liveActivityProtectionState,
                 resumeDate: temporaryProtectionPauseUntil,
                 shieldStyle: lavaGuardLook,
+                pauseMinutes: liveActivityPauseMinutes,
                 pauseRequiresAuthentication: SecurityProtectedSurfaceStorage.isProtected(
                     .protectionPause,
                     defaults: appGroupDefaults
@@ -3144,6 +3932,8 @@ final class AppViewModel: ObservableObject {
             pauseProtectionTemporarily(for: .tenMinutes)
         case .pauseFifteenMinutes:
             pauseProtectionTemporarily(for: .fifteenMinutes)
+        case .pauseConfigured:
+            pauseProtectionTemporarily(request: .pauseConfigured)
         case .resume:
             resumeProtectionNow()
         case .reconnect:
@@ -3285,19 +4075,40 @@ final class AppViewModel: ObservableObject {
         await protectionUserNotifications.requestAuthorization()
     }
 
-    func applyOnboardingRecommendedDefaults() {
+    func applyOnboardingRecommendedDefaults(protectionLevel: OnboardingProtectionLevel = .recommended) {
         let defaults = AppConfiguration.lavaRecommendedDefaults
-        configuration.enabledBlocklistIDs = defaults.enabledBlocklistIDs
-        configuration.resolverPresetID = defaults.resolverPresetID
-        configuration.customResolverAddress = defaults.customResolverAddress
-        configuration.customResolverName = defaults.customResolverName
-        configuration.fallbackToDeviceDNS = defaults.fallbackToDeviceDNS
+        // The surfaced choices are owned by their steps: the protection level by the
+        // protection-level step and the resolver + encrypted-fallback fields by the
+        // connection-quality step (applyOnboardingConnectionPreferences). Only the non-surfaced
+        // residual (local logging retention) is applied here as setup wraps up.
         configuration.keepFilteringCounts = defaults.keepFilteringCounts
         configuration.keepDomainDiagnostics = defaults.keepDomainDiagnostics
         configuration.keepNetworkActivity = defaults.keepNetworkActivity
+        // Seed the three default filters (Core / Balanced / Extra) into "Your filters" with the
+        // chosen level loaded; mirror its blocklist set into the live config so the active filter
+        // and config agree.
+        library = .seededDefaults(active: protectionLevel)
+        mirrorActiveFilterIntoConfiguration()
         rebuildEnabledBlockRules()
         persistFilterChanges()
         startOnboardingDefaultBlocklistSyncIfNeeded()
+    }
+
+    /// Apply the onboarding connection-quality choice (Device DNS primary + an optional
+    /// encrypted DoH fallback). Owns every resolver/fallback field so the `.done`
+    /// residual apply never clobbers it.
+    func applyOnboardingConnectionPreferences(useEncryptedFallback: Bool, fallbackResolverPresetID: String) {
+        let defaults = AppConfiguration.lavaRecommendedDefaults
+        configuration.resolverPresetID = DNSResolverPreset.device.id
+        configuration.customResolverAddress = defaults.customResolverAddress
+        configuration.customResolverName = defaults.customResolverName
+        configuration.fallbackToDeviceDNS = defaults.fallbackToDeviceDNS
+        configuration.usesEncryptedDeviceDNSFallback = useEncryptedFallback
+        configuration.fallbackResolverPresetID = fallbackResolverPresetID
+        configuration.fallbackCustomResolverAddress = nil
+        configuration.fallbackCustomResolverSecondaryAddress = nil
+        configuration.fallbackCustomResolverName = nil
+        persistFilterChanges()
     }
 
     func selectOnboardingBlocklists(_ sourceIDs: Set<String>) {
@@ -3359,24 +4170,28 @@ final class AppViewModel: ObservableObject {
             catalogStatusMessage = "Disabled \(blocklist.name)."
             catalogStatusIsError = false
             persistFilterChanges()
+            ProtectionHapticFeedback.play(.selectionConfirmed)
             return
         }
 
         guard catalogSourcesByID[blocklist.id] != nil else {
             catalogStatusMessage = "This source is not available yet."
             catalogStatusIsError = true
+            ProtectionHapticFeedback.play(.selectionRejected)
             return
         }
 
         guard !isSyncingCatalog else {
             catalogStatusMessage = "Finish the current filter update first."
             catalogStatusIsError = false
+            ProtectionHapticFeedback.play(.selectionRejected)
             return
         }
 
         guard !enabledIDsExceedSoftRuleBudget(configuration.enabledBlocklistIDs.union([blocklist.id])) else {
             catalogStatusMessage = filterRuleBudgetMessage()
             catalogStatusIsError = true
+            ProtectionHapticFeedback.play(.selectionRejected)
             return
         }
 
@@ -3384,6 +4199,7 @@ final class AppViewModel: ObservableObject {
             configuration.enabledBlocklistIDs.insert(blocklist.id)
             catalogStatusMessage = "Downloading \(blocklist.name)..."
             catalogStatusIsError = false
+            ProtectionHapticFeedback.play(.selectionConfirmed)
             Task {
                 await syncCatalog()
             }
@@ -3395,6 +4211,7 @@ final class AppViewModel: ObservableObject {
         catalogStatusMessage = "Enabled \(blocklist.name)."
         catalogStatusIsError = false
         persistFilterChanges()
+        ProtectionHapticFeedback.play(.selectionConfirmed)
     }
 
     func addCustomBlocklist(displayName: String, rawURL: String) -> String? {
@@ -3743,6 +4560,83 @@ final class AppViewModel: ObservableObject {
         persistFilterChanges()
     }
 
+    func prepareQAInternetNetworkCondition(_ condition: QAInternetNetworkCondition) {
+        configuration.qaProbeSet = .hosted
+        adminQAStatusMessage = "\(condition.title): \(condition.expectedOutcome)"
+        vpnMessageIsError = false
+        persistFilterChanges()
+    }
+
+    func applyQAInternetDNSSetup(_ setup: QAInternetDNSSetup) {
+        configuration.resolverPresetID = setup.resolverPresetID
+        configuration.customResolverAddress = setup.customResolverAddress
+        configuration.customResolverSecondaryAddress = nil
+        configuration.customResolverName = setup.customResolverName
+        configuration.fallbackToDeviceDNS = setup.fallbackToDeviceDNS
+        configuration.usesEncryptedDeviceDNSFallback = setup.usesEncryptedDeviceDNSFallback
+        configuration.fallbackResolverPresetID = setup.fallbackResolverPresetID
+        configuration.fallbackCustomResolverAddress = setup.fallbackCustomResolverAddress
+        configuration.fallbackCustomResolverSecondaryAddress = nil
+        configuration.fallbackCustomResolverName = setup.fallbackCustomResolverName
+        configuration.isPaid = configuration.isPaid || setup.resolverPresetID == DNSResolverPreset.customID
+        adminQAStatusMessage = "\(setup.title) is active."
+        vpnMessageIsError = false
+        persistResolverSettings(activity: .changeResolver)
+    }
+
+    func applyQAInternetBlocklistLoad(_ load: QAInternetBlocklistLoad) {
+        configuration.enabledBlocklistIDs = load.enabledBlocklistIDs
+        // Compile the new selection into blockRules before persisting: persistFilterChanges
+        // serializes the in-memory blockRules, so without this the QA load would persist the
+        // previous load's compiled rules/counts while the UI says the new load is active.
+        rebuildEnabledBlockRules()
+        adminQAStatusMessage = "\(load.title) blocklist load is active."
+        vpnMessageIsError = false
+        persistFilterChanges()
+        startQAInternetBlocklistSyncIfNeeded(for: load.enabledBlocklistIDs)
+    }
+
+    func applyQAInternetScenarioSuite(_ suite: QAInternetScenarioSuite) {
+        let scenario = suite.startingScenario
+        configuration.qaProbeSet = .hosted
+        // Set + compile the blocklist load before applying DNS so neither tunnel reload
+        // (resolver-config reload from applyQAInternetDNSSetup, snapshot reload from
+        // persistFilterChanges) fires against the previous blocklist set or stale blockRules.
+        configuration.enabledBlocklistIDs = scenario.blocklistLoad.enabledBlocklistIDs
+        rebuildEnabledBlockRules()
+        applyQAInternetDNSSetup(scenario.dnsSetup)
+        adminQAStatusMessage = "\(suite.title) ready: start with \(scenario.title). \(suite.totalCombinationCount) combinations total."
+        vpnMessageIsError = false
+        persistFilterChanges()
+        startQAInternetBlocklistSyncIfNeeded(for: scenario.blocklistLoad.enabledBlocklistIDs)
+    }
+
+    // Mirrors the catalog sync the normal enable paths kick (see
+    // startOnboardingBlocklistSyncIfNeeded): the QA apply* methods only assign
+    // enabledBlocklistIDs, so any selected source missing from the rule cache must be
+    // downloaded for the load (e.g. Recommended/Large/Stress) to actually materialize.
+    private func startQAInternetBlocklistSyncIfNeeded(for sourceIDs: Set<String>) {
+        guard sourceIDs.contains(where: { cachedBlockRuleSets[$0] == nil }) else {
+            return
+        }
+
+        Task {
+            // A refresh already in flight (e.g. the launch sync) captured the previous
+            // selection, so wait for it to finish before syncing — otherwise the newly
+            // selected QA sources never download and the load persists with missing rules.
+            // Gate on catalogSyncTask (set synchronously at the start of syncCatalog), not
+            // isSyncingCatalog (set later inside performCatalogSync), to also catch the
+            // window between the two — matching the turn-on path.
+            if catalogSyncTask != nil {
+                await self.waitForCatalogSyncToFinish()
+            }
+            guard sourceIDs.contains(where: { cachedBlockRuleSets[$0] == nil }) else {
+                return
+            }
+            await self.syncCatalog()
+        }
+    }
+
     func applyAdminQAAction(_ action: AdminQAAction) {
         switch action {
         case .showWelcome:
@@ -3955,9 +4849,11 @@ final class AppViewModel: ObservableObject {
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
             }
+            ProtectionHapticFeedback.play(.actionSucceeded)
         } catch {
             vpnMessage = "Could not clear local history: \(error.localizedDescription)"
             vpnMessageIsError = true
+            ProtectionHapticFeedback.play(.actionFailed)
         }
     }
 
@@ -3971,9 +4867,11 @@ final class AppViewModel: ObservableObject {
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
             }
+            ProtectionHapticFeedback.play(.actionSucceeded)
         } catch {
             vpnMessage = "Could not clear local filtering counts: \(error.localizedDescription)"
             vpnMessageIsError = true
+            ProtectionHapticFeedback.play(.actionFailed)
         }
     }
 
@@ -3992,9 +4890,11 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
                 await self.sendTunnelMessage(LavaSecAppGroup.clearNetworkActivityLogMessage)
             }
+            ProtectionHapticFeedback.play(.actionSucceeded)
         } catch {
             vpnMessage = "Could not clear local logs: \(error.localizedDescription)"
             vpnMessageIsError = true
+            ProtectionHapticFeedback.play(.actionFailed)
         }
     }
 
@@ -4180,8 +5080,8 @@ final class AppViewModel: ObservableObject {
                 accountSignInProviderInProgress = nil
                 accountAuthMessage = "Signed in with Apple."
                 accountAuthMessageIsError = false
+                ProtectionHapticFeedback.play(.actionSucceeded)
                 await uploadPendingEncryptedBackupIfPossible()
-                await refreshAccountDeveloperAccess()
                 await syncLavaSecurityPlusEntitlementIfPossible(lavaSecurityPlusStore.entitlement)
             } catch AccountAuthError.cancelled {
                 accountAuthState = accountAuthService.state
@@ -4191,10 +5091,12 @@ final class AppViewModel: ObservableObject {
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
                 accountAuthMessageIsError = true
+                ProtectionHapticFeedback.play(.actionFailed)
             } catch {
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
                 accountAuthMessageIsError = true
+                ProtectionHapticFeedback.play(.actionFailed)
             }
         }
     }
@@ -4212,8 +5114,8 @@ final class AppViewModel: ObservableObject {
                 accountSignInProviderInProgress = nil
                 accountAuthMessage = "Signed in with Google."
                 accountAuthMessageIsError = false
+                ProtectionHapticFeedback.play(.actionSucceeded)
                 await uploadPendingEncryptedBackupIfPossible()
-                await refreshAccountDeveloperAccess()
                 await syncLavaSecurityPlusEntitlementIfPossible(lavaSecurityPlusStore.entitlement)
             } catch AccountAuthError.cancelled {
                 accountAuthState = accountAuthService.state
@@ -4223,14 +5125,17 @@ final class AppViewModel: ObservableObject {
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
                 accountAuthMessageIsError = true
+                ProtectionHapticFeedback.play(.actionFailed)
             } catch AccountAuthError.googleClientIDNotConfigured {
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Google sign-in needs the Google iOS and Web client IDs in the app configuration."
                 accountAuthMessageIsError = true
+                ProtectionHapticFeedback.play(.actionFailed)
             } catch {
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
                 accountAuthMessageIsError = true
+                ProtectionHapticFeedback.play(.actionFailed)
             }
         }
     }
@@ -4238,7 +5143,6 @@ final class AppViewModel: ObservableObject {
     func signOutAccount() {
         accountAuthService.signOut()
         accountAuthState = accountAuthService.state
-        isAccountDeveloper = false
         accountAuthMessage = "Signed out."
         accountAuthMessageIsError = false
         loadEncryptedBackupState()
@@ -4262,30 +5166,15 @@ final class AppViewModel: ObservableObject {
             accountAuthState = accountAuthService.state
             accountAuthMessage = "Deleted your Lava account."
             accountAuthMessageIsError = false
-            isAccountDeveloper = false
             loadEncryptedBackupState()
+            ProtectionHapticFeedback.play(.actionSucceeded)
             return true
         } catch {
             accountAuthState = accountAuthService.state
             accountAuthMessage = "Could not delete account: \(error.localizedDescription)"
             accountAuthMessageIsError = true
+            ProtectionHapticFeedback.play(.actionFailed)
             return false
-        }
-    }
-
-    func refreshAccountDeveloperAccess() async {
-        do {
-            guard let session = try await accountAuthService.currentBackupSession() else {
-                accountAuthState = accountAuthService.state
-                isAccountDeveloper = false
-                return
-            }
-
-            accountAuthState = accountAuthService.state
-            isAccountDeveloper = await accountQAStatusResponseIsDeveloper(accessToken: session.accessToken)
-        } catch {
-            accountAuthState = accountAuthService.state
-            isAccountDeveloper = false
         }
     }
 
@@ -4370,7 +5259,8 @@ final class AppViewModel: ObservableObject {
     func turnOnEncryptedBackup(recoveryPhrase: String) async throws {
         let payload = BackupConfigurationPayload(
             configuration: configuration,
-            catalogVersionHint: catalogVersion
+            catalogVersionHint: catalogVersion,
+            filterLibrary: library
         )
         let deviceSecret = try BackupDeviceSecret.generate()
         let serverRecoveryShare = try BackupAssistedRecoverySecret.makeServerShare()
@@ -4440,10 +5330,23 @@ final class AppViewModel: ObservableObject {
     }
 
     func restoreEncryptedBackup(secret: String, mode: BackupRestoreMode) async throws {
+        // Claim the configuration-replacement token at entry: a filter switch suspended at its
+        // async prepare is now superseded, so when it resumes its commit/rollback gate bails
+        // instead of reverting this restore. Re-checked below after the unlock awaits (before any
+        // disk write or app-state mutation) to cover the reverse ordering — a switch/import that
+        // starts WHILE this restore awaits its envelope/passkey unlock.
+        let replacementToken = configurationReplacementGate.begin()
         let envelope = try await loadAvailableEncryptedBackupEnvelope()
 
         let trimmedSecret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         let payload: BackupConfigurationPayload
+        // A recovery-phrase / passkey restore lands on a device with NO device secret, so the
+        // fetched envelope's keychain slot can't be re-sealed later (silently dropping every
+        // post-restore edit). Re-key the keychain slot with a fresh device secret for THIS
+        // device using the unlock material we just verified; persist it so re-seal works.
+        let freshDeviceSecret = try BackupDeviceSecret.generate()
+        var localEnvelope = envelope
+        var didRekeyDeviceSlot = false
         switch mode {
         case .deviceKey:
             guard let deviceSecret = try backupKeychainStore.loadDeviceSecret() else {
@@ -4454,12 +5357,24 @@ final class AppViewModel: ObservableObject {
             } catch {
                 throw EncryptedBackupError.invalidDeviceUnlock
             }
+            // Device secret already present + working — no re-key needed.
         case .recoveryCode:
             do {
                 payload = try decryptWithNormalizedRecoveryPhrase(trimmedSecret, envelope: envelope)
             } catch {
                 throw EncryptedBackupError.invalidRecoveryPhrase
             }
+            // A recovery-phrase restore lands on a device with no working device secret, so the
+            // re-key MUST succeed: without it there's no secret to re-seal with and every
+            // post-restore edit silently stops backing up. Fail the restore (before any disk write
+            // or app-state mutation) rather than half-restoring into that silent-drop state.
+            guard let rekeyed = rekeyedEnvelopeWithNormalizedRecoveryPhrase(
+                trimmedSecret, envelope: envelope, newDeviceSecret: freshDeviceSecret
+            ) else {
+                throw EncryptedBackupError.invalidRecoveryPhrase
+            }
+            localEnvelope = rekeyed
+            didRekeyDeviceSlot = true
         case .passkey:
             let prfOutput = try await passkeyPRFOutputForRestore(envelope: envelope)
             do {
@@ -4467,11 +5382,92 @@ final class AppViewModel: ObservableObject {
             } catch {
                 throw EncryptedBackupError.invalidPasskeyUnlock
             }
+            // Same as recovery: a passkey restore must establish a working device secret on this
+            // device, or post-restore edits silently stop backing up. Fail rather than half-restore.
+            guard let rekeyed = try? envelope.rekeyingDeviceSlot(
+                newDeviceSecret: freshDeviceSecret, unlockingPasskeyPRFOutput: prfOutput
+            ) else {
+                throw EncryptedBackupError.invalidPasskeyUnlock
+            }
+            localEnvelope = rekeyed
+            didRekeyDeviceSlot = true
+        }
+
+        // A switch/import that started while we awaited the envelope/passkey unlock now owns the
+        // configuration. Abort BEFORE writing the device secret or mutating app state, rather than
+        // clobbering the newer owner (the reverse of the entry-token supersession above).
+        guard configurationReplacementGate.isCurrent(replacementToken) else {
+            throw EncryptedBackupError.supersededByConcurrentConfigurationChange
+        }
+
+        if didRekeyDeviceSlot {
+            // A recovery-phrase / passkey restore re-keyed the envelope's .keychain slot with a
+            // fresh device secret. Both the secret AND the re-keyed envelope must reach disk before
+            // we mutate app state — otherwise the saved secret can't unwrap the on-disk envelope and
+            // every post-restore edit silently stops backing up. Fail the restore if either write
+            // fails so the user retries rather than landing in that silent-drop state.
+            try backupKeychainStore.saveDeviceSecret(freshDeviceSecret)
+            try saveLocalEncryptedBackupEnvelope(localEnvelope)
+        } else {
+            // deviceKey restore: the device secret already works, so just stage the (unchanged)
+            // envelope locally — but BEFORE the persist below, not after. The persist's re-seal
+            // (scheduleAutomaticBackupAfterConfigurationChange) reseals THIS local envelope to the
+            // restored config/library and clears the stale upload marker; saving it AFTER the
+            // persist (the prior ordering) clobbered that fresh re-seal with the pre-restore copy.
+            // Best-effort: a failed local-copy write only defers the next re-seal, never corrupts.
+            try? saveLocalEncryptedBackupEnvelope(localEnvelope)
         }
 
         configuration = payload.restoredConfiguration()
-        try await persistSharedState()
-        try? saveLocalEncryptedBackupEnvelope(envelope)
+        // Restore the whole filter library (multi-filter), so every hosted filter — not
+        // just the active one — survives a restore on a new device. A pre-multi-filter
+        // backup carries no library, so migrate the restored config into one "Default"
+        // filter. persistSharedState below writes both files; library-authoritative load
+        // then regenerates the config mirror from this restored library.
+        // Migrate known custom blocklists to catalog sources across EVERY hosted filter — the
+        // same rewrite restoredConfiguration() applies to the active/top-level config — so a
+        // backup restored onto a new device doesn't leave non-active filters pinned to raw
+        // custom-URL lists that this device already ships as curated catalog sources.
+        // Normalize BEFORE checking validity, exactly as the launch load path does: a backup
+        // with filters but a stale activeFilterID is invalid only until normalized() repoints
+        // the active id to the first filter. Checking isValid on the raw library would reject
+        // it and fall through to migrating just the top-level config — discarding every other
+        // hosted filter from the backup.
+        if let restoredLibrary = payload.restoredFilterLibrary()?
+            .migratingKnownCustomBlocklistsToCatalogSources()
+            .normalized(), restoredLibrary.isValid {
+            library = restoredLibrary
+            // A backup may carry an OLDER-schema library (e.g. a pre-three-defaults v1 library).
+            // Restoring it is a DELIBERATE recovery of the user's own data — distinct from the
+            // on-upgrade reset — so stamp it to the current schema; otherwise the launch migration
+            // guard (schemaVersion >= currentSchemaVersion) would reject and reseed it on the next
+            // relaunch, and the restored filters would survive only until restart.
+            library.schemaVersion = FilterLibrary.currentSchemaVersion
+            // Library-authoritative: the restored library's active filter — not the legacy
+            // top-level config fields — is the source of truth, so regenerate config's four
+            // filter-scoped fields from it before persisting. This recovers the active id
+            // and its contents together (the device-global config fields are untouched).
+            mirrorActiveFilterIntoConfiguration()
+        } else {
+            library = FilterLibrary(migratingLegacy: configuration)
+        }
+        // Restore replaces the whole library, so every per-filter draft + the detail target are
+        // stale — wipe them so a preserved edit can't overwrite the just-restored state.
+        filterEditDrafts.removeAll()
+        filterEditTargetID = nil
+        // Config-first persist: the restored configuration carries device-global fields the
+        // library can't reconstruct, so a partial write must lose the re-restorable library, not
+        // the config (see persistSharedState).
+        // Config-first persist (prioritizesConfigurationDurability). Its re-seal step now operates
+        // on the local envelope staged above (both restore modes), so the saved envelope reflects
+        // the restored state and the upload marker is correctly cleared — no post-persist save can
+        // clobber it.
+        try await persistSharedState(prioritizesConfigurationDurability: true)
+        // An envelope + working device secret are now on disk, so backup IS configured on this
+        // device. Refresh the cached state from the store (it was .off on a fresh device and the
+        // restore never updates it otherwise), so Settings reflects "on" AND post-restore edits
+        // pass the auto-backup gate instead of the stale .off short-circuiting the re-seal/upload.
+        loadEncryptedBackupState()
 
         Task {
             await self.notifyTunnelSnapshotUpdated()
@@ -4574,6 +5570,39 @@ final class AppViewModel: ObservableObject {
             accountAuthState = accountAuthService.state
             return .unconfirmed
         }
+    }
+
+    /// Re-key the envelope's device slot with a fresh device secret, recovering the payload
+    /// key via the recovery phrase (trying the same normalized candidates as decrypt, and
+    /// both the assisted-recovery and password-style recovery slots). Returns the re-keyed
+    /// envelope, or `nil` if no candidate worked.
+    private func rekeyedEnvelopeWithNormalizedRecoveryPhrase(
+        _ secret: String,
+        envelope: ZeroKnowledgeBackupEnvelope,
+        newDeviceSecret: String
+    ) -> ZeroKnowledgeBackupEnvelope? {
+        let normalizedPhrase = BackupRecoveryPhrase.phrase(
+            from: BackupRecoveryPhrase.words(from: secret)
+        )
+        let candidates = [
+            normalizedPhrase,
+            secret.trimmingCharacters(in: .whitespacesAndNewlines),
+            secret.uppercased()
+        ].filter { !$0.isEmpty }
+
+        for candidate in candidates {
+            if let rekeyed = try? envelope.rekeyingDeviceSlot(
+                newDeviceSecret: newDeviceSecret, unlockingAssistedRecoveryPhrase: candidate
+            ) {
+                return rekeyed
+            }
+            if let rekeyed = try? envelope.rekeyingDeviceSlot(
+                newDeviceSecret: newDeviceSecret, unlockingRecoveryPhrase: candidate
+            ) {
+                return rekeyed
+            }
+        }
+        return nil
     }
 
     private func decryptWithNormalizedRecoveryPhrase(
@@ -4708,7 +5737,8 @@ final class AppViewModel: ObservableObject {
         refreshReports()
         let inputs = PreparedBugReportInputs(
             snapshot: currentSnapshot(),
-            debugLogEntries: loadBugReportDebugLogEntries()
+            debugLogEntries: loadBugReportDebugLogEntries(),
+            selfReconnectTimes: loadSelfReconnectAttemptTimes()
         )
         preparedBugReportInputs = inputs
         bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
@@ -4835,7 +5865,7 @@ final class AppViewModel: ObservableObject {
         refreshTunnelHealth(force: true)
     }
 
-    func syncCatalog() async {
+    func syncCatalog(isBackgroundRefresh: Bool = false) async {
         if let catalogSyncTask {
             await catalogSyncTask.value
             return
@@ -4846,7 +5876,7 @@ final class AppViewModel: ObservableObject {
                 return
             }
 
-            await self.performCatalogSync()
+            await self.performCatalogSync(isBackgroundRefresh: isBackgroundRefresh)
         }
         catalogSyncTask = task
         // Forward cancellation from the awaiting context (e.g. an expired background
@@ -4872,7 +5902,7 @@ final class AppViewModel: ObservableObject {
         catalogSyncTask = nil
     }
 
-    private func performCatalogSync(operationID: LatencyOperationID = .make()) async {
+    private func performCatalogSync(operationID: LatencyOperationID = .make(), isBackgroundRefresh: Bool = false) async {
         let trace = makeLatencyTrace(operationID: operationID, operationKind: "refreshLists")
         let span = trace.beginSpan("action.refreshLists", details: [
             "catalogVersion": catalogVersion ?? "nil",
@@ -4891,6 +5921,20 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        // Captured BEFORE the sync for the background rollback guard: the published pointer
+        // this refresh builds forward from. If a concurrent foreground publish moves it
+        // before our flip, the background aborts rather than rolling the catalog back to its
+        // own older sync (see publishBackgroundRefreshArtifacts). Foreground path: unused.
+        let basePublishedPointerToken = isBackgroundRefresh ? currentPublishedArtifactPointerToken() : nil
+        // Captured BEFORE the sync for the background catalog-cache commit. The background sync
+        // DEFERS its latest.json write (commitsLatestCatalog: false) so it can land atomically
+        // with the pointer flip; this baseline lets the commit veto itself if a concurrent
+        // foreground sync advanced the shared catalog meanwhile (so the background never clobbers
+        // the foreground's catalog). Foreground path: unused.
+        let baseLatestCatalogData: Data? = isBackgroundRefresh
+            ? try? Data(contentsOf: BlocklistCatalogRepository.latestCatalogURL(in: cacheURL))
+            : nil
+
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
         isSyncingCatalog = true
         catalogStatusMessage = "Fetching from the server..."
@@ -4903,10 +5947,19 @@ final class AppViewModel: ObservableObject {
             // Free-tier (e.g. lapsed Plus) keeps its existing custom lists but their
             // contents are frozen: serve the cached payload and never refresh from
             // the network here. The curated catalog still syncs as usual.
-            let refreshesCustomBlocklists = configuration.limits.allowsCustomBlocklists
+            //
+            // A background refresh is ALSO strictly cache-only for custom lists: a
+            // network re-fetch would rotate custom-list hashes, diverging the artifact
+            // identity from the configuration.json this path never rewrites.
+            let refreshesCustomBlocklists = configuration.limits.allowsCustomBlocklists && !isBackgroundRefresh
             let syncTask = Task.detached(priority: .utility) {
                 let synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL)
-                let catalogResult = try await synchronizer.sync(enabledSourceIDs: enabledIDs)
+                // Background defers the latest.json commit to publish time (atomic with the
+                // pointer flip); foreground commits inline as before.
+                let catalogResult = try await synchronizer.sync(
+                    enabledSourceIDs: enabledIDs,
+                    commitsLatestCatalog: !isBackgroundRefresh
+                )
                 // Free tier is strictly cache-only: never network-fetch custom lists
                 // here. We deliberately don't fall back to a network sync on a cache
                 // miss — doing so would re-fetch (and overwrite) every enabled list,
@@ -4935,6 +5988,24 @@ final class AppViewModel: ObservableObject {
 
             applySyncResults(catalogResult: result.0, customResult: result.1)
 
+            if isBackgroundRefresh {
+                // The system may have expired the BGTask while the detached sync ran (the
+                // expiration handler calls work.cancel() + setTaskCompleted(false)). Do not
+                // stage/flip artifacts or notify the tunnel past the deadline — bail like
+                // the cancellation guard above. (A later expiration, mid-publish, is caught
+                // before the pointer flip by the in-lock supersession closure below.)
+                guard !Task.isCancelled else {
+                    actionStatus = "cancelled"
+                    finishCatalogSyncTask()
+                    return
+                }
+                // Hybrid background publish: artifacts-only, never configuration.json,
+                // never protection restore. Returns before the foreground persist tail.
+                actionStatus = await publishBackgroundRefreshArtifacts(operationID: operationID, basePublishedPointerToken: basePublishedPointerToken, baseLatestCatalogData: baseLatestCatalogData)
+                finishCatalogSyncTask()
+                return
+            }
+
             // Smart refresh: only pay the snapshot re-encode + tunnel reload (and the
             // reconnect it triggers) when a list actually changed upstream. A refresh
             // that finds nothing new stops here — cheap, and no spurious reconnect.
@@ -4962,6 +6033,20 @@ final class AppViewModel: ObservableObject {
                 return
             }
 
+            // A background refresh must NEVER write shared state, on ANY path. The
+            // foreground failure recovery below restores from cache via
+            // loadCachedCatalogAfterSyncFailure (which calls persistSharedState) and then
+            // the tail arms restoreProtectionIfNeeded — both rewrite configuration.json /
+            // protection from this headless model's launch-time config, reopening the
+            // config-clobber race this mode exists to avoid. So a failed background refresh
+            // bails like the cancellation case: leave the last-good artifacts and config
+            // untouched and let the next foreground sync recover.
+            if isBackgroundRefresh {
+                actionStatus = "bg-sync-failed"
+                finishCatalogSyncTask()
+                return
+            }
+
             let restoredFromCache = await loadCachedCatalogAfterSyncFailure(
                 cacheURL: cacheURL,
                 originalError: error,
@@ -4978,6 +6063,186 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Thrown by the background publish's `commitBeforeFlip` to veto the flip when a concurrent
+    /// foreground sync advanced the shared catalog (`latest.json`) since this run's baseline —
+    /// declining to clobber it. Aborts the publish without changing catalog or pointer.
+    private struct BackgroundCatalogCacheSupersededError: Error {}
+
+    /// Background catalog-refresh publish tail (the BGTask path). Re-reads the LIVE
+    /// on-disk configuration, builds the snapshot from it, and publishes ARTIFACTS ONLY
+    /// under a degrade-ABORT publish lock with an in-lock generation supersession check —
+    /// so a concurrent foreground save always wins and a stale background publish can
+    /// never clobber it. NEVER rewrites configuration.json and NEVER restores protection
+    /// (both would write shared state from this headless model). Returns a status string
+    /// for the action span and swallows its own errors (a failed publish just leaves the
+    /// last-good artifacts in place).
+    private func publishBackgroundRefreshArtifacts(operationID: LatencyOperationID, basePublishedPointerToken: String?, baseLatestCatalogData: Data?) async -> String {
+        // Custom lists are cache-only in the background, so cachedBlockRuleSets holds bytes
+        // loaded under THIS config's custom fingerprints (applySyncResults just set the
+        // hashes to match what was loaded). Capture them BEFORE reloading the live config.
+        let baselineCustomIdentities = enabledCustomBlocklistIdentities(in: configuration)
+
+        // Re-read whatever the foreground last persisted and build against THAT, not the
+        // config this headless model launched with.
+        loadPersistedConfiguration()
+
+        // Abort if the reload had to reseed the filter library (the on-disk library is
+        // pre-upgrade/old-schema, or lost a write race): the foreground migration has not
+        // landed yet, so the reseed mirrored Balanced into `configuration` in memory WITHOUT
+        // persisting it. Building here would publish Balanced artifacts while
+        // app-configuration.json — and its generation — still describe the pre-upgrade filter,
+        // a silent flip the generation guard cannot catch (no config was written). Publish
+        // nothing until the user's next foreground launch commits the migration.
+        guard !didReseedFilterLibraryOnLastLoad else {
+            return "bg-premigration"
+        }
+
+        // Abort if a foreground/manual custom-list refresh changed any enabled custom
+        // source's fingerprint while we synced: cachedBlockRuleSets still holds the OLD
+        // bytes, but the snapshot identity is computed from this reloaded config (NEW
+        // fingerprint) — publishing would stamp the new identity onto stale bytes, and the
+        // tunnel would accept them until a later publish. The generation token does NOT catch
+        // this when the foreground write landed before our reload (both ends then read the
+        // same new generation); the coverage guard only checks presence, not fingerprint.
+        // Fail-closed: a changed/added/removed entry counts as a mismatch.
+        guard enabledCustomBlocklistIdentities(in: configuration) == baselineCustomIdentities else {
+            return "bg-custom-changed"
+        }
+        let builtGeneration = configuration.configurationGeneration
+
+        // Build the prepared snapshot OFF the main actor. The merge + filterSnapshot are
+        // O(rules); for very large rule sets they would otherwise block the main actor long
+        // enough that the BGTask expiration handler (queued on .main) could not preempt before
+        // the system deadline. Capture the Sendable inputs here, then build on a detached task
+        // (the encode/stage/flip is already off-main on the service actor).
+        //
+        // The builder merges for the RELOADED enabled set: currentSnapshot uses the merged
+        // rules verbatim (configuration.filterSnapshot only unions manual rules, never
+        // re-filters by enabled IDs) and applySyncResults built from the launch-time set, so
+        // without re-merging a foreground DISABLE in the launch→reload window would over-block
+        // the disabled list — over-coverage the subset-only guard can't catch. A source the
+        // live config enables but this headless sync didn't fetch is omitted, so the summary
+        // reports it uncovered and the coverage guard below aborts (fail-closed). Merging once
+        // here also drops the redundant second merge the foreground summary path does.
+        let configurationForBuild = configuration
+        let ruleSetsForBuild = cachedBlockRuleSets
+        let guardrailForBuild = threatGuardrail
+        let catalogForBuild = currentCatalog
+        let compiledRuleCountForBuild = compiledBlocklistRuleCount
+        let prepared = await Task.detached(priority: .utility) {
+            Self.buildBackgroundPreparedSnapshot(
+                configuration: configurationForBuild,
+                cachedBlockRuleSets: ruleSetsForBuild,
+                threatGuardrail: guardrailForBuild,
+                catalog: catalogForBuild,
+                compiledBlocklistRuleCount: compiledRuleCountForBuild
+            )
+        }.value
+
+        // The off-main build freed the main actor, so an expiration that fired during it has
+        // already run work.cancel(); bail before the coverage/persist work (the in-lock check
+        // remains the final backstop before the flip).
+        guard !Task.isCancelled else {
+            return "bg-cancelled"
+        }
+
+        // Fail-closed coverage backstop: never point the tunnel at a snapshot that does
+        // not cover the live enabled set (e.g. a foreground enable landed for a source
+        // this headless sync didn't fetch).
+        guard prepared.summary.coversEnabledBlocklists(in: configuration) else {
+            return "bg-uncovered"
+        }
+
+        // Smart refresh (mirror the foreground gate at performCatalogSync): if nothing
+        // changed upstream, skip the publish entirely — no new versioned dir, no pointer
+        // flip, no tunnel reload. The versioned token embeds generatedAt, so WITHOUT this an
+        // unchanged daily run would churn a redundant dir and trigger a needless reconnect.
+        guard didSnapshotIdentityChangeAfterSync() else {
+            return "bg-unchanged"
+        }
+
+        // Catalog-cache commit, ATOMIC with the pointer flip. The background sync deferred its
+        // latest.json write (commitsLatestCatalog: false); commit it here, under the publish
+        // lock, only on success — the tunnel derives its expected identity from latest.json, so
+        // committing it ahead of this abortable publish would leave the cached catalog ahead of
+        // the pointer (→ the tunnel rejects the last-good artifact → in-extension recompile /
+        // fail-closed on large lists). On any abort, latest.json stays consistent with the
+        // pointer. If we can't reproduce the resolved catalog bytes, do not publish (a flip
+        // without the matching latest.json would itself be inconsistent).
+        guard let catalogCacheURL,
+              let catalogForCommit = currentCatalog,
+              let latestCatalogData = try? BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalogForCommit)
+        else {
+            return "bg-error"
+        }
+        let latestCatalogURL = BlocklistCatalogRepository.latestCatalogURL(in: catalogCacheURL)
+
+        let configurationURL = self.configurationURL
+        do {
+            let outcome = try await persistPreparedSnapshotArtifacts(
+                prepared,
+                lockMode: .tryOrAbort,
+                supersededWhileLocked: { @Sendable currentPointerToken in
+                    // Inside the held publish lock, evaluated immediately BEFORE the pointer
+                    // flip. ABORT the flip if the BGTask expired since we entered the publish
+                    // (do no publish work past the system deadline)...
+                    if Task.isCancelled { return true }
+                    // ...or if a concurrent publish moved the live pointer since this task
+                    // captured its basis. The background builds its catalog from its OWN sync,
+                    // not from freshly-published artifacts, so without this it could flip the
+                    // pointer back to an older catalog a foreground refresh already superseded
+                    // (a rollback). The generation token misses this: the background rebuilt
+                    // config from the reloaded file, so generations match. Fail-closed.
+                    if currentPointerToken != basePublishedPointerToken { return true }
+                    // ...or if a foreground write superseded our basis: re-read the on-disk
+                    // generation and abort. If the file can't be read, treat as superseded
+                    // (degrade-ABORT).
+                    guard let configurationURL,
+                          let data = try? Data(contentsOf: configurationURL),
+                          let onDisk = try? JSONDecoder().decode(AppConfiguration.self, from: data)
+                    else {
+                        return true
+                    }
+                    return onDisk.configurationGeneration != builtGeneration
+                },
+                commitBeforeFlip: { @Sendable in
+                    // Runs under the publish lock, after the supersession check, immediately
+                    // BEFORE the pointer flip. latest.json CAS: only commit if a concurrent
+                    // foreground sync hasn't advanced the shared catalog since this background
+                    // run captured its baseline. The foreground commits latest.json OUTSIDE the
+                    // publish lock, so this is best-effort — the residual read→write TOCTOU is
+                    // sub-millisecond and the tunnel recompiles on a brief mismatch — but it
+                    // closes the wide window where the background would clobber a foreground
+                    // catalog. Vetoing (throw) aborts the publish before any state change: the
+                    // shared catalog and the pointer both stay at the foreground's newer state.
+                    let onDiskLatestCatalog = try? Data(contentsOf: latestCatalogURL)
+                    guard onDiskLatestCatalog == baseLatestCatalogData else {
+                        throw BackgroundCatalogCacheSupersededError()
+                    }
+                    try latestCatalogData.write(to: latestCatalogURL, options: [.atomic])
+                }
+            )
+
+            switch outcome {
+            case .published:
+                await notifyTunnelSnapshotUpdated(operationID: operationID)
+                return "bg-published"
+            case .abortedSuperseded:
+                return "bg-superseded"
+            case .abortedContended:
+                return "bg-contended"
+            case .abortedCancelled:
+                return "bg-cancelled"
+            }
+        } catch is BackgroundCatalogCacheSupersededError {
+            // A concurrent foreground sync advanced the shared catalog; we declined to clobber
+            // it. Nothing was published — latest.json and the pointer are both the foreground's.
+            return "bg-catalog-superseded"
+        } catch {
+            return "bg-error"
+        }
+    }
+
     /// True when the just-synced configuration + catalog produces a different compiled
     /// identity than the one already persisted on disk — i.e. a list actually changed.
     /// True (rebuild) when no manifest exists yet (first prepare). Lets `performCatalogSync`
@@ -4987,7 +6252,7 @@ final class AppViewModel: ObservableObject {
             return true
         }
 
-        let manifest = try? FilterArtifactStore(directoryURL: containerURL).loadManifest()
+        let manifest = try? FilterArtifactStore(directoryURL: containerURL).readableStore().loadManifest()
         guard let previousIdentity = manifest?.snapshotIdentity else {
             return true
         }
@@ -5258,6 +6523,7 @@ final class AppViewModel: ObservableObject {
     private struct PreparedBugReportInputs {
         let snapshot: FilterSnapshot
         let debugLogEntries: [BugReportDebugLogEntry]
+        let selfReconnectTimes: [Date]
     }
 
     private var preparedBugReportInputs: PreparedBugReportInputs?
@@ -5267,9 +6533,20 @@ final class AppViewModel: ObservableObject {
             context: context,
             inputs: PreparedBugReportInputs(
                 snapshot: currentSnapshot(),
-                debugLogEntries: loadBugReportDebugLogEntries()
+                debugLogEntries: loadBugReportDebugLogEntries(),
+                selfReconnectTimes: loadSelfReconnectAttemptTimes()
             )
         )
+    }
+
+    /// Read-only snapshot of the tunnel's persisted self-reconnect attempt timeline (shared
+    /// app-group defaults). Surfaced in the bug report's incident summary (LAV-94 B); never
+    /// written here — the tunnel owns the key, the app only reads it.
+    private func loadSelfReconnectAttemptTimes() -> [Date] {
+        let raw = LavaSecAppGroup.sharedDefaults.array(
+            forKey: LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey
+        ) as? [Double] ?? []
+        return raw.map(Date.init(timeIntervalSince1970:))
     }
 
     private func makeBugReportBundle(
@@ -5316,7 +6593,8 @@ final class AppViewModel: ObservableObject {
             ),
             diagnostics: diagnostics,
             localHistoryEnabled: configuration.keepDomainDiagnostics,
-            debugLogEntries: inputs.debugLogEntries
+            debugLogEntries: inputs.debugLogEntries,
+            selfReconnectTimes: inputs.selfReconnectTimes
         )
     }
 
@@ -5354,16 +6632,6 @@ final class AppViewModel: ObservableObject {
         throw lastError ?? BugReportSubmissionError(message: "Could not send the bug report.")
     }
 
-    private func accountQAStatusResponseIsDeveloper(accessToken: String) async -> Bool {
-        do {
-            return try await AccountQAAccessClient(urlSession: .shared).isAccountDeveloper(
-                accessToken: accessToken
-            )
-        } catch {
-            return false
-        }
-    }
-
     private func startLavaSecurityPlusStore() {
         lavaSecurityPlusOffers = lavaSecurityPlusStore.offers
         lavaSecurityPlusStore.entitlementChanged = { [weak self] entitlement in
@@ -5389,7 +6657,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func applyLavaSecurityPlusEntitlement(_ entitlement: LavaSecurityPlusEntitlement) {
-        // Surface the auto-renewable expiry (nil for the lifetime plan / no entitlement)
+        // Surface the auto-renewable expiry (nil when there is no active entitlement)
         // before the early-return below, so the subscriber UI stays current even when the
         // active flag itself is unchanged (e.g. a renewal that only moves the expiry date).
         let nextExpiresAt = entitlement.isActive ? entitlement.expiresAt : nil
@@ -5658,6 +6926,75 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    /// Off-main builder for the BACKGROUND publish path. Equivalent to
+    /// `preparedSnapshotForCurrentConfiguration()` for the case the background guarantees —
+    /// where the block rules are exactly the merge of the enabled sources' cached rule sets —
+    /// so it merges ONCE and reuses that for both the snapshot and the summary rule count,
+    /// dropping the redundant second merge `preparedBlocklistRuleCount()` performs.
+    ///
+    /// `nonisolated static` so it runs on a detached task off the main actor: the merge +
+    /// `filterSnapshot` are O(rules) and must not block the main actor past the BGTask
+    /// deadline (the foreground path is unaffected and still uses
+    /// `preparedSnapshotForCurrentConfiguration()`/`self.blockRules`, which can differ from a
+    /// fresh merge in the reuse path). All inputs are Sendable value types the caller captures
+    /// on the main actor.
+    nonisolated static func buildBackgroundPreparedSnapshot(
+        configuration: AppConfiguration,
+        cachedBlockRuleSets: [String: DomainRuleSet],
+        threatGuardrail: DomainRuleSet,
+        catalog: BlocklistCatalog?,
+        compiledBlocklistRuleCount: Int
+    ) -> PreparedFilterSnapshot {
+        let enabledIDs = configuration.enabledBlocklistIDs
+        let mergedBlockRules = FilterSnapshotPreparationService.mergedBlockRules(
+            enabledSourceIDs: enabledIDs,
+            sourceRuleSets: cachedBlockRuleSets
+        )
+        let snapshot = configuration.filterSnapshot(
+            blockRules: mergedBlockRules,
+            nonAllowableThreatRules: threatGuardrail
+        )
+
+        // Mirror preparedBlocklistRuleCount() / preparedBlocklistSourceRuleCounts(), but reuse
+        // the single merge above instead of re-merging. Fail-closed: a missing enabled source
+        // yields nil source counts → coversEnabledBlocklists returns false → bg-uncovered.
+        let blocklistRuleCount: Int?
+        let hasAllEnabledRuleSets = enabledIDs.allSatisfy { cachedBlockRuleSets[$0] != nil }
+        if enabledIDs.isEmpty || hasAllEnabledRuleSets {
+            blocklistRuleCount = mergedBlockRules.count
+        } else if compiledBlocklistRuleCount > 0 {
+            blocklistRuleCount = compiledBlocklistRuleCount
+        } else {
+            blocklistRuleCount = nil
+        }
+
+        let blocklistSourceRuleCounts: [String: Int]?
+        if enabledIDs.isEmpty {
+            blocklistSourceRuleCounts = [:]
+        } else {
+            var counts: [String: Int] = [:]
+            var complete = true
+            for sourceID in enabledIDs {
+                guard let rules = cachedBlockRuleSets[sourceID] else {
+                    complete = false
+                    break
+                }
+                counts[sourceID] = rules.count
+            }
+            blocklistSourceRuleCounts = complete ? counts : nil
+        }
+
+        return PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: catalog),
+            snapshot: snapshot,
+            summary: PreparedFilterSnapshotSummary(
+                snapshot: snapshot,
+                blocklistRuleCount: blocklistRuleCount,
+                blocklistSourceRuleCounts: blocklistSourceRuleCounts
+            )
+        )
+    }
+
     // reusedPersistedArtifacts means the snapshot was decoded from and validated
     // against the on-disk artifacts, so persisting it again would rewrite
     // identical bytes (and force a pointless tunnel reload).
@@ -5756,7 +7093,7 @@ final class AppViewModel: ObservableObject {
             // Manifest-first gate: a non-reusable artifact set is rejected from
             // the small manifest alone, without decoding the full prepared JSON.
             // The decoded snapshot below stays the authoritative reuse check.
-            let artifactStore = FilterArtifactStore(directoryURL: containerURL)
+            let artifactStore = FilterArtifactStore(directoryURL: containerURL).readableStore()
             if let manifest = try? artifactStore.loadManifest(),
                let rejection = manifest.reuseRejectionReason(configuration: configuration, cachedCatalog: cachedCatalog) {
                 // Field-level reason (names only) so a redundant cold rebuild
@@ -5803,7 +7140,7 @@ final class AppViewModel: ObservableObject {
                 try? BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL).loadCachedCatalogMetadata()
             }
 
-            let artifactStore = FilterArtifactStore(directoryURL: containerURL)
+            let artifactStore = FilterArtifactStore(directoryURL: containerURL).readableStore()
             guard let manifest = try? artifactStore.loadManifest() else {
                 return false
             }
@@ -5820,7 +7157,9 @@ final class AppViewModel: ObservableObject {
             return nil
         }
 
-        let compactSnapshotURL = containerURL.appendingPathComponent(LavaSecAppGroup.compactSnapshotFilename)
+        // Resolve through the pointer (versioned set) with root fallback, consistent
+        // with the other warm-start readers; single-file read, captured once.
+        let compactSnapshotURL = FilterArtifactStore(directoryURL: containerURL).readableStore().compactSnapshotURL
         let configuration = configuration
 
         return await Task.detached(priority: .utility) {
@@ -6810,11 +8149,40 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Per-source content fingerprint (id → cacheIdentity) for the enabled custom lists.
+    /// `cacheIdentity` folds in the sourceURL, parse format, and lastAcceptedHash, so an
+    /// inequality means the cached bytes a background sync loaded no longer describe the
+    /// reloaded configuration. Used to fail-closed the background publish (see
+    /// `publishBackgroundRefreshArtifacts`).
+    private func enabledCustomBlocklistIdentities(in configuration: AppConfiguration) -> [String: String] {
+        Dictionary(
+            enabledCustomBlocklists(in: configuration).map { ($0.id, $0.cacheIdentity) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    /// The content-addressed token of the currently-published filter artifact pointer, or
+    /// nil if nothing is published yet. The background refresh captures this before syncing
+    /// and re-checks it under the publish lock to detect a concurrent foreground publish
+    /// (the catalog-rollback guard in `publishBackgroundRefreshArtifacts`).
+    private func currentPublishedArtifactPointerToken() -> String? {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return nil
+        }
+
+        return FilterArtifactStore(directoryURL: containerURL).loadArtifactPointer()?.token
+    }
+
     @discardableResult
     private func migrateLowRiskLaunchCacheIfNeeded(cacheURL: URL) -> Bool {
+        // Only the launch-critical default-enabled sources gate a cache refresh.
+        // Passing every curated (opt-in) source would force-purge latest.json for
+        // any user whose cache predates a catalog expansion, bricking the offline
+        // path when the re-fetch fails. Opt-in additions are picked up by the
+        // normal catalog sync without a forced low-risk refresh.
         let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
             in: cacheURL,
-            requiredSourceIDs: Set(DefaultCatalog.curatedSources.map(\.id))
+            requiredSourceIDs: DefaultCatalog.recommendedDefaultSourceIDs
         )
 
         if changed {
@@ -6921,14 +8289,110 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadPersistedConfiguration() {
-        guard let configurationURL,
-              let data = try? Data(contentsOf: configurationURL),
-              let persistedConfiguration = try? JSONDecoder().decode(AppConfiguration.self, from: data)
-        else {
-            return
+        if let configurationURL,
+           let data = try? Data(contentsOf: configurationURL),
+           let persistedConfiguration = try? JSONDecoder().decode(AppConfiguration.self, from: data) {
+            configuration = persistedConfiguration
         }
 
-        configuration = persistedConfiguration
+        loadOrMigrateFilterLibrary()
+    }
+
+    /// Load the filter library, or (first launch on a multi-filter build, or a
+    /// corrupt/empty file) migrate the legacy single-filter configuration into a
+    /// one-filter "Default" library. Cheap and synchronous — an array-wrap, no parse
+    /// or compile — so it is safe in the launch path next to `loadPersistedConfiguration`.
+    ///
+    /// The library is the source of truth: on load, the active filter's four fields are
+    /// mirrored OUT of the library into `configuration` (a derived cache). This makes the
+    /// persisted `activeFilterID` + active-filter contents recover together — a process
+    /// kill between the library write and the config write is reconciled in the library's
+    /// favour. Restore-safe because the backup payload now carries the whole library.
+    private func loadOrMigrateFilterLibrary() {
+        if let filterLibraryURL,
+           let data = try? Data(contentsOf: filterLibraryURL),
+           let persisted = try? JSONDecoder().decode(FilterLibrary.self, from: data) {
+            let normalized = persisted.normalized()
+            // Accept only an invariant-valid library (>=1 filter, active id resolves) that did NOT
+            // lose a two-file write race: a library stamped with an OLDER config generation than the
+            // config on disk is stale (e.g. a restore wrote a newer config but this library write
+            // never landed), so we reject it and migrate from the durable config instead — keeping
+            // the restored device-global config + active filter rather than reverting to the stale
+            // library (Codex r20). A corrupt/empty/dangling file likewise falls through to migration.
+            if normalized.isValid,
+               normalized.schemaVersion >= FilterLibrary.currentSchemaVersion,
+               !normalized.lostWriteRace(againstConfigurationGeneration: configuration.configurationGeneration) {
+                library = normalized
+                // The on-disk library was accepted as-is (no reseed): a headless background
+                // publish may proceed against this config.
+                didReseedFilterLibraryOnLastLoad = false
+                // Library is authoritative — regenerate the active filter's mirror in
+                // `configuration` from it (the inverse of the persist-boundary sync).
+                mirrorActiveFilterIntoConfiguration()
+                reconcileLoadedLibraryGenerationIfNeeded()
+                return
+            }
+        }
+
+        // No current (>= currentSchemaVersion), invariant-valid library that won the write race →
+        // seed the three default filters (Core / Balanced / Extra) with Balanced loaded. This is
+        // BOTH the first-launch seed and the on-upgrade migration: a pre-three-defaults library
+        // (older schema) or a legacy single-filter config is replaced, so existing users move to
+        // Balanced — a deliberate no-back-compat reset while the app is not yet public. Onboarding
+        // re-seeds with the user's chosen level active when it runs on a fresh install.
+        library = .seededDefaults(active: .balanced)
+        // Flag the reseed so a headless background publish ABORTS: this mirrors Balanced into
+        // the in-memory `configuration` below but the persist is foreground-only, so the
+        // background model would otherwise build + publish Balanced artifacts while
+        // app-configuration.json still describes the pre-upgrade filter — and the generation
+        // guard would NOT catch it (no config was written, so the on-disk generation is
+        // unchanged). The publish path checks this and bails until the foreground migration
+        // lands (the user's next launch persists it, after which this stays false).
+        didReseedFilterLibraryOnLastLoad = true
+        mirrorActiveFilterIntoConfiguration()
+        // Persist the migration only from a foreground instance. The headless
+        // background-refresh model is read-only — writing here could race a foreground
+        // upgrade/manage action and overwrite a just-created multi-filter library with a
+        // singleton migration from this model's launch-time config. (The in-memory library
+        // is still populated so the headless model can read it.)
+        //
+        // Persist via persistConfigurationOnly (not persistFilterLibrary): a legacy config is
+        // itself generation 0, so a plain library write would stamp the freshly-migrated library
+        // at generation 0 — the value lostWriteRace TRUSTS. A later config-first restore that's
+        // killed before its library write would then leave this generation-0 file to win over the
+        // restored config (Codex r23). persistConfigurationOnly bumps the generation first, so the
+        // migrated library + config are written together at a non-zero generation that a future
+        // restore can supersede. Suppress the backup hook: this runs during init before the
+        // auto-backup flag is loaded, and a migration only adds the Default filter the server copy
+        // already restores to (Codex r24) — the next real change re-seals + uploads.
+        if !isHeadless {
+            try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+        }
+    }
+
+    /// After accepting an on-disk library on load, bring the two files onto a single, NON-ZERO
+    /// generation. Three cases need it (all one-time — the steady state is library.gen == config.gen
+    /// > 0, which no-ops): the library won a write race so the config is stale (Codex r22); the
+    /// library is at the generation-0 sentinel a legacy/pre-marker file decodes to (Codex r21); or
+    /// both are still 0. In every case advance the in-memory generation to at least the library's so
+    /// a headless background publish ABORTS against the unchanged on-disk generation, and — in the
+    /// foreground — durably rewrite BOTH files at a bumped generation so a later restore can
+    /// supersede this library instead of trusting a stale generation-0 stamp (Codex r23).
+    private func reconcileLoadedLibraryGenerationIfNeeded() {
+        guard library.configurationGeneration != configuration.configurationGeneration
+            || library.configurationGeneration == 0 else {
+            return
+        }
+        configuration.configurationGeneration = max(
+            configuration.configurationGeneration,
+            library.configurationGeneration
+        )
+        if !isHeadless {
+            // Suppress the backup hook (launch-time, before the auto-backup flag is loaded). A
+            // reconcile changes only the backup-stripped generation, so backed-up content is
+            // unchanged anyway (Codex r24).
+            try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+        }
     }
 
     private func persistDiagnostics() throws {
@@ -6961,24 +8425,62 @@ final class AppViewModel: ObservableObject {
     // Encode and writes run inside FilterSnapshotPreparationService, off the
     // main actor (the encode + compact rebuild was measured at ~1.1s for large
     // rule sets); manifest-last ordering is owned by the service.
-    private func persistPreparedSnapshotArtifacts(_ preparedSnapshot: PreparedFilterSnapshot) async throws {
+    @discardableResult
+    private func persistPreparedSnapshotArtifacts(
+        _ preparedSnapshot: PreparedFilterSnapshot,
+        lockMode: FilterSnapshotPreparationService.PublishLockMode = .blocking,
+        supersededWhileLocked: (@Sendable (_ currentPointerToken: String?) -> Bool)? = nil,
+        commitBeforeFlip: (@Sendable () throws -> Void)? = nil
+    ) async throws -> FilterSnapshotPreparationService.PublishOutcome {
         guard let containerURL = LavaSecAppGroup.containerURL,
               let service = filterSnapshotPreparationService
         else {
             throw LavaSecAppError.appGroupUnavailable
         }
 
-        try await service.persistArtifacts(
+        return try await service.persistArtifacts(
             preparedSnapshot,
             containerURL: containerURL,
             snapshotFilename: LavaSecAppGroup.snapshotFilename,
-            compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename
+            compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename,
+            publishLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterArtifactPublishLockFilename),
+            lockMode: lockMode,
+            supersededWhileLocked: supersededWhileLocked,
+            commitBeforeFlip: commitBeforeFlip,
+            // Keep every hosted filter's last-compiled directory alive so switching back
+            // to a recently-used filter is an instant pointer flip, not a cold compile.
+            additionalRetainedTokens: retainedFilterArtifactTokens()
         )
+    }
+
+    /// Cap on how many hosted filters' compiled directories stay warm for instant
+    /// switch-back. Bounds disk — each retained token is one artifact directory; beyond
+    /// this a switch recompiles (correct, just not instant). Without a real LRU we keep
+    /// the active filter first, then library order; refining to most-recently-activated
+    /// is a follow-up.
+    private static let maxWarmFilterArtifacts = 8
+
+    /// The versioned-artifact tokens to keep warm across a publish: the active filter's
+    /// compiled token first (most likely switch-back target), then other hosted filters',
+    /// capped at ``maxWarmFilterArtifacts`` so disk stays bounded as the library grows.
+    /// The active filter's freshly-staged token is also retained by the publish itself.
+    private func retainedFilterArtifactTokens() -> [String] {
+        let activeID = library.activeFilterID
+        var tokens: [String] = []
+        if let activeToken = library.filter(id: activeID)?.lastCompiledToken {
+            tokens.append(activeToken)
+        }
+        for filter in library.filters where filter.id != activeID {
+            guard let token = filter.lastCompiledToken else { continue }
+            tokens.append(token)
+        }
+        return Array(tokens.prefix(Self.maxWarmFilterArtifacts))
     }
 
     private func persistSharedState(
         preparedSnapshot: PreparedFilterSnapshot? = nil,
-        rewritesRuleArtifacts: Bool = true
+        rewritesRuleArtifacts: Bool = true,
+        prioritizesConfigurationDurability: Bool = false
     ) async throws {
         guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
@@ -6989,29 +8491,170 @@ final class AppViewModel: ObservableObject {
         // state changed: re-encoding the prepared JSON and rebuilding the
         // compact artifact were measured as the bulk of warm turn-on cost.
         let snapshotToPersist = preparedSnapshot ?? preparedSnapshotForCurrentConfiguration()
-        if rewritesRuleArtifacts, snapshotToPersist.summary.coversEnabledBlocklists(in: configuration) {
-            try await persistPreparedSnapshotArtifacts(snapshotToPersist)
+        let didRewriteArtifacts = rewritesRuleArtifacts
+            && snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)
+
+        // Keep the library's active filter in lockstep with the configuration we're
+        // persisting (the only two writers of app-configuration.json funnel through here
+        // and persistConfigurationOnly), and record the compiled token (deterministic) so
+        // GC keeps this filter's compiled directory warm. The artifact publish happens
+        // AFTER the config write (below) per the config-leads-pointer ordering; a token
+        // recorded for an as-yet-unpublished dir simply forces a recompile on next use.
+        syncActiveFilterFromConfiguration()
+        if didRewriteArtifacts {
+            let token = FilterArtifactStore.versionedToken(for: snapshotToPersist)
+            library.mutateFilter(id: library.activeFilterID) { $0.lastCompiledToken = token }
         }
 
+        // Advance the supersession token and write configuration.json BEFORE flipping the
+        // artifact pointer, so the on-disk generation already leads any pointer flip a
+        // concurrent background refresh could observe (see AppConfiguration.configurationGeneration).
+        // If the order were reversed, a background writer could take the publish lock after
+        // the foreground flip but before the bump, read the stale generation, and clobber the
+        // foreground's fresh artifacts. The brief window where config leads the pointer is
+        // fail-closed: a reader resolving the pointer then sees an under-covering artifact and
+        // falls back / cold-rebuilds, never serving wrong rules.
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-
         let configurationURL = containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename)
+        advanceConfigurationGeneration()
         let configurationData = try encoder.encode(configuration)
+        // The library and config are two separate atomic files, NOT a transactional pair — a kill
+        // can land between them. Each library write is stamped with the config generation it is
+        // paired with (persistFilterLibrary), and load rejects a library whose stamp is older than
+        // the config on disk (FilterLibrary.lostWriteRace). That makes BOTH orderings safe, so we
+        // order purely by which side is unreconstructable if a partial write happens:
+        //  • NORMAL edits write the library (source of truth) FIRST.
+        //  • A RESTORE writes the unreconstructable device-global config FIRST, then the library: a
+        //    kill before the config lands leaves the prior config+library intact (a restore that
+        //    never landed can't destroy existing filters — Codex r19); a kill after it lands leaves
+        //    a lower-generation old library that load rejects in favour of the restored config,
+        //    migrating it into one Default filter (Codex r20). No destructive pre-delete needed.
+        // Exactly one physical config write either way (SharedConfigurationWriterInvariant).
+        if !prioritizesConfigurationDurability {
+            try persistFilterLibrary()
+        }
         try configurationData.write(to: configurationURL, options: [.atomic])
+        if prioritizesConfigurationDurability {
+            try persistFilterLibrary()
+        }
         scheduleAutomaticBackupAfterConfigurationChange()
+
+        if didRewriteArtifacts {
+            try await persistPreparedSnapshotArtifacts(snapshotToPersist)
+        }
     }
 
-    private func persistConfigurationOnly() throws {
+    /// Advance the supersession token to a value that has never been used — even across a
+    /// backup restore, which replaces `configuration` with a freshly-decoded value whose
+    /// token defaults to 0. Deriving the next token from the max of the in-memory and the
+    /// live ON-DISK generation means a post-restore save exceeds the newest persisted token
+    /// instead of resetting to 1 (which an in-flight background refresh could already hold as
+    /// its `builtGeneration`, letting it pass the in-lock supersession check and clobber the
+    /// restore). Monotonic ⇒ never repeats. Foreground writes run on the main actor, so this
+    /// read-modify-write is not racy; the background only ever READS the token (under the
+    /// publish lock).
+    private func advanceConfigurationGeneration() {
+        configuration.configurationGeneration = max(configuration.configurationGeneration, onDiskConfigurationGeneration()) &+ 1
+    }
+
+    /// The supersession token currently persisted on disk, or 0 if there is no readable
+    /// configuration yet. Read just before a write to keep `advanceConfigurationGeneration`
+    /// monotonic across an in-memory reset.
+    private func onDiskConfigurationGeneration() -> Int {
+        guard let configurationURL,
+              let data = try? Data(contentsOf: configurationURL),
+              let persisted = try? JSONDecoder().decode(AppConfiguration.self, from: data)
+        else {
+            return 0
+        }
+
+        return persisted.configurationGeneration
+    }
+
+    /// Persist the live configuration + library at a freshly-bumped generation.
+    ///
+    /// `schedulesAutomaticBackup` is false ONLY for the launch-time generation-bump persists
+    /// (migration / `reconcileLoadedLibraryGenerationIfNeeded`): those run during `init`, before
+    /// `isAutomaticBackupEnabled` and the encrypted-backup state are loaded, so the re-seal would
+    /// clear the upload marker but see the default `isAutomaticBackupEnabled == false` and never
+    /// schedule the upload — leaving an auto-backup user's backup looking un-uploaded until a later
+    /// edit (Codex r24). Suppressing the backup hook there is safe: a migration only adds the single
+    /// Default filter the server's pre-multi-filter payload already restores to, and a reconcile
+    /// changes only the (backup-stripped) generation, so neither alters backed-up content — the next
+    /// real user change re-seals and uploads normally.
+    private func persistConfigurationOnly(schedulesAutomaticBackup: Bool = true) throws {
         guard let configurationURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
 
+        syncActiveFilterFromConfiguration()
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // Bump the supersession token (see AppConfiguration.configurationGeneration) so a concurrent
+        // background refresh built against the prior config aborts its flip — BEFORE persisting the
+        // library, so persistFilterLibrary stamps the library with the SAME (new) generation the
+        // config below carries. Otherwise the library would stamp the pre-bump generation and load
+        // would wrongly read it as stale.
+        advanceConfigurationGeneration()
+        // Persist the library (source of truth) BEFORE the config (its derived cache), so a
+        // kill between the two writes is reconciled in the library's favour on next launch.
+        try persistFilterLibrary()
         let configurationData = try encoder.encode(configuration)
         try configurationData.write(to: configurationURL, options: [.atomic])
-        scheduleAutomaticBackupAfterConfigurationChange()
+        if schedulesAutomaticBackup {
+            scheduleAutomaticBackupAfterConfigurationChange()
+        }
+    }
+
+    /// Write-through the active filter's four fields from the live `configuration`.
+    /// Runs at the persistence boundary so the library's copy of the active filter
+    /// never drifts from what's being saved to `app-configuration.json`. If the
+    /// contents changed, any cached compile token is now stale, so clear it.
+    private func syncActiveFilterFromConfiguration() {
+        // The active id should always resolve (normalized on load + invariant-preserving
+        // mutations), but repair a dangling id rather than silently skipping the sync —
+        // a skipped sync would drift the config and the library apart permanently.
+        if library.filter(id: library.activeFilterID) == nil {
+            library = library.normalized()
+        }
+        guard var filter = library.filter(id: library.activeFilterID) else { return }
+        // Only publish a library change when the four fields actually moved — a no-op
+        // persist (the common case for device-global edits) must not churn @Published.
+        guard filter.applyFilterFields(from: configuration) else { return }
+        filter.lastCompiledToken = nil
+        library.update(filter)
+    }
+
+    /// Regenerate the live `configuration`'s four filter-scoped fields from the active
+    /// filter (the inverse of `syncActiveFilterFromConfiguration`). Used on load and after
+    /// any change to which filter is active — the library is the source of truth, and the
+    /// device-global fields on `configuration` are left untouched.
+    private func mirrorActiveFilterIntoConfiguration() {
+        let active = library.activeFilter
+        configuration.enabledBlocklistIDs = active.enabledBlocklistIDs
+        configuration.customBlocklists = active.customBlocklists
+        configuration.blockedDomains = active.blockedDomains
+        configuration.allowedDomains = active.allowedDomains
+    }
+
+    private func persistFilterLibrary() throws {
+        guard let filterLibraryURL else {
+            throw LavaSecAppError.appGroupUnavailable
+        }
+        // Stamp the library with the config generation it is being written alongside, so the load
+        // path can reject a library that lost a two-file write race (see FilterLibrary.lostWriteRace
+        // / loadOrMigrateFilterLibrary). Callers bump the generation (advanceConfigurationGeneration)
+        // BEFORE persisting, so the value read here matches the config written in the same operation.
+        // Guard the assignment so an unchanged stamp doesn't churn @Published.
+        if library.configurationGeneration != configuration.configurationGeneration {
+            library.configurationGeneration = configuration.configurationGeneration
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(library)
+        try data.write(to: filterLibraryURL, options: [.atomic])
     }
 
     private func uploadEncryptedBackup(
@@ -7041,7 +8684,12 @@ final class AppViewModel: ObservableObject {
             accountAuthState = accountAuthService.state
             try await backupSyncService.upload(envelope, session: session)
             let uploadedAt = Date()
-            recordEncryptedBackupUpload(uploadedAt: uploadedAt)
+            guard recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt: uploadedAt) else {
+                // A re-seal replaced the local envelope mid-upload; the newer one still needs
+                // uploading (the re-seal already cleared the marker / scheduled its own upload).
+                encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
+                return
+            }
             encryptedBackupState = .synced(estimatedByteSize: estimatedByteSize, uploadedAt: uploadedAt)
         } catch BackupSyncServiceError.requestFailed(let statusCode) where statusCode == 401 {
             do {
@@ -7054,7 +8702,10 @@ final class AppViewModel: ObservableObject {
                 accountAuthState = accountAuthService.state
                 try await backupSyncService.upload(envelope, session: refreshedSession)
                 let uploadedAt = Date()
-                recordEncryptedBackupUpload(uploadedAt: uploadedAt)
+                guard recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt: uploadedAt) else {
+                    encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
+                    return
+                }
                 encryptedBackupState = .synced(estimatedByteSize: estimatedByteSize, uploadedAt: uploadedAt)
             } catch {
                 accountAuthState = accountAuthService.state
@@ -7138,6 +8789,12 @@ final class AppViewModel: ObservableObject {
         if !canOfferLiveActivities {
             defaults.set(false, forKey: usesLiveActivitiesDefaultsKey)
         }
+
+        liveActivityPauseMinutes = LiveActivityPausePreference.minutes(
+            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)
+        )
+
+        usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true
     }
 
     private func loadLavaGuardProgress() {
@@ -7192,8 +8849,37 @@ final class AppViewModel: ObservableObject {
         backupEnvelopeStore.recordUpload(at: uploadedAt)
     }
 
+    /// Record a successful upload ONLY if the envelope we uploaded is still the current local one.
+    /// A config/library change re-seals + saves a new local envelope while an upload is in flight
+    /// (e.g. the turn-on upload or a manual Back Up Now); recording .synced for the older envelope
+    /// would falsely claim the server holds the latest, when the freshly re-sealed envelope still
+    /// needs uploading. Returns whether the marker was recorded (the envelope is comparable —
+    /// ZeroKnowledgeBackupEnvelope is Equatable — and a re-seal always produces a different one).
+    private func recordEncryptedBackupUploadIfStillCurrent(
+        _ uploadedEnvelope: ZeroKnowledgeBackupEnvelope,
+        uploadedAt: Date
+    ) -> Bool {
+        guard loadLocalEncryptedBackupEnvelope() == uploadedEnvelope else {
+            return false
+        }
+        recordEncryptedBackupUpload(uploadedAt: uploadedAt)
+        return true
+    }
+
     private func scheduleAutomaticBackupAfterConfigurationChange() {
-        guard isAutomaticBackupEnabled, encryptedBackupState.isConfigured else {
+        // Re-seal the LOCAL envelope with the current config + library on every change, BEFORE
+        // consulting the cached backup state. The envelope is otherwise sealed only at
+        // turn-on/restore, so without this the next upload (automatic OR manual) backs up stale
+        // state and a restore silently loses every post-turn-on edit (new filters, renames,
+        // blocklist changes). Gate the re-seal on the LIVE store, not the in-memory
+        // encryptedBackupState: that cached value is stale (.off) right after a restore until the
+        // next launch re-derives it, so an early isConfigured guard here would short-circuit the
+        // re-seal and drop every post-restore edit. refreshLocalEncryptedBackupEnvelope no-ops
+        // safely when no local envelope / device secret is present, so calling it
+        // unconditionally is correct.
+        refreshLocalEncryptedBackupEnvelope()
+
+        guard encryptedBackupState.isConfigured, isAutomaticBackupEnabled else {
             return
         }
 
@@ -7220,6 +8906,49 @@ final class AppViewModel: ObservableObject {
 
     private func saveLocalEncryptedBackupEnvelope(_ envelope: ZeroKnowledgeBackupEnvelope) throws {
         try backupEnvelopeStore.saveEnvelope(envelope)
+    }
+
+    /// Re-seal the local encrypted-backup envelope with the current config + library
+    /// (keeping every key slot), so a backup reflects post-turn-on changes. Recovers the
+    /// payload key via the stored device secret — no user interaction. Best-effort: if there
+    /// is no local envelope or device secret, leave the existing envelope untouched.
+    private func refreshLocalEncryptedBackupEnvelope() {
+        guard let envelope = loadLocalEncryptedBackupEnvelope() else {
+            return
+        }
+        let storedDeviceSecret = try? backupKeychainStore.loadDeviceSecret()
+        guard let deviceSecret = storedDeviceSecret ?? nil else {
+            return
+        }
+        let payload = BackupConfigurationPayload(
+            configuration: configuration,
+            catalogVersionHint: catalogVersion,
+            filterLibrary: library
+        )
+        // Skip the re-seal entirely when the backup CONTENT is unchanged. resealingPayload mints a
+        // fresh AES-GCM ciphertext every time and the marker-clear below then flips an
+        // already-uploaded backup to "not uploaded"; without this gate a non-user persist (e.g.
+        // reconcileTunnelSnapshotAfterLaunch on launch) would churn the backup state and schedule a
+        // redundant upload with no actual change. hasSameBackupContent ignores protectionEnabledHint
+        // (a frequently-toggled advisory hint) and the library's already-stripped local cache
+        // tokens, so a protection pause/resume or a compile-token restamp no longer churns the
+        // marker. Compare against the currently-sealed payload (recovered via the same device secret).
+        if let currentPayload = try? envelope.decryptWithKeychainSecret(deviceSecret),
+           currentPayload.hasSameBackupContent(as: payload) {
+            return
+        }
+        guard let resealed = try? envelope.resealingPayload(payload, deviceSecret: deviceSecret) else {
+            return
+        }
+        try? saveLocalEncryptedBackupEnvelope(resealed)
+        // The re-sealed local envelope is newer than any uploaded copy, so the prior upload marker
+        // is stale. Clear it (and refresh the cached state) — otherwise currentState() keeps
+        // reporting .synced and Settings claims the latest backup is uploaded while the server
+        // still holds the pre-change envelope. The automatic-upload path records a fresh marker
+        // after a successful upload; with automatic backup off the state correctly stays
+        // "encrypted locally, not yet uploaded" until a manual Back Up Now.
+        backupEnvelopeStore.clearUploadMarker()
+        loadEncryptedBackupState()
     }
 
     private func loadLocalEncryptedBackupEnvelope() -> ZeroKnowledgeBackupEnvelope? {
@@ -7478,6 +9207,10 @@ final class AppViewModel: ObservableObject {
 
     private var configurationURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.configurationFilename)
+    }
+
+    private var filterLibraryURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename)
     }
 
     private var diagnosticsURL: URL? {

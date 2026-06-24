@@ -13,6 +13,14 @@ DERIVED_DATA="${LAVA_CAPTURE_DERIVED_DATA:-$ROOT_DIR/.build/lava-site-capture-de
 OUTPUT_DIR="${LAVA_CAPTURE_OUTPUT_DIR:-$ROOT_DIR/server/site/lavasecurity-app/public/assets/app-captures}"
 LOCALES=(${LAVA_CAPTURE_LOCALES:-en ja zh-Hant zh-Hans de fr})
 
+# Per-checkout DerivedData (~750 MB) is the main local-disk hog, so delete this
+# run's throwaway build on exit. Set LAVA_CAPTURE_KEEP_DERIVED_DATA=1 to keep it
+# for faster incremental reruns.
+cleanup_derived_data() {
+    [[ "${LAVA_CAPTURE_KEEP_DERIVED_DATA:-0}" == "1" ]] || rm -rf "$DERIVED_DATA"
+}
+trap cleanup_derived_data EXIT
+
 apple_locale() {
     case "$1" in
         en) echo "en_US" ;;

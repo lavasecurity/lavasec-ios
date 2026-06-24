@@ -74,13 +74,13 @@ struct FilterConfirmationSheet: View {
                     didConfirm = true
                     dismiss()
                     Task {
-                        await viewModel.prepareAndApplyFilterDraft()
+                        await viewModel.prepareAndApplyFilterDraft(origin: origin)
                     }
                 }
                 .buttonStyle(LavaStandaloneActionButtonStyle())
                 .disabled(!viewModel.filterDraftCanConfirm)
             }
-            .navigationTitle("Review")
+            .navigationTitle("Review".lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -90,6 +90,7 @@ struct FilterConfirmationSheet: View {
                     }
                 }
             }
+            .lavaTier(.calm)
         }
         .presentationDetents([.medium, .large])
         .onDisappear {
@@ -222,16 +223,25 @@ struct FilterPreparationScreen: View {
                     }
 
                     VStack(spacing: 10) {
-                        Button("Try Again") {
-                            viewModel.retryFilterPreparation()
+                        // A dead-end failure (switch target deleted/frozen mid-prepare) isn't
+                        // retryable — retrying just re-fails — so "Keep Current Filter" is the
+                        // only recovery there.
+                        if viewModel.filterPreparationFailureIsRetryable {
+                            Button("Try Again") {
+                                viewModel.retryFilterPreparation()
+                            }
+                            .buttonStyle(LavaStandaloneActionButtonStyle())
                         }
-                        .buttonStyle(LavaStandaloneActionButtonStyle())
 
-                        Button(origin.failureBackTitle) {
-                            viewModel.returnToFilterEditAfterPrepareFailure()
-                            returnToReview?()
+                        // A filter switch has no editor/review to go back to, so hide the
+                        // "Back to Edit"/"Back to Review" affordance for it.
+                        if viewModel.filterPreparationFailureOffersEditReturn {
+                            Button(origin.failureBackTitle) {
+                                viewModel.returnToFilterEditAfterPrepareFailure()
+                                returnToReview?()
+                            }
+                            .buttonStyle(LavaSecondaryActionButtonStyle())
                         }
-                        .buttonStyle(LavaSecondaryActionButtonStyle())
 
                         Button(role: .cancel) {
                             viewModel.keepCurrentFiltersAfterPrepareFailure()

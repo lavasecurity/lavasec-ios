@@ -246,6 +246,65 @@ final class CompactFilterSnapshotTests: XCTestCase {
         )
     }
 
+    func testCanServeAsLastKnownGoodToleratesRotatedCatalogHashButNotConfigChange() throws {
+        // Cold-start last-known-good fallback for the rotating-upstream / stale-pinned-hash
+        // wedge: a `source_url_only` list's upstream rotates 4x/day, so the catalog's pinned
+        // hash for it goes stale vs the cached content. On a cold start the strict reuse gate
+        // rejects the on-disk artifact (catalog-hash diff) AND the in-extension recompile
+        // throws checksumMismatch, so the tunnel would fail CLOSED and clear protection.
+        // The fallback must re-serve the user's previously-compiled rules when ONLY the
+        // catalog hash rotated, while still rejecting a genuine config change (fail-open).
+        let configuration = AppConfiguration(
+            enabledBlocklistIDs: ["source-a"],
+            resolverPresetID: DNSResolverPreset.cloudflare.id
+        )
+        let catalogV1 = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: catalogV1),
+            snapshot: configuration.filterSnapshot(),
+            summary: PreparedFilterSnapshotSummary(
+                snapshot: configuration.filterSnapshot(),
+                blocklistRuleCount: 7,
+                blocklistSourceRuleCounts: ["source-a": 7]
+            )
+        )
+
+        let data = try CompactFilterSnapshot(preparedSnapshot: prepared).encodedData()
+        let decoded = try CompactFilterSnapshot.decode(from: data)
+        let summary = try CompactFilterSnapshot.readSummary(from: data)
+
+        // Upstream rotated: the cached catalog now pins a new version/hash for source-a.
+        let catalogV2 = Self.catalog(sourceVersionID: "source-v2", guardrailVersionID: "guardrail-v1")
+
+        // The strict reuse gate REJECTS the rotated catalog — this is exactly the
+        // store-miss that forces the (doomed) in-extension recompile on cold start.
+        XCTAssertFalse(summary.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: catalogV2))
+        XCTAssertFalse(decoded.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: catalogV2))
+
+        // ...but the last-known-good fallback ACCEPTS it: same config, only the catalog
+        // hash rotated. Summary and full-snapshot verdicts must agree.
+        XCTAssertTrue(summary.canServeAsLastKnownGood(for: configuration))
+        XCTAssertTrue(decoded.canServeAsLastKnownGood(for: configuration))
+
+        // A genuine config change (an extra enabled list the artifact does not cover)
+        // is still REJECTED — re-serving the old artifact would silently NOT filter the
+        // newly-enabled list (a fail-OPEN), so the cold start must rebuild instead.
+        let extraList = AppConfiguration(
+            enabledBlocklistIDs: ["source-a", "source-b"],
+            resolverPresetID: DNSResolverPreset.cloudflare.id
+        )
+        XCTAssertFalse(summary.canServeAsLastKnownGood(for: extraList))
+        XCTAssertFalse(decoded.canServeAsLastKnownGood(for: extraList))
+
+        // A resolver-transport change is still REJECTED (the snapshot bakes in the transport).
+        let differentTransport = AppConfiguration(
+            enabledBlocklistIDs: ["source-a"],
+            resolverPresetID: DNSResolverPreset.cloudflareDoH.id
+        )
+        XCTAssertFalse(summary.canServeAsLastKnownGood(for: differentTransport))
+        XCTAssertFalse(decoded.canServeAsLastKnownGood(for: differentTransport))
+    }
+
     func testCompactSummarySubtractsAllowedExceptionThatOverlapsBlockedDomain() throws {
         var blockRules = DomainRuleSet()
         try blockRules.insert(domain: "ads.example.com", matchesSubdomains: true)

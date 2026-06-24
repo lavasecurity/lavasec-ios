@@ -26,6 +26,26 @@ public enum TunnelSelfReconnectPolicy {
     /// Hard cap on self-reconnects within `attemptWindow`; once reached we stop
     /// restarting and leave the "reconnect needed" notification as the signal.
     public static let maxAttemptsPerWindow = 2
+    /// Cap for the device-DNS *recapture* restart (Track 4) — the no-fallback
+    /// resolver-changing handoff where a cold restart is the ONLY thing that
+    /// re-captures the new network's resolver (Phase 0). Slightly higher than the
+    /// wedge cap: the +1 headroom absorbs one in-flight, not-yet-credited restart
+    /// during a legitimate network-switch flurry (a productive restart is credited
+    /// back on the next launch's confirmed recovery, so genuine switching nets ~0),
+    /// while still bounding a genuinely-dead resolver at 3 restarts/window before
+    /// falling back to the in-place wedge-recovery probe (anti restart-loop).
+    public static let maxDeviceDNSRecaptureAttemptsPerWindow = 3
+
+    /// Why a self-reconnect is being considered. Selects the per-window ceiling; the
+    /// attempt *store* is shared across reasons (a self-reconnect is one scarce
+    /// process-restart resource regardless of trigger — two budgets would let a
+    /// flapping network double the real restart rate).
+    public enum RestartReason: Equatable, Sendable {
+        /// The sustained connectivity wedge (the original escalation).
+        case wedge
+        /// Device-DNS capture-retry exhaustion on a no-fallback config (Track 4).
+        case deviceDNSRecapture
+    }
 
     public enum Decision: Equatable, Sendable {
         /// Restart now (and record `now` in the persisted attempt history).
@@ -53,6 +73,7 @@ public enum TunnelSelfReconnectPolicy {
         protectionEnabled: Bool,
         onDemandEnabled: Bool,
         recentReconnectTimes: [Date],
+        reason: RestartReason = .wedge,
         now: Date = Date()
     ) -> Decision {
         // Only the genuine wedge — not `.dnsSlow` (also `.reconnect`, but working)
@@ -79,7 +100,10 @@ public enum TunnelSelfReconnectPolicy {
             return .throttled
         }
 
-        if recent.count >= maxAttemptsPerWindow {
+        let ceiling = reason == .deviceDNSRecapture
+            ? maxDeviceDNSRecaptureAttemptsPerWindow
+            : maxAttemptsPerWindow
+        if recent.count >= ceiling {
             return .throttled
         }
 

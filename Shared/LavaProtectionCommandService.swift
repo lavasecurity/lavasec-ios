@@ -77,8 +77,8 @@ enum LavaProtectionCommandService {
             )
 
             switch request {
-            case .pauseFiveMinutes, .pauseTenMinutes, .pauseFifteenMinutes:
-                guard let duration = request.pauseDuration else {
+            case .pauseFiveMinutes, .pauseTenMinutes, .pauseFifteenMinutes, .pauseConfigured:
+                guard let duration = resolvedPauseDuration(for: request, defaults: defaults) else {
                     log("perform-missing-duration", details: ["request": request.rawValue])
                     return try currentActivityOutcome(pauseStore: pauseStore, reason: "missing-duration")
                 }
@@ -134,6 +134,28 @@ enum LavaProtectionCommandService {
                 }
             }
         }
+    }
+
+    // Fixed pause cases carry their own duration; `.pauseConfigured` (the Live
+    // Activity's single Pause button) resolves the user-chosen length from the
+    // shared app-group defaults, clamped to the valid range by the policy.
+    private static func resolvedPauseDuration(
+        for request: LavaLiveActivityActionRequest,
+        defaults: UserDefaults
+    ) -> TimeInterval? {
+        if let fixedDuration = request.pauseDuration {
+            return fixedDuration
+        }
+
+        guard request == .pauseConfigured else {
+            return nil
+        }
+
+        return LiveActivityPausePreference.duration(forMinutes: persistedPauseMinutes(defaults: defaults))
+    }
+
+    private static func persistedPauseMinutes(defaults: UserDefaults) -> Int {
+        LiveActivityPausePreference.minutes(from: ProtectionUserDefaultsStorage(defaults: defaults))
     }
 
     private static func pauseProtection(
@@ -278,7 +300,8 @@ enum LavaProtectionCommandService {
             protectionState: protectionState,
             resumeDate: resumeDate,
             pauseRequiresAuthentication: pauseRequiresAuthentication,
-            shieldStyle: persistedShieldStyle(defaults: defaults)
+            shieldStyle: persistedShieldStyle(defaults: defaults),
+            pauseMinutes: persistedPauseMinutes(defaults: defaults)
         )
         let content = ActivityContent(state: state, staleDate: resumeDate)
 
@@ -363,7 +386,13 @@ enum LavaProtectionCommandService {
                 return try body()
             }
 
-            _ = FileManager.default.createFile(atPath: lockURL.path, contents: nil)
+            // Open with O_CREAT only — deliberately NOT FileManager.createFile, which
+            // on Darwin replaces an existing file's inode (temp + rename). Because
+            // flock locks are bound to the inode, a createFile here would orphan the
+            // current holder's lock and let every acquirer lock a fresh inode, so two
+            // processes (app, tunnel, widget) could "acquire" concurrently — no real
+            // mutual exclusion. O_CREAT without O_TRUNC/O_EXCL opens the existing inode
+            // (or creates one), so all processes share a single lock object.
             let lockFileDescriptor = open(lockURL.path, O_CREAT | O_RDWR, mode_t(S_IRUSR | S_IWUSR))
             guard lockFileDescriptor >= 0 else {
                 return try body()

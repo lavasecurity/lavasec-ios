@@ -8,8 +8,10 @@ const catalogs = [
   path.join(iosRoot, "LavaSecApp", "Localizable.xcstrings"),
   path.join(iosRoot, "LavaSecApp", "InfoPlist.xcstrings")
 ];
-const requiredLocales = ["en", "ja", "zh-Hant", "zh-Hans", "de", "fr"];
+const requiredLocales = ["en", "ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"];
 const allowedUntranslatedValues = new Set([
+  "Account",
+  "Password",
   "Apple",
   "Cloudflare",
   "Filter",

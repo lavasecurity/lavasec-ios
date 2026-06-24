@@ -114,14 +114,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains("private struct SettingsSubpageContent<Content: View>: View"))
         XCTAssertTrue(source.contains("private enum SettingsSubpageLayout"))
-        XCTAssertEqual(
-            source.occurrences(of: "SettingsSubpageContent {")
-                + source.occurrences(of: "SettingsSubpageContent(spacing:"),
-            10
-        )
+        // Every Settings sub-screen routes through the shared scaffold. Each screen now passes
+        // title:/tier:/intro: arguments, so all call sites use the parenthesized form.
+        XCTAssertEqual(source.occurrences(of: "SettingsSubpageContent("), 10)
         XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
         XCTAssertFalse(source.contains("LavaScreenContent(\n            spacing: 24"))
-        XCTAssertTrue(source.contains("SettingsSubpageContent(spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
+        XCTAssertTrue(source.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
     }
 
     func testScreenContentScrollAnchorDoesNotAddTopSpacing() throws {
@@ -149,7 +147,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private struct LegalNoticesView: View"
         )
 
-        XCTAssertTrue(feedbackBlock.contains(".navigationTitle(\"Feedback\")"))
+        XCTAssertTrue(feedbackBlock.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
         XCTAssertEqual(feedbackBlock.occurrences(of: "No silent telemetry"), 1)
         XCTAssertTrue(feedbackBlock.containsInOrder([
             "Choose a topic",
@@ -410,7 +408,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
         )
 
-        XCTAssertTrue(feedbackBlock.contains("SettingsSubpageContent(spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
+        XCTAssertTrue(feedbackBlock.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
         XCTAssertTrue(feedbackBlock.contains("if onDismissRequested != nil && !isShowingThankYou"))
         XCTAssertTrue(feedbackBlock.contains("if isShowingThankYou {\n                thankYouBottomActionBar"))
         XCTAssertTrue(thankYouBlock.contains("FeedbackThankYouMascot()"))
@@ -561,6 +559,38 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("Button(\"Discard\", role: .destructive)"))
         XCTAssertTrue(rageShakeSheetBlock.contains("canRequestDismiss"))
         XCTAssertTrue(rageShakeSheetBlock.contains(".interactiveDismissDisabled(isReportDirty"))
+
+        // The bug-report sheet stays MOUNTED across an App Unlock lock so the
+        // in-progress draft (local @State) survives; its content is hidden by an
+        // opaque, hit-blocking, modal in-sheet mask while App Unlock is pending OR
+        // the app-switcher privacy mask is up, and the diagnostics sampling task
+        // is gated off while masked. The sheet is presented from RootView with a
+        // raw binding (no withhold), and the importer's withhold gate is untouched.
+        XCTAssertTrue(rootSource.contains(".sheet(item: $viewModel.rageShakeDestination)"))
+        XCTAssertTrue(feedbackBlock.contains("security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible"))
+        XCTAssertTrue(feedbackBlock.contains("BugReportSheetLockMask("))
+        XCTAssertTrue(feedbackBlock.contains("security.authenticateAppUnlockIfNeeded()"))
+        XCTAssertTrue(feedbackBlock.contains(".task(id: isAppUnlockMaskVisible)"))
+        XCTAssertTrue(feedbackBlock.contains("guard !isAppUnlockMaskVisible else { return }"))
+        // Re-check after the non-cancellation-aware sampleReports() await so a
+        // lock that lands mid-sample can't refresh the draft above the lock.
+        XCTAssertTrue(feedbackBlock.contains("guard !Task.isCancelled, !isAppUnlockMaskVisible else { return }"))
+
+        let maskBlock = try Self.sourceBlock(
+            in: settingsSource,
+            startingAt: "private struct BugReportSheetLockMask",
+            endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
+        )
+        // OPAQUE fill, never translucent material (which would leak the draft
+        // through the blur), and it must swallow hits + be a modal a11y element.
+        XCTAssertTrue(maskBlock.contains(".fill(LavaStyle.groupedBackground)"))
+        XCTAssertFalse(maskBlock.contains(".regularMaterial"))
+        XCTAssertTrue(maskBlock.contains(".contentShape(Rectangle())"))
+        XCTAssertTrue(maskBlock.contains(".accessibilityAddTraits(.isModal)"))
+        // Must carry its own unlock affordance: the root lock overlay is behind
+        // this window-level sheet, so a cancelled passcode prompt would otherwise
+        // strand the user (forced to discard the draft) — see the P2 on 3d1f492.
+        XCTAssertTrue(maskBlock.contains("Button(\"Unlock Lava\", action: unlock)"))
     }
 
     func testAccountPageRemovesFreeAccountInfoPanelAndUsesStandardAccountSheetChrome() throws {
@@ -606,7 +636,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: requestDismiss)"))
         XCTAssertTrue(feedbackBlock.contains("ToolbarItem(placement: .cancellationAction)"))
-        XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Close\", role: .close, action: requestDismiss)"))
+        XCTAssertTrue(feedbackBlock.contains("NativeToolbarIconButton(systemName: \"xmark\", accessibilityLabel: \"Cancel\", role: .cancel, action: requestDismiss)"))
         XCTAssertFalse(feedbackBlock.contains("LavaToolbarIconButton("))
     }
 
@@ -641,7 +671,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(accountBlock.contains("backupMaintenanceButton(.disable)"))
         XCTAssertTrue(accountBlock.contains("iconTint: .red, titleTint: .red"))
         XCTAssertTrue(accountBlock.contains("Image(systemName: \"trash\")"))
-        XCTAssertTrue(accountBlock.contains("Disabling backup also permanently deletes the copy stored for your account."))
+        XCTAssertTrue(accountBlock.contains("Delete online backup copy removes the server copy but keeps backups on."))
         XCTAssertTrue(accountBlock.containsInOrder([
             "title: \"Automatic Backup\"",
             "backupMaintenanceButton(.clear)",
@@ -687,7 +717,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("try? await Task.sleep(nanoseconds: automaticBackupDelay)"))
         XCTAssertTrue(preferenceBlock.contains("UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKey)"))
         XCTAssertFalse(preferenceBlock.contains("scheduleAutomaticBackupAfterConfigurationChange()"))
-        XCTAssertTrue(uploadBlock.contains("recordEncryptedBackupUpload(uploadedAt:"))
+        // The marker is recorded through the version-checked helper, so a re-seal during an
+        // in-flight upload can't leave a stale "uploaded" marker for the older envelope.
+        XCTAssertTrue(uploadBlock.contains("recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt:"))
     }
 
     func testBugReportUsesGenericResolverNameInsteadOfCustomDisplayName() throws {
@@ -710,10 +742,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private enum LocalLogSetting"
         )
 
-        XCTAssertTrue(privacyBlock.contains("LavaSectionGroup(\"Local Logs\")"))
+        // Helper text now lives in the section footer (design rule: one home for helper text),
+        // and the intro panel is promoted to the scaffold intro: slot (still inside this block).
+        XCTAssertTrue(privacyBlock.contains("LavaSectionGroup(\"Local Logs\", footer: \"Detailed activity is kept for 7 days — export to keep a copy.\")"))
         XCTAssertTrue(privacyBlock.contains("title: \"All local logs stay on this iPhone\""))
-        XCTAssertTrue(privacyBlock.contains("description: \"Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below.\""))
-        XCTAssertTrue(privacyBlock.contains("Text(\"Detailed activity is kept for 7 days — export to keep a copy.\")"))
+        XCTAssertTrue(privacyBlock.contains("description: \"Domain history and network activity are kept for 7 days; counts and Lava Guard progress last longer. Keep or clear each below.\""))
+        XCTAssertFalse(privacyBlock.contains("Text(\"Detailed activity is kept for 7 days — export to keep a copy.\")"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Filtering Counts\", isOn: keepFilteringCountsBinding)"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Domain Logs\", isOn: keepDomainHistoryBinding)"))
         XCTAssertTrue(privacyBlock.contains("localLogToggle(\"Network Activity\", isOn: keepNetworkActivityBinding)"))
@@ -807,10 +841,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let resolverBlock = try Self.sourceBlock(
             in: source,
             startingAt: "struct DNSResolverSettingsView: View",
-            endingBefore: "private struct ResolverSelectionIndicator: View"
+            endingBefore: "struct PrivacyDataSettingsView: View"
         )
 
-        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"Device DNS\")"))
+        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"Device DNS\") {"))
         XCTAssertTrue(resolverBlock.contains("Toggle(\"Use Device DNS Setting\", isOn: useDeviceDNSBinding)"))
         XCTAssertTrue(resolverBlock.contains("viewModel.deviceDNSResolverDetailText"))
         XCTAssertTrue(resolverBlock.contains("if !usesDeviceDNSSetting"))
@@ -818,7 +852,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverBlock.contains("isSelected: isCustomResolverSelected"))
         XCTAssertTrue(resolverBlock.contains("isEditingCustomResolver || viewModel.configuration.resolverPresetID == DNSResolverPreset.customID"))
         XCTAssertTrue(resolverBlock.contains(".onDisappear(perform: resetCustomResolverDrafts)"))
-        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"DNS Providers\")"))
+        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"DNS Providers\", footer:"))
         XCTAssertTrue(resolverBlock.contains("@Environment(\\.dismiss) private var dismiss"))
         XCTAssertTrue(resolverBlock.contains("@FocusState private var focusedCustomResolverField: CustomResolverFocusField?"))
         XCTAssertTrue(resolverBlock.contains("@State private var customResolverSecondaryDraft = \"\""))
@@ -827,13 +861,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverBlock.contains("@State private var customResolverValidationMessage: String?"))
         XCTAssertTrue(resolverBlock.contains("if showsResolverOptions"))
         XCTAssertTrue(resolverBlock.contains("DNS Transport"))
-        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"DNS Transport\")"))
+        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"DNS Transport\", footer:"))
         XCTAssertTrue(resolverBlock.contains("Picker(\"DNS Transport\""))
         XCTAssertTrue(resolverBlock.contains("ForEach(selectedBaseResolver.availableTransports"))
         XCTAssertTrue(resolverBlock.contains(".pickerStyle(.segmented)"))
         XCTAssertTrue(resolverBlock.contains("resolverTransportBinding"))
         XCTAssertTrue(resolverBlock.contains("transportDetailText"))
-        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"Custom Resolver\")"))
+        XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"Custom Resolver\", footer:"))
         XCTAssertFalse(resolverBlock.contains("LavaSectionGroup(\"Custom DNS\")"))
         XCTAssertTrue(resolverBlock.contains("CustomResolverTextField("))
         XCTAssertTrue(resolverBlock.contains("title: \"Name (optional)\""))
@@ -924,13 +958,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverBlock.contains(".lavaQuietNoteText()"))
         XCTAssertTrue(resolverBlock.contains("IP uses standard DNS. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) encrypt allowed lookups to the resolver."))
         XCTAssertTrue(resolverBlock.containsInOrder([
-            "LavaSectionGroup(\"Device DNS\")",
+            "LavaSectionGroup(\"Device DNS\") {",
             "title: \"Fallback to Device DNS\"",
             "detail: viewModel.deviceDNSFallbackDetailText",
             "if !usesDeviceDNSSetting",
-            "LavaSectionGroup(\"DNS Providers\")",
-            "LavaSectionGroup(\"Custom Resolver\")",
-            "LavaSectionGroup(\"DNS Transport\")",
+            "LavaSectionGroup(\"DNS Providers\", footer:",
+            "LavaSectionGroup(\"Custom Resolver\", footer:",
+            "LavaSectionGroup(\"DNS Transport\", footer:",
             "detail: transportDetailText"
         ]))
         XCTAssertFalse(resolverBlock.contains("Use DNS over HTTPS"))
@@ -995,7 +1029,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let optionControlBlock = try Self.sourceBlock(
             in: source,
             startingAt: "private struct ResolverOptionControl: View",
-            endingBefore: "private struct ResolverSelectionIndicator: View"
+            endingBefore: "struct PrivacyDataSettingsView: View"
         )
         XCTAssertTrue(optionControlBlock.containsInOrder([
             "ResolverToggleRow",

@@ -88,6 +88,10 @@ enum SettingsRoute: Hashable {
 
 private enum LavaWebLinks {
     static let support = URL(string: "https://lavasecurity.app/support/")!
+    static let privacy = URL(string: "https://lavasecurity.app/privacy/")!
+    // No custom EULA is hosted; Apple's standard EULA is the compliant default
+    // for the Guideline 3.1.2 "Terms of Use" link.
+    static let terms = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
 }
 
 private struct SettingsRouteDestinationView: View {
@@ -106,7 +110,6 @@ private struct SettingsRouteDestinationView: View {
                 CustomizationSettingsView()
             case .dnsResolver:
                 DNSResolverSettingsView()
-                    .lavaTier(.technical)
             case .privacyData:
                 PrivacyDataSettingsView()
             case .security:
@@ -117,7 +120,6 @@ private struct SettingsRouteDestinationView: View {
                 LegalNoticesView()
             case .versionNerdStats:
                 VersionNerdStatsView()
-                    .lavaTier(.technical)
             case .networkActivity:
                 NetworkActivityLogView()
 #if DEBUG || LAVA_QA_TOOLS
@@ -137,18 +139,45 @@ private enum SettingsSubpageLayout {
     static let feedbackSpacing: CGFloat = 18
 }
 
+/// The shared layout for a Settings sub-screen — the single place the "Lava Settings Page"
+/// anatomy is enforced, so a non-technical user (think a parent with no security background)
+/// meets the same shape on every screen instead of a different layout each time:
+///
+///   1. Large navigation `title`, always run through `.lavaLocalized`.
+///   2. Exactly one `intro` panel (`LavaInfoPanel`) above all sections — one plain sentence
+///      saying what the screen does plus the single reassurance that matters. On a
+///      `.technical` (Workshop) screen this panel is the plain-language on-ramp. Typed as a
+///      concrete `LavaInfoPanel?` rather than a generic slot so the "one panel" rule is
+///      structural, not a convention each screen has to remember.
+///   3. The body is titled `LavaSectionGroup`s; per-option helper text lives in the group's
+///      `footer:`, not scattered `lavaQuietNoteText`.
+///   4. `tier` declares the screen's depth (`LavaTier`): `.calm` for everyday screens,
+///      `.celebratory` for delight, `.technical` for power-user surfaces. The tier governs
+///      the reading level — how much jargon is allowed — see `LavaTier` in LavaTokens.swift.
+///
+/// Sales surfaces (Upgrade) are intentionally exempt from the strict body anatomy but still
+/// declare a `tier` and reuse the shared components/tokens.
 private struct SettingsSubpageContent<Content: View>: View {
+    let title: String?
+    let tier: LavaTier
+    let intro: LavaInfoPanel?
     let spacing: CGFloat
     let scrolls: Bool
     let refreshAction: (() async -> Void)?
     let content: Content
 
     init(
+        title: String? = nil,
+        tier: LavaTier = .calm,
+        intro: LavaInfoPanel? = nil,
         spacing: CGFloat = SettingsSubpageLayout.spacing,
         scrolls: Bool = true,
         refreshAction: (() async -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {
+        self.title = title
+        self.tier = tier
+        self.intro = intro
         self.spacing = spacing
         self.scrolls = scrolls
         self.refreshAction = refreshAction
@@ -161,6 +190,27 @@ private struct SettingsSubpageContent<Content: View>: View {
             scrolls: scrolls,
             refreshAction: refreshAction
         ) {
+            if let intro {
+                intro
+            }
+            content
+        }
+        .lavaTier(tier)
+        .modifier(SettingsSubpageNavigationTitle(title: title))
+    }
+}
+
+/// Applies the localized large navigation title when a subpage declares one, leaving the
+/// chrome untouched otherwise. Keeps the `.lavaLocalized` call in one place so no screen can
+/// ship an unlocalized title.
+private struct SettingsSubpageNavigationTitle: ViewModifier {
+    let title: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let title {
+            content.navigationTitle(title.lavaLocalized)
+        } else {
             content
         }
     }
@@ -245,11 +295,11 @@ struct SettingsView: View {
                     )
 
                     SettingsNavigationRow(
-                        path: $path,
                         route: .bugReport,
                         systemImage: "ladybug",
                         title: "Feedback",
-                        summary: "Voluntary and anonymized"
+                        summary: "Voluntary and anonymized",
+                        action: { viewModel.rageShakeDestination = .bugReport }
                     )
 
                     SettingsNavigationRow(
@@ -340,19 +390,24 @@ private struct SettingsNavigationRow: View {
     let badgeGlyph: AnyView?
     let title: String
     let summary: String
+    /// When set, tapping the row runs this instead of pushing the route's
+    /// destination — used for entries that present a sheet (e.g. Feedback).
+    let action: (() -> Void)?
 
     init(
         route: SettingsRoute,
         systemImage: String? = nil,
         badgeGlyph: AnyView? = nil,
         title: String,
-        summary: String
+        summary: String,
+        action: (() -> Void)? = nil
     ) {
         self.route = route
         self.systemImage = systemImage
         self.badgeGlyph = badgeGlyph
         self.title = title
         self.summary = summary
+        self.action = action
     }
 
     init(
@@ -395,7 +450,11 @@ private struct SettingsNavigationRow: View {
                     return
                 }
 
-                isShowingDestination = true
+                if let action {
+                    action()
+                } else {
+                    isShowingDestination = true
+                }
             }
         } label: {
             HStack(spacing: 12) {
@@ -535,7 +594,15 @@ private struct AccountSettingsView: View {
     @State private var backupMaintenanceTarget: BackupMaintenanceAction?
 
     var body: some View {
-        SettingsSubpageContent {
+        SettingsSubpageContent(
+            title: "Account & Backup",
+            tier: .calm,
+            intro: LavaInfoPanel(
+                title: viewModel.encryptedBackupInfoTitle,
+                description: "Lava works without an account. Sign in only to back up your settings online — encrypted, so only you can restore them on a new phone.",
+                systemImage: "person.crop.circle"
+            )
+        ) {
             LavaSectionGroup(
                 "Account",
                 footer: "Account login is only needed for encrypted backup upload, support history, or paid account management."
@@ -606,11 +673,6 @@ private struct AccountSettingsView: View {
 
             LavaSectionGroup("Encrypted Backup") {
                 VStack(alignment: .leading, spacing: 10) {
-                    LavaInfoPanel(
-                        title: viewModel.encryptedBackupInfoTitle,
-                        systemImage: "lock.shield.fill"
-                    )
-
                     LavaCondensedList {
                         if viewModel.isEncryptedBackupConfigured {
                             Button {
@@ -688,14 +750,13 @@ private struct AccountSettingsView: View {
                                 backupMaintenanceButton(.disable)
                             }
 
-                            Text("Disabling backup also permanently deletes the copy stored for your account.")
+                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, the online copy can't be recovered.".lavaLocalized)
                                 .lavaQuietNoteText()
                         }
                     }
                 }
             }
         }
-        .navigationTitle("Account & Backup")
         .lavaConfirmationAlert { host in
             host.alert(
                 backupMaintenanceTarget?.title.lavaLocalized ?? "",
@@ -788,27 +849,27 @@ private enum BackupMaintenanceAction: Identifiable {
     var buttonTitle: String {
         switch self {
         case .clear:
-            return "Clear Backup"
+            return "Delete online backup copy"
         case .disable:
-            return "Disable Backup"
+            return "Turn off & delete backup"
         }
     }
 
     var title: String {
         switch self {
         case .clear:
-            return "Clear backup?"
+            return "Delete online backup copy?"
         case .disable:
-            return "Disable backup?"
+            return "Turn off & delete backup?"
         }
     }
 
     var actionTitle: String {
         switch self {
         case .clear:
-            return "Clear Backup"
+            return "Delete online backup copy"
         case .disable:
-            return "Disable Backup"
+            return "Turn off & delete backup"
         }
     }
 
@@ -1069,12 +1130,28 @@ private struct GoogleSignInIcon: View {
     }
 }
 
+/// Upgrade is a **sales surface**, intentionally exempt from the strict Settings-page anatomy
+/// (it keeps its marketing layout) but still declaring its depth `tier`. The eyebrow +
+/// `LavaInfoCard { UpgradePlanComparisonView() }` free-vs-paid table already plays the
+/// orientation-panel role, so no separate `LavaInfoPanel` intro is added.
+///
+/// Documented divergences / improvement opportunities (deferred — keep the current sales
+/// layout for now, per product):
+///   - The nav title stays a raw `.navigationTitle("Lava Security Plus")` literal (NOT
+///     `.lavaLocalized`). It is the one Settings title left untranslated; localize it when the
+///     sales copy is finalized.
+///   - The plan-pitch strings and the "…and a pitch for your parent" subtitle are
+///     placeholder/jokey copy and are bare Swift literals (untranslated, invisible to the
+///     localization gate). Replace with real, localized marketing copy before launch.
+///   - The Restore Purchase / Manage Subscription rows are hand-rolled with
+///     `.padding(16).lavaSurface(.card)` instead of the shared `lavaControlRowCard()`; they
+///     could adopt the shared row card pending visual QA that it preserves the sales look.
 private struct UpgradeSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
 
     var body: some View {
-        SettingsSubpageContent {
+        SettingsSubpageContent(tier: .celebratory) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("More room for your rules")
                     .foregroundStyle(LavaStyle.lavaOrange)
@@ -1176,6 +1253,8 @@ private struct UpgradeSettingsView: View {
                 .padding(16)
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
+
+            UpgradeLegalFooter()
         }
     }
 
@@ -1196,11 +1275,9 @@ private struct UpgradeSettingsView: View {
     private func planPitch(for kind: LavaSecurityPlusPlanKind) -> String {
         switch kind {
         case .yearly:
-            "\"We are saving 16%! This has the best value.\""
+            "\"We are saving 37%! This has the best value.\""
         case .monthly:
             "\"We already saved this by unplugging appliances.\""
-        case .lifetime:
-            "\"Pay once and we're done. The rest is free. Winnerrr.\""
         }
     }
 
@@ -1229,8 +1306,8 @@ private struct UpgradeSettingsView: View {
     @ViewBuilder
     private var subscriberManagementSection: some View {
         VStack(spacing: 10) {
-            // Manage / cancel — auto-renewable plans only. The lifetime unlock has no
-            // expiry and nothing to cancel, so it gets no Manage row.
+            // Manage / cancel is shown only with an active auto-renewable subscription
+            // (non-nil expiry); hidden when there is no entitlement.
             if viewModel.lavaSecurityPlusExpiresAt != nil {
                 Button {
                     manageSubscription()
@@ -1293,6 +1370,30 @@ private struct UpgradeSettingsView: View {
         if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
             _ = await UIApplication.shared.open(url)
         }
+    }
+}
+
+/// Guideline 3.1.2 disclosure: auto-renew terms + functional Terms (EULA) and
+/// Privacy Policy links, shown on the paywall wherever subscriptions are offered.
+private struct UpgradeLegalFooter: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings.")
+                .lavaQuietNoteText()
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 6) {
+                Link("Terms of Use", destination: LavaWebLinks.terms)
+                Text("•")
+                    .foregroundStyle(LavaStyle.secondaryText)
+                Link("Privacy Policy", destination: LavaWebLinks.privacy)
+            }
+            .font(.footnote.weight(.semibold))
+            .tint(LavaStyle.lavaOrange)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
     }
 }
 
@@ -1495,38 +1596,15 @@ private struct CustomizationSettingsView: View {
     @EnvironmentObject private var security: SecurityController
 
     var body: some View {
-        SettingsSubpageContent {
-            LavaSectionGroup("Appearance") {
-                Picker("Appearance", selection: appearanceBinding) {
-                    ForEach(LavaAppearancePreference.allCases) { preference in
-                        Text(preference.displayName.lavaLocalized)
-                            .tag(preference)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .tint(LavaStyle.safeGreen)
-                .lavaControlRowCard()
-            }
-
-            if viewModel.canOfferLiveActivities {
-                LavaSectionGroup("Live Activities") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
-                            .font(.headline)
-                            .tint(LavaStyle.safeGreen)
-                            .lavaControlRowCard()
-
-                        Text("Shows Lava status on the Lock Screen and Dynamic Island when available.".lavaLocalized)
-                            .lavaQuietNoteText()
-                            .padding(.horizontal, 10)
-                    }
-                }
-            }
-
-            LavaSectionGroup("Language") {
-                SettingsSystemSettingsRow(title: "Change in iOS Settings")
-            }
-
+        SettingsSubpageContent(
+            title: "Customization",
+            tier: .calm,
+            intro: LavaInfoPanel(
+                title: "Make Lava yours",
+                description: "Pick how Lava looks and feels. None of these change how it protects you, so try anything.",
+                systemImage: "slider.horizontal.3"
+            )
+        ) {
             LavaSectionGroup("Lava Guard") {
                 LavaGuardLookPickerRow(
                     look: viewModel.lavaGuardLook,
@@ -1540,8 +1618,64 @@ private struct CustomizationSettingsView: View {
                     .tint(LavaStyle.safeGreen)
                     .lavaControlRowCard()
             }
+
+            if viewModel.canOfferLiveActivities {
+                LavaSectionGroup("Live Activities") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
+                            .font(.headline)
+                            .tint(LavaStyle.safeGreen)
+                            .lavaControlRowCard()
+
+                        Text("Shows Lava status on the Lock Screen and Dynamic Island when available.".lavaLocalized)
+                            .lavaQuietNoteText()
+
+                        if viewModel.usesLiveActivities {
+                            Stepper(
+                                value: liveActivityPauseMinutesBinding,
+                                in: LiveActivityPausePreference.minutesRange
+                            ) {
+                                Text(viewModel.liveActivityPauseLengthLabel)
+                                    .font(.headline)
+                            }
+                            .tint(LavaStyle.safeGreen)
+                            .lavaControlRowCard()
+
+                            Text("How long the Pause button turns Lava off before protection resumes on its own.".lavaLocalized)
+                                .lavaQuietNoteText()
+                        }
+                    }
+                }
+            }
+
+            LavaSectionGroup("Haptics") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("App Haptics", isOn: lavaHapticsBinding)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+
+                    Text("Lava's own taps. System haptics stay with iOS.".lavaLocalized)
+                        .lavaQuietNoteText()
+                }
+            }
+
+            LavaSectionGroup("Appearance") {
+                Picker("Appearance", selection: appearanceBinding) {
+                    ForEach(LavaAppearancePreference.allCases) { preference in
+                        Text(preference.displayName.lavaLocalized)
+                            .tag(preference)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
+            }
+
+            LavaSectionGroup("Language") {
+                SettingsSystemSettingsRow(title: "Change in iOS Settings")
+            }
         }
-        .navigationTitle("Customization")
     }
 
     private var appearanceBinding: Binding<LavaAppearancePreference> {
@@ -1564,12 +1698,32 @@ private struct CustomizationSettingsView: View {
         }
     }
 
+    private var liveActivityPauseMinutesBinding: Binding<Int> {
+        Binding {
+            viewModel.liveActivityPauseMinutes
+        } set: { minutes in
+            performAppSettingsMutation(reason: "Edit Customization settings") {
+                viewModel.setLiveActivityPauseMinutes(minutes)
+            }
+        }
+    }
+
     private var updatesAppIconBinding: Binding<Bool> {
         Binding {
             viewModel.updatesAppIconWithLavaGuard
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
                 viewModel.setUpdatesAppIconWithLavaGuard(isEnabled)
+            }
+        }
+    }
+
+    private var lavaHapticsBinding: Binding<Bool> {
+        Binding {
+            viewModel.usesLavaHaptics
+        } set: { isEnabled in
+            performAppSettingsMutation(reason: "Edit Customization settings") {
+                viewModel.setUsesLavaHaptics(isEnabled)
             }
         }
     }
@@ -1717,14 +1871,10 @@ private struct LavaGuardUnlockInfoPanel: View {
         LavaInfoCard {
             VStack(alignment: .leading, spacing: 10) {
                 Text(.init("Keep Lava protecting you to unlock more Guards, or [**Upgrade**](lavasecurity://settings/upgrade) to unlock them all.".lavaLocalized))
-                    .font(.subheadline)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lavaSupportingText()
 
                 Text(.init("Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)".lavaLocalized))
-                    .font(.footnote)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lavaSupportingText()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .tint(LavaStyle.safeGreen)
@@ -1751,8 +1901,6 @@ private enum LavaGuardLookRowMetrics {
     static let minRowHeight: CGFloat = 64
     static let titleFontSize: CGFloat = 16
     static let subtitleFontSize: CGFloat = 15
-    static let selectedCornerRadius: CGFloat = 10
-    static let selectedHighlightOpacity: Double = 0.08
 }
 
 private struct LavaGuardLookContent: View {
@@ -1849,51 +1997,30 @@ private struct LavaGuardLookOptionRow: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
+        // The card already insets its content by 16, so the row carries no padding
+        // of its own — it just swaps the bespoke trailing radio for the shared
+        // trailing checkmark (a lock for gated Guards) via LavaSelectableRow.
+        LavaSelectableRow(
+            state: selectionState,
+            isEnabled: availability.isSelectable,
+            horizontalPadding: 0,
+            verticalPadding: 0,
+            minHeight: LavaGuardLookRowMetrics.minRowHeight
+        ) {
             LavaGuardLookContent(
                 look: look,
                 availability: availability,
                 showsDescription: !availability.isRevealed
             )
-            .layoutPriority(1)
-
-            selectionIndicator
         }
-            .frame(minHeight: LavaGuardLookRowMetrics.minRowHeight)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selectedHighlight)
-            .clipShape(RoundedRectangle(cornerRadius: LavaGuardLookRowMetrics.selectedCornerRadius, style: .continuous))
-            .contentShape(Rectangle())
-            .opacity(availability.isSelectable ? 1 : 0.68)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// Radio glyph for any selectable Guard; a lock for ones still gated behind
-    /// usage/Plus, so the row reads as "single-select, this one isn't available yet".
-    @ViewBuilder
-    private var selectionIndicator: some View {
-        Group {
-            if !availability.isSelectable {
-                Image(systemName: "lock.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(LavaStyle.secondaryText)
-            } else {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSelected ? LavaStyle.safeGreen : LavaStyle.secondaryText)
-            }
+    private var selectionState: LavaRowSelectionState {
+        guard availability.isSelectable else {
+            return .locked
         }
-        .frame(width: 28)
-        .accessibilityHidden(true)
-    }
 
-    @ViewBuilder
-    private var selectedHighlight: some View {
-        if isSelected {
-            RoundedRectangle(cornerRadius: LavaGuardLookRowMetrics.selectedCornerRadius, style: .continuous)
-                .fill(look.dynamicIslandStatusGlyphColor.opacity(LavaGuardLookRowMetrics.selectedHighlightOpacity))
-        }
+        return isSelected ? .selected : .unselected
     }
 }
 
@@ -1975,7 +2102,15 @@ struct DNSResolverSettingsView: View {
     @FocusState private var focusedCustomResolverField: CustomResolverFocusField?
 
     var body: some View {
-        SettingsSubpageContent {
+        SettingsSubpageContent(
+            title: "DNS Resolver",
+            tier: .technical,
+            intro: LavaInfoPanel(
+                title: "How websites get found",
+                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone — only change it if you know you want to.",
+                systemImage: "network"
+            )
+        ) {
             LavaSectionGroup("Device DNS") {
                 VStack(alignment: .leading, spacing: 8) {
                     Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
@@ -1985,7 +2120,6 @@ struct DNSResolverSettingsView: View {
 
                     Text(viewModel.deviceDNSResolverDetailText.lavaLocalized)
                         .lavaQuietNoteText()
-                        .padding(.horizontal, 10)
 
                     // The fallback toggle sits directly under the Device DNS detail in
                     // both states. When an encrypted primary is selected it offers the
@@ -2039,23 +2173,25 @@ struct DNSResolverSettingsView: View {
             }
 
             if !usesDeviceDNSSetting {
-                LavaSectionGroup("DNS Providers") {
+                LavaSectionGroup("DNS Providers", footer: "A provider answers your phone's \"where is this website?\" questions. Any of these are trustworthy.") {
                     LavaCondensedList {
                         ForEach(Array(DNSResolverPreset.settingsPresets.filter { $0.id != DNSResolverPreset.device.id }.enumerated()), id: \.element.id) { _, preset in
                             Button {
                                 selectResolver(preset)
                             } label: {
-                                LavaCondensedListItem(
-                                    title: preset.displayName,
-                                    metadata: metadata(for: preset)
+                                LavaSelectableRow(
+                                    state: (!isCustomResolverSelected && selectedBaseResolver.id == preset.id) ? .selected : .unselected
                                 ) {
-                                    ResolverSelectionIndicator(isSelected: !isCustomResolverSelected && selectedBaseResolver.id == preset.id)
+                                    ResolverPresetRowContent(
+                                        title: preset.displayName,
+                                        metadata: metadata(for: preset)
+                                    )
                                 }
                             }
                             .buttonStyle(.plain)
                             .tint(LavaStyle.safeGreen)
 
-                            LavaCondensedDivider(leadingInset: 50)
+                            LavaCondensedDivider(leadingInset: 16)
                         }
 
                         Button {
@@ -2073,7 +2209,7 @@ struct DNSResolverSettingsView: View {
                 }
 
                 if showsCustomResolverOptions {
-                    LavaSectionGroup("Custom Resolver") {
+                    LavaSectionGroup("Custom Resolver", footer: "For advanced users: enter the address of a DNS service you trust. Not sure? Leave it and pick a provider above.") {
                         VStack(spacing: 12) {
                             LavaTextInputPanel {
                                 CustomResolverTextField(
@@ -2134,7 +2270,7 @@ struct DNSResolverSettingsView: View {
                 }
 
                 if showsResolverOptions {
-                    LavaSectionGroup("DNS Transport") {
+                    LavaSectionGroup("DNS Transport", footer: "\"Transport\" is how the lookup travels. IP is unencrypted; DoH, DoT, and DoQ scramble it so others on your network can't see the sites you visit.") {
                         ResolverTransportControl(
                             detail: transportDetailText,
                             selectedBaseResolver: selectedBaseResolver,
@@ -2144,7 +2280,6 @@ struct DNSResolverSettingsView: View {
                 }
             }
         }
-        .navigationTitle("DNS Resolver")
         .navigationBarBackButtonHidden(customResolverBackButtonIsVisible)
         .toolbar {
             if customResolverBackButtonIsVisible {
@@ -2611,17 +2746,19 @@ private struct ResolverPickerSections: View {
                         Button {
                             selectBaseResolver(preset)
                         } label: {
-                            LavaCondensedListItem(
-                                title: preset.displayName,
-                                metadata: metadata(for: preset)
+                            LavaSelectableRow(
+                                state: (!isCustomResolverSelected && selectedBaseResolver.id == preset.id) ? .selected : .unselected
                             ) {
-                                ResolverSelectionIndicator(isSelected: !isCustomResolverSelected && selectedBaseResolver.id == preset.id)
+                                ResolverPresetRowContent(
+                                    title: preset.displayName,
+                                    metadata: metadata(for: preset)
+                                )
                             }
                         }
                         .buttonStyle(.plain)
                         .tint(LavaStyle.safeGreen)
 
-                        LavaCondensedDivider(leadingInset: 50)
+                        LavaCondensedDivider(leadingInset: 16)
                     }
 
                     Button {
@@ -3016,15 +3153,39 @@ private struct CustomResolverTextField: View {
     }
 }
 
+/// Title + transport-address metadata for a preset DNS provider row. The selection
+/// checkmark is supplied by the enclosing ``LavaSelectableRow``.
+private struct ResolverPresetRowContent: View {
+    let title: String
+    let metadata: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.lavaLocalized)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let metadata {
+                Text(metadata.lavaLocalized)
+                    .lavaMetadataText()
+            }
+        }
+    }
+}
+
 private struct CustomDNSResolverRow: View {
     let isSelected: Bool
     let isEnabled: Bool
     let metadata: String
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ResolverSelectionIndicator(isSelected: isSelected)
-
+        LavaSelectableRow(
+            state: isSelected ? .selected : .unselected,
+            verticalPadding: 9,
+            minHeight: 52
+        ) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Custom DNS".lavaLocalized)
                     .font(.subheadline.weight(.medium))
@@ -3035,15 +3196,7 @@ private struct CustomDNSResolverRow: View {
 
                 metadataView
             }
-            .layoutPriority(1)
-
-            Spacer(minLength: 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-        .frame(minHeight: 52)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -3120,26 +3273,6 @@ private struct ResolverOptionControl: View {
     }
 }
 
-private struct ResolverSelectionIndicator: View {
-    let isSelected: Bool
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(isSelected ? LavaStyle.safeGreen : LavaStyle.secondaryText, lineWidth: 2)
-                .frame(width: 22, height: 22)
-
-            if isSelected {
-                Circle()
-                    .fill(LavaStyle.safeGreen)
-                    .frame(width: 14, height: 14)
-            }
-        }
-        .frame(width: 24, height: 24)
-        .accessibilityHidden(true)
-    }
-}
-
 struct PrivacyDataSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
@@ -3152,15 +3285,17 @@ struct PrivacyDataSettingsView: View {
     @State private var localLogExportErrorMessage: String?
 
     var body: some View {
-        SettingsSubpageContent {
-            LavaSectionGroup("Local Logs") {
+        SettingsSubpageContent(
+            title: "Privacy & Data",
+            tier: .calm,
+            intro: LavaInfoPanel(
+                title: "All local logs stay on this iPhone",
+                description: "Domain history and network activity are kept for 7 days; counts and Lava Guard progress last longer. Keep or clear each below.",
+                systemImage: "eyeglasses"
+            )
+        ) {
+            LavaSectionGroup("Local Logs", footer: "Detailed activity is kept for 7 days — export to keep a copy.") {
                 VStack(spacing: 10) {
-                    LavaInfoPanel(
-                        title: "All local logs stay on this iPhone",
-                        description: "Domain history and network activity are kept for 7 days. Counts and Lava Guard progress are kept longer. Keep or clear each below.",
-                        systemImage: "lock.shield.fill"
-                    )
-
                     LavaCondensedList {
                         localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
 
@@ -3186,10 +3321,6 @@ struct PrivacyDataSettingsView: View {
                             .lavaControlRowCard()
                     }
                     .buttonStyle(.plain)
-
-                    Text("Detailed activity is kept for 7 days — export to keep a copy.")
-                        .lavaQuietNoteText()
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let localLogExportErrorMessage {
                         Text(localLogExportErrorMessage)
@@ -3226,7 +3357,6 @@ struct PrivacyDataSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Privacy & Data".lavaLocalized)
         .fileExporter(
             isPresented: $isPresentingLocalLogExporter,
             document: localLogExportDocument,
@@ -3439,7 +3569,15 @@ private struct SecuritySettingsView: View {
     @State private var isShowingPasscodeSetup = false
 
     var body: some View {
-        SettingsSubpageContent {
+        SettingsSubpageContent(
+            title: "Security",
+            tier: .calm,
+            intro: LavaInfoPanel(
+                title: "Lock Lava with a passcode",
+                description: "Add a passcode or Face ID so only you can change Lava. Pick which screens ask for it below.",
+                systemImage: "lock.fill"
+            )
+        ) {
             LavaSectionGroup("Authentication") {
                 LavaCondensedList {
                     Toggle("Passcode", isOn: passcodeBinding)
@@ -3457,7 +3595,10 @@ private struct SecuritySettingsView: View {
                 .tint(LavaStyle.safeGreen)
             }
 
-            LavaSectionGroup("Use authentication for") {
+            LavaSectionGroup(
+                "Use authentication for",
+                footer: "These switches turn on after you set a passcode or Face ID above. Each one decides which screen asks before it lets you in."
+            ) {
                 LavaCondensedList {
                     ForEach(Array(authenticationSurfaces.enumerated()), id: \.offset) { index, item in
                         securitySurfaceToggle(item.title, surface: item.surface)
@@ -3476,7 +3617,6 @@ private struct SecuritySettingsView: View {
                     .lavaQuietNoteText()
             }
         }
-        .navigationTitle("Security")
         .fullScreenCover(isPresented: $isShowingPasscodeSetup) {
             SecurityPasscodeSetupView()
                 .environmentObject(security)
@@ -3878,6 +4018,7 @@ private enum BugReportStep: Int, CaseIterable, Identifiable {
 struct BugReportSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var security: SecurityController
     @Binding private var externalIsReportDirty: Bool
     private let onDismissRequested: (() -> Void)?
     @State private var selectedIssueType: BugReportIssueType?
@@ -3900,7 +4041,7 @@ struct BugReportSettingsView: View {
     }
 
     var body: some View {
-        SettingsSubpageContent(spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou) {
+        SettingsSubpageContent(title: "Feedback", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou) {
             if isShowingThankYou {
                 thankYouPage
             } else {
@@ -3919,7 +4060,6 @@ struct BugReportSettingsView: View {
                 feedbackBottomActionBar
             }
         }
-        .navigationTitle("Feedback")
         .navigationBarBackButtonHidden(isReportDirty && onDismissRequested == nil)
         .toolbar {
             if isReportDirty && onDismissRequested == nil {
@@ -3930,7 +4070,7 @@ struct BugReportSettingsView: View {
 
             if onDismissRequested != nil && !isShowingThankYou {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: requestDismiss)
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: requestDismiss)
                 }
             }
         }
@@ -3944,8 +4084,17 @@ struct BugReportSettingsView: View {
                 Text("Your feedback draft will be removed.")
             }
         }
-        .task {
+        .task(id: isAppUnlockMaskVisible) {
+            // Don't sample device diagnostics (connectivity/health/network log)
+            // while the content is masked for App Unlock; re-sample once the mask
+            // drops on unlock so the draft carries fresh, post-unlock diagnostics.
+            guard !isAppUnlockMaskVisible else { return }
             await viewModel.sampleReports()
+            // `sampleReports()` isn't cancellation-aware, so the app may have
+            // locked during the await (this task is cancelled, but execution
+            // resumes). Re-check before refreshing the draft so we never rebuild
+            // it above the lock — the unlock transition starts a fresh task.
+            guard !Task.isCancelled, !isAppUnlockMaskVisible else { return }
             refreshDraft()
             syncReportDirtyState()
         }
@@ -3964,6 +4113,20 @@ struct BugReportSettingsView: View {
         .onChange(of: contactEmail) { _, _ in reportInputChanged() }
         .onChange(of: includeDiagnostics) { _, _ in reportInputChanged() }
         .onChange(of: isShowingThankYou) { _, _ in syncReportDirtyState() }
+        // Opaque, hit-blocking mask over the WHOLE sheet (form + bottom action
+        // bar) while App Unlock is pending or the privacy mask is up. Placed as
+        // the last modifier so it composes over `.safeAreaInset` (the Submit /
+        // Continue bar) — content stays unreadable and unsubmittable above the
+        // lock overlay. The toolbar Cancel/Back buttons live in nav chrome above
+        // this overlay and are intentionally left reachable: they only dismiss
+        // (never reveal or submit content).
+        .overlay {
+            if isAppUnlockMaskVisible {
+                BugReportSheetLockMask(
+                    unlock: { Task { await security.authenticateAppUnlockIfNeeded() } }
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -3983,7 +4146,7 @@ struct BugReportSettingsView: View {
             LavaInfoPanel(
                 title: "No silent telemetry",
                 description: "Lava only sends feedback after you review it and tap Submit",
-                systemImage: "hand.raised.fill"
+                systemImage: "ladybug"
             )
 
             LavaSectionGroup("Choose a topic") {
@@ -4358,11 +4521,22 @@ struct BugReportSettingsView: View {
         }
 
         UIPasteboard.general.string = submittedReportID
+        ProtectionHapticFeedback.play(.selectionConfirmed)
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             didCopySubmittedReportID = UIPasteboard.general.string == submittedReportID
         }
+    }
+
+    /// True while the sheet's content must be hidden behind the in-sheet lock
+    /// mask: when App Unlock is pending (locked device) OR the app-switcher
+    /// privacy mask is up (`.inactive`, before `.background` flips the lock).
+    /// Keying on the privacy-mask flag too closes the app-switcher-snapshot gap —
+    /// the bug-report sheet presents above RootView's privacy/lock overlays, so
+    /// those don't cover it and this view must mask itself.
+    private var isAppUnlockMaskVisible: Bool {
+        security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible
     }
 
     private var isReportDirty: Bool {
@@ -4461,6 +4635,47 @@ private struct FeedbackThankYouMascot: View {
     }
 }
 
+/// Opaque, hit-blocking cover for the bug-report sheet while App Unlock is
+/// pending. The sheet stays mounted (so an in-progress draft survives), and this
+/// mask hides its content above the lock overlay. It uses an OPAQUE fill (never
+/// translucent `.regularMaterial`) so the draft can't bleed through, swallows all
+/// taps/scroll/keyboard hits via `contentShape`, and is an `.isModal`
+/// accessibility container so VoiceOver can't reach the masked fields underneath.
+///
+/// It mirrors `SecurityLockOverlay` and carries its OWN "Unlock Lava" button:
+/// the root lock overlay renders *behind* this window-level sheet and the sheet
+/// can't be swiped away while the draft is dirty, so without an in-mask unlock
+/// affordance a user who cancels the passcode prompt would be stuck (forced to
+/// discard the draft). Tapping it re-surfaces the App Unlock prompt.
+private struct BugReportSheetLockMask: View {
+    let unlock: () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(LavaStyle.groupedBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(LavaStyle.safeGreen)
+
+                Text("Lava Locked")
+                    .font(.title.bold())
+
+                Button("Unlock Lava", action: unlock)
+                    .buttonStyle(.borderedProminent)
+                    .tint(LavaStyle.safeControlGreen)
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .accessibilityIdentifier("bugReportSheetLockMask")
+    }
+}
+
 private struct FeedbackSecondaryActionButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
@@ -4533,13 +4748,15 @@ private struct BugReportDiagnosticsInfoView: View {
     let sections: [BugReportPreviewSection]
 
     var body: some View {
-        SettingsSubpageContent {
-            LavaInfoPanel(
+        SettingsSubpageContent(
+            title: "Information Sent",
+            tier: .technical,
+            intro: LavaInfoPanel(
                 title: "Diagnostics",
                 description: "These examples show the technical summary Lava can send when you turn on optional diagnostics",
                 systemImage: "doc.text.magnifyingglass"
             )
-
+        ) {
             LavaSectionGroup("Information sent") {
                 if sections.isEmpty {
                     LavaPlainCard {
@@ -4570,7 +4787,6 @@ private struct BugReportDiagnosticsInfoView: View {
                 }
             }
         }
-        .navigationTitle("Information Sent")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -4657,13 +4873,15 @@ private struct BugReportPreviewSectionCard: View {
 
 private struct LegalNoticesView: View {
     var body: some View {
-        SettingsSubpageContent {
-            LavaInfoPanel(
+        SettingsSubpageContent(
+            title: "Legal Notices",
+            tier: .calm,
+            intro: LavaInfoPanel(
                 title: "Third-party notices",
                 description: ThirdPartyLegalNotices.affiliationDisclaimer,
                 systemImage: "doc.text"
             )
-
+        ) {
             LegalNoticeSection(
                 title: "DNS Resolvers",
                 notices: ThirdPartyLegalNotices.dnsResolverNotices
@@ -4686,7 +4904,6 @@ private struct LegalNoticesView: View {
                 }
             }
         }
-        .navigationTitle("Legal Notices")
     }
 }
 
@@ -4778,7 +4995,15 @@ private struct VersionNerdStatsView: View {
     @State private var isSamplingTunnelHealth = false
 
     var body: some View {
-        SettingsSubpageContent {
+        SettingsSubpageContent(
+            title: "Nerd Stats",
+            tier: .technical,
+            intro: LavaInfoPanel(
+                title: "Lava's behind-the-scenes counters",
+                description: "Local counts of how Lava handles your traffic. Nothing here shows the sites you visited, so look around freely.",
+                systemImage: "info.circle"
+            )
+        ) {
             LavaSectionGroup("App") {
                 LavaPlainCard {
                     VStack(spacing: 10) {
@@ -4795,7 +5020,7 @@ private struct VersionNerdStatsView: View {
 
             LavaSectionGroup(
                 "Tunnel Health",
-                footer: "These are local aggregate counters. Domain names are not included here."
+                footer: "Local counts of how Lava reaches the internet — no website names. They track when lookups worked, failed, retried, or briefly fell back to your phone's settings."
             ) {
                 LavaPlainCard {
                     VStack(spacing: 10) {
@@ -4869,7 +5094,6 @@ private struct VersionNerdStatsView: View {
                 }
             }
         }
-        .navigationTitle("Nerd Stats")
         .task {
             await refreshTunnelHealthSample()
 

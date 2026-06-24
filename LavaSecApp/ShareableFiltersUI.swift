@@ -39,16 +39,15 @@ enum LavaQRCode {
 
 /// Presents the current setup as a copyable code and a (security-masked) QR.
 struct ShareFiltersSheet: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    /// The shareable code for the chosen filter (the picker computes it per filter).
+    let code: String
     @Environment(\.dismiss) private var dismiss
 
     @State private var isQRRevealed = false
     @State private var didCopyCode = false
 
     var body: some View {
-        let code = viewModel.shareableFilterConfigurationCode
-
-        return NavigationStack {
+        NavigationStack {
             LavaSheetScaffold(spacing: 20) {
                 VStack(alignment: .leading, spacing: 20) {
                     LavaInfoPanel(
@@ -72,6 +71,7 @@ struct ShareFiltersSheet: View {
                     }
                 }
             }
+            .lavaTier(.calm)
         }
     }
 
@@ -138,7 +138,7 @@ struct ShareFiltersSheet: View {
                     Text("This setup is too large for a QR code")
                         .font(.headline)
                         .foregroundStyle(LavaStyle.ink)
-                    Text("Share the config code below instead — it carries the same setup.")
+                    Text("Share the setup code below instead — it carries the same setup.")
                         .lavaMetadataText()
                         .multilineTextAlignment(.center)
                 }
@@ -150,7 +150,7 @@ struct ShareFiltersSheet: View {
 
     @ViewBuilder
     private func codeCard(for code: String) -> some View {
-        LavaSectionGroup("Config code") {
+        LavaSectionGroup("Setup code", footer: "Anyone with this code can copy your blocklists and blocked sites. Share it only with people you trust.") {
             VStack(alignment: .leading, spacing: 12) {
                 Text(code)
                     .font(.system(.footnote, design: .monospaced))
@@ -162,13 +162,14 @@ struct ShareFiltersSheet: View {
 
                 Button {
                     UIPasteboard.general.string = code
+                    ProtectionHapticFeedback.play(.selectionConfirmed)
                     withAnimation { didCopyCode = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
                         withAnimation { didCopyCode = false }
                     }
                 } label: {
                     Label(
-                        didCopyCode ? "Copied" : "Copy config code",
+                        didCopyCode ? "Copied" : "Copy setup code",
                         systemImage: didCopyCode ? "checkmark" : "doc.on.doc"
                     )
                 }
@@ -200,6 +201,10 @@ struct ImportFiltersFlow: View {
     var onSkip: (() -> Void)? = nil
     /// Called after a config is successfully applied (e.g. to finish onboarding).
     var onImported: (() -> Void)? = nil
+    /// Whether the preview offers "Add as a new filter" (the additive Filters-tab flow). Onboarding
+    /// passes `false`: the library is pre-seeded to the free cap there, so "add" can't apply — the
+    /// import instead becomes the active filter ("Use this filter"), which is the first-run intent.
+    var allowsAddingNewFilter: Bool = true
     /// Fresh-auth gate run before applying an import — replacing filters is a
     /// filter-editing action. Defaults to allow (onboarding's first-run flow has
     /// no protected surface); the Filters entry point supplies the real check.
@@ -207,13 +212,23 @@ struct ImportFiltersFlow: View {
 
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var stage: Stage
     @State private var applyError: String?
+    /// Add-as-new at the filter cap routes here for a FREE user (upgrade to get more).
+    @State private var showingPaywall = false
+    /// A Plus user already at the 10-filter cap can't upgrade their way past it, so they get an
+    /// informational "Maximum filters reached" note instead of the paywall.
+    @State private var showingMaxFilters = false
+    /// Whether the next stage swap reads as a push or a pop, so the slide matches
+    /// the direction of travel. Set by `go(to:)` from the stage ordering.
+    @State private var navDirection: LavaFlowDirection = .forward
 
     init(
         startMode: ImportFiltersStartMode,
         showsSkip: Bool = false,
+        allowsAddingNewFilter: Bool = true,
         onRootBack: (() -> Void)? = nil,
         onSkip: (() -> Void)? = nil,
         onImported: (() -> Void)? = nil,
@@ -221,6 +236,7 @@ struct ImportFiltersFlow: View {
     ) {
         self.startMode = startMode
         self.showsSkip = showsSkip
+        self.allowsAddingNewFilter = allowsAddingNewFilter
         self.onRootBack = onRootBack
         self.onSkip = onSkip
         self.onImported = onImported
@@ -233,6 +249,8 @@ struct ImportFiltersFlow: View {
         case enterCode
         case scanCode
         case confirm(ShareableFilterConfiguration)
+        case nameNew(ShareableFilterConfiguration)
+        case chooseReplace(ShareableFilterConfiguration)
         case applying(ShareableFilterConfiguration)
 
         init(startMode: ImportFiltersStartMode) {
@@ -245,26 +263,76 @@ struct ImportFiltersFlow: View {
                 self = .scanCode
             }
         }
+
+        /// Stable identity for the page transition (the associated config doesn't
+        /// change which page is on screen, so it's deliberately excluded).
+        var transitionID: String {
+            switch self {
+            case .chooseMethod: "chooseMethod"
+            case .enterCode: "enterCode"
+            case .scanCode: "scanCode"
+            case .confirm: "confirm"
+            case .nameNew: "nameNew"
+            case .chooseReplace: "chooseReplace"
+            case .applying: "applying"
+            }
+        }
+
+        /// Depth in the flow, so `go(to:)` can tell a push from a pop. Enter/scan
+        /// share a depth — they're siblings off the chooser, never reached from
+        /// one another.
+        var order: Int {
+            switch self {
+            case .chooseMethod: 0
+            case .enterCode, .scanCode: 1
+            case .confirm: 2
+            case .nameNew, .chooseReplace: 3
+            case .applying: 4
+            }
+        }
     }
 
     var body: some View {
         // One NavigationStack hosts every stage so each step renders a native
         // navigation bar (title + back/skip toolbar items). The stage machine
-        // swaps the stack's root content; back is driven by `stage`, not a push.
+        // swaps the stack's root content; back is driven by `stage`, not a push —
+        // so the slide between stages is supplied here (a real push would give it
+        // for free) to match the native page transitions elsewhere in the app.
         NavigationStack {
-            content
-                .background(LavaStyle.groupedBackground.ignoresSafeArea())
-                .alert(
-                    "Couldn't import",
-                    isPresented: Binding(
-                        get: { applyError != nil },
-                        set: { if !$0 { applyError = nil } }
+            ZStack {
+                content
+                    .lavaFlowTransition(
+                        value: stage.transitionID,
+                        direction: navDirection,
+                        reduceMotion: reduceMotion
                     )
+            }
+            .background(LavaStyle.groupedBackground.ignoresSafeArea())
+            .alert(
+                "Couldn't import",
+                isPresented: Binding(
+                    get: { applyError != nil },
+                    set: { if !$0 { applyError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { applyError = nil }
+            } message: {
+                Text(applyError ?? "")
+            }
+            .sheet(isPresented: $showingPaywall) {
+                LavaPlusUpgradeSheet()
+            }
+            .lavaConfirmationAlert { host in
+                host.alert(
+                    "Maximum filters reached".lavaLocalized,
+                    isPresented: $showingMaxFilters
                 ) {
-                    Button("OK", role: .cancel) { applyError = nil }
+                    Button("OK", role: .cancel) {}
                 } message: {
-                    Text(applyError ?? "")
+                    Text("You can host up to %d filters. Delete one to add another.".lavaLocalizedFormat(viewModel.configuration.limits.maxFilters))
                 }
+            }
+            .lavaTier(.calm)
         }
     }
 
@@ -273,8 +341,8 @@ struct ImportFiltersFlow: View {
         switch stage {
         case .chooseMethod:
             ImportMethodChooserView(
-                onEnterCode: { stage = .enterCode },
-                onScanCode: { stage = .scanCode },
+                onEnterCode: { go(to: .enterCode) },
+                onScanCode: { go(to: .scanCode) },
                 onClose: { dismiss() }
             )
         case .enterCode:
@@ -282,29 +350,63 @@ struct ImportFiltersFlow: View {
                 showsSkip: showsSkip,
                 onBack: { goBackFromMethod() },
                 onSkip: { onSkip?() },
-                onDecoded: { config in stage = .confirm(config) }
+                onDecoded: { config in go(to: .confirm(config)) }
             )
         case .scanCode:
             ImportQRScannerView(
                 showsSkip: showsSkip,
                 onBack: { goBackFromMethod() },
                 onSkip: { onSkip?() },
-                onDecoded: { config in stage = .confirm(config) }
+                onDecoded: { config in go(to: .confirm(config)) }
             )
         case .confirm(let config):
             ImportPreviewView(
                 configuration: config,
-                onBack: { stage = Stage(startMode: startMode) },
-                onConfirm: { apply(config) }
+                allowsAddingNewFilter: allowsAddingNewFilter,
+                onBack: { go(to: Stage(startMode: startMode)) },
+                onAddNew: {
+                    // Additive default — name a brand-new filter. At the cap, a free user trips the
+                    // paywall (upgrade for more); a Plus user (already subscribed) can't pay past the
+                    // 10-filter cap, so they get the "Maximum filters reached" note instead.
+                    if viewModel.canCreateFilter {
+                        go(to: .nameNew(config))
+                    } else if viewModel.configuration.hasLavaSecurityPlus {
+                        showingMaxFilters = true
+                    } else {
+                        showingPaywall = true
+                    }
+                },
+                onReplace: { go(to: .chooseReplace(config)) },
+                onUseAsActiveFilter: { replaceActive(config) }
+            )
+        case .nameNew(let config):
+            ImportNameNewFilterView(
+                onBack: { go(to: .confirm(config)) },
+                onAdd: { name in addNew(config, name: name) }
+            )
+        case .chooseReplace(let config):
+            ImportChooseReplaceTargetView(
+                onBack: { go(to: .confirm(config)) },
+                onReplace: { filter in replace(config, into: filter) }
             )
         case .applying:
             ImportApplyingView()
         }
     }
 
+    /// Moves to `newStage`, sliding in the direction implied by the stage depth
+    /// (deeper = push, shallower = pop) so the transition matches a native
+    /// navigation stack.
+    private func go(to newStage: Stage) {
+        navDirection = newStage.order >= stage.order ? .forward : .backward
+        withAnimation(LavaFlowTransition.animation(reduceMotion: reduceMotion)) {
+            stage = newStage
+        }
+    }
+
     private func goBackFromMethod() {
         if startMode == .chooseMethod {
-            stage = .chooseMethod
+            go(to: .chooseMethod)
         } else if let onRootBack {
             onRootBack()
         } else {
@@ -312,25 +414,80 @@ struct ImportFiltersFlow: View {
         }
     }
 
-    private func apply(_ config: ShareableFilterConfiguration) {
-        let plan = viewModel.importPlan(for: config)
-        stage = .applying(config)
+    /// Add the imported setup as a brand-new filter (additive). Library-only — never touches the
+    /// other filters or the live tunnel.
+    private func addNew(_ config: ShareableFilterConfiguration, name: String) {
+        go(to: .applying(config))
         Task { @MainActor in
-            // Replacing filters is a filter-editing action — gate it behind the
-            // same fresh-auth surface the manual edit/save flow uses.
+            // Adding a filter is a filter-editing action — gate it behind the same fresh-auth
+            // surface the manual edit/save flow uses.
             guard await authorizeImport() else {
-                stage = .confirm(config)
+                go(to: .nameNew(config))
                 return
             }
 
-            let result = await viewModel.applyImportedShareableConfiguration(plan.applied)
+            // Carry the EXACT plan the preview showed (same importPlan convenience) so what was
+            // previewed is what's added — no per-destination re-plan that could diverge.
+            let applied = viewModel.importPlan(for: config).applied
+            if viewModel.addImportedShareableConfigurationAsNewFilter(applied, name: name) != nil {
+                onImported?()
+                dismiss()
+            } else {
+                applyError = "Couldn't add this filter. Please try again."
+                go(to: .nameNew(config))
+            }
+        }
+    }
+
+    /// Onboarding path: make the import the ACTIVE filter (the library is pre-seeded to the cap
+    /// there, so "add as new" can't apply). Goes through the full active-replace (prepare + reload).
+    private func replaceActive(_ config: ShareableFilterConfiguration) {
+        go(to: .applying(config))
+        Task { @MainActor in
+            guard await authorizeImport() else {
+                go(to: .confirm(config))
+                return
+            }
+
+            let applied = viewModel.importPlan(for: config).applied
+            let result = await viewModel.replaceFilterWithImportedShareableConfiguration(
+                id: viewModel.activeFilterID,
+                applied
+            )
             switch result {
             case .success:
                 onImported?()
                 dismiss()
             case .failure(let message):
                 applyError = message
-                stage = .confirm(config)
+                go(to: .confirm(config))
+            }
+        }
+    }
+
+    /// Replace a chosen existing filter with the imported setup. Replacing the active filter
+    /// reloads the tunnel; a non-active filter is replaced library-only.
+    private func replace(_ config: ShareableFilterConfiguration, into filter: Filter) {
+        go(to: .applying(config))
+        Task { @MainActor in
+            guard await authorizeImport() else {
+                go(to: .chooseReplace(config))
+                return
+            }
+
+            // Carry the EXACT plan the preview showed (worst-case fits any target's budget).
+            let applied = viewModel.importPlan(for: config).applied
+            let result = await viewModel.replaceFilterWithImportedShareableConfiguration(
+                id: filter.id,
+                applied
+            )
+            switch result {
+            case .success:
+                onImported?()
+                dismiss()
+            case .failure(let message):
+                applyError = message
+                go(to: .chooseReplace(config))
             }
         }
     }
@@ -346,8 +503,11 @@ private struct ImportMethodChooserView: View {
     var body: some View {
         LavaSheetScaffold(spacing: 18) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Import a setup someone shared with you. This replaces your blocklists and blocked domains.")
-                    .lavaSupportingText()
+                LavaInfoPanel(
+                    title: "Import a shared filter",
+                    description: "Bring in a setup someone shared. Add it as a new filter, or replace one of yours — you choose after previewing it.",
+                    systemImage: "square.and.arrow.down"
+                )
 
                 ImportOptionRow(
                     systemImage: "qrcode.viewfinder",
@@ -359,7 +519,7 @@ private struct ImportMethodChooserView: View {
                 ImportOptionRow(
                     systemImage: "character.cursor.ibeam",
                     title: "Enter a code",
-                    subtitle: "Paste or type the config code",
+                    subtitle: "Paste or type the setup code",
                     action: onEnterCode
                 )
             }
@@ -426,11 +586,14 @@ private struct ImportCodeEntryView: View {
     var body: some View {
         LavaSheetScaffold(spacing: 16) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Paste the config code that was shared with you. It usually starts with \"LF1-\".")
-                    .lavaSupportingText()
+                LavaInfoPanel(
+                    title: "Enter a setup code",
+                    description: "Paste the setup code someone shared with you. It usually starts with \"LF1-\".",
+                    systemImage: "character.cursor.ibeam"
+                )
 
                 LavaTextEditorInputRow(
-                    title: "Config code",
+                    title: "Setup code",
                     text: $enteredCode,
                     placeholder: "LF1-…",
                     minHeight: 180
@@ -634,11 +797,57 @@ final class QRScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        registerAppActivityObservers()
         startSessionIfNeeded()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        unregisterAppActivityObservers()
+        stopSession()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Power the capture session down whenever the app leaves the active state —
+    /// app switcher (`.inactive`) or background — and bring it back on return.
+    /// `viewWillDisappear` only fires on real navigation, not on resign-active, so
+    /// without this the camera keeps running behind the UIKit privacy shield in
+    /// the app switcher even when App Unlock is off. Mirrors the lifecycle that
+    /// installs `LavaPrivacyShield`; the restart re-checks camera authorization.
+    private func registerAppActivityObservers() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    private func unregisterAppActivityObservers() {
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        center.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    @objc private func appWillResignActive() {
+        stopSession()
+    }
+
+    @objc private func appDidBecomeActive() {
+        startSessionIfNeeded()
+    }
+
+    private func stopSession() {
         nonisolated(unsafe) let session = self.session
         sessionQueue.async {
             if session.isRunning {
@@ -811,8 +1020,16 @@ private struct ImportPreviewView: View {
     @EnvironmentObject private var viewModel: AppViewModel
 
     let configuration: ShareableFilterConfiguration
+    /// Additive (Filters tab) when true; single "Use this filter" → active replace when false
+    /// (onboarding, where the library is pre-seeded to the cap).
+    var allowsAddingNewFilter: Bool = true
     let onBack: () -> Void
-    let onConfirm: () -> Void
+    /// Add the imported setup as a brand-new filter (the additive default).
+    let onAddNew: () -> Void
+    /// Replace one of the user's existing filters with the imported setup.
+    let onReplace: () -> Void
+    /// Make the import the active filter directly (onboarding single-action path).
+    var onUseAsActiveFilter: () -> Void = {}
 
     /// How many blocked domains to list before collapsing the rest into a
     /// "+N more" note, so a large import doesn't render an unbounded wall of rows.
@@ -836,11 +1053,9 @@ private struct ImportPreviewView: View {
         return LavaSheetScaffold(spacing: 18) {
             VStack(alignment: .leading, spacing: 16) {
                 LavaInfoPanel(
-                    title: "This replaces your filter",
-                    description: "Importing replaces your blocklists and blocked domains. Your allowed exceptions and resolver stay as they are.",
-                    systemImage: "exclamationmark.triangle.fill",
-                    tint: LavaStyle.lavaOrange,
-                    borderTint: LavaStyle.lavaOrange
+                    title: "Import this filter",
+                    description: "Add it as a new filter, or replace one of yours. Your allowed exceptions and DNS choice stay put.",
+                    systemImage: "square.and.arrow.down"
                 )
 
                 if !curatedNames.isEmpty {
@@ -892,11 +1107,29 @@ private struct ImportPreviewView: View {
                 }
             }
         } footer: {
-            Button(plan.applied.isEmpty ? "Nothing to import" : "Replace my filter") {
-                onConfirm()
+            VStack(spacing: 10) {
+                if allowsAddingNewFilter {
+                    Button(plan.applied.isEmpty ? "Nothing to import" : "Add as a new filter") {
+                        onAddNew()
+                    }
+                    .buttonStyle(LavaStandaloneActionButtonStyle())
+                    .disabled(plan.applied.isEmpty)
+
+                    if !plan.applied.isEmpty {
+                        Button("Replace a filter instead") { onReplace() }
+                            .font(.subheadline.weight(.medium))
+                            .tint(LavaStyle.safeGreen)
+                            .padding(.top, 2)
+                    }
+                } else {
+                    // Onboarding: the import becomes the active filter (no add/replace choice).
+                    Button(plan.applied.isEmpty ? "Nothing to import" : "Use this filter") {
+                        onUseAsActiveFilter()
+                    }
+                    .buttonStyle(LavaStandaloneActionButtonStyle())
+                    .disabled(plan.applied.isEmpty)
+                }
             }
-            .buttonStyle(LavaStandaloneActionButtonStyle())
-            .disabled(plan.applied.isEmpty)
         }
         .navigationTitle("Review import".lavaLocalized)
         .navigationBarTitleDisplayMode(.inline)
@@ -997,6 +1230,165 @@ private struct ImportContentRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 56)
         .lavaSurface(.panel, cornerRadius: 14)
+    }
+}
+
+// MARK: Add-as-new (name) + Replace (picker) stages
+
+/// Name a brand-new filter for an additive import. The name must be non-empty and not collide
+/// with an existing filter (enforced at the model layer too).
+private struct ImportNameNewFilterView: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    let onBack: () -> Void
+    let onAdd: (String) -> Void
+
+    @State private var name = ""
+
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isDuplicate: Bool { !trimmed.isEmpty && !viewModel.isFilterNameAvailable(trimmed) }
+    private var canAdd: Bool { !trimmed.isEmpty && !isDuplicate }
+
+    var body: some View {
+        LavaSheetScaffold(spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                LavaInfoPanel(
+                    title: "Name your new filter",
+                    description: "This import is added as a new filter in your library — give it a name you'll recognize.",
+                    systemImage: "square.and.pencil"
+                )
+
+                LavaSectionGroup("Filter name") {
+                    TextField("Filter name".lavaLocalized, text: $name)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { if canAdd { onAdd(trimmed) } }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .lavaSurface(.panel, cornerRadius: 14)
+                }
+
+                if isDuplicate {
+                    Text("You already have a filter with that name.".lavaLocalized)
+                        .lavaQuietNoteText()
+                        .foregroundStyle(LavaStyle.errorText)
+                }
+            }
+        } footer: {
+            Button("Add filter") { onAdd(trimmed) }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(!canAdd)
+        }
+        .navigationTitle("New filter".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            importFlowToolbar(showsSkip: false, onBack: onBack, onSkip: {})
+        }
+    }
+}
+
+/// Pick which existing filter the import should replace. Replacing the in-effect filter reloads
+/// the tunnel; any other filter is replaced library-only. A frozen (lapsed-Plus) filter is
+/// read-only and can't be a replace target.
+private struct ImportChooseReplaceTargetView: View {
+    @EnvironmentObject private var viewModel: AppViewModel
+    let onBack: () -> Void
+    let onReplace: (Filter) -> Void
+
+    var body: some View {
+        LavaSheetScaffold(spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                LavaInfoPanel(
+                    title: "Replace which filter?",
+                    description: "The filter you pick keeps its name and allowed exceptions; its blocklists and blocked domains become the imported ones.",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+
+                LavaSectionGroup("Your filters") {
+                    LavaCondensedList {
+                        let filters = viewModel.filters
+                        ForEach(filters) { filter in
+                            ImportReplaceTargetRow(
+                                name: filter.name,
+                                summary: summary(for: filter),
+                                isReplaceable: !viewModel.isFilterFrozen(filter.id)
+                            ) {
+                                onReplace(filter)
+                            }
+
+                            if filter.id != filters.last?.id {
+                                LavaCondensedDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Replace a filter".lavaLocalized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            importFlowToolbar(showsSkip: false, onBack: onBack, onSkip: {})
+        }
+    }
+
+    private func summary(for filter: Filter) -> String {
+        if viewModel.isFilterFrozen(filter.id) {
+            return "Locked".lavaLocalized
+        }
+        let rules = filter.isEmpty
+            ? "Blocks nothing".lavaLocalized
+            : "%@ rules".lavaLocalizedFormat(viewModel.filterRuleCount(for: filter).formatted())
+        if filter.id == viewModel.activeFilterID {
+            return "%1$@ · %2$@".lavaLocalizedFormat(rules, "In effect".lavaLocalized)
+        }
+        return rules
+    }
+}
+
+/// One row in the import replace-target picker: name + summary, greyed and non-tappable when the
+/// filter is frozen (read-only).
+private struct ImportReplaceTargetRow: View {
+    let name: String
+    let summary: String
+    let isReplaceable: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isReplaceable ? LavaStyle.primaryText : LavaStyle.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    Text(summary)
+                        .lavaMetadataText()
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
+                if isReplaceable {
+                    Image(systemName: "chevron.right")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Image(systemName: "lock.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(LavaStyle.secondaryText)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .frame(minHeight: 64)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isReplaceable)
+        .opacity(isReplaceable ? 1 : 0.5)
     }
 }
 

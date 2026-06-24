@@ -364,12 +364,41 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
                     details: details
                 )
             }
+            // Drop presentation-churn BEFORE the suffix so the small report window keeps the
+            // tunnel / DNS / self-reconnect events that explain the incident (LAV-94 A).
+            .filter { !$0.isReportWindowChurn }
 
         guard entries.count > limit else {
             return entries
         }
 
         return Array(entries.suffix(limit))
+    }
+
+    /// High-frequency events that carry no incident-diagnostic value but, left in, flood the
+    /// last-`limit` report window and evict the tunnel / DNS / self-reconnect events that actually
+    /// explain a "reconnecting on its own" report. The full on-device debug log still retains them;
+    /// only the bug-report projection drops them.
+    var isReportWindowChurn: Bool {
+        // Live-activity reconcile: presentation-only, fires every few seconds (≈14 in 40s in
+        // report 186bdad3) — it only reflects Live Activity state (LAV-94 A).
+        if component == "live-activity-controller", event == "reconcile" {
+            return true
+        }
+        // Per-query resolver wire-attempt latency spans fire ~2 begin/end entries PER DNS query
+        // (emitted ONLY in DEBUG/LAVA_QA_TOOLS builds). On a busy or recovering link they dominate
+        // the window (~30 of 40 in the on-device QA replay on 2026-06-22) and evict the
+        // self-reconnect/teardown events. The per-query churn carries no operation identity in the
+        // report projection (no spanName, or the resolver.endpointAttempt span), whereas
+        // operation-lifecycle spans (e.g. "tunnel.setNetworkSettings") carry a meaningful spanName
+        // and ARE kept. Per-query latency still lives in the vpn health counters and the full
+        // on-device log, so dropping the churn here only affects QA/internal reports — Release never
+        // compiles these spans.
+        if event == "latency-span-begin" || event == "latency-span-end" {
+            let spanName = details["spanName"]
+            return spanName == nil || spanName == "resolver.endpointAttempt"
+        }
+        return false
     }
 
     public var dictionary: [String: Any] {
@@ -519,6 +548,134 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
     }
 }
 
+/// A privacy-safe, REDACTED snapshot of the recovery / escalation state at report time — the
+/// "why did it (or didn't it) self-reconnect" evidence. Derived entirely from the tunnel health
+/// counters (already in the report) plus the tunnel's persisted self-reconnect attempt timeline,
+/// which survives the restart. Carries NO resolved domains / browsing history — only timestamps,
+/// counts, and policy reason labels — so it stays on the right side of the data-minimization line.
+/// It exists so a "reconnecting on its own" / "protected but no internet" report carries the
+/// INCIDENT instead of only the symptom: the cluster's reports had `has_recent_dns_events = false`
+/// and a debug-log window flooded by live-activity reconciles (LAV-94 B).
+public struct BugReportIncidentSummary: Equatable, Sendable {
+    /// Bound on the surfaced timeline so a long-running session can't bloat the payload.
+    public static let maxSelfReconnectTimes = 20
+
+    public let selfReconnectTimes: [Date]
+    public let lastFailureReason: String?
+    public let consecutiveUpstreamFailureCount: Int
+    public let consecutiveDNSSmokeProbeFailureCount: Int
+    public let consecutiveRejectedSmokeResponseCount: Int
+    public let lastUpstreamFailureAt: Date?
+    public let lastUpstreamSuccessAt: Date?
+    public let lastPrimaryUpstreamSuccessAt: Date?
+    public let lastEncryptedFallbackSuccessAt: Date?
+    public let lastDNSSmokeProbeAt: Date?
+    public let lastDNSSmokeProbeSucceeded: Bool?
+    public let lastNetworkChangeAt: Date?
+    public let networkChangeCount: Int
+    public let lastResolverRuntimeResetAt: Date?
+    public let lastResolverRuntimeResetReason: String?
+    public let resolverRuntimeResetCount: Int
+    public let lastResolverIdentityChangeAt: Date?
+
+    public init(health: TunnelHealthSnapshot, selfReconnectTimes: [Date], now: Date = Date()) {
+        // Prune to the tunnel's active attempt window FIRST. The persisted defaults array is
+        // only normalized by the tunnel when it evaluates a wedge (TunnelSelfReconnectPolicy),
+        // so a report filed after a quiet stretch would otherwise carry self-reconnect timestamps
+        // that are long past the window and falsely flag `has_incident_summary`/`hasContent` with a
+        // stale timeline. Reuse the same prune (clamps future-dated, drops out-of-window) so the
+        // report can never disagree with the tunnel about what counts as a recent attempt.
+        // Then sort + cap so the timeline is deterministic and bounded regardless of caller order.
+        let recentSelfReconnectTimes = TunnelSelfReconnectPolicy.prunedAttemptTimes(selfReconnectTimes, now: now)
+        self.selfReconnectTimes = Array(recentSelfReconnectTimes.sorted().suffix(Self.maxSelfReconnectTimes))
+        self.lastFailureReason = health.lastFailureReason
+        self.consecutiveUpstreamFailureCount = health.consecutiveUpstreamFailureCount
+        self.consecutiveDNSSmokeProbeFailureCount = health.consecutiveDNSSmokeProbeFailureCount
+        self.consecutiveRejectedSmokeResponseCount = health.consecutiveRejectedSmokeResponseCount
+        self.lastUpstreamFailureAt = health.lastUpstreamFailureAt
+        self.lastUpstreamSuccessAt = health.lastUpstreamSuccessAt
+        self.lastPrimaryUpstreamSuccessAt = health.lastPrimaryUpstreamSuccessAt
+        self.lastEncryptedFallbackSuccessAt = health.lastEncryptedFallbackSuccessAt
+        self.lastDNSSmokeProbeAt = health.lastDNSSmokeProbeAt
+        self.lastDNSSmokeProbeSucceeded = health.lastDNSSmokeProbeSucceeded
+        self.lastNetworkChangeAt = health.lastNetworkChangeAt
+        self.networkChangeCount = health.networkChangeCount
+        self.lastResolverRuntimeResetAt = health.lastResolverRuntimeResetAt
+        self.lastResolverRuntimeResetReason = health.lastResolverRuntimeResetReason
+        self.resolverRuntimeResetCount = health.resolverRuntimeResetCount
+        self.lastResolverIdentityChangeAt = health.lastResolverIdentityChangeAt
+    }
+
+    public var selfReconnectCount: Int {
+        selfReconnectTimes.count
+    }
+
+    public var lastSelfReconnectAt: Date? {
+        selfReconnectTimes.last
+    }
+
+    /// True when there is any recovery evidence worth reading — drives the honest
+    /// `has_incident_summary` flag that replaces the always-false `has_recent_dns_events`.
+    public var hasContent: Bool {
+        !selfReconnectTimes.isEmpty
+            || lastFailureReason != nil
+            || consecutiveUpstreamFailureCount > 0
+            || consecutiveDNSSmokeProbeFailureCount > 0
+            || consecutiveRejectedSmokeResponseCount > 0
+            || lastEncryptedFallbackSuccessAt != nil
+            || resolverRuntimeResetCount > 0
+    }
+
+    public var dictionary: [String: Any] {
+        var body: [String: Any] = [
+            "self_reconnect_count": selfReconnectCount,
+            "consecutive_upstream_failure_count": consecutiveUpstreamFailureCount,
+            "consecutive_dns_smoke_probe_failure_count": consecutiveDNSSmokeProbeFailureCount,
+            "consecutive_rejected_smoke_response_count": consecutiveRejectedSmokeResponseCount,
+            "network_change_count": networkChangeCount,
+            "resolver_runtime_reset_count": resolverRuntimeResetCount
+        ]
+
+        if !selfReconnectTimes.isEmpty {
+            body["self_reconnect_times"] = selfReconnectTimes.compactMap(Self.dateString)
+        }
+        Self.set(&body, "last_self_reconnect_at", lastSelfReconnectAt)
+        if let lastFailureReason {
+            body["last_failure_reason"] = lastFailureReason
+        }
+        Self.set(&body, "last_upstream_failure_at", lastUpstreamFailureAt)
+        Self.set(&body, "last_upstream_success_at", lastUpstreamSuccessAt)
+        Self.set(&body, "last_primary_upstream_success_at", lastPrimaryUpstreamSuccessAt)
+        Self.set(&body, "last_encrypted_fallback_success_at", lastEncryptedFallbackSuccessAt)
+        Self.set(&body, "last_dns_smoke_probe_at", lastDNSSmokeProbeAt)
+        if let lastDNSSmokeProbeSucceeded {
+            body["last_dns_smoke_probe_succeeded"] = lastDNSSmokeProbeSucceeded
+        }
+        Self.set(&body, "last_network_change_at", lastNetworkChangeAt)
+        Self.set(&body, "last_resolver_runtime_reset_at", lastResolverRuntimeResetAt)
+        if let lastResolverRuntimeResetReason {
+            body["last_resolver_runtime_reset_reason"] = lastResolverRuntimeResetReason
+        }
+        Self.set(&body, "last_resolver_identity_change_at", lastResolverIdentityChangeAt)
+
+        return body
+    }
+
+    private static func set(_ body: inout [String: Any], _ key: String, _ date: Date?) {
+        if let value = dateString(date) {
+            body[key] = value
+        }
+    }
+
+    private static func dateString(_ date: Date?) -> String? {
+        guard let date else {
+            return nil
+        }
+
+        return SharedDateFormatting.iso8601.string(from: date)
+    }
+}
+
 public struct BugReportBundle: Sendable {
     public let reportID: UUID
     public let context: BugReportContext
@@ -529,6 +686,9 @@ public struct BugReportBundle: Sendable {
     public let diagnostics: DiagnosticsStore
     public let localHistoryEnabled: Bool
     public let debugLogEntries: [BugReportDebugLogEntry]
+    /// Recent self-reconnect attempt timestamps the tunnel persisted to the shared app group
+    /// (read app-side — never touches the tunnel's frozen recovery path). Folded into `incident`.
+    public let selfReconnectTimes: [Date]
 
     public init(
         reportID: UUID = UUID(),
@@ -539,7 +699,8 @@ public struct BugReportBundle: Sendable {
         filters: BugReportFilterSummary,
         diagnostics: DiagnosticsStore,
         localHistoryEnabled: Bool,
-        debugLogEntries: [BugReportDebugLogEntry]
+        debugLogEntries: [BugReportDebugLogEntry],
+        selfReconnectTimes: [Date] = []
     ) {
         self.reportID = reportID
         self.context = context
@@ -550,6 +711,12 @@ public struct BugReportBundle: Sendable {
         self.diagnostics = diagnostics
         self.localHistoryEnabled = localHistoryEnabled
         self.debugLogEntries = debugLogEntries
+        self.selfReconnectTimes = selfReconnectTimes
+    }
+
+    /// The redacted recovery/escalation envelope surfaced in the report (LAV-94 B).
+    public var incident: BugReportIncidentSummary {
+        BugReportIncidentSummary(health: vpn.health, selfReconnectTimes: selfReconnectTimes)
     }
 
     public var previewSections: [BugReportPreviewSection] {
@@ -559,15 +726,20 @@ public struct BugReportBundle: Sendable {
             vpnStatusSection,
             lifecycleLogSection,
             networkResolverSection,
+            incidentSummarySection,
             filterSnapshotSection,
             localActivitySection
         ]
     }
 
     public func makeRequestBody() -> [String: Any] {
+        let incident = incident
         var body: [String: Any] = [
             "report_id": reportID.uuidString.lowercased(),
             "include_recent_dns_events": false,
+            // Honest replacement for the always-false `has_recent_dns_events`: true only when
+            // diagnostics are attached AND there is recovery evidence to read (LAV-94 B).
+            "has_incident_summary": context.includeDiagnostics && incident.hasContent,
             "include_optional_diagnostics": context.includeDiagnostics,
             "kind": context.issueType.kind.rawValue,
             "user_description": context.userDescription
@@ -587,6 +759,7 @@ public struct BugReportBundle: Sendable {
             body["filters"] = filtersBody
             body["diagnostics"] = diagnosticsBody
             body["debug_log"] = debugLogEntries.map(\.dictionary)
+            body["incident"] = incident.dictionary
         }
 
         if let contactEmail = context.normalizedContactEmail {
@@ -739,6 +912,38 @@ public struct BugReportBundle: Sendable {
         )
     }
 
+    private var incidentSummarySection: BugReportPreviewSection {
+        let incident = incident
+        var items = [
+            item("self_reconnects", "Self-reconnects (recent)", "\(incident.selfReconnectCount)"),
+            item(
+                "last_self_reconnect",
+                "Last self-reconnect",
+                incident.lastSelfReconnectAt.map(Self.displayDate) ?? "None recorded"
+            ),
+            item("incident_last_failure", "Last failure reason", incident.lastFailureReason ?? "None"),
+            item("consecutive_smoke_failures", "Consecutive smoke-probe failures", "\(incident.consecutiveDNSSmokeProbeFailureCount)"),
+            item("rejected_responses", "Rejected resolver responses", "\(incident.consecutiveRejectedSmokeResponseCount)"),
+            item(
+                "encrypted_fallback_serving",
+                "Encrypted fallback last served",
+                incident.lastEncryptedFallbackSuccessAt.map(Self.displayDate) ?? "Not serving"
+            ),
+            item("runtime_resets", "Resolver runtime resets", "\(incident.resolverRuntimeResetCount)")
+        ]
+
+        if let resetReason = incident.lastResolverRuntimeResetReason {
+            items.append(item("last_runtime_reset_reason", "Last runtime reset reason", resetReason))
+        }
+
+        return BugReportPreviewSection(
+            id: "incident_summary",
+            title: "Incident Summary",
+            purpose: "A redacted recovery timeline — self-reconnects, failure reasons, and fallback state. No browsing history or domains are included.",
+            items: items
+        )
+    }
+
     private var filterSnapshotSection: BugReportPreviewSection {
         var items = [
             item("catalog", "Catalog", filters.catalogVersion ?? "Unknown"),
@@ -798,6 +1003,10 @@ public struct BugReportBundle: Sendable {
         }
 
         return SharedDateFormatting.iso8601.string(from: date)
+    }
+
+    private static func displayDate(_ date: Date) -> String {
+        SharedDateFormatting.iso8601.string(from: date)
     }
 }
 

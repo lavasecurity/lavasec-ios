@@ -63,17 +63,23 @@ struct LavaActivityAttributes: ActivityAttributes {
         var resumeDate: Date?
         var pauseRequiresAuthentication: Bool
         var shieldStyle: GuardianShieldStyle
+        // Drives the "Pause for N min" expanded-view button label. Travels with
+        // the activity content so changing the length in Settings relabels the
+        // live button on the next reconcile.
+        var pauseMinutes: Int
 
         init(
             protectionState: ProtectionState,
             resumeDate: Date?,
             pauseRequiresAuthentication: Bool,
-            shieldStyle: GuardianShieldStyle
+            shieldStyle: GuardianShieldStyle,
+            pauseMinutes: Int = LiveActivityPausePreference.defaultMinutes
         ) {
             self.protectionState = protectionState
             self.resumeDate = resumeDate
             self.pauseRequiresAuthentication = pauseRequiresAuthentication
             self.shieldStyle = shieldStyle
+            self.pauseMinutes = pauseMinutes
         }
 
         init(from decoder: Decoder) throws {
@@ -82,6 +88,8 @@ struct LavaActivityAttributes: ActivityAttributes {
             resumeDate = try container.decodeIfPresent(Date.self, forKey: .resumeDate)
             pauseRequiresAuthentication = try container.decode(Bool.self, forKey: .pauseRequiresAuthentication)
             shieldStyle = try container.decodeIfPresent(GuardianShieldStyle.self, forKey: .shieldStyle) ?? .original
+            pauseMinutes = try container.decodeIfPresent(Int.self, forKey: .pauseMinutes)
+                ?? LiveActivityPausePreference.defaultMinutes
         }
     }
 

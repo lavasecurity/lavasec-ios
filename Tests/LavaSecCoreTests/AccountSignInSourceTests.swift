@@ -18,7 +18,8 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(settingsViewSource.contains("return \"Open Account & Backup settings\""))
         XCTAssertFalse(settingsViewSource.contains("return \"Open Account settings\""))
         XCTAssertFalse(settingsRootBlock.contains("title: \"Account\""))
-        XCTAssertTrue(accountPageBlock.contains(".navigationTitle(\"Account & Backup\")"))
+        // Title is now folded into the SettingsSubpageContent(title:) scaffold arg (localized there).
+        XCTAssertTrue(accountPageBlock.contains("title: \"Account & Backup\""))
         XCTAssertFalse(accountPageBlock.contains(".navigationTitle(\"Account\")"))
     }
 

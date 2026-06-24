@@ -62,7 +62,7 @@ public enum GuardStepHealthPolicy {
         switch connectivitySeverity {
         case .dnsSlow, .needsReconnect, .networkUnavailable:
             return .issue
-        case .usingDeviceDNSFallback:
+        case .usingDeviceDNSFallback, .usingEncryptedFallback:
             return .inactive
         case .healthy, .recovering:
             break
@@ -95,6 +95,8 @@ public enum GuardStepHealthPolicy {
         switch connectivitySeverity {
         case .usingDeviceDNSFallback:
             return GuardFlowDNSDetail(name: "Device DNS fallback")
+        case .usingEncryptedFallback:
+            return GuardFlowDNSDetail(name: "Encrypted DNS fallback")
         case .dnsSlow, .needsReconnect, .networkUnavailable, .healthy, .recovering:
             break
         }

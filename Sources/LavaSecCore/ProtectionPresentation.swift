@@ -22,7 +22,7 @@ public extension ProtectionTintRole {
     /// Exhaustive over every `ProtectionConnectivitySeverity`.
     static func connected(severity: ProtectionConnectivitySeverity) -> ProtectionTintRole {
         switch severity {
-        case .healthy, .usingDeviceDNSFallback: .protected
+        case .healthy, .usingDeviceDNSFallback, .usingEncryptedFallback: .protected
         case .recovering:                        .transitioning
         case .dnsSlow, .needsReconnect:          .attention
         case .networkUnavailable:                .inactive

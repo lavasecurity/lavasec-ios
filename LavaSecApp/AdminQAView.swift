@@ -49,6 +49,74 @@ struct PhoneQAView: View {
                 )
             }
 
+            LavaSectionGroup("Internet QA Suites", footer: "Tap a suite to apply its starter DNS and blocklist state, then run the listed network condition combinations manually.") {
+                LavaCondensedList {
+                    ForEach(Array(QAInternetScenarioSuite.allCases.enumerated()), id: \.element.id) { index, suite in
+                        Button {
+                            viewModel.applyQAInternetScenarioSuite(suite)
+                        } label: {
+                            QAInternetScenarioSuiteRow(suite: suite)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < QAInternetScenarioSuite.allCases.count - 1 {
+                            LavaCondensedDivider(leadingInset: 50)
+                        }
+                    }
+                }
+            }
+
+            LavaSectionGroup("Network Conditions", footer: "These are manual phone conditions; Lava prepares hosted probes and shows the expected recovery signal.") {
+                LavaCondensedList {
+                    ForEach(Array(QAInternetNetworkCondition.allCases.enumerated()), id: \.element.id) { index, condition in
+                        Button {
+                            viewModel.prepareQAInternetNetworkCondition(condition)
+                        } label: {
+                            QAInternetNetworkConditionRow(condition: condition)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < QAInternetNetworkCondition.allCases.count - 1 {
+                            LavaCondensedDivider(leadingInset: 50)
+                        }
+                    }
+                }
+            }
+
+            LavaSectionGroup("DNS Setups") {
+                LavaCondensedList {
+                    ForEach(Array(QAInternetDNSSetup.allCases.enumerated()), id: \.element.id) { index, setup in
+                        Button {
+                            viewModel.applyQAInternetDNSSetup(setup)
+                        } label: {
+                            QAInternetDNSSetupRow(setup: setup)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < QAInternetDNSSetup.allCases.count - 1 {
+                            LavaCondensedDivider(leadingInset: 50)
+                        }
+                    }
+                }
+            }
+
+            LavaSectionGroup("Blocklist Loads") {
+                LavaCondensedList {
+                    ForEach(Array(QAInternetBlocklistLoad.allCases.enumerated()), id: \.element.id) { index, load in
+                        Button {
+                            viewModel.applyQAInternetBlocklistLoad(load)
+                        } label: {
+                            QAInternetBlocklistLoadRow(load: load)
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < QAInternetBlocklistLoad.allCases.count - 1 {
+                            LavaCondensedDivider(leadingInset: 50)
+                        }
+                    }
+                }
+            }
+
             LavaSectionGroup("Haptics") {
                 LavaCondensedList {
                     ForEach(Array(PhoneQAHapticPreview.allCases.enumerated()), id: \.element.id) { index, preview in
@@ -217,6 +285,125 @@ struct PhoneQAView: View {
     private func copy(_ domain: String) {
         UIPasteboard.general.string = domain
         copiedDomain = domain
+    }
+}
+
+private struct QAInternetScenarioSuiteRow: View {
+    let suite: QAInternetScenarioSuite
+
+    var body: some View {
+        LavaCondensedListItem(
+            title: suite.title,
+            subtitle: suite.summary,
+            metadata: suite.metadata
+        ) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .foregroundStyle(LavaStyle.lavaOrange)
+                .frame(width: 24)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct QAInternetNetworkConditionRow: View {
+    let condition: QAInternetNetworkCondition
+
+    var body: some View {
+        LavaCondensedListItem(
+            title: condition.title,
+            subtitle: condition.summary,
+            metadata: "\(condition.testerSteps.count) steps"
+        ) {
+            Image(systemName: iconName)
+                .foregroundStyle(LavaStyle.safeGreen)
+                .frame(width: 24)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var iconName: String {
+        switch condition {
+        case .cellularHandover:
+            "antenna.radiowaves.left.and.right"
+        case .wifiToCellularSwitch:
+            "wifi.slash"
+        case .cellularToWifiSwitch:
+            "wifi"
+        case .flappingEdgeWifi:
+            "wifi.exclamationmark"
+        case .sameSSIDRoaming:
+            "dot.radiowaves.left.and.right"
+        case .wifiInternetBlackhole:
+            "wifi.slash"
+        case .airplaneModeRecovery:
+            "airplane"
+        case .elevatorSignalLoss:
+            "arrow.up.and.down"
+        case .deprioritizedLowBandwidth:
+            "speedometer"
+        case .lowDataModeConstrained:
+            "arrow.down.circle"
+        case .ipv6OnlyNAT64:
+            "network"
+        case .mtuDoQFragmentation:
+            "bolt.horizontal.icloud"
+        case .captivePortalRejoin:
+            "network.badge.shield.half.filled"
+        }
+    }
+}
+
+private struct QAInternetDNSSetupRow: View {
+    let setup: QAInternetDNSSetup
+
+    var body: some View {
+        LavaCondensedListItem(
+            title: setup.title,
+            subtitle: setup.summary,
+            metadata: "\(setup.transport.menuTitle) · \(setup.fallbackLabel)"
+        ) {
+            Image(systemName: iconName)
+                .foregroundStyle(LavaStyle.lavaOrange)
+                .frame(width: 24)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var iconName: String {
+        switch setup.transport {
+        case .deviceDNS:
+            "iphone.gen3.radiowaves.left.and.right"
+        case .plainDNS:
+            "network"
+        case .dnsOverHTTPS:
+            "lock.icloud"
+        case .dnsOverTLS:
+            "lock.shield"
+        case .dnsOverQUIC:
+            "bolt.horizontal.icloud"
+        }
+    }
+}
+
+private struct QAInternetBlocklistLoadRow: View {
+    let load: QAInternetBlocklistLoad
+
+    var body: some View {
+        LavaCondensedListItem(
+            title: load.title,
+            subtitle: load.summary,
+            metadata: "\(load.enabledBlocklistIDs.count) sources",
+            status: LavaCondensedStatus(
+                text: load.abbreviation,
+                foreground: LavaStyle.secondaryText,
+                background: LavaStyle.secondaryText.opacity(0.12)
+            )
+        ) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .foregroundStyle(LavaStyle.safeGreen)
+                .frame(width: 24)
+        }
+        .contentShape(Rectangle())
     }
 }
 

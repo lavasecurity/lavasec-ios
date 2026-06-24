@@ -95,7 +95,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(securityBlock.contains("With authentication on"))
         XCTAssertTrue(securityBlock.contains("Toggle(\"Passcode\""))
         XCTAssertTrue(securityBlock.contains("Toggle(security.biometricToggleTitle"))
-        XCTAssertTrue(securityBlock.contains("LavaSectionGroup(\"Use authentication for\")"))
+        // "Use authentication for" now carries a plain-language footer, so it renders as a
+        // multi-line LavaSectionGroup(title, footer:) — assert the section title and its footer.
+        XCTAssertTrue(securityBlock.contains("\"Use authentication for\""))
+        XCTAssertTrue(securityBlock.contains("These switches turn on after you set a passcode or Face ID above."))
         XCTAssertTrue(securityBlock.contains(".disabled(!security.hasAuthenticationMethod)"))
         XCTAssertTrue(securityBlock.contains(".opacity(security.hasAuthenticationMethod ? 1 : 0.45)"))
         XCTAssertTrue(securityBlock.contains("security.hasAuthenticationMethod && security.isProtected(surface)"))

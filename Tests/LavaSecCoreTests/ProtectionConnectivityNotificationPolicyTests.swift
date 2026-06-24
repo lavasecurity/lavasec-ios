@@ -2,7 +2,9 @@ import XCTest
 @testable import LavaSecCore
 
 final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
-    func testDeviceDNSFallbackCreatesBriefNotificationForFreshUnsentEvent() {
+    func testDeviceDNSFallbackPostsNoNotification() {
+        // Informational, non-actionable: Lava keeps filtering on Device DNS, so it
+        // surfaces in-app only — no push banner (we notify only when a tap is needed).
         let now = Date(timeIntervalSince1970: 100)
         let eventAt = now.addingTimeInterval(-2)
         let health = TunnelHealthSnapshot(
@@ -20,14 +22,12 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(notification?.kind, .deviceDNSFallback)
-        XCTAssertEqual(notification?.identifier, "device-dns-fallback:98")
-        XCTAssertEqual(notification?.title, "Lava switched to Device DNS")
-        XCTAssertEqual(notification?.body, "Network DNS rules changed. Filtering is still on.")
-        XCTAssertEqual(notification?.supersededNotificationIdentifiers, [])
+        XCTAssertNil(notification)
     }
 
-    func testNetworkUnavailableCreatesBriefNotificationForFreshUnsentEvent() {
+    func testNetworkUnavailablePostsNoNotification() {
+        // Informational, non-actionable: Lava auto-resumes when the network returns,
+        // so it surfaces in-app only — no push banner.
         let now = Date(timeIntervalSince1970: 200)
         let eventAt = now.addingTimeInterval(-5)
         let health = TunnelHealthSnapshot(
@@ -45,10 +45,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             now: now
         )
 
-        XCTAssertEqual(notification?.kind, .networkUnavailable)
-        XCTAssertEqual(notification?.identifier, "network-unavailable:195")
-        XCTAssertEqual(notification?.title, "Lava needs a network")
-        XCTAssertEqual(notification?.body, "No internet path is available. Lava will resume when the network returns.")
+        XCTAssertNil(notification)
     }
 
     func testReconnectNeededCreatesBriefNotificationForFreshUnsentSmokeProbeFailure() {
@@ -259,9 +256,11 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertEqual(notification?.title, "Lava DNS is slow")
     }
 
-    func testSlowDNSDoesNotEscalateOverOutstandingDeviceDNSFallbackBanner() {
-        // Slow DNS is a soft degradation, not a hard outage — it ranks with the
-        // non-actionable banners and must not steal a standing one.
+    func testSlowDNSSupersedesStaleInformationalMarker() {
+        // `deviceDNSFallback` no longer posts, so an outstanding marker for it can only
+        // be a stale pre-upgrade leftover. An actionable `dnsSlow` "Tap to reconnect"
+        // banner must NOT be suppressed by such a leftover — it supersedes it (clearing
+        // the stale banner from Notification Center) instead of being blocked.
         let now = Date(timeIntervalSince1970: 1300)
         let eventAt = now.addingTimeInterval(-3)
         let history = ProtectionConnectivityNotificationHistory(
@@ -271,7 +270,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             unresolvedProblemKind: .deviceDNSFallback
         )
 
-        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(severity: .dnsSlow, primaryAction: .reconnect),
             health: TunnelHealthSnapshot(
                 lastNetworkChangeAt: now.addingTimeInterval(-30),
@@ -279,7 +278,10 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             ),
             history: history,
             now: now
-        ))
+        )
+
+        XCTAssertEqual(notification?.kind, .dnsSlow)
+        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["device-dns-fallback:1200"])
     }
 
     func testReconnectNeededEscalatesOverOutstandingSlowDNSBanner() {
@@ -316,19 +318,21 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
     func testProblemNotificationsRespectCooldownEvenAfterPreviousProblemResolved() {
         let now = Date(timeIntervalSince1970: 600)
         let eventAt = now.addingTimeInterval(-5)
+        // A prior actionable problem was delivered 120s ago and has since resolved
+        // (no outstanding marker), so the 600s cooldown must still suppress a fresh
+        // actionable problem.
         let history = ProtectionConnectivityNotificationHistory(
-            lastDeliveredNotificationID: "reconnected:device-dns-fallback:500",
+            lastDeliveredNotificationID: "reconnect-needed:480",
             lastDeliveredAt: now.addingTimeInterval(-120)
         )
 
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: ProtectionConnectivityAssessment(
-                severity: .networkUnavailable,
-                primaryAction: .turnOff
+                severity: .needsReconnect,
+                primaryAction: .reconnect
             ),
             health: TunnelHealthSnapshot(
-                networkPathIsSatisfied: false,
-                lastNetworkChangeAt: eventAt
+                lastDNSSmokeProbeAt: eventAt
             ),
             history: history,
             now: now
@@ -337,7 +341,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertNil(notification)
     }
 
-    func testResolvedProblemSurfacesReconnectedAcknowledgementAfterRealForwardingSuccess() {
+    func testResolvedProblemSilentlyClearsBannerWithoutAcknowledgement() {
         let now = Date(timeIntervalSince1970: 700)
         let successAt = now.addingTimeInterval(-4)
         let history = ProtectionConnectivityNotificationHistory(
@@ -346,23 +350,178 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             unresolvedProblemNotificationID: "reconnect-needed:600",
             unresolvedProblemKind: .reconnectNeeded
         )
+        let health = TunnelHealthSnapshot(
+            lastNetworkChangeAt: now.addingTimeInterval(-20),
+            lastPrimaryUpstreamSuccessAt: successAt
+        )
 
+        // When a "reconnect needed" the user was warned about recovers (a real
+        // client query resolves through the primary), the standing banner is
+        // SILENTLY removed — no "reconnected" success ping. The user is only
+        // interrupted when a tap is required, never to be told it's fixed.
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: Self.healthyAssessment,
-            health: TunnelHealthSnapshot(
-                lastNetworkChangeAt: now.addingTimeInterval(-20),
-                lastPrimaryUpstreamSuccessAt: successAt
-            ),
+            health: health,
             history: history,
             now: now
         )
+        XCTAssertNil(notification)
 
-        // A "reconnect needed" the user was warned about gets a positive recovery
-        // confirmation once a real client query resolves through the tunnel,
-        // superseding the problem banner so the user knows it's actually back.
-        XCTAssertEqual(notification?.kind, .reconnected)
-        XCTAssertEqual(notification?.identifier, "reconnected:reconnect-needed:600")
-        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["reconnect-needed:600"])
+        // The outstanding problem banner is still cleared from Notification Center.
+        let resolved = ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+            for: Self.healthyAssessment,
+            health: health,
+            history: history,
+            now: now
+        )
+        XCTAssertEqual(resolved, ["reconnect-needed:600"])
+    }
+
+    func testEncryptedFallbackCoverageClearsReconnectBannerAndLiftsCooldownWithoutAck() {
+        // A "reconnect needed" banner is outstanding; the state has moved to
+        // `.usingEncryptedFallback` (DoH carrying DNS, primary still wedged). The banner is
+        // SILENTLY cleared (leaving it standing is harmful — tapping it would turn protection
+        // off), the delivery cooldown is back-dated (so a lapse re-posts promptly), and NO
+        // positive "reconnected" ack is posted (the primary has not recovered).
+        let now = Date(timeIntervalSince1970: 700)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: now.addingTimeInterval(-90),
+            unresolvedProblemNotificationID: "reconnect-needed:600",
+            unresolvedProblemKind: .reconnectNeeded
+        )
+        let coveredAssessment = ProtectionConnectivityAssessment(
+            severity: .usingEncryptedFallback,
+            primaryAction: .turnOff
+        )
+        // Primary still wedged: a failed smoke probe, no `lastPrimaryUpstreamSuccessAt`.
+        let coveredHealth = TunnelHealthSnapshot(
+            lastDNSSmokeProbeAt: now.addingTimeInterval(-5),
+            lastDNSSmokeProbeSucceeded: false
+        )
+
+        // The stale banner IS cleared during coverage...
+        XCTAssertEqual(
+            ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+                for: coveredAssessment,
+                health: coveredHealth,
+                history: history,
+                now: now
+            ),
+            ["reconnect-needed:600"]
+        )
+        // ...the cooldown is back-dated to (now - 600 + reFlapGrace) so a lapse re-posts after
+        // the grace, not the full 600s...
+        XCTAssertEqual(
+            ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+                for: coveredAssessment,
+                history: history,
+                now: now
+            ),
+            now.addingTimeInterval(-(ProtectionConnectivityNotificationPolicy.minimumProblemDeliveryInterval
+                - ProtectionConnectivityNotificationPolicy.reFlapGraceInterval))
+        )
+        // ...and NO positive "reconnected" acknowledgement (or any new banner) is posted.
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: coveredAssessment,
+            health: coveredHealth,
+            history: history,
+            now: now
+        ))
+    }
+
+    func testEncryptedFallbackCoverageAlsoClearsDnsSlowAndOtherStaleBanners() {
+        // Codex #86 round 16: the silent supersede must not be reconnectNeeded-only. A `.dnsSlow`
+        // banner ("Tap to reconnect protection") delivered before coverage is just as harmful —
+        // tapping it under `.usingEncryptedFallback` (.turnOff) turns protection OFF — and so is a
+        // stale informational `deviceDNSFallback` banner (every Lava tap routes to the primary
+        // action). Both must be silently cleared and get the same back-dated cooldown.
+        let now = Date(timeIntervalSince1970: 700)
+        let coveredAssessment = ProtectionConnectivityAssessment(
+            severity: .usingEncryptedFallback,
+            primaryAction: .turnOff
+        )
+        let coveredHealth = TunnelHealthSnapshot(
+            lastDNSSmokeProbeAt: now.addingTimeInterval(-5),
+            lastDNSSmokeProbeSucceeded: false
+        )
+
+        let cases: [(String, ProtectionConnectivityNotificationKind)] = [
+            ("dns-slow:600", .dnsSlow),
+            ("device-dns-fallback:600", .deviceDNSFallback),
+        ]
+        for (id, kind) in cases {
+            let history = ProtectionConnectivityNotificationHistory(
+                lastDeliveredNotificationID: id,
+                lastDeliveredAt: now.addingTimeInterval(-90),
+                unresolvedProblemNotificationID: id,
+                unresolvedProblemKind: kind
+            )
+            XCTAssertEqual(
+                ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+                    for: coveredAssessment, health: coveredHealth, history: history, now: now
+                ),
+                [id],
+                "Coverage must clear a stale \(kind.rawValue) banner so its tap can't turn protection off."
+            )
+            XCTAssertEqual(
+                ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+                    for: coveredAssessment, history: history, now: now
+                ),
+                now.addingTimeInterval(-(ProtectionConnectivityNotificationPolicy.minimumProblemDeliveryInterval
+                    - ProtectionConnectivityNotificationPolicy.reFlapGraceInterval)),
+                "The \(kind.rawValue) silent clear must back-date the cooldown like the reconnect clear."
+            )
+        }
+    }
+
+    func testReconnectRePostsAfterFallbackCoverageLapsesUsingBackdatedCooldown() {
+        // After the silent clear back-dated lastDeliveredAt, a lapse back to `.needsReconnect`
+        // must re-post a fresh, correctly-actionable banner once the grace has elapsed —
+        // closing the 600s gap — but stay suppressed before the grace (bounding a flap).
+        let clearedAt = Date(timeIntervalSince1970: 700)
+        let backdated = ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+            for: ProtectionConnectivityAssessment(severity: .usingEncryptedFallback, primaryAction: .turnOff),
+            history: ProtectionConnectivityNotificationHistory(
+                unresolvedProblemNotificationID: "reconnect-needed:600",
+                unresolvedProblemKind: .reconnectNeeded
+            ),
+            now: clearedAt
+        )
+        // History AFTER the silent clear: markers wiped, lastDeliveredAt back-dated.
+        let postClearHistory = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:600",
+            lastDeliveredAt: backdated
+        )
+        let reconnectAssessment = ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
+
+        func wedgedHealth(probeAt: Date) -> TunnelHealthSnapshot {
+            TunnelHealthSnapshot(
+                lastFailureReason: "receive-failed",
+                lastDNSSmokeProbeAt: probeAt,
+                lastDNSSmokeProbeSucceeded: false,
+                consecutiveDNSSmokeProbeFailureCount: 3
+            )
+        }
+
+        // Before the grace elapses: still suppressed (flap bound).
+        let beforeGrace = clearedAt.addingTimeInterval(ProtectionConnectivityNotificationPolicy.reFlapGraceInterval - 5)
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: reconnectAssessment,
+            health: wedgedHealth(probeAt: beforeGrace.addingTimeInterval(-1)),
+            history: postClearHistory,
+            now: beforeGrace
+        ))
+
+        // After the grace: a fresh reconnectNeeded banner posts.
+        let afterGrace = clearedAt.addingTimeInterval(ProtectionConnectivityNotificationPolicy.reFlapGraceInterval + 5)
+        let posted = ProtectionConnectivityNotificationPolicy.notification(
+            for: reconnectAssessment,
+            health: wedgedHealth(probeAt: afterGrace.addingTimeInterval(-1)),
+            history: postClearHistory,
+            now: afterGrace
+        )
+        XCTAssertEqual(posted?.kind, .reconnectNeeded)
     }
 
     func testSmokeProbeOnlyRecoveryDoesNotAcknowledgeOrClearTheProblem() {
@@ -487,32 +646,25 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         ).isEmpty)
     }
 
-    func testReconnectedAcknowledgementFiresOnceAndOnlyForADeliveredProblem() {
+    func testAutoRecoveryWithoutADeliveredProblemStaysFullySilent() {
         let now = Date(timeIntervalSince1970: 700)
         let successAt = now.addingTimeInterval(-4)
         let recoveredHealth = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: successAt)
 
-        // No problem was ever delivered → no recovery confirmation (auto-recoveries the
-        // user never saw a warning for stay silent).
+        // A self-heal the user never saw a warning for (no outstanding problem)
+        // makes ZERO noise: neither a notification nor a spurious banner clear.
         XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
             for: Self.healthyAssessment,
             health: recoveredHealth,
             history: .empty,
             now: now
         ))
-
-        // Already acknowledged (lastDelivered is the reconnected id) → fires only once.
-        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
             for: Self.healthyAssessment,
             health: recoveredHealth,
-            history: ProtectionConnectivityNotificationHistory(
-                lastDeliveredNotificationID: "reconnected:reconnect-needed:600",
-                lastDeliveredAt: now.addingTimeInterval(-5),
-                unresolvedProblemNotificationID: "reconnect-needed:600",
-                unresolvedProblemKind: .reconnectNeeded
-            ),
+            history: .empty,
             now: now
-        ))
+        ).isEmpty)
     }
 
     func testResolvedProblemIdentifiersSkipMissingUnresolvedCases() {
@@ -535,22 +687,26 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             now: now
         ).isEmpty)
 
+        // An outstanding id with NO kind (a half-written / unparseable marker) is
+        // not a valid outstanding problem → nothing to clear.
         XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
             for: assessment,
             health: health,
             history: ProtectionConnectivityNotificationHistory(
-                lastDeliveredNotificationID: "reconnected:network-unavailable:700",
+                lastDeliveredNotificationID: "reconnect-needed:700",
                 lastDeliveredAt: now.addingTimeInterval(-90),
-                unresolvedProblemNotificationID: "network-unavailable:700",
-                unresolvedProblemKind: .networkUnavailable
+                unresolvedProblemNotificationID: "reconnect-needed:700",
+                unresolvedProblemKind: nil
             ),
             now: now
         ).isEmpty)
     }
 
-    func testResolvedProblemPostsReconnectedConfirmationAndClearsTheProblemBanner() {
+    func testRecoveryClearsAnyOutstandingProblemBannerWithoutAConfirmation() {
         let now = Date(timeIntervalSince1970: 900)
         let successAt = now.addingTimeInterval(-2)
+        // An outstanding banner of any kind (here a legacy `network-unavailable`
+        // marker that may still be persisted from before that kind stopped posting).
         let history = ProtectionConnectivityNotificationHistory(
             lastDeliveredNotificationID: "network-unavailable:870",
             lastDeliveredAt: now.addingTimeInterval(-20),
@@ -558,17 +714,17 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
             unresolvedProblemKind: .networkUnavailable
         )
         let recoveredHealth = TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: successAt)
+
+        // Recovery posts NO confirmation ...
         let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: Self.healthyAssessment,
             health: recoveredHealth,
             history: history,
             now: now
         )
+        XCTAssertNil(notification)
 
-        // Recovery now posts the confirmation AND still reports the problem banner to
-        // clear — the two run together (the confirmation supersedes the banner too).
-        XCTAssertEqual(notification?.kind, .reconnected)
-        XCTAssertEqual(notification?.supersededNotificationIdentifiers, ["network-unavailable:870"])
+        // ... but still reports the outstanding banner to clear from Notification Center.
         XCTAssertEqual(
             ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
                 for: Self.healthyAssessment,

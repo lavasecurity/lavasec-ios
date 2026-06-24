@@ -377,6 +377,7 @@ final class BugReportBundleTests: XCTestCase {
                 "VPN Status",
                 "Tunnel Lifecycle Log",
                 "Network & Resolver Health",
+                "Incident Summary",
                 "Filter Snapshot",
                 "Local Activity Summary"
             ]
@@ -497,6 +498,192 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertEqual(bundle.vpn.status, "disconnected")
     }
 
+    // MARK: - LAV-94 A: live-activity reconcile must not flood the report window
+
+    func testDebugLogParserExcludesLiveActivityReconcileFromReportWindow() {
+        // 14 reconciles + 2 incident events; the small window (limit 5) must keep the incident
+        // events, not be flooded out by the high-frequency reconcile churn (LAV-94 A).
+        var lines = [
+            #"{"component":"tunnel","event":"self-reconnect","reason":"receive-failed","timestamp":"2026-06-22T00:00:00Z"}"#
+        ]
+        for index in 0..<14 {
+            lines.append(
+                #"{"component":"live-activity-controller","event":"reconcile","timestamp":"2026-06-22T00:00:\#(String(format: "%02d", index))Z"}"#
+            )
+        }
+        lines.append(
+            #"{"component":"tunnel","event":"resolver-wedge-recovery","reason":"covered-primary-recapture","timestamp":"2026-06-22T00:00:20Z"}"#
+        )
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(lines.joined(separator: "\n").utf8), limit: 5)
+
+        XCTAssertFalse(
+            entries.contains { $0.component == "live-activity-controller" && $0.event == "reconcile" },
+            "Reconcile churn must be excluded from the report window."
+        )
+        XCTAssertTrue(entries.contains { $0.event == "self-reconnect" })
+        XCTAssertTrue(entries.contains { $0.event == "resolver-wedge-recovery" })
+    }
+
+    func testDebugLogParserExcludesLatencySpanChurnFromReportWindow() {
+        // The QA/Debug-only resolver latency spans fire ~2 per DNS wire attempt; on a recovering
+        // link they flood the window and evict the incident events (on-device QA replay 2026-06-22:
+        // ~30 of 40 entries were latency-span pairs). The small window must keep the self-reconnect.
+        var lines = [
+            #"{"component":"tunnel","event":"self-reconnect","reason":"receive-failed","timestamp":"2026-06-22T00:00:00Z"}"#
+        ]
+        for index in 0..<14 {
+            lines.append(
+                #"{"component":"tunnel","event":"latency-span-begin","timestamp":"2026-06-22T00:00:\#(String(format: "%02d", index))Z"}"#
+            )
+            lines.append(
+                #"{"component":"tunnel","event":"latency-span-end","details":{"durationMs":"8"},"timestamp":"2026-06-22T00:00:\#(String(format: "%02d", index))Z"}"#
+            )
+        }
+        lines.append(
+            #"{"component":"tunnel","event":"startTunnel-begin","timestamp":"2026-06-22T00:00:30Z"}"#
+        )
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(lines.joined(separator: "\n").utf8), limit: 5)
+
+        XCTAssertFalse(
+            entries.contains { $0.event == "latency-span-begin" || $0.event == "latency-span-end" },
+            "Per-query latency-span churn must be excluded from the report window."
+        )
+        XCTAssertTrue(entries.contains { $0.event == "self-reconnect" })
+        XCTAssertTrue(entries.contains { $0.event == "startTunnel-begin" })
+    }
+
+    // MARK: - LAV-94 B: redacted incident summary
+
+    func testRequestBodyIncludesIncidentSummaryWhenDiagnosticsAreIncluded() throws {
+        // Anchor to "now" so the self-reconnect timeline falls inside the attempt window the
+        // summary prunes to (the bundle's `incident` uses the current clock).
+        let networkChangedAt = Date().addingTimeInterval(-180)
+        let reconnectAt = networkChangedAt.addingTimeInterval(120)
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                details: "Lava keeps reconnecting on its own.",
+                includeDiagnostics: true
+            ),
+            health: TunnelHealthSnapshot(
+                lastFailureReason: "receive-failed",
+                consecutiveUpstreamFailureCount: 2,
+                lastDNSSmokeProbeAt: networkChangedAt.addingTimeInterval(110),
+                lastDNSSmokeProbeSucceeded: false,
+                consecutiveDNSSmokeProbeFailureCount: 5,
+                consecutiveRejectedSmokeResponseCount: 0,
+                lastNetworkChangeAt: networkChangedAt,
+                networkChangeCount: 3,
+                resolverRuntimeResetCount: 1,
+                lastEncryptedFallbackSuccessAt: networkChangedAt.addingTimeInterval(60)
+            ),
+            selfReconnectTimes: [reconnectAt, networkChangedAt.addingTimeInterval(30)]
+        )
+
+        let body = bundle.makeRequestBody()
+        XCTAssertEqual(body["has_incident_summary"] as? Bool, true)
+        let incident = try XCTUnwrap(body["incident"] as? [String: Any])
+        XCTAssertEqual(incident["self_reconnect_count"] as? Int, 2)
+        XCTAssertEqual(incident["consecutive_dns_smoke_probe_failure_count"] as? Int, 5)
+        XCTAssertEqual(incident["consecutive_rejected_smoke_response_count"] as? Int, 0)
+        XCTAssertEqual(incident["last_failure_reason"] as? String, "receive-failed")
+        XCTAssertNotNil(incident["last_self_reconnect_at"])
+        XCTAssertNotNil(incident["last_encrypted_fallback_success_at"])
+        let times = try XCTUnwrap(incident["self_reconnect_times"] as? [String])
+        XCTAssertEqual(times.count, 2)
+        // Timeline is sorted ascending, so the last entry is the most recent self-reconnect.
+        XCTAssertEqual(incident["last_self_reconnect_at"] as? String, times.last)
+    }
+
+    func testIncidentSummaryAbsentWithoutDiagnostics() {
+        let bundle = makeBundle(
+            context: BugReportContext(issueType: .vpnOrFilterIssue, includeDiagnostics: false),
+            selfReconnectTimes: [Date(timeIntervalSinceReferenceDate: 800_720_000)]
+        )
+
+        let body = bundle.makeRequestBody()
+        XCTAssertEqual(body["has_incident_summary"] as? Bool, false)
+        XCTAssertNil(body["incident"], "No incident envelope is sent unless diagnostics are attached.")
+    }
+
+    func testIncidentSummaryHasNoContentOnAHealthyTunnel() {
+        let incident = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: []
+        )
+        XCTAssertFalse(incident.hasContent, "A clean snapshot with no failures or reconnects has nothing to report.")
+    }
+
+    func testIncidentSummaryCarriesNoResolvedDomains() throws {
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                affectedSite: "secret-site.example",
+                includeDiagnostics: true
+            ),
+            health: TunnelHealthSnapshot(
+                lastFailureReason: "receive-failed",
+                consecutiveDNSSmokeProbeFailureCount: 3
+            ),
+            selfReconnectTimes: [Date(timeIntervalSinceReferenceDate: 800_720_000)]
+        )
+
+        let incident = try XCTUnwrap(bundle.makeRequestBody()["incident"] as? [String: Any])
+        // The incident envelope is timestamps / counts / policy reasons only — never a queried
+        // domain or browsing history (the data-minimization line, LAV-94 B).
+        let serialized = String(decoding: try JSONSerialization.data(withJSONObject: incident), as: UTF8.self)
+        XCTAssertFalse(serialized.contains("secret-site"))
+        XCTAssertFalse(serialized.lowercased().contains("example"))
+    }
+
+    func testIncidentSummaryTimelineIsBounded() {
+        let base = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let manyTimes = (0..<50).map { base.addingTimeInterval(Double($0)) }
+        // `now` anchored to the last attempt so all 50 fall inside the prune window and the
+        // bound (not the window) is what trims the timeline.
+        let incident = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(lastFailureReason: "receive-failed"),
+            selfReconnectTimes: manyTimes,
+            now: manyTimes.last!
+        )
+        XCTAssertEqual(incident.selfReconnectTimes.count, BugReportIncidentSummary.maxSelfReconnectTimes)
+        // The cap keeps the MOST RECENT attempts.
+        XCTAssertEqual(incident.lastSelfReconnectAt, manyTimes.last)
+    }
+
+    func testIncidentSummaryPrunesSelfReconnectsOutsideTheAttemptWindow() {
+        let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let recent = now.addingTimeInterval(-120)            // inside the 600s attempt window
+        let stale = now.addingTimeInterval(-1_800)           // 30 min old — outside the window
+        let incident = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(lastFailureReason: "receive-failed"),
+            selfReconnectTimes: [stale, recent],
+            now: now
+        )
+        XCTAssertEqual(
+            incident.selfReconnectTimes,
+            [recent],
+            "Only self-reconnects inside the attempt window are surfaced — the persisted store can hold older ones the tunnel hasn't pruned yet."
+        )
+        XCTAssertEqual(incident.selfReconnectCount, 1)
+    }
+
+    func testIncidentSummaryStaleOnlySelfReconnectDoesNotFlagAnIncident() {
+        let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        // A clean tunnel whose ONLY "evidence" is a self-reconnect older than the window must
+        // not report an incident — otherwise a report filed long after a one-off reconnect would
+        // dishonestly set has_incident_summary (the Codex finding on #105).
+        let incident = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [now.addingTimeInterval(-3_600)],
+            now: now
+        )
+        XCTAssertTrue(incident.selfReconnectTimes.isEmpty)
+        XCTAssertFalse(incident.hasContent)
+    }
+
     private func makeBundle(
         reportID: UUID = UUID(uuidString: "12345678-1234-4234-9234-123456789abc")!,
         context: BugReportContext = BugReportContext(
@@ -510,7 +697,8 @@ final class BugReportBundleTests: XCTestCase {
         filters: BugReportFilterSummary? = nil,
         diagnostics: DiagnosticsStore = DiagnosticsStore(startedAt: Date(timeIntervalSinceReferenceDate: 100)),
         debugLogEntries: [BugReportDebugLogEntry] = [],
-        health: TunnelHealthSnapshot? = nil
+        health: TunnelHealthSnapshot? = nil,
+        selfReconnectTimes: [Date] = []
     ) -> BugReportBundle {
         BugReportBundle(
             reportID: reportID,
@@ -553,7 +741,8 @@ final class BugReportBundleTests: XCTestCase {
             ),
             diagnostics: diagnostics,
             localHistoryEnabled: false,
-            debugLogEntries: debugLogEntries
+            debugLogEntries: debugLogEntries,
+            selfReconnectTimes: selfReconnectTimes
         )
     }
 

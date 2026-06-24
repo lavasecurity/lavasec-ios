@@ -23,6 +23,9 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     public let protectionEnabledHint: Bool
     public let catalogVersionHint: String?
     public let customBlocklists: [CustomBlocklistSource]
+    /// The full multi-filter library (hosted filters + active selection). Optional so
+    /// pre-multi-filter backups decode to `nil` and restore as a single "Default" filter.
+    public let filterLibrary: FilterLibrary?
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
@@ -47,6 +50,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         case protectionEnabledHint
         case catalogVersionHint
         case customBlocklists
+        case filterLibrary
     }
 
     public init(
@@ -71,7 +75,8 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         lavaGuardUnlocks: LavaGuardAchievementLedger = LavaGuardAchievementLedger(),
         protectionEnabledHint: Bool,
         catalogVersionHint: String? = nil,
-        customBlocklists: [CustomBlocklistSource] = []
+        customBlocklists: [CustomBlocklistSource] = [],
+        filterLibrary: FilterLibrary? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.enabledBlocklistIDs = enabledBlocklistIDs
@@ -95,6 +100,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.protectionEnabledHint = protectionEnabledHint
         self.catalogVersionHint = catalogVersionHint
         self.customBlocklists = customBlocklists
+        self.filterLibrary = filterLibrary
     }
 
     public init(from decoder: Decoder) throws {
@@ -124,9 +130,14 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.protectionEnabledHint = try container.decode(Bool.self, forKey: .protectionEnabledHint)
         self.catalogVersionHint = try container.decodeIfPresent(String.self, forKey: .catalogVersionHint)
         self.customBlocklists = try container.decodeIfPresent([CustomBlocklistSource].self, forKey: .customBlocklists) ?? []
+        self.filterLibrary = try container.decodeIfPresent(FilterLibrary.self, forKey: .filterLibrary)
     }
 
-    public init(configuration: AppConfiguration, catalogVersionHint: String? = nil) {
+    public init(
+        configuration: AppConfiguration,
+        catalogVersionHint: String? = nil,
+        filterLibrary: FilterLibrary? = nil
+    ) {
         self.init(
             enabledBlocklistIDs: configuration.enabledBlocklistIDs,
             allowedDomains: configuration.allowedDomains,
@@ -148,8 +159,59 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             lavaGuardUnlocks: configuration.lavaGuardUnlocks,
             protectionEnabledHint: configuration.protectionEnabled,
             catalogVersionHint: catalogVersionHint,
-            customBlocklists: configuration.customBlocklists
+            customBlocklists: configuration.customBlocklists,
+            // Strip every hosted filter's device-LOCAL cache fields (compile tokens,
+            // freshness timestamps) before they enter the portable payload: they describe
+            // THIS device's artifact directories, are useless on a restore target, and would
+            // otherwise make a maintenance persist that only restamps a token look like a
+            // content change and churn the backup's upload marker.
+            filterLibrary: filterLibrary?.strippingLocalCacheState()
         )
+    }
+
+    /// Whether two payloads carry the same backed-up CONTENT, ignoring
+    /// `protectionEnabledHint`. Protection is toggled constantly (pause/resume, the Live
+    /// Activity button) and is only an advisory restore hint, so a toggle on its own must
+    /// not re-seal the envelope and flip an already-uploaded backup to "not uploaded". Every
+    /// other field still defines content; `filterLibrary` is cache-stripped at construction,
+    /// so library equality here is true content equality.
+    ///
+    /// Consequence (intended, best-effort): because a lone protection toggle is skipped, the
+    /// sealed/uploaded `protectionEnabledHint` only refreshes at the next CONTENT change, so a
+    /// restore can land on a slightly stale protection state. This is fail-closed — the worst case
+    /// is protection restored OFF when the source had it ON (one tap to re-enable), never the
+    /// reverse — and on a fresh device the hint is largely inert anyway (`restoreProtectionIfNeeded`
+    /// is onboarding-gated and can't auto-start the VPN). The currency win (no marker churn on
+    /// pause/resume) outweighs the hint lag.
+    public func hasSameBackupContent(as other: BackupConfigurationPayload) -> Bool {
+        schemaVersion == other.schemaVersion
+            && enabledBlocklistIDs == other.enabledBlocklistIDs
+            && allowedDomains == other.allowedDomains
+            && blockedDomains == other.blockedDomains
+            && resolverPresetID == other.resolverPresetID
+            && customResolverAddress == other.customResolverAddress
+            && customResolverSecondaryAddress == other.customResolverSecondaryAddress
+            && customResolverName == other.customResolverName
+            && fallbackToDeviceDNS == other.fallbackToDeviceDNS
+            && usesEncryptedDeviceDNSFallback == other.usesEncryptedDeviceDNSFallback
+            && fallbackResolverPresetID == other.fallbackResolverPresetID
+            && fallbackCustomResolverAddress == other.fallbackCustomResolverAddress
+            && fallbackCustomResolverSecondaryAddress == other.fallbackCustomResolverSecondaryAddress
+            && fallbackCustomResolverName == other.fallbackCustomResolverName
+            && keepFilteringCounts == other.keepFilteringCounts
+            && keepDomainDiagnostics == other.keepDomainDiagnostics
+            && keepNetworkActivity == other.keepNetworkActivity
+            && keepLavaGuardProgress == other.keepLavaGuardProgress
+            && lavaGuardUnlocks == other.lavaGuardUnlocks
+            && catalogVersionHint == other.catalogVersionHint
+            && customBlocklists == other.customBlocklists
+            && filterLibrary == other.filterLibrary
+    }
+
+    /// The restored multi-filter library, or `nil` for a pre-multi-filter backup (the
+    /// caller then migrates `restoredConfiguration()` into a single "Default" filter).
+    public func restoredFilterLibrary() -> FilterLibrary? {
+        filterLibrary
     }
 
     public func restoredConfiguration() -> AppConfiguration {
