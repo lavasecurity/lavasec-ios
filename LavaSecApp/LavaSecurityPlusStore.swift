@@ -17,8 +17,6 @@ struct LavaSecurityPlusOffer: Identifiable {
             "Monthly"
         case .yearly:
             "Yearly"
-        case .lifetime:
-            "Lifetime"
         }
     }
 
@@ -28,8 +26,6 @@ struct LavaSecurityPlusOffer: Identifiable {
             "Flexible subscription"
         case .yearly:
             "Best value"
-        case .lifetime:
-            "One-time unlock"
         }
     }
 }

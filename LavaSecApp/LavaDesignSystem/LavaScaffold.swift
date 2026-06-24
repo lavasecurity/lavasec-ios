@@ -20,11 +20,14 @@ extension View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    func lavaQuietNoteText(horizontalPadding: CGFloat = 4) -> some View {
+    /// Quiet helper / footer text. Intentionally carries NO horizontal inset so it
+    /// sits flush (0-indent) with section titles and card edges — the single shared
+    /// baseline. Do NOT wrap call sites in `.padding(.horizontal, …)`; that is what
+    /// reintroduces the misaligned-quiet-text drift.
+    func lavaQuietNoteText() -> some View {
         font(.footnote)
             .foregroundStyle(LavaStyle.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, horizontalPadding)
     }
 
     func lavaRowSubtitleText() -> some View {
@@ -654,8 +657,11 @@ struct NativeToolbarIconButton: View {
 
     var body: some View {
         Button(role: role.flatMap(\.buttonRole), action: action) {
-            LavaToolbarIconSymbol(systemName: systemName)
-                .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
+            LavaToolbarIconSymbol(
+                systemName: systemName,
+                isDestructive: role.flatMap(\.buttonRole) == .destructive
+            )
+            .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
         }
         .accessibilityLabel(accessibilityLabel)
     }
@@ -665,14 +671,25 @@ private struct LavaToolbarIconSymbol: View {
     @Environment(\.isEnabled) private var isEnabled
 
     let systemName: String
+    /// When the host button carries the destructive role, render the glyph in the
+    /// system destructive red so the role reads visually — the enclosing Button's
+    /// own tint is otherwise overridden by this explicit `foregroundStyle`.
+    var isDestructive: Bool = false
 
     var body: some View {
         Image(systemName: systemName)
             .font(.system(size: iconPointSize, weight: .semibold))
-            .foregroundStyle(isEnabled ? LavaStyle.ink : LavaStyle.tertiaryText)
+            .foregroundStyle(symbolColor)
             .offset(y: iconVerticalOffset)
             .opacity(isEnabled ? 1 : 0.45)
             .accessibilityHidden(true)
+    }
+
+    private var symbolColor: Color {
+        guard isEnabled else {
+            return LavaStyle.tertiaryText
+        }
+        return isDestructive ? .red : LavaStyle.ink
     }
 
     private var iconPointSize: CGFloat {
@@ -701,5 +718,59 @@ private struct LavaToolbarIconSymbol: View {
         default:
             0
         }
+    }
+}
+
+// MARK: - Staged-flow push transition
+
+/// Direction of travel through a self-managed staged flow — one view that swaps
+/// its body across a `switch`-driven stage/step machine instead of pushing onto
+/// a `NavigationStack`. Forward mimics a native push (the incoming page enters
+/// from the trailing edge while the outgoing page leaves toward the leading
+/// edge); backward reverses it, matching a pop.
+enum LavaFlowDirection {
+    case forward
+    case backward
+}
+
+/// The slide used by staged flows (Import a filter, Set up backup) so stepping
+/// between their stages reads like the system push/pop the rest of the app gets
+/// for free from `NavigationStack`, rather than a hard cut.
+enum LavaFlowTransition {
+    /// Timing for a staged-flow page change — tuned a touch quicker than the
+    /// system push, and softened to a plain fade under Reduce Motion.
+    static func animation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .easeOut(duration: 0.32)
+    }
+
+    /// Horizontal push/pop transition honoring `direction`. Reduce Motion trades
+    /// the slide for a cross-fade — still allowed, as a fade carries no motion.
+    static func transition(_ direction: LavaFlowDirection, reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else {
+            return .opacity
+        }
+        let insertionEdge: Edge = direction == .backward ? .leading : .trailing
+        let removalEdge: Edge = direction == .backward ? .trailing : .leading
+        return .asymmetric(
+            insertion: .move(edge: insertionEdge),
+            removal: .move(edge: removalEdge)
+        )
+    }
+}
+
+extension View {
+    /// Cross-slides between the stages of a self-managed flow as `value` changes,
+    /// mimicking a `NavigationStack` push/pop. Apply to the switched stage content
+    /// and host it in a stable container (e.g. a `ZStack`) so the outgoing and
+    /// incoming pages overlap during the slide instead of reflowing. Drive the
+    /// `value` change inside `withAnimation(LavaFlowTransition.animation(...))`
+    /// and pass the matching `direction` so the slide reads the right way.
+    func lavaFlowTransition<V: Hashable>(
+        value: V,
+        direction: LavaFlowDirection,
+        reduceMotion: Bool
+    ) -> some View {
+        id(value)
+            .transition(LavaFlowTransition.transition(direction, reduceMotion: reduceMotion))
     }
 }

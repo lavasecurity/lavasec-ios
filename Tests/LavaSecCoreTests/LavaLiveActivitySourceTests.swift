@@ -164,6 +164,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let lavaGuardUnlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
         let progressPrivacyIndex = try XCTUnwrap(customizationBlock.range(of: "Lava Guard progress requires local logs")?.lowerBound)
         XCTAssertLessThan(lavaGuardUnlockNoteIndex, progressPrivacyIndex)
+        // The unlock panel uses the shared info-panel supporting-text style rather
+        // than its own one-off subheadline/footnote sizes.
+        XCTAssertTrue(customizationBlock.contains(".lavaSupportingText()"))
+        XCTAssertFalse(customizationBlock.contains(".font(.footnote)"))
         XCTAssertTrue(customizationBlock.contains("if !viewModel.configuration.hasLavaSecurityPlus {"))
         XCTAssertTrue(customizationBlock.contains(".environment(\\.openURL, OpenURLAction"))
         XCTAssertTrue(customizationBlock.contains("showUpgradePage = true"))
@@ -195,8 +199,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains(".frame(minHeight: LavaGuardLookRowMetrics.minRowHeight)"))
         XCTAssertTrue(customizationBlock.contains("static let titleFontSize: CGFloat = 16"))
         XCTAssertTrue(customizationBlock.contains("static let subtitleFontSize: CGFloat = 15"))
-        XCTAssertTrue(customizationBlock.contains("static let selectedCornerRadius: CGFloat = 10"))
-        XCTAssertTrue(customizationBlock.contains("static let selectedHighlightOpacity: Double = 0.08"))
+        // The selected row is now marked by the radio glyph alone — the tinted
+        // background (and the metrics that drove it) is gone.
+        XCTAssertFalse(customizationBlock.contains("static let selectedCornerRadius"))
+        XCTAssertFalse(customizationBlock.contains("static let selectedHighlightOpacity"))
         XCTAssertTrue(customizationBlock.contains("let contourSize = size * 1.12"))
         XCTAssertTrue(customizationBlock.contains("let availability: LavaGuardAvailability"))
         XCTAssertTrue(customizationBlock.contains("if showsDescription,"))
@@ -218,11 +224,18 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(customizationBlock.contains("Image(systemName: \"checkmark\")"))
         XCTAssertTrue(customizationBlock.contains(".lineLimit(1)"))
         XCTAssertTrue(customizationBlock.contains(".lineLimit(2)"))
-        XCTAssertTrue(customizationBlock.contains(".background(selectedHighlight)"))
-        XCTAssertTrue(customizationBlock.contains("private var selectedHighlight: some View"))
-        XCTAssertTrue(customizationBlock.contains("look.dynamicIslandStatusGlyphColor.opacity(LavaGuardLookRowMetrics.selectedHighlightOpacity)"))
+        XCTAssertFalse(customizationBlock.contains(".background(selectedHighlight)"))
+        XCTAssertFalse(customizationBlock.contains("private var selectedHighlight: some View"))
+        XCTAssertFalse(customizationBlock.contains("look.dynamicIslandStatusGlyphColor.opacity(LavaGuardLookRowMetrics.selectedHighlightOpacity)"))
         XCTAssertFalse(customizationBlock.contains(".padding(.horizontal, -LavaGuardLookRowMetrics"))
-        XCTAssertTrue(customizationBlock.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        // The option row now delegates layout + selection accessory + a11y trait to
+        // the shared LavaSelectableRow scaffold; the bespoke trailing radio is gone.
+        XCTAssertTrue(customizationBlock.contains("LavaSelectableRow("))
+        XCTAssertTrue(customizationBlock.contains("private var selectionState: LavaRowSelectionState"))
+        XCTAssertTrue(customizationBlock.contains("return isSelected ? .selected : .unselected"))
+        XCTAssertFalse(customizationBlock.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        XCTAssertFalse(customizationBlock.contains("largecircle.fill.circle"))
+        XCTAssertFalse(customizationBlock.contains("private var selectionIndicator: some View"))
         XCTAssertTrue(customizationBlock.contains("\"A Lava a day keeps bad domains away.\""))
         XCTAssertTrue(customizationBlock.contains("\"Always check the link first.\""))
         XCTAssertTrue(customizationBlock.contains("\"Block it once. Browse in peace.\""))
@@ -243,9 +256,16 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLiveActivities(isEnabled)"))
         XCTAssertTrue(customizationBlock.contains("Shows Lava status on the Lock Screen and Dynamic Island when available."))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Language\")"))
-        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
+        // Section order: Lava Guard, Live Activities, Haptics, Appearance, Language.
+        let lavaGuardIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Lava Guard\")")?.lowerBound)
         let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
-        XCTAssertLessThan(appearanceIndex, liveActivitiesIndex)
+        let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
+        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
+        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
+        XCTAssertLessThan(lavaGuardIndex, liveActivitiesIndex)
+        XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
+        XCTAssertLessThan(hapticsIndex, appearanceIndex)
+        XCTAssertLessThan(appearanceIndex, languageIndex)
 
         let guardPickerIndex = try XCTUnwrap(customizationBlock.range(of: "LavaGuardLookPickerRow(")?.lowerBound)
         let unlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
@@ -255,14 +275,89 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertLessThan(matchIconIndex, paidGateIndex)
         XCTAssertLessThan(paidGateIndex, unlockNoteIndex)
         XCTAssertTrue(customizationBlock.contains("SettingsSystemSettingsRow(title: \"Change in iOS Settings\")"))
-        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        let lavaGuardIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Lava Guard\")")?.lowerBound)
-        XCTAssertLessThan(languageIndex, lavaGuardIndex)
         XCTAssertFalse(customizationBlock.contains("systemImage: \"globe\""))
         XCTAssertFalse(customizationBlock.contains("SettingsSystemSettingsRow(title: \"Open iOS Settings\")"))
         XCTAssertFalse(customizationBlock.contains("summary: \"Open iOS Settings\""))
         XCTAssertFalse(customizationBlock.contains("Opens iOS Settings > Lava Security > Language."))
         XCTAssertFalse(customizationBlock.contains("Turning this on lets Lava request"))
+    }
+
+    func testCustomizationPageOffersLavaHapticsToggleBetweenLiveActivitiesAndLanguage() throws {
+        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let customizationBlock = try sourceBlock(
+            in: settings,
+            startingAt: "private struct CustomizationSettingsView: View",
+            endingBefore: "struct DNSResolverSettingsView: View"
+        )
+
+        // The standalone Haptics section, not the removed "Appearance & Haptics" /
+        // "Haptic Feedback" / configuration-backed `playsHapticFeedback` design.
+        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Haptics\")"))
+        XCTAssertTrue(customizationBlock.contains("Toggle(\"App Haptics\", isOn: lavaHapticsBinding)"))
+        // The note scopes this to Lava's own taps — system haptics (keyboard
+        // feedback, etc.) keep firing after this is off, which is why an earlier
+        // app-wide haptics toggle was dropped.
+        XCTAssertTrue(customizationBlock.contains("Lava's own taps. System haptics stay with iOS."))
+        XCTAssertFalse(customizationBlock.contains("LavaSectionGroup(\"Appearance & Haptics\")"))
+        XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
+        XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))
+        XCTAssertFalse(customizationBlock.contains("viewModel.configuration.playsHapticFeedback"))
+        XCTAssertFalse(customizationBlock.contains("viewModel.setHapticFeedback(isEnabled)"))
+
+        // Binding routes through the same auth-gated mutation as the other toggles.
+        XCTAssertTrue(customizationBlock.contains("private var lavaHapticsBinding: Binding<Bool>"))
+        XCTAssertTrue(customizationBlock.contains("viewModel.usesLavaHaptics"))
+        XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLavaHaptics(isEnabled)"))
+
+        let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
+        let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
+        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
+        XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
+        XCTAssertLessThan(hapticsIndex, languageIndex)
+    }
+
+    func testLiveActivityPauseLengthStepperIsGatedToLiveActivitiesSection() throws {
+        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let presenter = try readSource("LavaSecApp/ProtectionPlatformSeams.swift")
+        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
+        let customizationBlock = try sourceBlock(
+            in: settings,
+            startingAt: "private struct CustomizationSettingsView: View",
+            endingBefore: "struct DNSResolverSettingsView: View"
+        )
+        let liveActivitiesSection = try sourceBlock(
+            in: customizationBlock,
+            startingAt: "LavaSectionGroup(\"Live Activities\")",
+            endingBefore: "LavaSectionGroup(\"Haptics\")"
+        )
+
+        // The stepper lives inside the Live Activities section, only when the
+        // feature is on (the Pause button it tunes only exists then), and binds
+        // through the same auth-gated mutation as the toggle.
+        XCTAssertTrue(liveActivitiesSection.contains("if viewModel.usesLiveActivities {"))
+        XCTAssertTrue(liveActivitiesSection.contains("Stepper("))
+        XCTAssertTrue(liveActivitiesSection.contains("value: liveActivityPauseMinutesBinding"))
+        XCTAssertTrue(liveActivitiesSection.contains("in: LiveActivityPausePreference.minutesRange"))
+        XCTAssertTrue(liveActivitiesSection.contains("Text(viewModel.liveActivityPauseLengthLabel)"))
+        XCTAssertTrue(customizationBlock.contains("private var liveActivityPauseMinutesBinding: Binding<Int>"))
+        XCTAssertTrue(customizationBlock.contains("viewModel.setLiveActivityPauseMinutes(minutes)"))
+
+        // View-model side: published value, clamped persistence to the app group,
+        // a reconcile so the live button relabels, and the format-string label.
+        XCTAssertTrue(appViewModel.contains("@Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes"))
+        XCTAssertTrue(appViewModel.contains("func setLiveActivityPauseMinutes(_ minutes: Int)"))
+        XCTAssertTrue(appViewModel.contains("let clampedMinutes = LiveActivityPausePreference.clamp(minutes)"))
+        XCTAssertTrue(appViewModel.contains("LiveActivityPausePreference.setMinutes(\n            clampedMinutes,\n            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
+        XCTAssertTrue(appViewModel.contains("\"Pause length: %d min\".lavaLocalizedFormat(liveActivityPauseMinutes)"))
+        XCTAssertTrue(appViewModel.contains("liveActivityPauseMinutes = LiveActivityPausePreference.minutes(\n            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
+        XCTAssertTrue(appViewModel.contains("pauseMinutes: liveActivityPauseMinutes"))
+
+        // The configured length is threaded through the presenter seam into the
+        // published content state.
+        XCTAssertTrue(presenter.contains("pauseMinutes: Int"))
+        XCTAssertTrue(controller.contains("pauseMinutes: Int"))
+        XCTAssertTrue(controller.contains("pauseMinutes: pauseMinutes"))
     }
 
     func testMaskedLavaGuardIconUsesOriginalShieldContour() throws {
@@ -362,8 +457,13 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(appViewModel.contains("case system"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var appearancePreference: LavaAppearancePreference = .system"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var usesLiveActivities = false"))
+        XCTAssertTrue(appViewModel.contains("@Published private(set) var usesLavaHaptics = true"))
         XCTAssertTrue(appViewModel.contains("private let appearancePreferenceDefaultsKey = \"lavasec.customization.appearance\""))
         XCTAssertTrue(appViewModel.contains("private let usesLiveActivitiesDefaultsKey = \"lavasec.customization.liveActivities\""))
+        XCTAssertTrue(appViewModel.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey"))
+        XCTAssertTrue(appViewModel.contains("func setUsesLavaHaptics(_ isEnabled: Bool)"))
+        XCTAssertTrue(appViewModel.contains("defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)"))
+        XCTAssertTrue(appViewModel.contains("usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var lavaGuardLook: GuardianShieldStyle = .original"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var lavaGuardProgress = LavaGuardProgress()"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var updatesAppIconWithLavaGuard = true"))
@@ -532,6 +632,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(attributes.contains("var pauseRequiresAuthentication: Bool"))
         XCTAssertTrue(attributes.contains("var shieldStyle: GuardianShieldStyle"))
         XCTAssertTrue(attributes.contains("decodeIfPresent(GuardianShieldStyle.self, forKey: .shieldStyle) ?? .original"))
+        // The configured pause length rides along in the content state, defaulting
+        // through the shared policy when an older payload omits it.
+        XCTAssertTrue(attributes.contains("var pauseMinutes: Int"))
+        XCTAssertTrue(attributes.contains("decodeIfPresent(Int.self, forKey: .pauseMinutes)"))
+        XCTAssertTrue(attributes.contains("?? LiveActivityPausePreference.defaultMinutes"))
         XCTAssertTrue(widget.contains("\"checkmark\""))
         XCTAssertTrue(widget.contains("\"pause.fill\""))
         XCTAssertFalse(widget.contains("\"checkmark.circle.fill\""))
@@ -541,6 +646,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(actionRequest.contains("case pauseFiveMinutes = \"pause-5-minutes\""))
         XCTAssertTrue(actionRequest.contains("case pauseTenMinutes = \"pause-10-minutes\""))
         XCTAssertTrue(actionRequest.contains("case pauseFifteenMinutes = \"pause-15-minutes\""))
+        XCTAssertTrue(actionRequest.contains("case pauseConfigured = \"pause-configured\""))
         XCTAssertTrue(actionRequest.contains("case resume"))
         XCTAssertFalse(actionRequest.contains("case turnOff"))
         XCTAssertFalse(actionRequest.contains("pendingRequestDefaultsKey"))
@@ -548,6 +654,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(actionRequest.contains("static func actionURL"))
         XCTAssertFalse(actionRequest.contains("static func pendingRequest("))
 
+        XCTAssertTrue(intents.contains("struct PauseLavaProtectionIntent: AppIntent, LiveActivityIntent"))
         XCTAssertTrue(intents.contains("struct PauseLavaProtectionFiveMinutesIntent: AppIntent, LiveActivityIntent"))
         XCTAssertTrue(intents.contains("struct PauseLavaProtectionTenMinutesIntent: AppIntent, LiveActivityIntent"))
         XCTAssertTrue(intents.contains("struct AuthenticatedPauseLavaProtectionFiveMinutesIntent: AppIntent, LiveActivityIntent"))
@@ -558,6 +665,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(intents.contains(".requiresLocalDeviceAuthentication"))
         XCTAssertFalse(intents.contains("openAppWhenRun = true"))
         XCTAssertFalse(intents.contains("struct TurnOffLavaProtectionIntent"))
+        XCTAssertTrue(intents.contains("try await LavaProtectionCommandService.perform(.pauseConfigured)"))
         XCTAssertTrue(intents.contains("try await LavaProtectionCommandService.perform(.pauseFiveMinutes)"))
         XCTAssertTrue(intents.contains("try await LavaProtectionCommandService.perform(.pauseTenMinutes)"))
         XCTAssertTrue(intents.contains("try await LavaProtectionCommandService.perform(.resume)"))
@@ -585,6 +693,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(commandService.contains("private static func persistedShieldStyle(defaults: UserDefaults) -> GuardianShieldStyle"))
         XCTAssertTrue(commandService.contains("LavaSecAppGroup.customizationLavaGuardLookDefaultsKey"))
         XCTAssertTrue(commandService.contains("shieldStyle: persistedShieldStyle(defaults: defaults)"))
+
+        // `.pauseConfigured` resolves the user-chosen length from the shared
+        // policy, and the published content state carries it for the button label.
+        XCTAssertTrue(commandService.contains("case .pauseFiveMinutes, .pauseTenMinutes, .pauseFifteenMinutes, .pauseConfigured:"))
+        XCTAssertTrue(commandService.contains("guard let duration = resolvedPauseDuration(for: request, defaults: defaults) else"))
+        XCTAssertTrue(commandService.contains("LiveActivityPausePreference.duration(forMinutes: persistedPauseMinutes(defaults: defaults))"))
+        XCTAssertTrue(commandService.contains("LiveActivityPausePreference.minutes(from: ProtectionUserDefaultsStorage(defaults: defaults))"))
+        XCTAssertTrue(commandService.contains("pauseMinutes: persistedPauseMinutes(defaults: defaults)"))
     }
 
     func testReconnectStateSurfacesTriangleGlyphAndReconnectButton() throws {
@@ -673,8 +789,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: "case .paused:"
         )
         XCTAssertTrue(onStateBlock.contains("if !state.pauseRequiresAuthentication"))
-        XCTAssertTrue(onStateBlock.contains("pauseFiveMinutesButton(\"5 min\")"))
-        XCTAssertTrue(onStateBlock.contains("pauseTenMinutesButton(\"10 min\")"))
+        // Single configured-length Pause button, gated behind the same auth check.
+        XCTAssertTrue(onStateBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
+        XCTAssertFalse(onStateBlock.contains("pauseFiveMinutesButton(\"5 min\")"))
+        XCTAssertFalse(onStateBlock.contains("pauseTenMinutesButton(\"10 min\")"))
         XCTAssertFalse(widget.contains("AuthenticatedPauseLavaProtectionFiveMinutesIntent"))
         XCTAssertFalse(widget.contains("AuthenticatedPauseLavaProtectionTenMinutesIntent"))
 
@@ -949,9 +1067,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("static let expandedActionSymbolFontSize: CGFloat = 15"))
         XCTAssertTrue(widget.contains("static let expandedActionLabelSpacing: CGFloat = 8"))
         XCTAssertTrue(widget.contains("HStack(alignment: .center, spacing: LavaLiveActivityStyle.expandedMascotContentSpacing)"))
-        XCTAssertTrue(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing)"))
+        // The two-up pause HStack is gone; a single full-width Pause button replaces it.
+        XCTAssertFalse(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing)"))
         XCTAssertTrue(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionLabelSpacing)"))
-        XCTAssertTrue(widget.contains(".frame(width: LavaLiveActivityStyle.expandedActionButtonWidth)"))
+        // The Pause label now sizes to the full (resume) button width, not the half width.
+        XCTAssertFalse(widget.contains(".frame(width: LavaLiveActivityStyle.expandedActionButtonWidth)"))
         XCTAssertTrue(widget.contains(".frame(width: LavaLiveActivityStyle.expandedResumeButtonWidth)"))
         XCTAssertTrue(widget.contains(".buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))"))
         XCTAssertEqual(
@@ -975,14 +1095,18 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(widget.contains("LavaLiveActivityStyle.buttonFill"))
         XCTAssertFalse(widget.contains("LavaLiveActivityStyle.buttonForeground"))
         XCTAssertFalse(widget.contains("Text(\"Pause for\")"))
-        XCTAssertTrue(widget.contains("pauseFiveMinutesButton(\"5 min\")"))
-        XCTAssertTrue(widget.contains("pauseTenMinutesButton(\"10 min\")"))
+        // A single configured-length Pause button replaces the fixed 5/10-min pair.
+        XCTAssertFalse(widget.contains("pauseFiveMinutesButton(\"5 min\")"))
+        XCTAssertFalse(widget.contains("pauseTenMinutesButton(\"10 min\")"))
+        XCTAssertTrue(widget.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
+        XCTAssertTrue(widget.contains("\"Pause for \\(minutes) min\""))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
         XCTAssertTrue(widget.contains("if !state.pauseRequiresAuthentication"))
+        XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionIntent())"))
         XCTAssertFalse(widget.contains("Button(intent: AuthenticatedPauseLavaProtectionFiveMinutesIntent())"))
-        XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionFiveMinutesIntent())"))
+        XCTAssertFalse(widget.contains("Button(intent: PauseLavaProtectionFiveMinutesIntent())"))
         XCTAssertFalse(widget.contains("Button(intent: AuthenticatedPauseLavaProtectionTenMinutesIntent())"))
-        XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionTenMinutesIntent())"))
+        XCTAssertFalse(widget.contains("Button(intent: PauseLavaProtectionTenMinutesIntent())"))
         XCTAssertFalse(widget.contains("Link(destination: url)"))
         XCTAssertFalse(widget.contains("LavaLiveActivityActionRequest.actionURL"))
         XCTAssertFalse(widget.contains("Button(\"Turn off\""))

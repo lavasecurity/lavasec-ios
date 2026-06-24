@@ -5,9 +5,13 @@ import UniformTypeIdentifiers
 
 struct BackupSetupView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var viewModel: AppViewModel
 
     @State private var step: BackupSetupStep = .overview
+    /// Whether the next step swap reads as a push or a pop, so the slide matches
+    /// the direction of travel. Set by `go(to:)` from the step ordering.
+    @State private var navDirection: LavaFlowDirection = .forward
     @State private var selectedPasskeyMode: BackupSetupPasskeyMode?
     @State private var recoveryPhrase = ""
     @State private var copiedRecoveryPhrase = false
@@ -22,11 +26,28 @@ struct BackupSetupView: View {
         LavaSheetScaffold {
             header
         } content: {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(step.subtitle.lavaLocalized)
-                    .lavaSupportingText()
+            // The chevron-back header and footer actions stay put on the sheet
+            // while the step body slides, mirroring a native push/pop (the title
+            // bar and toolbar holding still as the page underneath moves).
+            ZStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 14) {
+                    // The landing step leads with a boxed intro panel (matching
+                    // BackupRestoreView's on-ramp); later steps use the quieter
+                    // per-step supporting subtitle.
+                    if step == .overview {
+                        LavaInfoPanel(
+                            title: "Your backup stays private",
+                            description: step.subtitle,
+                            systemImage: "lock.shield.fill"
+                        )
+                    } else {
+                        Text(step.subtitle.lavaLocalized)
+                            .lavaSupportingText()
+                    }
 
-                stepContent
+                    stepContent
+                }
+                .lavaFlowTransition(value: step, direction: navDirection, reduceMotion: reduceMotion)
             }
         } footer: {
             footer
@@ -42,6 +63,7 @@ struct BackupSetupView: View {
         .onAppear {
             ensureRecoveryPhrase()
         }
+        .lavaTier(.calm)
     }
 
     // Mirror the import-filters sheet chrome: a chevron-back / centered-title bar on
@@ -88,7 +110,7 @@ struct BackupSetupView: View {
         case .validatePasskey:
             cancelPasskeyValidation()
         case .recoveryPhrase, .confirm:
-            step = step.previous
+            go(to: step.previous)
         }
     }
 
@@ -113,7 +135,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "key.fill",
                         title: "This device",
-                        detail: "A local unlock is saved in Keychain. Lava never sees it."
+                        detail: "A local unlock key is kept safe on this phone. Lava never sees it."
                     )
 
                     Divider()
@@ -121,7 +143,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "person.badge.key.fill",
                         title: "Passkey",
-                        detail: "Optional (iOS 18+). Saved in your password manager and used to restore on a new device — the key is derived on your device, so Lava still can't read your backup."
+                        detail: "Optional (iOS 18+). Saved in your password manager to restore on a new device. Your phone makes the key itself, so Lava still can't read your backup."
                     )
 
                     Divider()
@@ -190,6 +212,7 @@ struct BackupSetupView: View {
                             ]
                         )
                         copiedRecoveryPhrase = true
+                        ProtectionHapticFeedback.play(.selectionConfirmed)
                     } label: {
                         Label((copiedRecoveryPhrase ? "Copied" : "Copy phrase").lavaLocalized, systemImage: copiedRecoveryPhrase ? "checkmark" : "doc.on.doc")
                     }
@@ -336,7 +359,7 @@ struct BackupSetupView: View {
 
         guard mode == .withPasskey else {
             viewModel.clearPendingBackupPasskey()
-            step = .recoveryPhrase
+            go(to: .recoveryPhrase)
             return
         }
 
@@ -344,7 +367,7 @@ struct BackupSetupView: View {
         Task {
             do {
                 try await viewModel.registerBackupPasskey()
-                step = .validatePasskey
+                go(to: .validatePasskey)
             } catch {
                 selectedPasskeyMode = nil
                 errorMessage = error.localizedDescription
@@ -373,7 +396,7 @@ struct BackupSetupView: View {
             if let failure {
                 errorMessage = failure
             } else {
-                step = .recoveryPhrase
+                go(to: .recoveryPhrase)
             }
         }
     }
@@ -382,17 +405,17 @@ struct BackupSetupView: View {
         viewModel.clearPendingBackupPasskey()
         selectedPasskeyMode = nil
         errorMessage = nil
-        step = .overview
+        go(to: .overview)
     }
 
     private func advance() {
         switch step {
         case .overview:
-            step = .recoveryPhrase
+            go(to: .recoveryPhrase)
         case .validatePasskey:
             break
         case .recoveryPhrase:
-            step = .confirm
+            go(to: .confirm)
         case .confirm:
             guard !isFinishingSetup else {
                 return
@@ -402,10 +425,12 @@ struct BackupSetupView: View {
             Task {
                 do {
                     try await viewModel.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
+                    ProtectionHapticFeedback.play(.actionSucceeded)
                     dismiss()
                 } catch {
                     errorMessage = error.localizedDescription
                     isFinishingSetup = false
+                    ProtectionHapticFeedback.play(.actionFailed)
                 }
             }
         }
@@ -420,6 +445,16 @@ struct BackupSetupView: View {
             recoveryPhrase = try BackupRecoveryPhrase.generate()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Moves to `newStep`, sliding in the direction implied by the step ordering
+    /// (later = push, earlier = pop) so the transition matches a native
+    /// navigation stack.
+    private func go(to newStep: BackupSetupStep) {
+        navDirection = newStep.order >= step.order ? .forward : .backward
+        withAnimation(LavaFlowTransition.animation(reduceMotion: reduceMotion)) {
+            step = newStep
         }
     }
 }
@@ -446,7 +481,7 @@ private enum BackupSetupStep {
     var subtitle: String {
         switch self {
         case .overview:
-            "Your lists are encrypted on your device before upload. Only you can decrypt them — with your recovery phrase, or a Passkey on a supported device. Lava only ever stores encrypted data and can never read your backup."
+            "Your lists are encrypted on your device before upload. Only you can unlock them — with your recovery phrase or a Passkey. Lava only ever stores encrypted data."
         case .validatePasskey:
             "Use your passkey once more so Lava can confirm it unlocks this backup, then save your recovery phrase."
         case .recoveryPhrase:
@@ -471,6 +506,18 @@ private enum BackupSetupStep {
             .overview
         case .confirm:
             .recoveryPhrase
+        }
+    }
+
+    /// Depth in the flow, so `go(to:)` can tell a push from a pop. validatePasskey
+    /// and recoveryPhrase are both reached straight from overview, so either can
+    /// follow it as a forward step.
+    var order: Int {
+        switch self {
+        case .overview: 0
+        case .validatePasskey: 1
+        case .recoveryPhrase: 2
+        case .confirm: 3
         }
     }
 }

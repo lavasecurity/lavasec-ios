@@ -112,6 +112,25 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         return identity.hasSameConfigurationInputs(as: configuration)
     }
 
+    /// Full-snapshot parity for `CompactFilterSnapshotSummary.canServeAsLastKnownGood`.
+    /// See that method: serviceable last-known-good for a failed fresh (re)compile —
+    /// tolerates ONLY stale catalog/guardrail content hashes while still requiring the same
+    /// configuration inputs + coverage + resolver transport (so it never fails OPEN and a
+    /// parser bump still forces a regenerate).
+    public func canServeAsLastKnownGood(for configuration: AppConfiguration) -> Bool {
+        guard resolver.transport == configuration.resolverPreset.transport else {
+            return false
+        }
+
+        if !configuration.enabledBlocklistIDs.isEmpty {
+            guard summary.coversEnabledBlocklists(in: configuration) else {
+                return false
+            }
+        }
+
+        return identity.hasSameConfigurationInputs(as: configuration)
+    }
+
     public func decision(for rawDomain: String) -> FilterDecision {
         guard let normalizedDomain = try? DomainName.normalize(rawDomain) else {
             return FilterDecision(action: .block, reason: .invalidDomain)
@@ -137,6 +156,38 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
     }
 
     public func encodedData() throws -> Data {
+        let header = try Self.encodedHeader(
+            identity: identity,
+            generatedAt: generatedAt,
+            resolver: resolver,
+            summary: summary
+        )
+
+        var data = Data()
+        data.reserveCapacity(
+            header.count
+                + blockRules.encodedSizeEstimate
+                + allowRules.encodedSizeEstimate
+                + nonAllowableThreatRules.encodedSizeEstimate
+        )
+        data.append(header)
+        try blockRules.appendEncodedData(to: &data)
+        try allowRules.appendEncodedData(to: &data)
+        try nonAllowableThreatRules.appendEncodedData(to: &data)
+        return data
+    }
+
+    /// Single source of truth for the file PREAMBLE (magic + version + length-prefixed
+    /// metadata JSON), shared by `encodedData()` and the in-extension streaming writer
+    /// (`writeStreaming`) so neither can drift from the other. The metadata always
+    /// carries `summarySchema = metadataSummarySchemaVersion`, so a reader can trust the
+    /// stored summary after cross-checking its counts against the rule tables.
+    static func encodedHeader(
+        identity: PreparedFilterSnapshotIdentity,
+        generatedAt: Date,
+        resolver: DNSResolverPreset,
+        summary: PreparedFilterSnapshotSummary
+    ) throws -> Data {
         let metadata = CompactFilterSnapshotMetadata(
             identity: identity,
             generatedAt: generatedAt,
@@ -150,23 +201,95 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         }
 
         var data = Data()
-        data.reserveCapacity(
-            Self.magic.count
-                + 8
-                + metadataData.count
-                + blockRules.encodedSizeEstimate
-                + allowRules.encodedSizeEstimate
-                + nonAllowableThreatRules.encodedSizeEstimate
-        )
+        data.reserveCapacity(Self.magic.count + 8 + metadataData.count)
         data.append(Self.magic)
         data.appendLittleEndian(Self.fileVersion)
         data.appendLittleEndian(UInt32(metadataData.count))
         data.append(metadataData)
-        try blockRules.appendEncodedData(to: &data)
-        try allowRules.appendEncodedData(to: &data)
-        try nonAllowableThreatRules.appendEncodedData(to: &data)
         return data
     }
+
+    /// Streams a byte-valid `CompactFilterSnapshot` to `fileHandle` WITHOUT holding the
+    /// large block-rule domain blob in heap — the in-extension fallback's whole reason
+    /// for existing. The block table's entries (the ~8 B/rule resident cost, supplied by
+    /// the caller already sorted byte-lexicographically and deduped) are written through a
+    /// bounded buffer, then the domain bytes are stream-copied from `blockDomainDataURL`
+    /// (the insertion-order blob the caller built on disk; its bytes need not be sorted —
+    /// only the entries do — so duplicate/dead bytes are harmless). `allowRules` and
+    /// `nonAllowableThreatRules` are small and encoded in heap via the same
+    /// `appendEncodedData` path as `encodedData()`. All format knowledge lives here and in
+    /// `CompactDomainRuleSet.emitTablePrefix`, the single source of truth.
+    static func writeStreaming(
+        to fileHandle: FileHandle,
+        identity: PreparedFilterSnapshotIdentity,
+        generatedAt: Date,
+        resolver: DNSResolverPreset,
+        summary: PreparedFilterSnapshotSummary,
+        blockExactEntries: [CompactDomainRuleSet.Entry],
+        blockSuffixEntries: [CompactDomainRuleSet.Entry],
+        blockDomainDataURL: URL,
+        blockDomainDataCount: Int,
+        allowRules: CompactDomainRuleSet,
+        nonAllowableThreatRules: CompactDomainRuleSet
+    ) throws {
+        try CompactDomainRuleSet.validateTableSizes(
+            exactCount: blockExactEntries.count,
+            suffixCount: blockSuffixEntries.count,
+            domainDataCount: blockDomainDataCount
+        )
+
+        try fileHandle.lavaWrite(try encodedHeader(
+            identity: identity,
+            generatedAt: generatedAt,
+            resolver: resolver,
+            summary: summary
+        ))
+
+        // Block table prefix (counts + entries + blobLen) through a bounded buffer.
+        var buffer = Data()
+        buffer.reserveCapacity(Self.streamingFlushThreshold + 16)
+        try CompactDomainRuleSet.emitTablePrefix(
+            exactEntries: blockExactEntries,
+            suffixEntries: blockSuffixEntries,
+            domainDataCount: blockDomainDataCount,
+            into: &buffer,
+            flushThreshold: Self.streamingFlushThreshold,
+            flush: { chunk in
+                try fileHandle.lavaWrite(chunk)
+                chunk.removeAll(keepingCapacity: true)
+            }
+        )
+        if !buffer.isEmpty {
+            try fileHandle.lavaWrite(buffer)
+            buffer.removeAll(keepingCapacity: true)
+        }
+
+        // Block table domain blob: stream-copy the on-disk insertion-order blob.
+        let blobHandle = try FileHandle(forReadingFrom: blockDomainDataURL)
+        defer { try? blobHandle.close() }
+        var copied = 0
+        while true {
+            let chunk = try blobHandle.read(upToCount: Self.streamingFlushThreshold) ?? Data()
+            if chunk.isEmpty { break }
+            try fileHandle.lavaWrite(chunk)
+            copied += chunk.count
+        }
+        guard copied == blockDomainDataCount else {
+            // The entries' offsets were computed against a blob of `blockDomainDataCount`
+            // bytes; a short/long copy would make them point out of bounds. Fail closed.
+            throw CompactFilterSnapshotError.truncatedData
+        }
+
+        // Allow + threat tables are small — encode in heap exactly as `encodedData()`.
+        var tail = Data()
+        try allowRules.appendEncodedData(to: &tail)
+        try nonAllowableThreatRules.appendEncodedData(to: &tail)
+        try fileHandle.lavaWrite(tail)
+    }
+
+    /// Buffer flush size for `writeStreaming` (64 KiB): bounds the heap held while
+    /// streaming the block entry table and copying the domain blob.
+    static let streamingFlushThreshold = 64 * 1024
 
     public static func decode(from data: Data) throws -> CompactFilterSnapshot {
         var reader = CompactBinaryReader(data: data)
@@ -353,10 +476,45 @@ public struct CompactFilterSnapshotSummary: Equatable, Sendable {
 
         return identity.hasSameConfigurationInputs(as: configuration)
     }
+
+    /// Whether this artifact is safe to serve as a LAST-KNOWN-GOOD fallback when a
+    /// fresh (re)compile cannot be produced — the rotating-upstream / stale-pinned-hash
+    /// wedge: a `source_url_only` blocklist's upstream rotated past the catalog's pinned
+    /// hash, so the strict reuse gate (`canReuseForProtectionStartup`) rejects this
+    /// artifact on the catalog-hash diff and the in-extension recompile throws
+    /// `checksumMismatch` against the stale cached source content.
+    ///
+    /// This is STRICTLY WEAKER than `canReuseForProtectionStartup` in exactly one way:
+    /// it tolerates stale catalog/guardrail content hashes/versions (the catalog-managed
+    /// fields). It keeps the resolver-transport and coverage guards and still requires the
+    /// SAME CONFIGURATION INPUTS (`hasSameConfigurationInputs`: enabled-list set, manual
+    /// block/allow domains, custom-list fingerprints, AND the current parser rules version).
+    /// So it never silently fails OPEN — the enabled-list set must match exactly, so we only ever
+    /// re-serve the user's own previously-compiled, previously-verified rules — and a
+    /// parser-rules bump still forces a regenerate. Serving those rules a few hours
+    /// stale beats clearing protection to zero on a cold start. The caller returns the
+    /// artifact's own (stale) identity, so the tunnel reloads to fresh rules as soon as
+    /// the app republishes a buildable artifact.
+    public func canServeAsLastKnownGood(for configuration: AppConfiguration) -> Bool {
+        guard resolver.transport == configuration.resolverPreset.transport else {
+            return false
+        }
+
+        if !configuration.enabledBlocklistIDs.isEmpty {
+            guard coversEnabledBlocklists(in: configuration) else {
+                return false
+            }
+        }
+
+        return identity.hasSameConfigurationInputs(as: configuration)
+    }
 }
 
 public struct CompactDomainRuleSet: Equatable, Sendable {
-    fileprivate struct Entry: Equatable, Sendable {
+    // Internal (not fileprivate) so the in-extension streaming writer
+    // (`StreamingCompactSnapshotCompiler`) can build entries that point into the blob it
+    // streams to disk and hand them to `CompactFilterSnapshot.writeStreaming`.
+    struct Entry: Equatable, Sendable {
         let offset: UInt32
         let length: UInt16
     }
@@ -458,25 +616,65 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
     }
 
     fileprivate func appendEncodedData(to data: inout Data) throws {
-        guard exactEntries.count <= Int(UInt32.max),
-              suffixEntries.count <= Int(UInt32.max),
-              domainData.count <= Int(UInt32.max)
+        try Self.validateTableSizes(
+            exactCount: exactEntries.count,
+            suffixCount: suffixEntries.count,
+            domainDataCount: domainData.count
+        )
+        // In-heap path: `.max` threshold + no-op flush, so `data` is the accumulator and
+        // this is byte-identical to the inline layout it replaced.
+        try Self.emitTablePrefix(
+            exactEntries: exactEntries,
+            suffixEntries: suffixEntries,
+            domainDataCount: domainData.count,
+            into: &data,
+            flushThreshold: Int.max,
+            flush: { _ in }
+        )
+        data.append(domainData)
+    }
+
+    /// Validates the per-table counts/size fit the UInt32 fields of the on-disk format.
+    /// Shared by `appendEncodedData` and `CompactFilterSnapshot.writeStreaming`.
+    static func validateTableSizes(exactCount: Int, suffixCount: Int, domainDataCount: Int) throws {
+        guard exactCount <= Int(UInt32.max),
+              suffixCount <= Int(UInt32.max),
+              domainDataCount <= Int(UInt32.max)
         else {
             throw CompactFilterSnapshotError.artifactTooLarge
         }
+    }
 
-        data.appendLittleEndian(UInt32(exactEntries.count))
-        data.appendLittleEndian(UInt32(suffixEntries.count))
+    /// Single source of truth for a rule table's on-disk PREFIX byte layout
+    /// (exactCount, suffixCount, all exact entries, all suffix entries, domainDataLength),
+    /// emitted into `buffer` and flushed via `flush` whenever it exceeds `flushThreshold`.
+    /// The in-heap encoder passes `flushThreshold: .max` + a no-op flush (so `buffer` is the
+    /// caller's accumulator); the streaming writer passes a small threshold + a `FileHandle`
+    /// flush so only a bounded buffer is ever resident. The trailing raw domain blob is
+    /// appended by the caller. Entries are emitted verbatim, so the caller MUST pass them
+    /// already byte-lexicographically sorted (and deduped) — the decoder fails closed on a
+    /// non-monotonic table (`entriesAreSorted`).
+    static func emitTablePrefix(
+        exactEntries: [Entry],
+        suffixEntries: [Entry],
+        domainDataCount: Int,
+        into buffer: inout Data,
+        flushThreshold: Int,
+        flush: (inout Data) throws -> Void
+    ) throws {
+        buffer.appendLittleEndian(UInt32(exactEntries.count))
+        buffer.appendLittleEndian(UInt32(suffixEntries.count))
         for entry in exactEntries {
-            data.appendLittleEndian(entry.offset)
-            data.appendLittleEndian(entry.length)
+            buffer.appendLittleEndian(entry.offset)
+            buffer.appendLittleEndian(entry.length)
+            if buffer.count >= flushThreshold { try flush(&buffer) }
         }
         for entry in suffixEntries {
-            data.appendLittleEndian(entry.offset)
-            data.appendLittleEndian(entry.length)
+            buffer.appendLittleEndian(entry.offset)
+            buffer.appendLittleEndian(entry.length)
+            if buffer.count >= flushThreshold { try flush(&buffer) }
         }
-        data.appendLittleEndian(UInt32(domainData.count))
-        data.append(domainData)
+        buffer.appendLittleEndian(UInt32(domainDataCount))
     }
 
     private func contains(_ query: ArraySlice<UInt8>, in entries: [Entry]) -> Bool {
@@ -770,5 +968,15 @@ private extension Data {
         append(UInt8((value >> 8) & 0x000000ff))
         append(UInt8((value >> 16) & 0x000000ff))
         append(UInt8((value >> 24) & 0x000000ff))
+    }
+}
+
+extension FileHandle {
+    /// Throwing append used by the streaming compact writer and the blob spill. The
+    /// non-throwing `write(_:)` is deprecated and TRAPS on error (e.g. disk full) — which
+    /// in the packet-tunnel extension would crash the tunnel; `write(contentsOf:)` throws,
+    /// so an IO error fails the compile and the caller falls back fail-CLOSED instead.
+    func lavaWrite(_ data: Data) throws {
+        try write(contentsOf: data)
     }
 }

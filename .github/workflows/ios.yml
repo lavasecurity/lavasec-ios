@@ -22,16 +22,22 @@ concurrency:
 # verbatim and the Merge-up contamination guard (below) depends on the two lanes
 # matching; see lavasec-infra/docs/engineering/release-and-propagation.md §1.2.
 #
-# Cost split (public Actions minutes are free; private macOS minutes are billed):
-# the Linux repo-checks and the `swift test` core suite run on BOTH lanes, but the
-# full `xcodebuild` app/extension compile (ios-simulator-build) is gated to the
-# PUBLIC repo via `github.repository` — so the private lane skips it for $0 while
-# the public lane runs it on every PR (incl. forks). The private lane's owned-
-# hardware app compile lives in light-build.yml (internal-only, never exported).
+# Cost split (public Actions minutes are free; private macOS minutes are billed).
+# Three levers keep the private lane cheap WITHOUT forking this byte-identical file —
+# all keyed on `github.repository` so the public lane is unaffected:
+#   1. `ios-simulator-build` (full ~30-min xcodebuild) is gated to the PUBLIC repo only;
+#      the private lane gets app-compile coverage from light-build.yml on owned hardware.
+#   2. `swift-package-tests` (the `swift test` core suite) runs on BOTH lanes, but its
+#      macOS RUNNER is chosen per-lane: GitHub-hosted (macos-26) on public, self-hosted
+#      (lava-mac-vm-ios-internal) on private — so the private lane's billed macOS minutes
+#      drop to $0 while keeping identical test coverage.
+#   3. `repo-checks` (cheap Linux) stays GitHub-hosted on both lanes.
 #
-# Runners: GitHub-hosted only (ubuntu-latest / macos-26), NEVER self-hosted — the
-# public lane runs untrusted fork code, so no owned hardware here. The signed
-# TestFlight/release pipeline lives in the private infra/runner tooling, not here.
+# Runners: the PUBLIC lane is GitHub-hosted only — it runs untrusted fork code, which
+# must never touch owned hardware. The PRIVATE lane routes only its trusted, internal
+# macOS work to self-hosted, and every self-hosted job is fork-guarded as defence in
+# depth. The signed TestFlight/release pipeline lives in the private infra/runner
+# tooling, not here.
 
 jobs:
   repo-checks:
@@ -46,6 +52,9 @@ jobs:
 
       - name: Check GPL blocklist distribution guardrails
         run: scripts/check-gpl-blocklist-distribution.sh
+
+      - name: Check blocklist catalog codegen is in sync with the canonical spec
+        run: node scripts/generate-blocklist-catalog.mjs --check
 
       - name: Merge-up contamination guard
         if: ${{ github.event_name == 'pull_request' }}
@@ -101,7 +110,17 @@ jobs:
 
   swift-package-tests:
     name: Swift Package Tests
-    runs-on: macos-26
+    # Per-lane runner WITHOUT forking this byte-identical file (same trick as
+    # ios-simulator-build's gate). Self-hosted is ALLOWLISTED to the exact private repo
+    # (it owns lava-mac-vm-ios-internal). EVERY other repo — the public lavasec-ios AND
+    # any OSS fork of either lane — uses GitHub-hosted macos-26: a fork has no access to
+    # the VM (a denylist on the public name would strand `someone/lavasec-ios` forks on
+    # the self-hosted default), and public minutes are free anyway. Override the private
+    # runner to a GitHub-hosted label via the IOS_CI_MAC_RUNNER repo var if the VM is
+    # offline (mirrors light-build's fallback). The `if` additionally skips a fork PR
+    # opened against the private repo, so fork code can never execute on the VM.
+    if: ${{ github.repository != 'lavasecurity/lavasec-ios-internal' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    runs-on: ${{ github.repository == 'lavasecurity/lavasec-ios-internal' && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
     timeout-minutes: 15
     steps:
       - name: Checkout

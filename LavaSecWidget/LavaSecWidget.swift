@@ -153,10 +153,7 @@ private struct LavaLiveActivityExpandedView: View {
                     switch protectionState {
                     case .on:
                         if !state.pauseRequiresAuthentication {
-                            HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
-                                pauseFiveMinutesButton("5 min")
-                                pauseTenMinutesButton("10 min")
-                            }
+                            pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))
                         }
                     case .paused:
                         Button(intent: ResumeLavaProtectionIntent()) {
@@ -186,19 +183,13 @@ private struct LavaLiveActivityExpandedView: View {
         .activitySystemActionForegroundColor(LavaLiveActivityStyle.lavaGreen)
     }
 
-    @ViewBuilder
-    private func pauseFiveMinutesButton(_ title: String) -> some View {
-        Button(intent: PauseLavaProtectionFiveMinutesIntent()) {
-            pauseActivityActionLabel(title)
-        }
-        .controlSize(.regular)
-        .tint(LavaLiveActivityStyle.lavaGreen)
-        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
+    private func pauseButtonTitle(forMinutes minutes: Int) -> String {
+        "Pause for \(minutes) min"
     }
 
     @ViewBuilder
-    private func pauseTenMinutesButton(_ title: String) -> some View {
-        Button(intent: PauseLavaProtectionTenMinutesIntent()) {
+    private func pauseButton(_ title: String) -> some View {
+        Button(intent: PauseLavaProtectionIntent()) {
             pauseActivityActionLabel(title)
         }
         .controlSize(.regular)
@@ -226,7 +217,7 @@ private struct LavaLiveActivityExpandedView: View {
         .minimumScaleFactor(0.82)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .frame(width: LavaLiveActivityStyle.expandedActionButtonWidth)
+        .frame(width: LavaLiveActivityStyle.expandedResumeButtonWidth)
     }
 
     private func liveActivityActionLabel(_ title: String) -> some View {

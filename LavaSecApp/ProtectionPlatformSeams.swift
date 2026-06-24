@@ -37,6 +37,7 @@ protocol AmbientProtectionPresenter: AnyObject, Sendable {
         protectionState: LavaActivityAttributes.ProtectionState?,
         resumeDate: Date?,
         shieldStyle: GuardianShieldStyle,
+        pauseMinutes: Int,
         pauseRequiresAuthentication: Bool
     ) async
 }

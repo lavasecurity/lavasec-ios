@@ -313,6 +313,142 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         XCTAssertEqual(result.metadataBySourceID[source.id]?.checksumSHA256, rawHash)
     }
 
+    func testAppParseRejectsAnOverCapSourceInsteadOfSilentlyTruncating() async throws {
+        // A source with more rules than the per-source cap must surface an over-limit error,
+        // NOT cache + serve a silently truncated set under the source's full identity (which
+        // also masks the overage from the tier/device aggregate gate). The raised 45 MB
+        // intake cap admits larger payloads, so this guard — not the byte gate — is what now
+        // catches an over-cap source on the foreground app parse path.
+        let rawText = (0..<5).map { "d\($0).example.com" }.joined(separator: "\n") + "\n"
+        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+        let source = makeSource(
+            id: "over-cap",
+            sourceHash: rawHash,
+            normalizedHash: rawHash,
+            redistributionMode: "source_url_only",
+            parseFormat: .plainDomains
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260525T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: []
+        )
+        let cacheURL = try makeTemporaryCacheDirectory()
+        try writeCatalog(catalog, to: cacheURL)
+        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+
+        let cappedBudget = BlocklistParseResourceBudget(
+            maximumBlocklistBytes: 45 * 1024 * 1024,
+            maxRulesPerSource: 3, // below the 5 rules in the source
+            maxConcurrentSources: 1
+        )
+        do {
+            _ = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL,
+                parseBudget: cappedBudget
+            ).loadCached(enabledSourceIDs: [source.id])
+            XCTFail("expected an over-limit error for a source exceeding the per-source cap")
+        } catch let error as BlocklistCatalogSyncError {
+            XCTAssertEqual(error, .blocklistExceedsRuleLimit(sourceID: source.id, ruleLimit: 3))
+        }
+
+        // The throw happens BEFORE the parsed-rules cache store, so nothing truncated was
+        // persisted: re-loading the same cache dir under a cap above the source size parses it
+        // fresh and IN FULL (no false positive, no poisoned cache).
+        let okBudget = BlocklistParseResourceBudget(
+            maximumBlocklistBytes: 45 * 1024 * 1024,
+            maxRulesPerSource: 100,
+            maxConcurrentSources: 1
+        )
+        let okResult = try await BlocklistCatalogSynchronizer(
+            cacheDirectoryURL: cacheURL,
+            parseBudget: okBudget
+        ).loadCached(enabledSourceIDs: [source.id])
+        let ruleSet = try XCTUnwrap(okResult.sourceRuleSets[source.id])
+        XCTAssertTrue(ruleSet.contains("d0.example.com"))
+        XCTAssertTrue(ruleSet.contains("d4.example.com"))
+    }
+
+    func testAppParseAcceptsAnAtCapSourceWithTrailingFooterLines() async throws {
+        // A source with exactly `maxRulesPerSource` rules followed by footer/comment/blank
+        // lines is IN LIMIT and must load fully — the over-cap guard must trip only when a
+        // real rule is dropped, not on trailing non-rule lines after the last rule.
+        let rawText = "a.example.com\nb.example.com\n# stats: 2 rules\n\n"
+        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+        let source = makeSource(
+            id: "at-cap-with-footer",
+            sourceHash: rawHash,
+            normalizedHash: rawHash,
+            redistributionMode: "source_url_only",
+            parseFormat: .plainDomains
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260525T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: []
+        )
+        let cacheURL = try makeTemporaryCacheDirectory()
+        try writeCatalog(catalog, to: cacheURL)
+        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+
+        let atCapBudget = BlocklistParseResourceBudget(
+            maximumBlocklistBytes: 45 * 1024 * 1024,
+            maxRulesPerSource: 2, // exactly the source's rule count
+            maxConcurrentSources: 1
+        )
+        let result = try await BlocklistCatalogSynchronizer(
+            cacheDirectoryURL: cacheURL,
+            parseBudget: atCapBudget
+        ).loadCached(enabledSourceIDs: [source.id])
+        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+        XCTAssertTrue(ruleSet.contains("a.example.com"))
+        XCTAssertTrue(ruleSet.contains("b.example.com"))
+    }
+
+    func testAppParseAcceptsAnAtCapSourceWithDuplicateRules() async throws {
+        // The cap is on UNIQUE rules: duplicates don't add new rules, so a source whose unique
+        // count is within the cap must load in full even when its raw line count (with repeats)
+        // exceeds the cap. A raw-count cap would mistake the repeated rule for an overflow.
+        let rawText = "a.example.com\nb.example.com\na.example.com\nb.example.com\na.example.com\n"
+        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+        let source = makeSource(
+            id: "at-cap-with-dups",
+            sourceHash: rawHash,
+            normalizedHash: rawHash,
+            redistributionMode: "source_url_only",
+            parseFormat: .plainDomains
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260525T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: []
+        )
+        let cacheURL = try makeTemporaryCacheDirectory()
+        try writeCatalog(catalog, to: cacheURL)
+        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+
+        // 5 raw rules, only 2 unique; cap = 2 → in limit.
+        let atCapBudget = BlocklistParseResourceBudget(
+            maximumBlocklistBytes: 45 * 1024 * 1024,
+            maxRulesPerSource: 2,
+            maxConcurrentSources: 1
+        )
+        let result = try await BlocklistCatalogSynchronizer(
+            cacheDirectoryURL: cacheURL,
+            parseBudget: atCapBudget
+        ).loadCached(enabledSourceIDs: [source.id])
+        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+        XCTAssertEqual(ruleSet.count, 2)
+        XCTAssertTrue(ruleSet.contains("a.example.com"))
+        XCTAssertTrue(ruleSet.contains("b.example.com"))
+    }
+
     func testSyncFetchesBlocklistFromUpstreamSourceURL() async throws {
         let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
         let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
@@ -791,9 +927,13 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         XCTAssertFalse(policy.isFresh(age: nil, statusIsError: true))
     }
 
-    func testLowRiskLaunchCacheRefreshesCatalogWithInactiveGPLSource() throws {
+    func testLowRiskLaunchCacheKeepsActiveAdGuardCatalog() throws {
         let cacheURL = try makeTemporaryCacheDirectory()
-        let legacySource = makeSource(
+        let defaultSource = makeSource(
+            id: DefaultCatalog.blockListProjectBasic.id,
+            licenseName: "Unlicense"
+        )
+        let adGuardSource = makeSource(
             id: "adguard-dns-filter",
             licenseName: "GPL-3.0"
         )
@@ -801,12 +941,12 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             schemaVersion: 2,
             catalogVersion: "20260525T122050Z",
             generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [legacySource],
-            guardrails: [makeSource(id: "phishing-database-active", licenseName: "MIT")]
+            sources: [defaultSource, adGuardSource],
+            guardrails: []
         )
         try writeCatalog(catalog, to: cacheURL)
 
-        XCTAssertTrue(
+        XCTAssertFalse(
             BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(
                 in: cacheURL,
                 requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
@@ -814,9 +954,13 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         )
     }
 
-    func testLowRiskLaunchCacheMigrationPurgesInactiveGPLBlocklistsAndInvalidatesLegacyCatalog() throws {
+    func testLowRiskLaunchCacheMigrationKeepsActiveAdGuardCatalogAndPayload() throws {
         let cacheURL = try makeTemporaryCacheDirectory()
-        let legacySource = makeSource(
+        let defaultSource = makeSource(
+            id: DefaultCatalog.blockListProjectBasic.id,
+            licenseName: "Unlicense"
+        )
+        let adGuardSource = makeSource(
             id: "adguard-dns-filter",
             licenseName: "GPL-3.0"
         )
@@ -824,11 +968,47 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             schemaVersion: 2,
             catalogVersion: "20260525T122050Z",
             generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [legacySource],
+            sources: [defaultSource, adGuardSource],
             guardrails: []
         )
         try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist("ads.example.com\n", sourceID: legacySource.id, to: cacheURL)
+        try writeLatestBlocklist("ads.example.com\n", sourceID: adGuardSource.id, to: cacheURL)
+
+        let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
+            in: cacheURL,
+            requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+        )
+
+        XCTAssertFalse(changed)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+            )
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: cacheURL
+                    .appendingPathComponent("blocklists", isDirectory: true)
+                    .appendingPathComponent(adGuardSource.id, isDirectory: true)
+                    .path
+            )
+        )
+    }
+
+    func testLowRiskLaunchCacheMigrationInvalidatesCatalogWithLegacyGuardrails() throws {
+        let cacheURL = try makeTemporaryCacheDirectory()
+        let source = makeSource(
+            id: DefaultCatalog.blockListProjectBasic.id,
+            licenseName: "Unlicense"
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260525T122050Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: [makeSource(id: "phishing-database-active", licenseName: "MIT")]
+        )
+        try writeCatalog(catalog, to: cacheURL)
 
         let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
             in: cacheURL,
@@ -839,14 +1019,6 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
-            )
-        )
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: cacheURL
-                    .appendingPathComponent("blocklists", isDirectory: true)
-                    .appendingPathComponent(legacySource.id, isDirectory: true)
-                    .path
             )
         )
     }
@@ -956,6 +1128,10 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testCachedCustomBlocklistRequiresLastAcceptedHashMatch() async throws {
+        // A custom source's lastAcceptedHash is the FREEZE anchor for a downgraded
+        // (cacheOnly) filter — it must fail closed when the only cached content differs,
+        // rather than silently re-hash from latest. (Dropping hash-pinning applies to catalog
+        // COMMUNITY sources, not to this custom-list freeze gate.)
         let sourceURL = URL(string: "https://user.example.com/list.txt")!
         let acceptedText = "accepted.example.com\n"
         let changedText = "changed.example.com\n"
@@ -977,6 +1153,102 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         } catch BlocklistCatalogSyncError.checksumMismatch(let sourceID) {
             XCTAssertEqual(sourceID, source.id)
         }
+    }
+
+    func testAcceptsDirectUpstreamRotationExcludesGuardrail() {
+        // Community source_url_only lists accept direct upstream rotation (no hard pin); the
+        // threat guardrail tier stays strict even though it is also published source_url_only.
+        let community = makeSource(id: "community", redistributionMode: "source_url_only")
+        XCTAssertTrue(community.acceptsDirectUpstreamRotation)
+
+        let pinned = String(repeating: "a", count: 64)
+        let guardrail = CatalogBlocklistSource(
+            id: "threat-guardrail",
+            name: "Threat Guardrail",
+            category: CatalogBlocklistSource.guardrailCategory,
+            riskLevel: "high",
+            defaultEnabled: true,
+            licenseName: "Test",
+            attribution: "Lava",
+            projectURL: URL(string: "https://example.com/project")!,
+            sourceURL: URL(string: "https://example.com/guardrail")!,
+            versionID: "g1",
+            entryCount: 1,
+            byteSize: 16,
+            sourceHash: pinned,
+            acceptedSourceHashes: [CatalogAcceptedSourceHash(sha256: pinned)],
+            normalizedHash: pinned,
+            publishedAt: Date(timeIntervalSince1970: 1_768_385_371),
+            redistributionMode: "source_url_only",
+            parseFormat: .plainDomains,
+            licenseTextURL: nil,
+            noticeURL: nil
+        )
+        XCTAssertFalse(guardrail.acceptsDirectUpstreamRotation)
+    }
+
+    func testSourceURLOnlyCacheServesRotatedLatestWhenHashNotPinned() async throws {
+        // Refresh-wedge root cause: a community source_url_only list rotated upstream, so its
+        // cached `latest` no longer matches the catalog's (now stale) pinned hash. On the
+        // cache-only path (the tunnel's cold-start in-extension compile) the device must SERVE
+        // that cached content — size/rule caps still apply at parse time — rather than throw
+        // checksumMismatch and clear protection.
+        let pinnedHash = String(repeating: "b", count: 64)
+        let source = makeSource(
+            id: "rotating-community",
+            sourceHash: pinnedHash,
+            normalizedHash: pinnedHash,
+            redistributionMode: "source_url_only"
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260623T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: []
+        )
+        let cacheURL = try makeTemporaryCacheDirectory()
+        try writeCatalog(catalog, to: cacheURL)
+        // The cached `latest` is the ROTATED content — its hash is NOT the pinned one, and no
+        // versioned file matches the pin, so the load falls through to the latest payload.
+        try writeLatestBlocklist("rotated.example.com\n", sourceID: source.id, to: cacheURL)
+
+        let result = try await BlocklistCatalogSynchronizer(
+            cacheDirectoryURL: cacheURL
+        ).loadCached(enabledSourceIDs: [source.id])
+
+        let rules = try XCTUnwrap(result.sourceRuleSets[source.id])
+        XCTAssertTrue(rules.contains("rotated.example.com"))
+    }
+
+    func testDecodedGuardrailIsStampedStrictRegardlessOfServerCategory() throws {
+        // Guardrail strictness must derive from guardrails[] array MEMBERSHIP, not the server's
+        // freeform `category` string (unsigned, TLS-only channel). A guardrails[] entry that
+        // arrives with a non-guardrail category is normalized on decode so it can never relax to
+        // community (rotation-accepting) behavior; a regular source keeps its category.
+        let community = makeSource(id: "community-src") // category "security"
+        let mislabeledGuardrail = makeSource(id: "threat-src") // also "security" — server mistagged it
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260623T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [community],
+            guardrails: [mislabeledGuardrail]
+        )
+
+        let encoded = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+        let decoded = try BlocklistCatalogSynchronizer.makeJSONDecoder().decode(BlocklistCatalog.self, from: encoded)
+
+        let decodedGuardrail = try XCTUnwrap(decoded.guardrails.first)
+        XCTAssertEqual(decodedGuardrail.category, CatalogBlocklistSource.guardrailCategory)
+        XCTAssertFalse(
+            decodedGuardrail.acceptsDirectUpstreamRotation,
+            "A decoded guardrails[] entry must stay strict (no rotation acceptance) regardless of its server category."
+        )
+
+        let decodedSource = try XCTUnwrap(decoded.sources.first)
+        XCTAssertEqual(decodedSource.category, "security", "Regular sources keep their server category.")
+        XCTAssertTrue(decodedSource.acceptsDirectUpstreamRotation)
     }
 
     func testRestoredCustomBlocklistFetchesAndCachedCompilerReloadsFromHash() async throws {
@@ -1187,7 +1459,7 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testParallelSourceCompilationStaysWithinConcurrencyCap() async throws {
-        let cap = BlocklistCatalogSynchronizer.maxConcurrentSourceCompilations
+        let cap = BlocklistParseResourceBudget.default.maxConcurrentSources
         let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
         let count = cap + 2
         let specs: [(source: CatalogBlocklistSource, url: URL, data: Data)] = (0..<count).map { index in

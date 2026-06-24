@@ -28,6 +28,7 @@
 		1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001026 /* DeveloperPreviewViews.swift */; };
 		1A0000010000000000000022 /* LavaTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001022 /* LavaTokens.swift */; };
 		1A0000010000000000000023 /* LavaScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001023 /* LavaScaffold.swift */; };
+		1A00000100000000000000F2 /* LavaSelectableRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010F2 /* LavaSelectableRow.swift */; };
 		1A00000100000000000000F0 /* LavaConfirmationDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010F0 /* LavaConfirmationDialog.swift */; };
 		1A0000010000000000000024 /* LavaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001024 /* LavaComponents.swift */; };
 		1A0000010000000000000010 /* LavaCondensedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001010 /* LavaCondensedList.swift */; };
@@ -142,6 +143,7 @@
 		1A0000010000000000001026 /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
 		1A0000010000000000001022 /* LavaTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaTokens.swift; sourceTree = "<group>"; };
 		1A0000010000000000001023 /* LavaScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaScaffold.swift; sourceTree = "<group>"; };
+		1A00000100000000000010F2 /* LavaSelectableRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaSelectableRow.swift; sourceTree = "<group>"; };
 		1A00000100000000000010F0 /* LavaConfirmationDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaConfirmationDialog.swift; sourceTree = "<group>"; };
 		1A0000010000000000001024 /* LavaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaComponents.swift; sourceTree = "<group>"; };
 		1A0000010000000000001010 /* LavaCondensedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaCondensedList.swift; sourceTree = "<group>"; };
@@ -271,6 +273,7 @@
 				1A0000010000000000001026 /* DeveloperPreviewViews.swift */,
 				1A0000010000000000001022 /* LavaTokens.swift */,
 				1A0000010000000000001023 /* LavaScaffold.swift */,
+				1A00000100000000000010F2 /* LavaSelectableRow.swift */,
 				1A00000100000000000010F0 /* LavaConfirmationDialog.swift */,
 				1A0000010000000000001024 /* LavaComponents.swift */,
 				1A0000010000000000001010 /* LavaCondensedList.swift */,
@@ -479,6 +482,10 @@
 				zh-Hans,
 				de,
 				fr,
+				es,
+				ko,
+				pt-BR,
+				it,
 			);
 			mainGroup = 1A0000010000000000009002;
 			minimizedProjectReferenceProxies = 1;
@@ -564,6 +571,7 @@
 				1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */,
 				1A0000010000000000000022 /* LavaTokens.swift in Sources */,
 				1A0000010000000000000023 /* LavaScaffold.swift in Sources */,
+				1A00000100000000000000F2 /* LavaSelectableRow.swift in Sources */,
 				1A00000100000000000000F0 /* LavaConfirmationDialog.swift in Sources */,
 				1A0000010000000000000024 /* LavaComponents.swift in Sources */,
 				1A000001000000000000001C /* OnboardingFlowView.swift in Sources */,

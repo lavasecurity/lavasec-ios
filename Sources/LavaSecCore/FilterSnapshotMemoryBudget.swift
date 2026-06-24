@@ -53,6 +53,38 @@ public enum FilterSnapshotMemoryBudget: Sendable {
     public static func exceedsBudget(ruleCount: Int) -> Bool {
         ruleCount > maxFilterRuleCount
     }
+
+    /// In-heap bytes per rule for a compact entry table (`CompactDomainRuleSet.Entry`
+    /// is `UInt32` offset + `UInt16` length → 8 B array stride). The in-extension
+    /// streaming compile holds the entry arrays resident while it sorts/dedups them; the
+    /// domain bytes themselves live on disk (memory-mapped), so they do NOT count here.
+    public static let estimatedCompactEntryBytesPerRule = 8.0
+
+    /// Largest AGGREGATE rule count the packet-tunnel streaming fallback may compile in
+    /// the extension. The streaming compile (`StreamingCompactSnapshotCompiler`) parses
+    /// every source straight through `BlocklistParser.forEachBlockRule` into an on-disk
+    /// blob — it NEVER builds a per-source dirty `DomainRuleSet`, so a single source's size
+    /// no longer bounds the compile; only the AGGREGATE compact entry arrays grow in heap.
+    /// The binding constraint is therefore the entry-array transient (the arrays plus the
+    /// slack of an in-place sort and amortized `Array` growth, modeled as ~2×
+    /// `estimatedCompactEntryBytesPerRule`); the domain bytes are streamed to disk and
+    /// memory-mapped (paged, not resident). Above this the per-rule gate throws and the
+    /// compile fails CLOSED, so the app re-prepares the full snapshot. The decoded resident
+    /// snapshot is the 9 B/rule mapped-compact form, additionally bounded by
+    /// `maxFilterRuleCount`.
+    ///
+    /// This is intentionally BELOW the Plus tier limit (2M) and the device guardrail
+    /// (`maxFilterRuleCount` ~3.26M): the very largest Plus configurations fail closed in
+    /// the rare in-extension fallback (deferring to the app, which prepares them fine under
+    /// the higher mapped-compact budget) rather than risk the jetsam transient.
+    ///
+    /// NOTE: a conservative model that assumes `.mappedIfSafe` actually maps on the
+    /// app-group container (the same assumption `reusableCompactSnapshot` already relies
+    /// on); the safe value wants on-device publish-stress validation, which should include
+    /// a near-ceiling config.
+    public static var maxStreamingCompileRuleCount: Int {
+        Int(((maxResidentMegabytes - baselineMegabytes) * bytesPerMegabyte) / (estimatedCompactEntryBytesPerRule * 2.0))
+    }
 }
 
 /// A subscription-tier ceiling on filter rules, distinct from the device memory

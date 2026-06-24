@@ -22,12 +22,19 @@ search() {
   fi
 }
 
+# The vendored canonical catalog index (Catalog/blocklist-catalog.json) is the
+# "adopted" copy of the public spec. It legitimately names GPL providers in their
+# attribution/source URLs but carries NO list bytes (it is structured metadata:
+# ids, names, licenses, source URLs). Exclude only that one validated file from the
+# list-DATA scan below — any other .txt/.json with list fingerprints still trips it.
+CATALOG_METADATA_FILE="Catalog/blocklist-catalog.json"
+
 search_globbed_files() {
   local pattern="$1"; local root="$2"; shift 2
   if command -v rg >/dev/null 2>&1; then
-    rg -n "$pattern" "$root" "$@"
+    rg -n "$pattern" "$root" "$@" --glob "!$CATALOG_METADATA_FILE"
   else
-    find "$root" \( -name "*.txt" -o -name "*.json" \) -print0 | xargs -0 grep -InE "$pattern"
+    find "$root" \( -name "*.txt" -o -name "*.json" \) ! -path "*/$CATALOG_METADATA_FILE" -print0 | xargs -0 grep -InE "$pattern"
   fi
 }
 

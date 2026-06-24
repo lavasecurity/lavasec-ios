@@ -34,6 +34,15 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
     public var qaProbeSet: QADomainProbeSet?
     public var customBlocklists: [CustomBlocklistSource]
     public var lavaGuardUnlocks: LavaGuardAchievementLedger
+    /// Monotonic supersession token, bumped on every foreground config write
+    /// (`persistSharedState`/`persistConfigurationOnly`). A background catalog
+    /// refresh captures this value when it builds, then — inside the publish lock —
+    /// re-reads the on-disk value and ABORTS the pointer flip if it changed, so a
+    /// background publish can never clobber a newer foreground edit. Kept in the
+    /// config file so the token and the config it guards are written atomically
+    /// (a sidecar would reintroduce a config-vs-token TOCTOU). NOT a filter-content
+    /// input, so it is excluded from `PreparedFilterSnapshotIdentity`.
+    public var configurationGeneration: Int
 
     public init(
         protectionEnabled: Bool = false,
@@ -57,7 +66,8 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         isPaid: Bool = false,
         qaProbeSet: QADomainProbeSet? = nil,
         customBlocklists: [CustomBlocklistSource] = [],
-        lavaGuardUnlocks: LavaGuardAchievementLedger = LavaGuardAchievementLedger()
+        lavaGuardUnlocks: LavaGuardAchievementLedger = LavaGuardAchievementLedger(),
+        configurationGeneration: Int = 0
     ) {
         self.protectionEnabled = protectionEnabled
         self.enabledBlocklistIDs = enabledBlocklistIDs
@@ -81,6 +91,7 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         self.qaProbeSet = qaProbeSet
         self.customBlocklists = customBlocklists
         self.lavaGuardUnlocks = lavaGuardUnlocks
+        self.configurationGeneration = configurationGeneration
     }
 
     public init(
@@ -143,6 +154,7 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
         case qaProbeSet
         case customBlocklists
         case lavaGuardUnlocks
+        case configurationGeneration
     }
 
     public init(from decoder: Decoder) throws {
@@ -176,6 +188,7 @@ public struct AppConfiguration: Equatable, Codable, Sendable {
             LavaGuardAchievementLedger.self,
             forKey: .lavaGuardUnlocks
         ) ?? LavaGuardAchievementLedger()
+        configurationGeneration = try container.decodeIfPresent(Int.self, forKey: .configurationGeneration) ?? 0
     }
 
     public var limits: FeatureLimits {

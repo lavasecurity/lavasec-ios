@@ -1,3 +1,4 @@
+import BackgroundTasks
 import GoogleSignIn
 import Darwin
 import LavaSecCore
@@ -9,6 +10,119 @@ import UIKit
 extension Notification.Name {
     static let lavaOpenGuardFromNotification = Notification.Name("com.lavasec.openGuardFromNotification")
     static let lavaOpenDeepLinkURL = Notification.Name("com.lavasec.openDeepLinkURL")
+}
+
+/// Daily background refresh of the filter lists (LAV-90 Phase 2). Registered at launch
+/// and re-submitted whenever the app backgrounds. The handler runs the same catalog sync
+/// as a manual refresh, but in `isBackgroundRefresh` mode: it re-reads the live on-disk
+/// configuration, publishes ARTIFACTS ONLY through the pointer-swap substrate under a
+/// degrade-ABORT publish lock + generation supersession check (so a concurrent foreground
+/// save always wins), and never rewrites `configuration.json` or restores protection.
+/// Thanks to the snapshot-identity gate, a run that finds nothing new is cheap and never
+/// reloads the tunnel.
+///
+/// Requires `Info.plist`: `UIBackgroundModes = [processing]` and
+/// `BGTaskSchedulerPermittedIdentifiers = [com.lavasec.catalog-refresh]`.
+/// Background *execution* — and the lock-free `mmap` read surviving a concurrent publish
+/// + GC — can only be validated on a real device.
+enum BackgroundCatalogRefresh {
+    /// Fixed (not bundle-derived) so it matches the Info.plist literal exactly in both
+    /// the App Store and dev/QA builds — no `$(PRODUCT_BUNDLE_IDENTIFIER)` substitution risk.
+    static let taskIdentifier = "com.lavasec.catalog-refresh"
+
+    /// App-group opt-in. OFF by default: a background publisher running concurrently with
+    /// the live tunnel read is exactly the unproven scenario behind LAV-90 Phase 1's
+    /// still-open on-device mmap-survives-GC gate. Flip this on-device to enable the first
+    /// internal validation run; promote to default-on only after that gate passes.
+    static let optInDefaultsKey = "backgroundCatalogRefreshEnabled"
+
+    /// Must run before the app finishes launching (called from the app delegate). Always
+    /// registers (iOS requires a handler for every permitted identifier); scheduling is
+    /// gated separately by `scheduleNext()`.
+    static func registerHandler() {
+        // Run the launch handler on the main queue and box the non-Sendable BGTask so it
+        // can cross into the main-actor `handle` (only ever touched on the main actor).
+        _ = BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: .main) { task in
+            let box = BGTaskBox(task)
+            MainActor.assumeIsolated {
+                handle(box.task)
+            }
+        }
+    }
+
+    /// Best-effort submit of the next run (~daily). Safe to call repeatedly. No-op unless
+    /// the opt-in flag is set (see `optInDefaultsKey`).
+    static func scheduleNext() {
+        guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey) else { return }
+        let request = BGProcessingTaskRequest(identifier: taskIdentifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 12 * 60 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    @MainActor
+    private static func handle(_ task: BGTask) {
+        scheduleNext() // always queue the next run, even if this one expires
+
+        // Complete the BGTask exactly once — when the sync finishes, or up front when
+        // the system expires the task — so iOS never records it as timed out (which
+        // would throttle future catalog refreshes).
+        let completion = BGTaskCompletion(task)
+
+        let work = Task { @MainActor in
+            // The opt-in is the safety off-switch for this unproven background publisher.
+            // `scheduleNext()` stops resubmitting once it is turned off, but iOS can still
+            // deliver a request that was already pending when the flag flipped — so re-read
+            // it here and do NO work (complete cleanly) if it was disabled after scheduling.
+            guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey) else {
+                completion.complete(success: true)
+                return
+            }
+
+            // A headless view model is enough to run the catalog sync against the shared
+            // container; the identity gate keeps it cheap. `headless: true` installs NO
+            // side-effecting init work (Plus-store entitlement listener, temporary-protection
+            // resume, live-activity observer) — all of which could write this model's stale
+            // launch-time config — and `isBackgroundRefresh` makes the publish artifacts-only
+            // + degrade-ABORT, so it never persists launch-time state over newer on-disk state.
+            let viewModel = AppViewModel(loadVPNState: false, headless: true)
+            await viewModel.syncCatalog(isBackgroundRefresh: true)
+            completion.complete(success: !Task.isCancelled)
+        }
+
+        task.expirationHandler = {
+            // Called on the registration queue (.main). Cancelling `work` propagates
+            // through `syncCatalog` into the detached sync, and we finish the task
+            // immediately so it never overruns the system deadline.
+            MainActor.assumeIsolated {
+                work.cancel()
+                completion.complete(success: false)
+            }
+        }
+    }
+}
+
+private final class BGTaskBox: @unchecked Sendable {
+    let task: BGTask
+    init(_ task: BGTask) { self.task = task }
+}
+
+/// Boxes a `BGTask` (non-Sendable) and guarantees `setTaskCompleted` runs exactly
+/// once across the work task and the expiration handler. `@unchecked Sendable`: the
+/// task is only ever touched on the main actor.
+private final class BGTaskCompletion: @unchecked Sendable {
+    private let task: BGTask
+    private var hasCompleted = false
+
+    init(_ task: BGTask) { self.task = task }
+
+    @MainActor
+    func complete(success: Bool) {
+        guard !hasCompleted else { return }
+        hasCompleted = true
+        task.setTaskCompleted(success: success)
+    }
 }
 
 @MainActor
@@ -69,6 +183,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        BackgroundCatalogRefresh.registerHandler()
         return true
     }
 
@@ -78,6 +193,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
 
     func applicationDidEnterBackground(_ application: UIApplication) {
         privacyShield.show(in: application)
+        BackgroundCatalogRefresh.scheduleNext()
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {

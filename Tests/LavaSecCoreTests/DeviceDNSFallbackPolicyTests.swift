@@ -158,4 +158,57 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
             * Double(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts)
         XCTAssertLessThan(totalWindow, DeviceDNSFallbackPolicy.routineSmokeProbeInterval)
     }
+
+    func testUsableResolverAddressAcceptsRealResolvers() {
+        // Ordinary public/private resolvers a real network hands out, plus addresses
+        // adjacent to (but outside) the rejected blocks.
+        for address in [
+            "1.1.1.1", "8.8.8.8", "9.9.9.9",
+            "192.168.11.2", "10.0.0.1", "172.16.0.1",
+            "169.253.0.1", "169.255.0.1", // adjacent to 169.254/16, must stay usable
+            "2001:4860:4860::8888", "240a:40:0:1008::9", "fd00::1", "2606:4700:4700::1111"
+        ] {
+            XCTAssertTrue(
+                DeviceDNSFallbackPolicy.isUsableResolverAddress(address),
+                "\(address) should be accepted as a usable resolver"
+            )
+        }
+    }
+
+    func testUsableResolverAddressRejectsReservedAndUnroutableRanges() {
+        for address in [
+            // unspecified / "this network"
+            "0.0.0.0", "0.1.2.3", "::",
+            // loopback
+            "127.0.0.1", "127.1.2.3", "::1",
+            // IPv4 link-local 169.254/16
+            "169.254.0.1", "169.254.255.255",
+            // IPv6 link-local fe80::/10 (covers fe80–febf)
+            "fe80::1", "fe80::abcd:1234", "febf::1",
+            // NAT64 64:ff9b::/96 wrapping a RESERVED IPv4 (still cannot answer) — rejected by
+            // the embedded-IPv4 check: unspecified 0.0.0.0, loopback 127/8, link-local 169.254/16.
+            "64:ff9b::", "64:ff9b::127.0.0.1", "64:ff9b::169.254.1.1",
+            // garbage / non-addresses
+            "not-an-ip", "", "999.999.999.999"
+        ] {
+            XCTAssertFalse(
+                DeviceDNSFallbackPolicy.isUsableResolverAddress(address),
+                "\(address) should be rejected as unusable"
+            )
+        }
+    }
+
+    func testUsableResolverAddressKeepsAddressesJustOutsideTheRejectedBlocks() {
+        // fc00::/7 ULA and fec0:: are NOT in fe80::/10 — must remain usable.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("fec0::1"))
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("fc00::1"))
+        // 64:ff9b:1:: is outside the /96 well-known NAT64 prefix — keep it.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("64:ff9b:1::1"))
+        // 64:ff9b::/96 wrapping a routable PUBLIC IPv4 is a real NAT64-reached resolver on an
+        // IPv6-only path (CLAT translates) — keep it (Codex P2).
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("64:ff9b::8.8.8.8"))
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("64:ff9b::1.2.3.4"))
+        // Both dotted-quad and hextet spellings of the embedded v4 are accepted.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("64:ff9b::808:808"))
+    }
 }

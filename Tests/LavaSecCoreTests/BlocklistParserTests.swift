@@ -119,4 +119,92 @@ final class BlocklistParserTests: XCTestCase {
         XCTAssertTrue(result.rules.isEmpty)
         XCTAssertEqual(result.rejectedLines.first?.reason, "Line is too long.")
     }
+
+    // MARK: - Streaming (Data) parse
+
+    func testStreamingDataParserMatchesStringParser() {
+        let parser = BlocklistParser()
+        let text = """
+        # comment
+        0.0.0.0 tracker.example.com analytics.example.com
+        ||ads.example.net^
+        address=/metrics.example.org/0.0.0.0
+        *.wild.example.dev
+        @@||allowed.example.com^
+
+        plain.example.com
+        """
+
+        let stringResult = parser.parseRuleSet(text, format: .auto)
+        let dataResult = parser.parseRuleSet(data: Data(text.utf8), format: .auto)
+
+        // Rule output must be identical to the whole-file String parser (blank lines
+        // and line-number diagnostics aside, which don't affect the rule set).
+        XCTAssertEqual(dataResult.ruleSet, stringResult.ruleSet)
+        XCTAssertTrue(dataResult.ruleSet.contains("tracker.example.com"))
+        XCTAssertTrue(dataResult.ruleSet.contains("analytics.example.com"))
+        XCTAssertTrue(dataResult.ruleSet.contains("metrics.example.org"))
+        XCTAssertTrue(dataResult.ruleSet.contains("plain.example.com"))
+        XCTAssertFalse(dataResult.ruleSet.contains("allowed.example.com"))
+    }
+
+    func testStreamingDataParserHandlesCRLFAndNoTrailingNewline() {
+        let parser = BlocklistParser()
+        // CRLF line endings, plus a final line with no trailing newline.
+        let bytes = Data("0.0.0.0 a.example.com\r\n0.0.0.0 b.example.com\r\nplain.example.org".utf8)
+
+        let result = parser.parseRuleSet(data: bytes, format: .auto)
+
+        XCTAssertTrue(result.ruleSet.contains("a.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("b.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("plain.example.org"))
+    }
+
+    func testStreamingDataParserDecodesInvalidUTF8LenientlyPerLine() {
+        let parser = BlocklistParser()
+        // A valid line, a line that is a lone invalid UTF-8 byte (0xFF → U+FFFD),
+        // then another valid line: only the bad line is dropped, the parse continues.
+        var bytes = Data("0.0.0.0 good.example.com\n".utf8)
+        bytes.append(0xFF)
+        bytes.append(contentsOf: "\n".utf8)
+        bytes.append(contentsOf: "0.0.0.0 also-good.example.com".utf8)
+
+        let result = parser.parseRuleSet(data: bytes, format: .auto)
+
+        XCTAssertTrue(result.ruleSet.contains("good.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("also-good.example.com"))
+    }
+
+    func testStreamingDataParserHonorsMaxRules() {
+        let parser = BlocklistParser(maxRules: 2)
+        let bytes = Data("0.0.0.0 one.example.com two.example.com three.example.com".utf8)
+
+        let result = parser.parseRuleSet(data: bytes, format: .hosts)
+
+        XCTAssertTrue(result.ruleSet.contains("one.example.com"))
+        XCTAssertTrue(result.ruleSet.contains("two.example.com"))
+        XCTAssertFalse(result.ruleSet.contains("three.example.com"))
+        XCTAssertEqual(result.rejectedLines.first?.reason, "Rule limit reached.")
+    }
+
+    func testStreamingDataParserHandlesBareCRAndMixedLineEndings() {
+        let parser = BlocklistParser()
+        // Classic-Mac bare CR, plus a mix of CR / LF / CRLF in one payload. The old
+        // whole-file String parser split on all of these (Character.isNewline); the
+        // streaming parser must match so a CR-only custom list doesn't collapse into
+        // one over-long line and silently under-parse.
+        let crOnly = "a.example.com\rb.example.com\rc.example.com"
+        let mixed = "a.example.com\rb.example.com\nc.example.com\r\nd.example.com"
+
+        for text in [crOnly, mixed] {
+            let stringResult = parser.parseRuleSet(text, format: .auto)
+            let dataResult = parser.parseRuleSet(data: Data(text.utf8), format: .auto)
+            XCTAssertEqual(dataResult.ruleSet, stringResult.ruleSet)
+        }
+
+        let crResult = parser.parseRuleSet(data: Data(crOnly.utf8), format: .auto)
+        XCTAssertTrue(crResult.ruleSet.contains("a.example.com"))
+        XCTAssertTrue(crResult.ruleSet.contains("b.example.com"))
+        XCTAssertTrue(crResult.ruleSet.contains("c.example.com"))
+    }
 }

@@ -16,6 +16,9 @@ struct LavaOnboardingView: View {
     @State private var isInstallingVPN = false
     @State private var isRequestingNotifications = false
     @State private var isShowingAdditionalSetup = false
+    @State private var protectionLevel: OnboardingProtectionLevel = .recommended
+    @State private var useEncryptedFallback = true
+    @State private var fallbackResolverPresetID = DNSResolverPreset.mullvadDoH.id
 
     var body: some View {
         GeometryReader { proxy in
@@ -69,19 +72,48 @@ struct LavaOnboardingView: View {
     private var topBar: some View {
         HStack {
             if !pageHistory.isEmpty {
-                LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: goBack)
+                Button(action: goBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(LavaStyle.ink)
+                        .frame(width: 38, height: 38)
+                        .background(.regularMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(LavaStyle.secondaryText.opacity(0.18), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
             } else {
                 Color.clear
-                    .frame(width: 44, height: 44)
+                    .frame(width: 38, height: 38)
             }
 
             Spacer()
 
-            Color.clear
-                .frame(width: 44, height: 44)
+            // "Import a filter" action (the old .done "Additional setup" on-ramp), shown
+            // ONLY on the final page: its sheet can finish onboarding (Skip/import/settings
+            // set hasSeenOnboarding), so reaching it earlier would let setup complete before
+            // the VPN/notification/protection/connection steps run (Codex P2).
+            if page == .done {
+                Button {
+                    isShowingAdditionalSetup = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Import a filter")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(LavaStyle.ink)
+                    .padding(.horizontal, 14)
+                    .frame(height: 38)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(LavaStyle.secondaryText.opacity(0.18), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Import a filter")
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
     }
 
     @ViewBuilder
@@ -91,6 +123,10 @@ struct LavaOnboardingView: View {
             internetIsLavaPage
         case .guardIntro, .features:
             guardScenePage
+        case .protectionLevel:
+            protectionLevelPage
+        case .connectionQuality:
+            connectionQualityPage
         case .vpn:
             vpnPage
         case .notifications:
@@ -162,6 +198,31 @@ struct LavaOnboardingView: View {
                 .offset(y: CGFloat(transition.featureRowsOffsetY))
                 .padding(.top, CGFloat(transition.featureRowsTopOffset))
             }
+        }
+    }
+
+    private var protectionLevelPage: some View {
+        OnboardingStepLayout(
+            step: "Step 3",
+            title: "Pick how much Lava blocks",
+            description: "Choose your protection level. You can change this anytime in Filters.",
+            contentPlacement: .centered
+        ) {
+            OnboardingProtectionLevelPanel(selection: $protectionLevel)
+        }
+    }
+
+    private var connectionQualityPage: some View {
+        OnboardingStepLayout(
+            step: "Step 4",
+            title: "Improve connection quality",
+            description: "Stay covered if your device's DNS can't be reached after a network change.",
+            contentPlacement: .centered
+        ) {
+            OnboardingConnectionPanel(
+                useEncryptedFallback: $useEncryptedFallback,
+                fallbackResolverPresetID: $fallbackResolverPresetID
+            )
         }
     }
 
@@ -261,6 +322,12 @@ struct LavaOnboardingView: View {
             OnboardingPrimaryButton(title: "Set Up Protection") {
                 goForward()
             }
+        case .protectionLevel, .connectionQuality:
+            // The choice is applied on departure (applyCurrentStepChoiceIfNeeded in go(to:)),
+            // so Continue and a forward page-dot jump both persist it.
+            OnboardingPrimaryButton(title: "Continue") {
+                goForward()
+            }
         case .vpn:
             OnboardingPrimaryButton(
                 title: "Install Local VPN",
@@ -282,13 +349,8 @@ struct LavaOnboardingView: View {
                 }
             }
         case .done:
-            VStack(spacing: 12) {
-                OnboardingPrimaryButton(title: "Open Guard") {
-                    hasSeenOnboarding = true
-                }
-                OnboardingSecondaryButton(title: "Additional setup") {
-                    isShowingAdditionalSetup = true
-                }
+            OnboardingPrimaryButton(title: "Open Guard") {
+                hasSeenOnboarding = true
             }
         }
     }
@@ -313,6 +375,10 @@ struct LavaOnboardingView: View {
             return
         }
 
+        // Persist the leaving step's surfaced choice so jumping away via the page dots
+        // (which call go(to:) directly) applies it too, not just the Continue button (Codex P2).
+        applyCurrentStepChoiceIfNeeded()
+
         if nextPage == .features {
             featureTransitionElapsed = 0
         }
@@ -320,7 +386,7 @@ struct LavaOnboardingView: View {
         // The standalone "Decide how Lava works" step is gone, so its recommended
         // defaults are applied silently as setup wraps up on the final page.
         if nextPage == .done {
-            viewModel.applyOnboardingRecommendedDefaults()
+            viewModel.applyOnboardingRecommendedDefaults(protectionLevel: protectionLevel)
         }
 
         pageHistory.append(page)
@@ -340,9 +406,27 @@ struct LavaOnboardingView: View {
             return
         }
 
+        applyCurrentStepChoiceIfNeeded()
         visitedPages.insert(previousPage)
         withAnimation(.easeInOut(duration: 0.22)) {
             page = previousPage
+        }
+    }
+
+    /// Persist the choice made on the step we're leaving. Called from every navigation
+    /// path (Continue, page dots, back) so a surfaced choice is applied no matter how the
+    /// user moves on — idempotent for the blocklist (no-op when unchanged).
+    private func applyCurrentStepChoiceIfNeeded() {
+        switch page {
+        case .protectionLevel:
+            viewModel.selectOnboardingBlocklists(protectionLevel.enabledBlocklistIDs())
+        case .connectionQuality:
+            viewModel.applyOnboardingConnectionPreferences(
+                useEncryptedFallback: useEncryptedFallback,
+                fallbackResolverPresetID: fallbackResolverPresetID
+            )
+        default:
+            break
         }
     }
 
@@ -406,6 +490,8 @@ private enum OnboardingPage: Int, CaseIterable, Identifiable {
     case features
     case vpn
     case notifications
+    case protectionLevel
+    case connectionQuality
     case done
 
     var id: Int { rawValue }
@@ -527,6 +613,224 @@ private struct OnboardingStepHeading: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension OnboardingProtectionLevel {
+    // Short labels so the segmented control reads at full size (no shrink-to-fit). Sourced from
+    // the canonical `displayName` (Core / Balanced / Extra) so the lever and the seeded filters
+    // in "Your filters" always match.
+    var leverTitle: LocalizedStringKey {
+        LocalizedStringKey(displayName)
+    }
+
+    // Kept short (≤2 lines) so the description slot can reserve a fixed height and the
+    // panel never changes size when the selection changes.
+    var leverSummary: LocalizedStringKey {
+        switch self {
+        case .essential:
+            "Blocks malicious sites: phishing, scams, and malware."
+        case .balanced:
+            "Adds spam, fraud, and abuse coverage. Best for most."
+        case .comprehensive:
+            "Adds ads and trackers. May break some sites."
+        }
+    }
+}
+
+/// The whole Step-3 protection control as ONE coherent panel, matching the Step-2
+/// permission-dialog style: a `.panel` surface (clean black/white background) with a
+/// green border, a segmented selector on top whose selected pill is filled Lava control
+/// green with a bold white label, the selected level's description, then the
+/// constant-height "what this turns on" checklist. The panel keeps a fixed size across
+/// selections — only the green pill slides, the description swaps within its reserved
+/// slot, and each checklist row lights up / dims.
+private struct OnboardingProtectionLevelPanel: View {
+    @Binding var selection: OnboardingProtectionLevel
+    @Namespace private var segmentNamespace
+
+    // The full superset of category rows (from the broadest level) so the checklist
+    // keeps a constant height — only each row's enabled state changes.
+    private var allGroups: [(category: BlocklistCategory, sources: [BlocklistSource])] {
+        let widestIDs = OnboardingProtectionLevel.comprehensive.enabledBlocklistIDs()
+        return DefaultCatalog.curatedSourcesByCategory.compactMap { entry in
+            let included = entry.sources.filter { widestIDs.contains($0.id) }
+            return included.isEmpty ? nil : (entry.category, included)
+        }
+    }
+
+    var body: some View {
+        let enabledCategories = Set(selection.enabledCategories())
+        return VStack(alignment: .leading, spacing: 20) {
+            segments
+
+            Text(selection.leverSummary)
+                .font(.title3)
+                .foregroundStyle(LavaStyle.secondaryText)
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(allGroups, id: \.category) { group in
+                    let isOn = enabledCategories.contains(group.category)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(isOn ? LavaStyle.safeGreen : LavaStyle.secondaryText.opacity(0.35))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(group.category.displayLabel.lavaLocalized)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(isOn ? LavaStyle.ink : LavaStyle.secondaryText)
+
+                            Text(group.sources.map(\.name).joined(separator: ", "))
+                                .font(.subheadline)
+                                .foregroundStyle(LavaStyle.secondaryText.opacity(isOn ? 1 : 0.55))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .opacity(isOn ? 1 : 0.5)
+                }
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
+        .animation(.easeInOut(duration: 0.2), value: selection)
+    }
+
+    private var segments: some View {
+        HStack(spacing: 6) {
+            ForEach(OnboardingProtectionLevel.allCases, id: \.self) { level in
+                let isSelected = selection == level
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selection = level
+                    }
+                } label: {
+                    Text(level.leverTitle)
+                        .font(.body.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .foregroundStyle(isSelected ? Color.white : LavaStyle.secondaryText)
+                        .background {
+                            if isSelected {
+                                Capsule()
+                                    .fill(LavaStyle.safeControlGreen)
+                                    .overlay(
+                                        Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 1)
+                                    )
+                                    .matchedGeometryEffect(id: "selectedSegment", in: segmentNamespace)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            }
+        }
+    }
+}
+
+/// Step 4 — the encrypted-fallback control, matching the Step-3 panel style: a toggle
+/// (default on), a DoH provider picker (transport pinned, not surfaced), and an inline
+/// privacy disclosure naming the chosen third-party resolver and that it's used only
+/// transiently during recovery.
+private struct OnboardingConnectionPanel: View {
+    @Binding var useEncryptedFallback: Bool
+    @Binding var fallbackResolverPresetID: String
+
+    private let providers: [DNSResolverPreset] = [
+        .mullvadDoH, .cloudflareDoH, .quad9SecureDoH, .googleDoH
+    ]
+
+    private func providerName(_ preset: DNSResolverPreset) -> String {
+        if preset.id == DNSResolverPreset.mullvadDoH.id { return "Mullvad" }
+        if preset.id == DNSResolverPreset.cloudflareDoH.id { return "Cloudflare" }
+        if preset.id == DNSResolverPreset.quad9SecureDoH.id { return "Quad9" }
+        if preset.id == DNSResolverPreset.googleDoH.id { return "Google" }
+        return preset.displayName
+    }
+
+    private var selectedProviderName: String {
+        providerName(providers.first { $0.id == fallbackResolverPresetID } ?? .mullvadDoH)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Toggle(isOn: $useEncryptedFallback.animation(.easeInOut(duration: 0.2))) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Encrypted fallback")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(LavaStyle.ink)
+                    Text("Recommended")
+                        .font(.footnote)
+                        .foregroundStyle(LavaStyle.secondaryText)
+                }
+            }
+            .tint(LavaStyle.safeControlGreen)
+
+            if useEncryptedFallback {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Provider")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(LavaStyle.secondaryText)
+                        .textCase(.uppercase)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                            if index > 0 {
+                                Divider()
+                            }
+                            providerRow(provider)
+                        }
+                    }
+                }
+
+                Text("If your device's DNS can't be reached, allowed lookups go to \(selectedProviderName) over an encrypted (DoH) connection, then return to your device's DNS automatically. \(selectedProviderName) is a third-party resolver used only during recovery.")
+                    .font(.footnote)
+                    .foregroundStyle(LavaStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
+        .animation(.easeInOut(duration: 0.2), value: useEncryptedFallback)
+        .animation(.easeInOut(duration: 0.2), value: fallbackResolverPresetID)
+    }
+
+    private func providerRow(_ provider: DNSResolverPreset) -> some View {
+        let isSelected = provider.id == fallbackResolverPresetID
+        return Button {
+            fallbackResolverPresetID = provider.id
+        } label: {
+            HStack(spacing: 12) {
+                Text(providerName(provider))
+                    .font(.body)
+                    .foregroundStyle(LavaStyle.ink)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(LavaStyle.safeControlGreen)
+                }
+            }
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
 
@@ -904,6 +1208,9 @@ private struct OnboardingAdditionalSetupSheet: View {
             ImportFiltersFlow(
                 startMode: .enterCode,
                 showsSkip: true,
+                // Onboarding seeds the three default filters (the free cap), so "add as new" can't
+                // apply here — the import becomes the active filter instead.
+                allowsAddingNewFilter: false,
                 onRootBack: { route = nil },
                 onSkip: onFinish,
                 onImported: onFinish
@@ -913,6 +1220,7 @@ private struct OnboardingAdditionalSetupSheet: View {
             ImportFiltersFlow(
                 startMode: .scanCode,
                 showsSkip: true,
+                allowsAddingNewFilter: false,
                 onRootBack: { route = nil },
                 onSkip: onFinish,
                 onImported: onFinish

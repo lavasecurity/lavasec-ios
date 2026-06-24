@@ -55,30 +55,80 @@ public enum KnownBlocklistURLMatcher {
     }
 }
 
-public extension AppConfiguration {
-    func migratingKnownCustomBlocklistsToCatalogSources() -> AppConfiguration {
-        var updatedConfiguration = self
+extension KnownBlocklistURLMatcher {
+    /// Rewrite a filter-scoped `(enabledBlocklistIDs, customBlocklists)` pair so any custom
+    /// list whose URL is recognised as a known catalog source becomes that catalog source:
+    /// the custom entry is dropped and, if it was enabled, its catalog id takes its place in
+    /// `enabledBlocklistIDs`. The single source of truth shared by every surface that hosts
+    /// these two fields — the device-global `AppConfiguration` and each hosted `Filter` —
+    /// so a backup restored onto a new device migrates ALL of its filters, not just the
+    /// active one mirrored into the config.
+    static func migratingKnownCustomBlocklists(
+        enabledBlocklistIDs: Set<String>,
+        customBlocklists: [CustomBlocklistSource]
+    ) -> (enabledBlocklistIDs: Set<String>, customBlocklists: [CustomBlocklistSource]) {
         var migratedCatalogSourceIDsByCustomID: [String: String] = [:]
-
-        updatedConfiguration.customBlocklists.removeAll { source in
-            guard let catalogSourceID = KnownBlocklistURLMatcher.catalogSourceID(for: source.sourceURL) else {
+        var remainingCustomBlocklists = customBlocklists
+        remainingCustomBlocklists.removeAll { source in
+            guard let catalogSourceID = catalogSourceID(for: source.sourceURL) else {
                 return false
             }
-
             migratedCatalogSourceIDsByCustomID[source.id] = catalogSourceID
             return true
         }
 
         guard !migratedCatalogSourceIDsByCustomID.isEmpty else {
-            return updatedConfiguration
+            return (enabledBlocklistIDs, customBlocklists)
         }
 
+        var migratedEnabledIDs = enabledBlocklistIDs
         for (customSourceID, catalogSourceID) in migratedCatalogSourceIDsByCustomID {
-            if updatedConfiguration.enabledBlocklistIDs.remove(customSourceID) != nil {
-                updatedConfiguration.enabledBlocklistIDs.insert(catalogSourceID)
+            if migratedEnabledIDs.remove(customSourceID) != nil {
+                migratedEnabledIDs.insert(catalogSourceID)
             }
         }
 
+        return (migratedEnabledIDs, remainingCustomBlocklists)
+    }
+}
+
+public extension AppConfiguration {
+    func migratingKnownCustomBlocklistsToCatalogSources() -> AppConfiguration {
+        let migrated = KnownBlocklistURLMatcher.migratingKnownCustomBlocklists(
+            enabledBlocklistIDs: enabledBlocklistIDs,
+            customBlocklists: customBlocklists
+        )
+        var updatedConfiguration = self
+        updatedConfiguration.enabledBlocklistIDs = migrated.enabledBlocklistIDs
+        updatedConfiguration.customBlocklists = migrated.customBlocklists
         return updatedConfiguration
+    }
+}
+
+public extension Filter {
+    /// Migrate THIS filter's known custom blocklists to catalog sources (see
+    /// ``AppConfiguration/migratingKnownCustomBlocklistsToCatalogSources()``).
+    func migratingKnownCustomBlocklistsToCatalogSources() -> Filter {
+        let migrated = KnownBlocklistURLMatcher.migratingKnownCustomBlocklists(
+            enabledBlocklistIDs: enabledBlocklistIDs,
+            customBlocklists: customBlocklists
+        )
+        var copy = self
+        copy.enabledBlocklistIDs = migrated.enabledBlocklistIDs
+        copy.customBlocklists = migrated.customBlocklists
+        return copy
+    }
+}
+
+public extension FilterLibrary {
+    /// Migrate EVERY hosted filter's known custom blocklists to catalog sources. Applied to
+    /// a restored backup library so hosted (non-active) filters get the same known-URL →
+    /// catalog rewrite the active filter receives via the config migration.
+    func migratingKnownCustomBlocklistsToCatalogSources() -> FilterLibrary {
+        FilterLibrary(
+            filters: filters.map { $0.migratingKnownCustomBlocklistsToCatalogSources() },
+            activeFilterID: activeFilterID,
+            schemaVersion: schemaVersion
+        )
     }
 }

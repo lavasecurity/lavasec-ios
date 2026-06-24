@@ -3,7 +3,6 @@ import Foundation
 public enum LavaSecurityPlusPlanKind: String, CaseIterable, Codable, Sendable {
     case monthly
     case yearly
-    case lifetime
 }
 
 public struct LavaSecurityPlusPlan: Equatable, Codable, Identifiable, Sendable {
@@ -37,7 +36,7 @@ public enum LavaSecurityPlusPolicy {
         kind: .monthly,
         productID: "lava_security_plus_monthly",
         displayName: "Monthly",
-        fallbackDisplayPrice: "$0.99/month",
+        fallbackDisplayPrice: "$3.99/month",
         isSubscription: true
     )
 
@@ -45,28 +44,18 @@ public enum LavaSecurityPlusPolicy {
         kind: .yearly,
         productID: "lava_security_plus_yearly",
         displayName: "Yearly",
-        fallbackDisplayPrice: "$9.99/year",
+        fallbackDisplayPrice: "$29.99/year",
         isSubscription: true
-    )
-
-    public static let lifetime = LavaSecurityPlusPlan(
-        kind: .lifetime,
-        productID: "lava_security_plus_lifetime",
-        displayName: "Lifetime",
-        fallbackDisplayPrice: "$29.99 lifetime",
-        isSubscription: false
     )
 
     public static let recommendedOfferOrder = [
         yearly,
-        monthly,
-        lifetime
+        monthly
     ]
 
     public static let productIDs = [
         monthly.productID,
-        yearly.productID,
-        lifetime.productID
+        yearly.productID
     ]
 
     public static func plan(for productID: String) -> LavaSecurityPlusPlan? {

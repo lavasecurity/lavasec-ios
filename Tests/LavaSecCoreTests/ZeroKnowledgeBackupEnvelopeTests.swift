@@ -116,6 +116,84 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
         XCTAssertThrowsError(try envelope.decryptWithPassword("device-secret-32-byte-random-value"))
     }
 
+    func testResealingPayloadUpdatesContentsButKeepsEveryUnlockPath() throws {
+        let deviceSecret = "device-secret-32-byte-random-value"
+        let phrase = "mavi nopa rytu seko hula pemi davo ciny"
+        let serverRecoveryShare = "server-share-32-byte-random-value"
+
+        let original = BackupConfigurationPayload(
+            configuration: AppConfiguration(enabledBlocklistIDs: ["a"]),
+            filterLibrary: FilterLibrary(filters: [Filter(id: "default", name: "Default")], activeFilterID: "default")
+        )
+        let envelope = try ZeroKnowledgeBackupEnvelope.makePasswordlessForTesting(
+            payload: original,
+            deviceSecret: deviceSecret,
+            serverRecoveryShare: serverRecoveryShare,
+            recoveryPhrase: phrase
+        )
+
+        // A post-turn-on change: a 2nd filter is now hosted + active.
+        let updated = BackupConfigurationPayload(
+            configuration: AppConfiguration(enabledBlocklistIDs: ["a", "b"]),
+            filterLibrary: FilterLibrary(
+                filters: [Filter(id: "default", name: "Default"), Filter(id: "f2", name: "Work")],
+                activeFilterID: "f2"
+            )
+        )
+        let resealed = try envelope.resealingPayload(updated, deviceSecret: deviceSecret)
+
+        // Key slots are byte-identical, so EVERY existing unlock path still works — and now
+        // decrypts the updated payload (the new filter survives a restore).
+        XCTAssertEqual(resealed.keySlots, envelope.keySlots)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(deviceSecret), updated)
+        XCTAssertEqual(try resealed.decryptWithAssistedRecoveryPhrase(phrase), updated)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(deviceSecret).restoredFilterLibrary()?.filters.count, 2)
+        // The original envelope is untouched (value semantics).
+        XCTAssertEqual(try envelope.decryptWithKeychainSecret(deviceSecret), original)
+    }
+
+    func testRekeyingDeviceSlotLetsANewDeviceReSeal() throws {
+        let phrase = "mavi nopa rytu seko hula pemi davo ciny"
+        let serverRecoveryShare = "server-share-32-byte-random-value"
+        let payload = BackupConfigurationPayload(
+            configuration: AppConfiguration(enabledBlocklistIDs: ["a"]),
+            filterLibrary: FilterLibrary(filters: [Filter(id: "default", name: "Default")], activeFilterID: "default")
+        )
+        let envelope = try ZeroKnowledgeBackupEnvelope.makePasswordlessForTesting(
+            payload: payload,
+            deviceSecret: "old-device-secret-value",
+            serverRecoveryShare: serverRecoveryShare,
+            recoveryPhrase: phrase
+        )
+
+        // A new-device restore via recovery phrase: re-key the device slot with THIS device's
+        // own secret (the old device secret isn't available here).
+        let newDeviceSecret = "new-device-secret-value"
+        let rekeyed = try envelope.rekeyingDeviceSlot(
+            newDeviceSecret: newDeviceSecret,
+            unlockingAssistedRecoveryPhrase: phrase
+        )
+
+        // Same slot kinds, payload unchanged. The new device secret unlocks; the recovery
+        // phrase still works; the OLD device secret no longer unlocks the re-keyed slot — so a
+        // later re-seal on the new device can recover the payload key via its own secret.
+        XCTAssertEqual(rekeyed.keySlots.map(\.kind), envelope.keySlots.map(\.kind))
+        XCTAssertEqual(try rekeyed.decryptWithKeychainSecret(newDeviceSecret), payload)
+        XCTAssertEqual(try rekeyed.decryptWithAssistedRecoveryPhrase(phrase), payload)
+        XCTAssertThrowsError(try rekeyed.decryptWithKeychainSecret("old-device-secret-value"))
+
+        // And re-sealing on the new device now works with its own secret.
+        let updated = BackupConfigurationPayload(
+            configuration: AppConfiguration(enabledBlocklistIDs: ["a", "b"]),
+            filterLibrary: FilterLibrary(
+                filters: [Filter(id: "default", name: "Default"), Filter(id: "f2", name: "Work")],
+                activeFilterID: "f2"
+            )
+        )
+        let resealed = try rekeyed.resealingPayload(updated, deviceSecret: newDeviceSecret)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(newDeviceSecret), updated)
+    }
+
     func testPasswordlessEnvelopeCanIncludeServerGatedPasskeySlot() throws {
         let payload = BackupConfigurationPayload(
             configuration: AppConfiguration(blockedDomains: ["casino.example"])

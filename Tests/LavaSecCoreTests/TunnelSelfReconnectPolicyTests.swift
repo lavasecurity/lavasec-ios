@@ -47,6 +47,16 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
         )
         XCTAssertEqual(
             TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.usingEncryptedFallback, .turnOff),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                now: now
+            ),
+            .noAction
+        )
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
                 assessment: assessment(.healthy, .turnOff),
                 protectionEnabled: true,
                 onDemandEnabled: true,
@@ -188,5 +198,144 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .throttled)
+    }
+
+    // MARK: - Track 4: device-DNS recapture restart reason
+
+    // Two attempts past the cooldown: the wedge cap (2) is reached, but the recapture
+    // cap (3) is not — so the no-fallback recapture restart still fires where the wedge
+    // escalation would throttle. This is the +1 headroom that covers one in-flight,
+    // not-yet-credited restart during a legitimate network-switch flurry.
+    func testRecaptureReasonHasHigherCeilingThanWedge() {
+        let attempts = [
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 200)),
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 100))
+        ]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                reason: .wedge,
+                now: now
+            ),
+            .throttled
+        )
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .reconnect
+        )
+    }
+
+    func testRecaptureReasonThrottlesAtItsOwnCeiling() {
+        // Three attempts past the cooldown — the recapture cap (3) is reached, so a
+        // genuinely-dead resolver is bounded (no unbounded restart loop).
+        let attempts = [
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 300)),
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 200)),
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 100))
+        ]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .throttled
+        )
+    }
+
+    func testRecaptureReasonStillRespectsCooldown() {
+        let lastAttempt = now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown - 1))
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [lastAttempt],
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .throttled
+        )
+    }
+
+    func testRecaptureReasonStillRequiresProtectionAndOnDemand() {
+        for (proto, onDemand) in [(false, true), (true, false)] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    assessment: assessment(.needsReconnect, .reconnect),
+                    protectionEnabled: proto,
+                    onDemandEnabled: onDemand,
+                    recentReconnectTimes: [],
+                    reason: .deviceDNSRecapture,
+                    now: now
+                ),
+                .noAction
+            )
+        }
+    }
+
+    func testRecaptureReasonStillRequiresNeedsReconnectSeverity() {
+        // A stale resolver that still WORKS (capture merely masked, queries succeeding)
+        // never reaches .needsReconnect, so the recapture restart must not fire for it.
+        for severity in [ProtectionConnectivitySeverity.dnsSlow, .usingEncryptedFallback, .healthy] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    assessment: assessment(severity, .reconnect),
+                    protectionEnabled: true,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: [],
+                    reason: .deviceDNSRecapture,
+                    now: now
+                ),
+                .noAction
+            )
+        }
+    }
+
+    func testWedgeAndRecaptureShareOneAttemptBudget() {
+        // The two reasons draw from ONE persisted attempt store (a self-reconnect is one
+        // scarce process restart regardless of trigger). Two wedge attempts already on
+        // record => a recapture decision sees count=2 < 3 => .reconnect; a third attempt
+        // of EITHER reason then throttles.
+        let attempts = [
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 200)),
+            now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 100))
+        ]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .reconnect
+        )
+        let threeAttempts = attempts + [now.addingTimeInterval(-(TunnelSelfReconnectPolicy.cooldown + 50))]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: threeAttempts,
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .throttled
+        )
     }
 }

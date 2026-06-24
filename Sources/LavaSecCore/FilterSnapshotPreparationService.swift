@@ -238,12 +238,67 @@ public actor FilterSnapshotPreparationService {
     // Encodes and writes the prepared JSON, the compact artifact, and the
     // manifest — in that order. The manifest is the cheap startup decision
     // point and must never describe artifacts that failed to land.
+    //
+    // Publishes a single content-addressed VERSIONED directory (LAV-90 Phase 1),
+    // staged off-lock (it is not yet pointed-to, so invisible to readers), with the
+    // pointer flip + GC run under the cross-process publish lock so two writers never
+    // interleave a flip. The pointer flip is the linearization point for the lock-free
+    // reader. This drops the legacy ROOT-level dual-write: the pointer/versioned set is
+    // the source of truth and the reader resolves it via the pointer.
+    //
+    // A pre-existing root set (left by an upgraded-from dual-write build) is deliberately
+    // NOT swept here. The tunnel reads `[pointer-resolved, root]` and may still fall back
+    // to root when the pointer-resolved store is rejected (e.g. a config-vs-artifact skew
+    // during the app's non-atomic refresh, or a GC'd versioned dir). Because that fallback
+    // is identity-gated, a stale root is only ever *used* when it matches the reader's
+    // config — i.e. it is always safe to keep, and deleting it could drop such a pass into
+    // a cold compile / fail-closed. Reclaiming the orphaned root is a separate follow-up
+    // (paired with a reader that re-resolves the pointer on a root miss), once the
+    // keep-last-known-good tunnel resilience has landed.
+    /// How the pointer flip contends for the cross-process publish lock.
+    public enum PublishLockMode: Sendable {
+        /// Foreground writer: BLOCK until the lock is free (degrade-OPEN if the lock
+        /// file is unavailable). The user is waiting and foreground must win.
+        case blocking
+        /// Background writer: non-blocking try-lock. If the lock is contended (a
+        /// foreground writer holds it) or unavailable, ABORT without flipping —
+        /// never degrade-open, so a stale background publish can't clobber.
+        case tryOrAbort
+    }
+
+    /// Outcome of a publish attempt; callers (the background refresh) decide whether to
+    /// notify the tunnel based on whether the pointer actually moved.
+    public enum PublishOutcome: Sendable {
+        /// The pointer was flipped to the freshly-staged versioned dir.
+        case published
+        /// `tryOrAbort` couldn't take the lock (foreground holds it / unavailable);
+        /// the staged dir is retained and reused or reaped next cycle.
+        case abortedContended
+        /// The lock was held but `supersededWhileLocked` reported a newer on-disk
+        /// configuration, so the flip was skipped (degrade-ABORT).
+        case abortedSuperseded
+        /// A `tryOrAbort` caller was already cancelled (the BGTask expired) before
+        /// staging, so nothing was encoded/written or flipped. Distinct from
+        /// `abortedContended` so telemetry can tell a deadline apart from lock contention.
+        case abortedCancelled
+    }
+
+    @discardableResult
     public func persistArtifacts(
         _ preparedSnapshot: PreparedFilterSnapshot,
         containerURL: URL,
         snapshotFilename: String,
-        compactSnapshotFilename: String
-    ) throws {
+        compactSnapshotFilename: String,
+        publishLockURL: URL? = nil,
+        lockMode: PublishLockMode = .blocking,
+        supersededWhileLocked: (@Sendable (_ currentPointerToken: String?) -> Bool)? = nil,
+        commitBeforeFlip: (@Sendable () throws -> Void)? = nil,
+        // Extra versioned tokens to keep alive during GC. Multi-filter passes each
+        // hosted filter's `lastCompiledToken` so a recently-used filter's compiled
+        // directory survives, making a switch back to it an instant pointer flip
+        // instead of a cold compile. Empty ⇒ today's behaviour (keep live+previous).
+        additionalRetainedTokens: [String] = []
+    ) throws -> PublishOutcome {
         // FilterArtifactStore is the single owner of artifact paths, atomic
         // writes, and the manifest-last ordering.
         let artifactStore = FilterArtifactStore(
@@ -251,7 +306,69 @@ public actor FilterSnapshotPreparationService {
             preparedSnapshotFilename: snapshotFilename,
             compactSnapshotFilename: compactSnapshotFilename
         )
-        try artifactStore.persist(preparedSnapshot: preparedSnapshot)
+        // Degrade-abort (background) callers race the BGTask deadline. Staging encodes +
+        // writes the full versioned dir (~1.1s for large rule sets); if the task was already
+        // cancelled, skip that work entirely rather than staging-then-aborting at the flip.
+        // (An expiry DURING staging is still caught by the in-lock supersession check before
+        // the pointer moves.) The blocking foreground path is never deadline-bound, so this
+        // only applies to `.tryOrAbort`.
+        if lockMode == .tryOrAbort, Task.isCancelled {
+            return .abortedCancelled
+        }
+        let writtenAt = Date()
+        // Versioned staging runs OFF the lock — it writes not-yet-pointed-to bytes (the
+        // versioned dir is invisible until the flip). Two writers stage into DISTINCT
+        // content-addressed token dirs, so concurrent staging never collides; the lock
+        // below serializes only the flip + GC. The background writer additionally uses
+        // `.tryOrAbort` (degrade-abort) so it never stages-then-flips while foreground
+        // holds the lock.
+        let pointer = try artifactStore.stageVersionedArtifacts(
+            preparedSnapshot: preparedSnapshot,
+            writtenAt: writtenAt
+        )
+
+        // The supersession check + pointer flip are ONE critical section: a foreground
+        // write that lands after staging but before the flip is observed here and ABORTS
+        // the flip, so the tunnel is never pointed at a snapshot built from a superseded
+        // config. Runs inside the held publish lock.
+        let flipUnderLock: () throws -> PublishOutcome = {
+            // The live pointer at the linearization point. Read FIRST so the supersession
+            // check can compare against it: a degrade-abort (background) caller uses it to
+            // detect that a concurrent publish moved the pointer since the caller captured
+            // its basis — a rollback guard the configuration-generation token cannot provide,
+            // because the catalog is not part of the configuration.
+            let previousToken = artifactStore.loadArtifactPointer()?.token
+            if let supersededWhileLocked, supersededWhileLocked(previousToken) {
+                // Published nothing. Do NOT GC on the abort path: narrowing the retain set
+                // here could evict the previous dir a lock-free reader is mid-pass on, and we
+                // didn't flip. The orphaned staged dir ages out and is reaped (after the grace
+                // window) by the next successful publish.
+                return .abortedSuperseded
+            }
+            // Commit any caller-supplied side state (e.g. the background catalog cache's
+            // latest.json) ATOMICALLY with the flip: it runs inside the same held lock, only
+            // once the supersession check has passed, and BEFORE the pointer moves. A throw
+            // here aborts before any state change (no committed side state, no flip), so a
+            // caller that detects its own basis went stale can veto the publish without
+            // leaving the side state ahead of the pointer.
+            try commitBeforeFlip?()
+            // GC even if the pointer flip throws, so a failed flip never leaks the
+            // freshly-staged dir (it is retained this cycle and reused/reaped next).
+            defer {
+                artifactStore.collectVersionedGarbage(
+                    retaining: ([pointer.token, previousToken].compactMap { $0 }) + additionalRetainedTokens
+                )
+            }
+            try artifactStore.writeArtifactPointer(pointer)
+            return .published
+        }
+
+        switch lockMode {
+        case .blocking:
+            return try FilterPublishLock.withExclusiveLock(at: publishLockURL, flipUnderLock)
+        case .tryOrAbort:
+            return try FilterPublishLock.withTryExclusiveLock(at: publishLockURL, flipUnderLock) ?? .abortedContended
+        }
     }
 
     // MARK: - Pure helpers (moved verbatim from AppViewModel)

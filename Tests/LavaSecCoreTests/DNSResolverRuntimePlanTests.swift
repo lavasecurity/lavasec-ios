@@ -233,4 +233,42 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
         ])
         XCTAssertFalse(plan.shouldFallbackToDeviceDNS)
     }
+
+    func testPrimaryCacheIdentifierIgnoresFallbackOnlyChanges() {
+        // The primary identity must NOT move when only a fallback wrapper changes — that is what
+        // lets the resolver-identity baseline / rejected-streak reset fire on a genuine primary
+        // switch but NOT on a fallback-only runtime reset (Codex #86 round 22).
+        let withoutEncryptedFallback = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: false,
+            deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        let withEncryptedFallback = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: true, // ONLY the fallback differs
+            deviceDNSAddresses: ["192.168.1.1"],  // SAME primary
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        // The full cache identifiers differ (the encrypted fallback folds in)...
+        XCTAssertNotEqual(withoutEncryptedFallback.cacheIdentifier, withEncryptedFallback.cacheIdentifier)
+        // ...but the PRIMARY identity is the same, so a fallback-only reset won't trip the switch.
+        XCTAssertEqual(withoutEncryptedFallback.primaryCacheIdentifier, withEncryptedFallback.primaryCacheIdentifier)
+        XCTAssertEqual(withEncryptedFallback.primaryCacheIdentifier, "device:192.168.1.1")
+
+        // A genuine primary switch (different device-resolver addresses) DOES move it.
+        let differentPrimary = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: true,
+            deviceDNSAddresses: ["10.0.0.1"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        XCTAssertNotEqual(withEncryptedFallback.primaryCacheIdentifier, differentPrimary.primaryCacheIdentifier)
+    }
 }

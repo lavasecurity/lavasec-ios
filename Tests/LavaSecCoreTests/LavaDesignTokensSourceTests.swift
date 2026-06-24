@@ -64,9 +64,11 @@ final class LavaDesignTokensSourceTests: XCTestCase {
 
     func testLavaTierIsWiredIntoRepresentativeSurfaces() throws {
         let settings = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        // Workshop depth: Nerd Stats + DNS Resolver.
-        XCTAssertEqual(settings.components(separatedBy: ".lavaTier(.technical)").count - 1, 2)
-        // Window depth: the Lava Guard skin picker.
+        // Workshop depth: Nerd Stats + DNS Resolver + the "Information Sent" diagnostics preview —
+        // declared via the SettingsSubpageContent tier: argument (the scaffold applies .lavaTier(tier)
+        // internally), not a route-site modifier.
+        XCTAssertEqual(settings.components(separatedBy: "tier: .technical").count - 1, 3)
+        // Window depth: the Lava Guard skin picker keeps its nested .lavaTier(.celebratory) override.
         XCTAssertTrue(settings.contains(".lavaTier(.celebratory)"))
         // Read-through demonstrated on a technical metric block.
         XCTAssertTrue(settings.contains(".lavaTierMetadata()"))

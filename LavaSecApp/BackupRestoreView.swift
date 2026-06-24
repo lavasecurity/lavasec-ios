@@ -15,7 +15,16 @@ struct BackupRestoreView: View {
         LavaSheetScaffold {
             header
         } content: {
-            LavaSectionGroup("Unlock and restore locally") {
+            LavaInfoPanel(
+                title: "Bring your settings back",
+                description: "Unlocks your backup right on this iPhone and turns your settings back on. Nothing changes until you tap Restore Backup.",
+                systemImage: "icloud.and.arrow.down"
+            )
+
+            LavaSectionGroup(
+                "Unlock and restore locally",
+                footer: "Everything unlocks on this iPhone — nothing is sent to us. Your unlock key stays in the iPhone's secure keychain."
+            ) {
                 VStack(alignment: .leading, spacing: 14) {
                     RestoreStatusPanel(status: restoreStatus)
 
@@ -56,6 +65,7 @@ struct BackupRestoreView: View {
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(mode.isUnavailable || (mode.requiresTypedSecret && restoreSecret.isEmpty) || isRestoring)
         }
+        .lavaTier(.calm)
     }
 
     // Match the import-filters / backup-setup sheet chrome: chevron-back +

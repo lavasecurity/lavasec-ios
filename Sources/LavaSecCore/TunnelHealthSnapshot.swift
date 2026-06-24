@@ -65,15 +65,29 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     public var networkChangeCount: Int
     public var lastResolverRuntimeResetAt: Date?
     public var lastResolverRuntimeResetReason: String?
+    /// The instant the configured resolver IDENTITY actually changed (a different upstream),
+    /// distinct from `lastResolverRuntimeResetAt`, which is also bumped by same-resolver runtime
+    /// resets (snapshot reloads, pause/resume, recovery). Only a genuine identity change is a fresh
+    /// DNS-health context, so this — not the broad reset timestamp — anchors the smoke-probe /
+    /// encrypted-fallback coverage baseline.
+    public var lastResolverIdentityChangeAt: Date?
     public var resolverRuntimeResetCount: Int
     public var lastUpstreamSuccessAt: Date?
     /// Timestamp of the last forwarding success carried by the configured PRIMARY
-    /// upstream (i.e. not the encrypted Device-DNS safety net). Recovery
-    /// acknowledgement keys off this rather than `lastUpstreamSuccessAt` so a
-    /// query that only resolved because the encrypted fallback caught it does not
-    /// clear the "reconnect" banner / post "reconnected" while the primary remains
-    /// wedged and traffic still depends on the safety net.
+    /// upstream (i.e. not the encrypted Device-DNS safety net). The silent recovery
+    /// banner-clear keys off this rather than `lastUpstreamSuccessAt` so a query
+    /// that only resolved because the encrypted fallback caught it does not clear
+    /// the "reconnect" banner while the primary remains wedged and traffic still
+    /// depends on the safety net.
     public var lastPrimaryUpstreamSuccessAt: Date?
+    /// Timestamp of the last DNS forwarding success carried by the ENCRYPTED safety net
+    /// (the DoH/DoT fallback for a device-DNS-primary config). Set ONLY when a query
+    /// resolved via that encrypted fallback. The connectivity policy reads this to
+    /// recognise the encrypted fallback is actively serving DNS, so a transition-induced
+    /// primary-resolver staleness does not warrant a user-visible self-reconnect. Kept
+    /// deliberately SEPARATE from `lastPrimaryUpstreamSuccessAt` (never set in the same
+    /// branch) so fallback-carried traffic can't paint the wedged primary "healthy".
+    public var lastEncryptedFallbackSuccessAt: Date?
     public var lastUpstreamFailureAt: Date?
     public var lastUpstreamDurationMilliseconds: Int?
     public var slowUpstreamResponseCount: Int
@@ -123,9 +137,11 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case networkChangeCount
         case lastResolverRuntimeResetAt
         case lastResolverRuntimeResetReason
+        case lastResolverIdentityChangeAt
         case resolverRuntimeResetCount
         case lastUpstreamSuccessAt
         case lastPrimaryUpstreamSuccessAt
+        case lastEncryptedFallbackSuccessAt
         case lastUpstreamFailureAt
         case lastUpstreamDurationMilliseconds
         case slowUpstreamResponseCount
@@ -176,9 +192,11 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         networkChangeCount: Int = 0,
         lastResolverRuntimeResetAt: Date? = nil,
         lastResolverRuntimeResetReason: String? = nil,
+        lastResolverIdentityChangeAt: Date? = nil,
         resolverRuntimeResetCount: Int = 0,
         lastUpstreamSuccessAt: Date? = nil,
         lastPrimaryUpstreamSuccessAt: Date? = nil,
+        lastEncryptedFallbackSuccessAt: Date? = nil,
         lastUpstreamFailureAt: Date? = nil,
         lastUpstreamDurationMilliseconds: Int? = nil,
         slowUpstreamResponseCount: Int = 0,
@@ -227,9 +245,11 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.networkChangeCount = networkChangeCount
         self.lastResolverRuntimeResetAt = lastResolverRuntimeResetAt
         self.lastResolverRuntimeResetReason = lastResolverRuntimeResetReason
+        self.lastResolverIdentityChangeAt = lastResolverIdentityChangeAt
         self.resolverRuntimeResetCount = resolverRuntimeResetCount
         self.lastUpstreamSuccessAt = lastUpstreamSuccessAt
         self.lastPrimaryUpstreamSuccessAt = lastPrimaryUpstreamSuccessAt
+        self.lastEncryptedFallbackSuccessAt = lastEncryptedFallbackSuccessAt
         self.lastUpstreamFailureAt = lastUpstreamFailureAt
         self.lastUpstreamDurationMilliseconds = lastUpstreamDurationMilliseconds
         self.slowUpstreamResponseCount = slowUpstreamResponseCount
@@ -344,6 +364,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             String.self,
             forKey: .lastResolverRuntimeResetReason
         )
+        self.lastResolverIdentityChangeAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lastResolverIdentityChangeAt
+        )
         self.resolverRuntimeResetCount = try container.decodeIfPresent(
             Int.self,
             forKey: .resolverRuntimeResetCount
@@ -352,6 +376,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastPrimaryUpstreamSuccessAt = try container.decodeIfPresent(
             Date.self,
             forKey: .lastPrimaryUpstreamSuccessAt
+        )
+        self.lastEncryptedFallbackSuccessAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lastEncryptedFallbackSuccessAt
         )
         self.lastUpstreamFailureAt = try container.decodeIfPresent(Date.self, forKey: .lastUpstreamFailureAt)
         self.lastUpstreamDurationMilliseconds = try container.decodeIfPresent(

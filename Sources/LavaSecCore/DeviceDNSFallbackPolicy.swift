@@ -2,6 +2,66 @@ import Foundation
 
 public enum DeviceDNSFallbackPolicy {
     public static let queryFallbackActivationThreshold = 3
+
+    /// Whether a captured system-DNS address is a usable upstream resolver, by
+    /// structure alone (the caller still rejects the tunnel's own listener address,
+    /// which is config-specific). Rejects ranges that can never resolve real queries
+    /// and only ever appear as half-configured/transient captures on a fresh link:
+    /// unspecified, loopback, link-local (IPv4 `169.254/16`, IPv6 `fe80::/10`), and
+    /// the IPv6 well-known NAT64 prefix (`64:ff9b::/96`). Adopting one wedges DNS on
+    /// an address that cannot answer — the stale-resolver strand Phase 0 hygiene
+    /// removes. Input is expected to be a canonical `inet_ntop` address; an
+    /// unparseable string is treated as unusable.
+    public static func isUsableResolverAddress(_ address: String) -> Bool {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, address, &v4) == 1 {
+            let octets = withUnsafeBytes(of: v4) { Array($0) } // network byte order == octet order
+            return isUsableIPv4Octets(octets)
+        }
+
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, address, &v6) == 1 {
+            let b = withUnsafeBytes(of: v6) { Array($0) } // 16 bytes, network order
+            if b.allSatisfy({ $0 == 0 }) {
+                return false // :: unspecified
+            }
+            if b[0..<15].allSatisfy({ $0 == 0 }), b[15] == 1 {
+                return false // ::1 loopback
+            }
+            if b[0] == 0xfe, (b[1] & 0xc0) == 0x80 {
+                return false // fe80::/10 link-local
+            }
+            if b[0] == 0x00, b[1] == 0x64, b[2] == 0xff, b[3] == 0x9b, b[4..<12].allSatisfy({ $0 == 0 }) {
+                // 64:ff9b::/96 well-known NAT64. An IPv6-only/NAT64 path can legitimately hand
+                // out an IPv4 resolver reached through this prefix (e.g. 64:ff9b::8.8.8.8), and
+                // it IS routable from inside the tunnel — the CLAT/464XLAT layer translates it
+                // (Codex P2). So don't drop the prefix wholesale; judge it by its embedded IPv4
+                // (the low 32 bits) so a NAT64-mapped public resolver is kept while a NAT64-mapped
+                // loopback/link-local/unspecified (which still cannot answer) is rejected.
+                return isUsableIPv4Octets(Array(b[12..<16]))
+            }
+            return true
+        }
+
+        return false // unparseable → not a usable resolver
+    }
+
+    /// Whether a 4-byte IPv4 address (network/octet order) can serve as an upstream
+    /// resolver, rejecting only the ranges that can never answer real queries:
+    /// `0.0.0.0/8` (unspecified), `127.0.0.0/8` (loopback), `169.254.0.0/16` (link-local).
+    /// Shared by the IPv4 path and the embedded-IPv4 check of the NAT64 prefix.
+    private static func isUsableIPv4Octets(_ octets: [UInt8]) -> Bool {
+        switch octets[0] {
+        case 0:
+            return false // 0.0.0.0/8 ("this network" / unspecified)
+        case 127:
+            return false // 127.0.0.0/8 loopback
+        case 169:
+            return octets[1] != 254 // 169.254.0.0/16 link-local
+        default:
+            return true
+        }
+    }
     public static let routineSmokeProbeInterval: TimeInterval = 300
     public static let fallbackRecoverySmokeProbeInterval: TimeInterval = 30
 

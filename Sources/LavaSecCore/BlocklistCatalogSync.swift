@@ -61,7 +61,11 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
         catalogVersion = try container.decode(String.self, forKey: .catalogVersion)
         generatedAt = try container.decode(Date.self, forKey: .generatedAt)
         sources = try container.decode([CatalogBlocklistSource].self, forKey: .sources)
+        // Stamp the guardrail tier from STRUCTURAL array membership, not the server-supplied
+        // `category` string: guardrail strictness (no rotation acceptance) must not hinge on a
+        // freeform field arriving over the unsigned, TLS-only catalog channel.
         guardrails = try container.decode([CatalogBlocklistSource].self, forKey: .guardrails)
+            .map { $0.markedAsGuardrail() }
     }
 
     public static func builtInSourceURLCatalog() -> BlocklistCatalog {
@@ -313,8 +317,53 @@ public struct CatalogBlocklistSource: Identifiable, Equatable, Codable, Sendable
         }
     }
 
+    /// Category marker for Lava's own threat-guardrail tier (the can't-be-allowed lists).
+    /// Guardrails stay strictly hash-pinned even though they are published source_url_only.
+    static let guardrailCategory = "guardrail"
+
+    /// Community lists are fetched directly from the upstream `source_url` over TLS, and the
+    /// device accepts whatever bytes the author serves — subject to the size/rule caps applied
+    /// at parse time. The catalog hash is ADVISORY (cache identity + audit), NOT a gate. This
+    /// retires the stale-pin wedge: a fast-rotating list (blocklistproject-basic, HaGeZi, …)
+    /// no longer fails the cold-start compile when its live hash differs from the catalog's
+    /// last-pinned one — a single pinned hash can never track a list that rotates faster than
+    /// we curate, and verifying a same-origin hash adds nothing over TLS anyway. The threat
+    /// GUARDRAIL is excluded: it is Lava-curated, stable, and the safety-critical tier, so it
+    /// stays strict (must still match an accepted hash on every path).
     var acceptsDirectUpstreamRotation: Bool {
-        redistributionMode == "source_url_only"
+        redistributionMode == "source_url_only" && category != Self.guardrailCategory
+    }
+
+    /// Returns a copy stamped into the guardrail tier. The catalog's `guardrails[]` array is the
+    /// STRUCTURAL source of truth for the safety-critical tier; since dropping community
+    /// hash-pinning keys strictness off `category == guardrailCategory`, we stamp it from array
+    /// membership at the (unsigned, TLS-only) decode boundary so a server bug, schema drift, or a
+    /// tampered `category` string can never silently relax a guardrail into community
+    /// (rotation-accepting) behavior.
+    func markedAsGuardrail() -> CatalogBlocklistSource {
+        guard category != Self.guardrailCategory else { return self }
+        return CatalogBlocklistSource(
+            id: id,
+            name: name,
+            category: Self.guardrailCategory,
+            riskLevel: riskLevel,
+            defaultEnabled: defaultEnabled,
+            licenseName: licenseName,
+            attribution: attribution,
+            projectURL: projectURL,
+            sourceURL: sourceURL,
+            versionID: versionID,
+            entryCount: entryCount,
+            byteSize: byteSize,
+            sourceHash: sourceHash,
+            acceptedSourceHashes: acceptedSourceHashes,
+            normalizedHash: normalizedHash,
+            publishedAt: publishedAt,
+            redistributionMode: redistributionMode,
+            parseFormat: parseFormat,
+            licenseTextURL: licenseTextURL,
+            noticeURL: noticeURL
+        )
     }
 
     private func resolvingAcceptedSourceHashes(
@@ -338,11 +387,9 @@ public struct CatalogBlocklistSource: Identifiable, Equatable, Codable, Sendable
     }
 
     private static func defaultCategory(for source: BlocklistSource) -> String {
-        if source.id.hasPrefix("blocklistproject") {
-            return "security"
-        }
-
-        return "ads_tracking"
+        // The bundled source now carries its own taxonomy category; use it so the
+        // offline-fallback catalog matches the canonical spec instead of guessing.
+        source.category.rawValue
     }
 }
 
@@ -420,6 +467,7 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
     case invalidCatalog
     case invalidBlocklistEncoding(String)
     case blocklistTooLarge(sourceID: String, byteSize: Int)
+    case blocklistExceedsRuleLimit(sourceID: String, ruleLimit: Int)
     case checksumMismatch(sourceID: String)
     case noAcceptedSourceHashes(sourceID: String)
     case missingEnabledBlocklistSource(sourceID: String)
@@ -437,6 +485,8 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
             "The downloaded blocklist for \(sourceID) is not valid UTF-8."
         case .blocklistTooLarge(let sourceID, let byteSize):
             "The downloaded blocklist for \(sourceID) is too large (\(byteSize) bytes)."
+        case .blocklistExceedsRuleLimit(let sourceID, let ruleLimit):
+            "The blocklist for \(sourceID) has more than \(ruleLimit) rules. Reduce its size or remove it."
         case .checksumMismatch(let sourceID):
             "The downloaded blocklist checksum did not match for \(sourceID)."
         case .noAcceptedSourceHashes(let sourceID):
@@ -469,27 +519,77 @@ struct BlocklistDownloadSizeLimitExceeded: LocalizedError {
 
 public typealias BlocklistCatalogDataFetcher = @Sendable (URL) async throws -> Data
 
-public struct BlocklistCatalogSynchronizer: Sendable {
-    public static let maximumBlocklistBytes = 25 * 1024 * 1024
+/// Per-context budget for parsing blocklist sources. The app process has ample
+/// memory and admits larger single lists; the packet-tunnel extension's fallback
+/// compile runs under a ~50 MiB jetsam budget where the parser's dirty `Set<String>`
+/// intermediate (~tens of bytes per rule, an order of magnitude above the 9 B/rule
+/// mapped compact form) dominates, so it parses smaller and serially, and rejects
+/// (fail-closed) a source too big to parse safely there — the app re-prepares the
+/// full snapshot.
+public struct BlocklistParseResourceBudget: Sendable {
+    /// Hard ceiling on a single source's raw bytes (enforced before parsing).
+    public let maximumBlocklistBytes: Int
+    /// Hard ceiling on rules accepted from a single source (truncates above it).
+    public let maxRulesPerSource: Int
+    /// Max sources parsed concurrently (bounds the multiplied parse transient).
+    public let maxConcurrentSources: Int
 
-    /// Cap on concurrent source fetch+parse. Sources are network-bound with up to
-    /// 25 MB parses, so this bounds peak memory and socket use while still
-    /// overlapping the dominant network latency across a multi-list configuration.
-    static let maxConcurrentSourceCompilations = 4
+    public init(maximumBlocklistBytes: Int, maxRulesPerSource: Int, maxConcurrentSources: Int) {
+        self.maximumBlocklistBytes = maximumBlocklistBytes
+        self.maxRulesPerSource = maxRulesPerSource
+        self.maxConcurrentSources = maxConcurrentSources
+    }
+
+    /// App/foreground default. ~45 MB admits a full 2M-rule list (the Plus per-source
+    /// ceiling) even in verbose `0.0.0.0 domain` hosts form (~22 B/line); the rule cap,
+    /// not the byte cap, binds for more compact formats. 4-way concurrency overlaps the
+    /// dominant network latency across a multi-list configuration.
+    public static let `default` = BlocklistParseResourceBudget(
+        maximumBlocklistBytes: 45 * 1024 * 1024,
+        maxRulesPerSource: FeatureLimits.plus.maxFilterRules,
+        maxConcurrentSources: 4
+    )
+
+    /// In-extension streaming compile budget. The streaming compile
+    /// (`StreamingCompactSnapshotCompiler`) parses each source straight into the on-disk
+    /// compact artifact and NEVER builds a per-source dirty `Set<String>`, so it does NOT
+    /// use `maxRulesPerSource` to cap a single source (it parses uncapped via
+    /// `streamParsePayload`'s `BlocklistParser(maxRules: .max)`); memory is bounded by the
+    /// AGGREGATE entry-array gate, `FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount`,
+    /// which throws to fail CLOSED so the app re-prepares the full artifact. Only the 25 MB
+    /// `maximumBlocklistBytes` intake cap is consumed here (the streaming path is serial by
+    /// construction, so `maxConcurrentSources` is unused too). `maxRulesPerSource` is set to
+    /// the aggregate ceiling as a defensive value for any non-streaming caller of this
+    /// budget.
+    public static let inExtension = BlocklistParseResourceBudget(
+        maximumBlocklistBytes: 25 * 1024 * 1024,
+        maxRulesPerSource: FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount,
+        maxConcurrentSources: 1
+    )
+}
+
+public struct BlocklistCatalogSynchronizer: Sendable {
+    /// The app/default raw-bytes ceiling. Also used by the static network fetcher and
+    /// surfaced to tests; per-instance enforcement uses `parseBudget.maximumBlocklistBytes`
+    /// (smaller inside the extension). See `BlocklistParseResourceBudget`.
+    public static let maximumBlocklistBytes = BlocklistParseResourceBudget.default.maximumBlocklistBytes
 
     public let catalogURLs: [URL]
     public let cacheDirectoryURL: URL
+    public let parseBudget: BlocklistParseResourceBudget
     private let dataFetcher: BlocklistCatalogDataFetcher
     private let ruleSetCache: RuleSetCache
     private let catalogRepository: BlocklistCatalogRepository
 
     public init(
         cacheDirectoryURL: URL,
-        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher
+        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
+        parseBudget: BlocklistParseResourceBudget = .default
     ) {
         self.catalogURLs = LavaSecAPI.catalogURLs
         self.cacheDirectoryURL = cacheDirectoryURL
         self.dataFetcher = dataFetcher
+        self.parseBudget = parseBudget
         self.ruleSetCache = RuleSetCache(cacheDirectoryURL: cacheDirectoryURL)
         self.catalogRepository = BlocklistCatalogRepository(
             cacheDirectoryURL: cacheDirectoryURL,
@@ -501,11 +601,13 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     public init(
         catalogURL: URL,
         cacheDirectoryURL: URL,
-        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher
+        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
+        parseBudget: BlocklistParseResourceBudget = .default
     ) {
         self.catalogURLs = [catalogURL]
         self.cacheDirectoryURL = cacheDirectoryURL
         self.dataFetcher = dataFetcher
+        self.parseBudget = parseBudget
         self.ruleSetCache = RuleSetCache(cacheDirectoryURL: cacheDirectoryURL)
         self.catalogRepository = BlocklistCatalogRepository(
             cacheDirectoryURL: cacheDirectoryURL,
@@ -517,11 +619,13 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     public init(
         catalogURLs: [URL],
         cacheDirectoryURL: URL,
-        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher
+        dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
+        parseBudget: BlocklistParseResourceBudget = .default
     ) {
         self.catalogURLs = catalogURLs
         self.cacheDirectoryURL = cacheDirectoryURL
         self.dataFetcher = dataFetcher
+        self.parseBudget = parseBudget
         self.ruleSetCache = RuleSetCache(cacheDirectoryURL: cacheDirectoryURL)
         self.catalogRepository = BlocklistCatalogRepository(
             cacheDirectoryURL: cacheDirectoryURL,
@@ -530,9 +634,21 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
-    public func sync(enabledSourceIDs: Set<String>) async throws -> BlocklistCatalogSyncResult {
+    /// `commitsLatestCatalog: false` performs the full fetch + compile (writing the
+    /// content-addressed, additive payloads to the cache) but does NOT write `catalog/latest.json`.
+    /// The background refresh uses this so the latest.json commit can land ATOMICALLY with the
+    /// artifact pointer flip (the tunnel derives its expected snapshot identity from latest.json;
+    /// committing it here, ahead of an abortable background publish, would leave the cached
+    /// catalog ahead of the pointer → the tunnel rejects the last-good artifact). The resolved
+    /// catalog is still returned in the result, so the caller can commit it on publish success.
+    /// The foreground keeps committing inline (default true); it always publishes, so its
+    /// catalog and pointer stay consistent.
+    public func sync(
+        enabledSourceIDs: Set<String>,
+        commitsLatestCatalog: Bool = true
+    ) async throws -> BlocklistCatalogSyncResult {
         let loadedCatalog = try await catalogRepository.loadRemoteCatalog()
-        if loadedCatalog.shouldCache {
+        if commitsLatestCatalog, loadedCatalog.shouldCache {
             try catalogRepository.saveLatestCatalog(loadedCatalog.data)
         }
         let result = try await compile(
@@ -542,7 +658,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             includesGuardrails: true
         )
 
-        if !loadedCatalog.shouldCache || result.catalog != loadedCatalog.catalog {
+        if commitsLatestCatalog, !loadedCatalog.shouldCache || result.catalog != loadedCatalog.catalog {
             // Persisting the RESOLVED catalog records rotated versionIDs and
             // hashes, which keeps RuleSetCache's predicted-hash lookups valid
             // on the next run.
@@ -577,6 +693,166 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         try await compileCustomBlocklists(sources, allowsNetwork: false)
     }
 
+    /// What the in-extension streaming compile needs once every source has been
+    /// streamed: the resolved catalog (to compute the snapshot identity) and the
+    /// per-source rule counts + delivered IDs (for the summary and the missing-source
+    /// check). The rule sets themselves are NOT returned — they were handed to the
+    /// callbacks one at a time and released.
+    public struct StreamingInExtensionCompileLoad: Sendable {
+        public let resolvedCatalog: BlocklistCatalog
+        public let deliveredBlockSourceIDs: Set<String>
+        public let perSourceRuleCounts: [String: Int]
+    }
+
+    /// Serial, callback-per-RULE load for the packet-tunnel streaming compile
+    /// (`StreamingCompactSnapshotCompiler`). Unlike `loadCached` (which materializes EVERY
+    /// enabled source's parsed `DomainRuleSet` into one dictionary at once) AND unlike a
+    /// per-source-callback variant (which would still build one full source's dirty
+    /// `Set<String>` at a time, capping how large a single source can be), this STREAM-PARSES
+    /// each source straight through `BlocklistParser.forEachBlockRule` and hands each accepted,
+    /// protected-filtered rule to `onBlockRule` one at a time — NO per-source `DomainRuleSet`
+    /// is ever built. The caller folds each rule directly into an on-disk compact blob, so the
+    /// only resident growth is the compact entry table (bounded by the caller's aggregate
+    /// gate, which throws to stop the parse). The parsed-rules cache is intentionally NOT
+    /// consulted here (a cache entry written by the app under the 2M budget would otherwise be
+    /// returned uncapped); every source is re-parsed from its cached raw payload (`allowsNetwork:
+    /// false`), bounded by the parse budget's 25 MB intake cap. A source ID present in both the
+    /// catalog and the custom lists is delivered twice (the tunnel unions them); its
+    /// `perSourceRuleCounts` value sums both. Guardrail rules go to `onGuardrailRule` (the
+    /// caller intersects them with the small allowlist); the caller passes
+    /// `includesGuardrails: false` when there are no allowed domains, since the effective
+    /// threat set is then empty regardless.
+    public func streamCachedForInExtensionCompile(
+        enabledSourceIDs: Set<String>,
+        customSources: [CustomBlocklistSource],
+        includesGuardrails: Bool,
+        onBlockRule: (_ domain: String, _ matchesSubdomains: Bool) throws -> Void,
+        onGuardrailRule: (_ domain: String, _ matchesSubdomains: Bool) throws -> Void
+    ) async throws -> StreamingInExtensionCompileLoad {
+        let catalog = try loadLatestCatalog()
+        let enabledSources = catalog.sources.filter { enabledSourceIDs.contains($0.id) }
+        let enabledCustomSources = customSources.filter { enabledSourceIDs.contains($0.id) }
+        let guardrailSources = includesGuardrails ? catalog.guardrails : []
+
+        var resolvedSourcesByID: [String: CatalogBlocklistSource] = [:]
+        var resolvedGuardrailsByID: [String: CatalogBlocklistSource] = [:]
+        var perSourceRuleCounts: [String: Int] = [:]
+        var delivered = Set<String>()
+
+        for source in enabledSources {
+            let (resolved, count) = try await streamParseCatalogSource(source) { rule in
+                try onBlockRule(rule.domain, rule.matchesSubdomains)
+            }
+            resolvedSourcesByID[source.id] = resolved
+            perSourceRuleCounts[source.id, default: 0] += count
+            delivered.insert(source.id)
+        }
+
+        for source in enabledCustomSources {
+            let count = try await streamParseCustomSource(source) { rule in
+                try onBlockRule(rule.domain, rule.matchesSubdomains)
+            }
+            perSourceRuleCounts[source.id, default: 0] += count
+            delivered.insert(source.id)
+        }
+
+        for source in guardrailSources {
+            let (resolved, _) = try await streamParseCatalogSource(source) { rule in
+                try onGuardrailRule(rule.domain, rule.matchesSubdomains)
+            }
+            resolvedGuardrailsByID[source.id] = resolved
+        }
+
+        let resolvedCatalog = BlocklistCatalog(
+            schemaVersion: catalog.schemaVersion,
+            catalogVersion: catalog.catalogVersion,
+            generatedAt: catalog.generatedAt,
+            sources: catalog.sources.map { resolvedSourcesByID[$0.id] ?? $0 },
+            guardrails: catalog.guardrails.map { resolvedGuardrailsByID[$0.id] ?? $0 }
+        )
+
+        return StreamingInExtensionCompileLoad(
+            resolvedCatalog: resolvedCatalog,
+            deliveredBlockSourceIDs: delivered,
+            perSourceRuleCounts: perSourceRuleCounts
+        )
+    }
+
+    /// Loads a catalog source's cached raw payload and stream-parses it through
+    /// `onRule` (no `DomainRuleSet`). Returns the resolved source (for identity) and the
+    /// emitted rule count (for the summary). Network-free.
+    private func streamParseCatalogSource(
+        _ source: CatalogBlocklistSource,
+        onRule: (_ rule: DomainRule) throws -> Void
+    ) async throws -> (resolved: CatalogBlocklistSource, count: Int) {
+        try Task.checkCancellation()
+        let payload = try await loadBlocklistPayload(for: source, allowsNetwork: false)
+        let count = try streamParsePayload(
+            payload.data,
+            sourceID: source.id,
+            parseFormat: source.parseFormat.blocklistFormat,
+            onRule: onRule
+        )
+        let resolved = source.resolvingDownloadedPayload(
+            checksumSHA256: payload.checksumSHA256,
+            byteSize: payload.data.count,
+            entryCount: count
+        )
+        return (resolved, count)
+    }
+
+    /// Custom-source counterpart of `streamParseCatalogSource`, mirroring
+    /// `compileCustomSource`'s error wrapping. Returns the emitted rule count.
+    private func streamParseCustomSource(
+        _ source: CustomBlocklistSource,
+        onRule: (_ rule: DomainRule) throws -> Void
+    ) async throws -> Int {
+        try Task.checkCancellation()
+        let payload: LoadedBlocklistPayload
+        do {
+            payload = try await loadCustomBlocklistPayload(for: source, allowsNetwork: false)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let syncError as BlocklistCatalogSyncError {
+            throw syncError
+        } catch {
+            throw BlocklistCatalogSyncError.customBlocklistUnavailable(
+                displayName: source.displayName,
+                reason: error.localizedDescription
+            )
+        }
+        return try streamParsePayload(
+            payload.data,
+            sourceID: source.id,
+            parseFormat: source.parseFormat.blocklistFormat,
+            onRule: onRule
+        )
+    }
+
+    /// Stream-parses raw payload bytes, handing each accepted block rule (after the
+    /// `lavaSecProtectedDomains` post-filter, matching `parsePayload`) to `onRule`. No
+    /// per-source rule cap is applied — a single source streams uncapped, because the
+    /// in-extension AGGREGATE is bounded by the caller's per-rule gate (which throws to stop
+    /// the parse), so a too-large source fails CLOSED rather than being silently truncated.
+    /// The `parseBudget` 25 MB intake cap bounds the input; the parse holds no `Set`.
+    private func streamParsePayload(
+        _ data: Data,
+        sourceID: String,
+        parseFormat: BlocklistFormat,
+        onRule: (_ rule: DomainRule) throws -> Void
+    ) throws -> Int {
+        try validateBlocklistSize(data.count, sourceID: sourceID)
+        var count = 0
+        try BlocklistParser(maxRules: Int.max).forEachBlockRule(data: data, format: parseFormat) { rule in
+            guard !DomainRuleSet.lavaSecProtectedDomains.containsNormalized(rule.domain) else {
+                return
+            }
+            count += 1
+            try onRule(rule)
+        }
+        return count
+    }
+
     public static func sha256Hex(of data: Data) -> String {
         SHA256.hash(data: data).map { byte in
             String(format: "%02x", byte)
@@ -606,9 +882,10 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return age >= 0 && age < maxAge
     }
 
-    public static let inactiveGPLLaunchSourceIDs: Set<String> = [
-        "adguard-dns-filter"
-    ]
+    // Temporary launch holds for GPL catalog sources that must be purged from
+    // existing caches. AdGuard is intentionally active under the source-url-only,
+    // off-by-default posture, so this set is empty for the catalog launch.
+    public static let inactiveGPLLaunchSourceIDs: Set<String> = []
 
     public static func cachedCatalogRequiresLowRiskLaunchRefresh(
         in cacheDirectoryURL: URL,
@@ -699,8 +976,10 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     public static func defaultDataFetcher(url: URL) async throws -> Data {
         // Stream the body to a temp file instead of buffering it in RAM. `data(from:)`
         // fully materializes the response in memory before any size check, so a remote
-        // (or MITM / hostile custom-URL) oversized body could spike memory — a real
-        // hazard given the sync can run inside the memory-constrained extension budget.
+        // (or MITM / hostile custom-URL) oversized body could spike memory. (This fetcher
+        // is the app/foreground network path only — the extension compiles cache-only,
+        // `allowsNetwork: false`, and never invokes it — but bounding download memory in
+        // the app is still worthwhile.)
         // `download(from:)` writes the body to disk as it arrives, so peak memory stays
         // bounded regardless of body size; we only load the bytes into `Data` after
         // confirming the on-disk size is within the cap, which preserves the downstream
@@ -754,7 +1033,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
         let sourceResults = try await mapBounded(
             enabledSources,
-            maxConcurrent: Self.maxConcurrentSourceCompilations
+            maxConcurrent: parseBudget.maxConcurrentSources
         ) { source in
             try await self.compileSource(
                 source,
@@ -765,7 +1044,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
         let guardrailResults = try await mapBounded(
             guardrailSources,
-            maxConcurrent: Self.maxConcurrentSourceCompilations
+            maxConcurrent: parseBudget.maxConcurrentSources
         ) { source in
             try await self.compileSource(
                 source,
@@ -832,7 +1111,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         let parseFormat = source.parseFormat.blocklistFormat
 
         // Parsed-rule cache hit by the catalog's predicted hash skips the
-        // payload read, the SHA-256 of up to 25 MB of text, and the parse.
+        // payload read, the SHA-256 of up to 45 MB of text, and the parse.
         if usesPredictedHashShortCircuit,
            let predictedHash = source.activeAcceptedHashValues().first,
            let cachedEntry = ruleSetCache.load(sourceID: source.id, contentSHA256: predictedHash, parseFormat: parseFormat) {
@@ -982,7 +1261,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     ) throws -> LoadedBlocklistPayload {
         for acceptedHash in acceptedHashes {
             let url = versionedBlocklistURL(for: source, checksumSHA256: acceptedHash)
-            if let data = try? Data(contentsOf: url),
+            if let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
                Self.sha256Hex(of: data) == acceptedHash {
                 try saveLatestBlocklist(data, for: source)
                 return LoadedBlocklistPayload(data: data, usedCache: true, checksumSHA256: acceptedHash)
@@ -994,7 +1273,13 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
     private func acceptedLatestBlocklist(for source: CatalogBlocklistSource) throws -> LoadedBlocklistPayload {
         let payload = try latestBlocklist(for: source)
-        guard source.acceptsDownloadedHash(payload.checksumSHA256) else {
+        // Community (source_url_only, non-guardrail) lists accept the last TLS-fetched, size-
+        // validated cached content as-is — the catalog hash is advisory, so a rotated cached
+        // list is served (size/rule caps still apply at parse time) instead of wedging the
+        // cold-start in-extension compile. This is the cache-only counterpart to the network
+        // path's existing `acceptsDirectUpstreamRotation` acceptance. The threat guardrail
+        // (acceptsDirectUpstreamRotation == false) stays strict and must match an accepted hash.
+        guard source.acceptsDirectUpstreamRotation || source.acceptsDownloadedHash(payload.checksumSHA256) else {
             throw BlocklistCatalogSyncError.checksumMismatch(sourceID: source.id)
         }
 
@@ -1002,7 +1287,11 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     private func latestBlocklist(for source: CatalogBlocklistSource) throws -> LoadedBlocklistPayload {
-        let data = try Data(contentsOf: latestBlocklistURL(for: source.id))
+        // Map the cached payload rather than reading it dirty: the streaming parse and
+        // SHA-256 touch pages on demand, and a mapped file is clean/reclaimable, so a
+        // large raw list doesn't add to the jetsam-counted footprint on the in-extension
+        // fallback compile path (which loads cached payloads under the ~50 MiB budget).
+        let data = try Data(contentsOf: latestBlocklistURL(for: source.id), options: [.mappedIfSafe])
         return LoadedBlocklistPayload(data: data, usedCache: true, checksumSHA256: Self.sha256Hex(of: data))
     }
 
@@ -1043,19 +1332,57 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
     private func parsePayload(_ data: Data, sourceID: String, format: BlocklistFormat) throws -> DomainRuleSet {
         try validateBlocklistSize(data.count, sourceID: sourceID)
-        // Decode leniently: a single invalid UTF-8 byte must not reject the whole
-        // list, which for an enabled source under fail-CLOSED would block all DNS.
-        // Malformed bytes become U+FFFD and fail per-line domain validation in the
-        // parser instead, so only the offending line is dropped. (The
-        // invalidBlocklistEncoding error stays in the public enum for the app's
-        // error UI, but lenient decoding no longer produces it here.)
-        let text = String(decoding: data, as: UTF8.self)
-
-        return BlocklistParser()
-            .parseRuleSet(text, format: format)
-            .ruleSet
-            .filteringOutRules(matchedBy: .lavaSecProtectedDomains)
+        // Stream the parse off the payload bytes (memory-mapped on cache reads),
+        // decoding one line at a time leniently: a single invalid UTF-8 byte must not
+        // reject the whole list, which for an enabled source under fail-CLOSED would
+        // block all DNS. Malformed bytes become U+FFFD and fail per-line domain
+        // validation in the parser instead, so only the offending line is dropped. (The
+        // invalidBlocklistEncoding error stays in the public enum for the app's error UI,
+        // but lenient decoding no longer produces it here.)
+        //
+        // This Set-building parse backs the foreground app's `loadCached` path. The per-source
+        // cap is `parseBudget.maxRulesPerSource` (app `.default`: the Plus ceiling, 2M) — the
+        // tier ceiling, not the higher device memory budget (~3.26M), on purpose, since the
+        // parsed intermediate is a dirty `Set<String>` (~tens of bytes/rule). The
+        // subscription-tier aggregate (Free 500K / Plus 2M) and the device budget are enforced
+        // on the deduped union in FilterSnapshotPreparationService, the authoritative per-user
+        // gate. (The in-extension streaming compile parses with no Set at all.)
+        //
+        // The cap is enforced on UNIQUE rules by counting the deduped set as it is built off
+        // the streaming emit, and a source that would EXCEED it surfaces an over-limit error
+        // rather than being silently truncated: returning a partial set would cache + serve it
+        // under the source's full identity (under-blocking) and mask the overage from the
+        // aggregate gate (a source truncated to exactly the cap slips the `> limit` check).
+        // Because `forEachBlockRule` emits only valid, accepted rules and duplicates are
+        // absorbed by the set, a duplicate, footer/comment, or invalid-domain line never trips
+        // the cap — so an in-limit source (even one at exactly the cap with trailing noise)
+        // loads in FULL. The set is bounded to `ruleLimit + 1`.
+        let ruleLimit = parseBudget.maxRulesPerSource
+        var ruleSet = DomainRuleSet()
+        var exceededRuleLimit = false
+        do {
+            try BlocklistParser(maxRules: Int.max).forEachBlockRule(data: data, format: format) { rule in
+                guard !DomainRuleSet.lavaSecProtectedDomains.containsNormalized(rule.domain) else {
+                    return
+                }
+                ruleSet.insert(rule)
+                if ruleSet.count > ruleLimit {
+                    exceededRuleLimit = true
+                    throw OverPerSourceRuleLimit()
+                }
+            }
+        } catch is OverPerSourceRuleLimit {
+            // Sentinel only — stop the parse as soon as a NEW unique rule exceeds the cap.
+        }
+        guard !exceededRuleLimit else {
+            throw BlocklistCatalogSyncError.blocklistExceedsRuleLimit(sourceID: sourceID, ruleLimit: ruleLimit)
+        }
+        return ruleSet
     }
+
+    /// Sentinel thrown from the streaming parse callback to stop once a source's unique rule
+    /// count exceeds the per-source cap; never escapes `parsePayload`.
+    private struct OverPerSourceRuleLimit: Error {}
 
     private func compileCustomBlocklists(
         _ sources: [CustomBlocklistSource],
@@ -1063,7 +1390,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     ) async throws -> CustomBlocklistSyncResult {
         let results = try await mapBounded(
             sources,
-            maxConcurrent: Self.maxConcurrentSourceCompilations
+            maxConcurrent: parseBudget.maxConcurrentSources
         ) { source in
             try await self.compileCustomSource(source, allowsNetwork: allowsNetwork)
         }
@@ -1160,6 +1487,12 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     private func acceptedCachedCustomBlocklist(for source: CustomBlocklistSource) throws -> LoadedBlocklistPayload {
+        // NOTE: a custom source's `lastAcceptedHash` is NOT a curation pin (the thing this PR
+        // drops for catalog community lists) — it is the FREEZE anchor for a downgraded
+        // filter (`customListPolicy == .cacheOnly`), which must keep serving exactly the bytes
+        // it was frozen at and fail closed otherwise rather than silently re-hash from latest.
+        // The custom NETWORK path already accepts upstream rotation (loadCustomBlocklistPayload),
+        // so there is no rotation wedge to fix here. Leave the freeze gate intact.
         if let acceptedHash = source.lastAcceptedHash {
             if let cached = try? versionedCustomBlocklist(for: source, checksumSHA256: acceptedHash) {
                 return cached
@@ -1234,7 +1567,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     private func latestCustomBlocklist(for source: CustomBlocklistSource) throws -> LoadedBlocklistPayload {
-        let data = try Data(contentsOf: latestCustomBlocklistURL(for: source.id))
+        let data = try Data(contentsOf: latestCustomBlocklistURL(for: source.id), options: [.mappedIfSafe])
         try validateBlocklistSize(data.count, sourceID: source.id)
         return LoadedBlocklistPayload(data: data, usedCache: true, checksumSHA256: Self.sha256Hex(of: data))
     }
@@ -1243,7 +1576,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         for source: CustomBlocklistSource,
         checksumSHA256: String
     ) throws -> LoadedBlocklistPayload {
-        let data = try Data(contentsOf: versionedCustomBlocklistURL(for: source, checksumSHA256: checksumSHA256))
+        let data = try Data(contentsOf: versionedCustomBlocklistURL(for: source, checksumSHA256: checksumSHA256), options: [.mappedIfSafe])
         try validateBlocklistSize(data.count, sourceID: source.id)
         guard Self.sha256Hex(of: data) == checksumSHA256 else {
             throw BlocklistCatalogSyncError.checksumMismatch(sourceID: source.id)
@@ -1252,7 +1585,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     private func validateBlocklistSize(_ byteSize: Int, sourceID: String) throws {
-        guard byteSize <= Self.maximumBlocklistBytes else {
+        guard byteSize <= parseBudget.maximumBlocklistBytes else {
             throw BlocklistCatalogSyncError.blocklistTooLarge(sourceID: sourceID, byteSize: byteSize)
         }
     }

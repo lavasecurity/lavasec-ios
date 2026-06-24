@@ -11,19 +11,31 @@ public struct FeatureLimits: Equatable, Codable, Sendable {
     public let maxFilterRules: Int
     public let allowsCustomBlocklists: Bool
     public let allowsCustomDNS: Bool
+    /// How many filters the user can host (the multi-filter library). Free tier = the three
+    /// seeded default filters (Core / Balanced / Extra); Plus = up to 10. On downgrade, filters
+    /// beyond the free cap are *frozen* (kept, read-only, can't be switched to) — never deleted —
+    /// mirroring the cache-only freeze used for extra custom blocklists.
+    public let maxFilters: Int
+
+    /// Whether the tier has no practical filter ceiling. No tier is currently unlimited (Plus is
+    /// capped at 10), so this is false everywhere; kept for the count/messaging seams and in case
+    /// a future tier lifts the cap. The count gate uses `maxFilters` directly.
+    public var hasUnlimitedFilters: Bool { maxFilters == .max }
 
     public init(
         maxAllowedDomains: Int,
         maxBlockedDomains: Int,
         maxFilterRules: Int,
         allowsCustomBlocklists: Bool,
-        allowsCustomDNS: Bool
+        allowsCustomDNS: Bool,
+        maxFilters: Int = 3
     ) {
         self.maxAllowedDomains = maxAllowedDomains
         self.maxBlockedDomains = maxBlockedDomains
         self.maxFilterRules = maxFilterRules
         self.allowsCustomBlocklists = allowsCustomBlocklists
         self.allowsCustomDNS = allowsCustomDNS
+        self.maxFilters = maxFilters
     }
 
     public static let free = FeatureLimits(
@@ -31,7 +43,8 @@ public struct FeatureLimits: Equatable, Codable, Sendable {
         maxBlockedDomains: 25,
         maxFilterRules: 500_000,
         allowsCustomBlocklists: false,
-        allowsCustomDNS: false
+        allowsCustomDNS: false,
+        maxFilters: 3
     )
 
     public static let paid = FeatureLimits(
@@ -39,7 +52,8 @@ public struct FeatureLimits: Equatable, Codable, Sendable {
         maxBlockedDomains: 1_000,
         maxFilterRules: 2_000_000,
         allowsCustomBlocklists: true,
-        allowsCustomDNS: true
+        allowsCustomDNS: true,
+        maxFilters: 10
     )
 
     public static let plus = paid

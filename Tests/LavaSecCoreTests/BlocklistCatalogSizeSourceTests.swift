@@ -12,8 +12,8 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
         let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
         let catalogListBlock = try Self.sourceBlock(
             in: filtersViewSource,
-            startingAt: "BlocklistPickerList(\n                                items: filteredPickerItems,",
-            endingBefore: "\n                            )\n                        }"
+            startingAt: "BlocklistPickerList(",
+            endingBefore: ".blocklistJumpAnchor(id: section.id)"
         )
         let pickerTextStackBlock = try Self.sourceBlock(
             in: filtersViewSource,
@@ -23,6 +23,7 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
         let prefixRange = try XCTUnwrap(pickerTextStackBlock.range(of: "BlocklistPickerStatusPill(status: metadataPrefixStatus)"))
         let metadataRange = try XCTUnwrap(pickerTextStackBlock.range(of: "Text(metadata.lavaLocalized)"))
 
+        XCTAssertTrue(catalogListBlock.contains("items: section.items"))
         XCTAssertTrue(catalogListBlock.contains("catalogMetadata: viewModel.blocklistRuleCountText(for:)"))
         XCTAssertTrue(catalogListBlock.contains("catalogMetadataPrefixStatus: blocklistSizeStatus(for:)"))
         XCTAssertFalse(catalogListBlock.contains("status: blocklistSizeStatus(for:)"))

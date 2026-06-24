@@ -6,6 +6,11 @@ enum LavaSecAppGroup {
     static let snapshotFilename = "filter-snapshot.json"
     static let compactSnapshotFilename = "filter-snapshot.compact"
     static let configurationFilename = "app-configuration.json"
+    // The library of hosted filters + which one is active (multi-filter). The four
+    // filter-scoped fields of the active filter are mirrored into `app-configuration.json`
+    // so the tunnel + the ~25 existing config readers are untouched; this file is the
+    // source of truth for the set of filters and the active selection.
+    static let filterLibraryFilename = "filter-library.json"
     static let tunnelHealthFilename = "tunnel-health.json"
     static let diagnosticsFilename = "diagnostics.json"
     static let diagnosticsControlFilename = "diagnostics-control.json"
@@ -34,6 +39,12 @@ enum LavaSecAppGroup {
     // cancel only recovers if on-demand will bring the tunnel back, and the app
     // persists `protectionEnabled = true` even when arming on-demand fails.
     static let protectionOnDemandConfirmedEnabledDefaultsKey = "lavasec.protection.onDemandConfirmedEnabled"
+    // The tunnel persists its recent self-reconnect attempt timestamps ([Double] epoch seconds)
+    // here for the cooldown/cap policy. Shared so the app can READ the self-reconnect timeline for
+    // a bug report's incident summary (LAV-94 B) without touching the tunnel's frozen recovery
+    // path. The tunnel's own `selfReconnectAttemptsDefaultsKey` literal is locked to this value by
+    // a source test (PacketTunnelDNSRuntimeSourceTests) so the two can never drift.
+    static let selfReconnectAttemptTimesDefaultsKey = "tunnel.selfReconnectAttemptTimes"
     // Aliased to the LavaSecCore stores so the app, tunnel, intents, and the
     // stores can never drift on key strings.
     static let protectionActiveSessionIDDefaultsKey = ProtectionSessionStore.Keys.activeSessionID
@@ -41,6 +52,12 @@ enum LavaSecAppGroup {
     static let protectionTemporaryPauseSessionIDDefaultsKey = ProtectionPauseStore.Keys.pausedSessionID
     static let protectionCommandRevisionDefaultsKey = ProtectionPauseStore.Keys.commandRevision
     static let protectionCommandLockFilename = "protection-command.lock"
+    // Content-addressed pointer-swap substrate for the shared filter-artifact set
+    // (LAV-90 Phase 1). The lock arbitrates writer-vs-writer only; the tunnel reads
+    // the pointer-swapped set lock-free. App + tunnel share these strings.
+    static let filterArtifactPublishLockFilename = "filter-artifact-publish.lock"
+    static let filterArtifactsDirectoryName = "filter-artifacts"
+    static let filterArtifactPointerFilename = "current.json"
     static let customizationLavaGuardLookDefaultsKey = "lavasec.customization.lavaGuardLook"
     static let latencyOperationIDOptionKey = "lavasec.latency.operationID"
 

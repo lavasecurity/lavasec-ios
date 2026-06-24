@@ -61,6 +61,224 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
     }
 
+    func testDeviceDNSCaptureExhaustionDropsStaleResolverOnlyWhenEncryptedFallbackCatchesIt() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let retryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func runDeviceDNSCaptureRetry",
+            endingBefore: "private func cancelDeviceDNSCaptureRetry"
+        )
+
+        // On capture-retry EXHAUSTION (a genuine resolver-changing handoff, not a
+        // transient mask) the tunnel stops serving the previous network's now-
+        // unreachable resolvers — but ONLY when a per-query encrypted fallback will
+        // catch the queries. Phase 0 hygiene (lavasec-infra#57).
+        XCTAssertTrue(
+            retryBlock.contains("event: \"device-dns-capture-retry-exhausted\""),
+            "Exhaustion must still be observable in the device log."
+        )
+
+        // The drop is gated on the encrypted fallback actually being the catcher. With
+        // NO fallback (Device-DNS-only), `device-dns-unavailable` is not restart-worthy
+        // (cold-start state), so dropping would strand the no-fallback handoff WITHOUT
+        // escalation (Codex P1 on #110) — preserve the stale resolver there and let the
+        // existing restart-worthy recovery fire (Track 4 is the prompt fix, separate).
+        XCTAssertTrue(
+            retryBlock.contains("currentResolverRuntimeConfiguration().encryptedFallback != nil"),
+            "The exhaustion drop must be gated on whether an encrypted fallback will catch the queries."
+        )
+        XCTAssertTrue(
+            retryBlock.contains("preserveOnEmptyCapture: !routesToEncryptedFallback"),
+            "Drop the stale resolver only when the encrypted fallback catches it; otherwise preserve it (no-fallback keeps its restart-worthy recovery)."
+        )
+
+        // The drop must be gated behind the retry-exhaustion check (only when truly
+        // exhausted, never on a routine empty read mid-retry).
+        let gateRange = try XCTUnwrap(
+            retryBlock.range(of: "DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture"),
+            "Expected the shouldRetryDeviceDNSCapture gate in runDeviceDNSCaptureRetry."
+        )
+        let dropRange = try XCTUnwrap(
+            retryBlock.range(of: "preserveOnEmptyCapture: !routesToEncryptedFallback"),
+            "Expected the fallback-gated stale-drop in the exhaustion branch."
+        )
+        XCTAssertTrue(
+            gateRange.lowerBound < dropRange.lowerBound,
+            "The stale-drop must come after (inside) the retry-exhaustion gate."
+        )
+
+        // When a drop does happen, it must take effect on the live runtime and nudge a
+        // confirming probe so queries route to the fallback at once, mirroring recapture.
+        XCTAssertTrue(
+            retryBlock.contains("reason: \"device-dns-stale-dropped-on-exhaustion\""),
+            "The drop+reset must be tagged distinctly for field logs."
+        )
+        XCTAssertTrue(
+            retryBlock.contains("collectPendingResponsesAndResetResolverRuntime("),
+            "Dropping the stale resolver must reset the runtime so live queries fail fast."
+        )
+        XCTAssertTrue(
+            retryBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"device-dns-stale-dropped-on-exhaustion\")"),
+            "A confirming probe must run so the policy sees the unavailable primary now."
+        )
+    }
+
+    func testDeviceDNSRecaptureRestartIsGatedAndProductiveCreditIsPersisted() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // Track 4: the no-fallback exhaustion path escalates to the gated cold-restart;
+        // the fallback case must NOT (Option-A keeps serving over the encrypted path).
+        let retryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func runDeviceDNSCaptureRetry",
+            endingBefore: "private func cancelDeviceDNSCaptureRetry"
+        )
+        let gateRange = try XCTUnwrap(
+            retryBlock.range(of: "if !routesToEncryptedFallback {"),
+            "The recapture restart must be gated on there being no encrypted fallback."
+        )
+        let callRange = try XCTUnwrap(
+            retryBlock.range(of: "promptDeviceDNSRecaptureRestartIfPolicyAllows(now:"),
+            "The exhaustion branch must escalate to the gated recapture restart."
+        )
+        XCTAssertTrue(gateRange.lowerBound < callRange.lowerBound)
+
+        // The recapture entry uses its OWN cap reason (higher ceiling) and shares the
+        // guarded teardown (Track-1 path guard + on-demand + atomic cancel, no main hop).
+        let promptBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func promptDeviceDNSRecaptureRestartIfPolicyAllows",
+            endingBefore: "private func performGuardedSelfReconnectTeardown"
+        )
+        XCTAssertTrue(promptBlock.contains("reason: .deviceDNSRecapture"))
+        XCTAssertTrue(promptBlock.contains("performGuardedSelfReconnectTeardown(reason: .deviceDNSRecapture"))
+        // A throttled/declined recapture still arms the in-place wedge probe (always-eventually-retry).
+        XCTAssertTrue(promptBlock.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"))
+
+        // The shared teardown persists the restart-survivable credit marker BEFORE the
+        // cancel — the cancel kills the process, so an in-memory marker would not survive.
+        let teardownBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func performGuardedSelfReconnectTeardown",
+            endingBefore: "private static func isOnDemandConfirmedEnabled"
+        )
+        let saveMarkerRange = try XCTUnwrap(
+            teardownBlock.range(of: "Self.saveLastSelfReconnectAt(now)"),
+            "The teardown must persist the credit marker."
+        )
+        let cancelRange = try XCTUnwrap(teardownBlock.range(of: "cancelTunnelWithError(nil)"))
+        XCTAssertTrue(
+            saveMarkerRange.lowerBound < cancelRange.lowerBound,
+            "The credit marker must be persisted before the cancel that kills the process."
+        )
+
+        // THE LOAD-BEARING CORRECTION: the productive-recovery credit reads the PERSISTED
+        // lastSelfReconnectAt (which survives the restart's process kill) and prunes the
+        // persisted attempt store — it does NOT rely on the in-memory wedge marker, which
+        // the cancel wipes (crediting through that would be a silent no-op for the cold
+        // restart this exists to credit).
+        let creditBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func creditProductiveSelfReconnectIfPending",
+            endingBefore: "// Pairs a logged"
+        )
+        XCTAssertTrue(
+            creditBlock.contains("Self.loadLastSelfReconnectAt()"),
+            "The credit must read the persisted (restart-survivable) marker."
+        )
+        XCTAssertTrue(
+            creditBlock.contains("Self.saveSelfReconnectAttemptTimes("),
+            "The credit must prune the persisted attempt store."
+        )
+        XCTAssertFalse(
+            creditBlock.contains("reconnectNeededSince"),
+            "The credit must not depend on the in-memory wedge marker (wiped by the restart)."
+        )
+        // Credit removes ONLY the recovered restart's own attempt (the marker), not every
+        // attempt at-or-before it — earlier unproductive restarts stay counted so an
+        // intermittent loop still hits the per-window cap after one success (Codex P2).
+        XCTAssertTrue(
+            creditBlock.contains("firstIndex(of: lastSelfReconnectAt)"),
+            "The credit must remove a single matching attempt, not a range."
+        )
+        XCTAssertFalse(
+            creditBlock.contains("filter { $0 > lastSelfReconnectAt }"),
+            "The credit must not erase every attempt at-or-before the marker (Codex P2)."
+        )
+
+        // The credit is invoked from a confirmed-recovery site (smoke-probe success), NOT
+        // from inside logConnectivityRecoveredIfWedged (whose wedge-marker guard the restart wipes).
+        XCTAssertTrue(source.contains("creditProductiveSelfReconnectIfPending(now: now)"))
+    }
+
+    func testRecaptureIntentIsCarriedIntoTheWedgeRetry() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // Codex P1/P2: when a no-fallback recapture restart cannot fire now (throttled by
+        // cooldown, OR `.noAction` because idle/low traffic keeps severity below
+        // `.needsReconnect`), the recovery retry re-enters the WEDGE path
+        // (selfReconnectIfPolicyAllows). Without carrying the recapture intent it applies the
+        // lower `.wedge` cap (2) and discards the recapture cap (3), suppressing the intended
+        // third recapture restart. Fix: a sticky `deviceDNSRecaptureRestartPending` flag set
+        // on ANY decline (recapture is owed once recapture exhausted), read by the wedge path
+        // to pick the ceiling, cleared on confirmed recovery.
+
+        // 1) The recapture decline branch marks the pending flag — on ANY decline, NOT only
+        //    `.throttled` (`.noAction` also covers the idle/low-traffic case — Codex P2).
+        let promptBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func promptDeviceDNSRecaptureRestartIfPolicyAllows",
+            endingBefore: "private func performGuardedSelfReconnectTeardown"
+        )
+        XCTAssertFalse(
+            promptBlock.contains("if decision == .throttled"),
+            "The recapture-pending flag must not be gated on .throttled only (Codex P2)."
+        )
+        let declineGuardRange = try XCTUnwrap(
+            promptBlock.range(of: "guard decision == .reconnect else {"),
+            "The recapture restart must decline when the policy does not say reconnect."
+        )
+        let setPendingRange = try XCTUnwrap(
+            promptBlock.range(of: "deviceDNSRecaptureRestartPending = true"),
+            "A declined recapture restart must mark the recapture restart as pending."
+        )
+        let probeRange = try XCTUnwrap(promptBlock.range(of: "scheduleResolverWedgeRecoveryProbeIfNeeded()"))
+        // Set inside the decline branch, before the always-eventually-retry backstop probe.
+        XCTAssertTrue(declineGuardRange.lowerBound < setPendingRange.lowerBound)
+        XCTAssertTrue(setPendingRange.lowerBound < probeRange.lowerBound)
+
+        // 2) The wedge path picks its restart reason from the flag and threads it into BOTH
+        //    the policy decision (so the ceiling matches) and the shared teardown.
+        let wedgeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows",
+            endingBefore: "// Track 4 — the gated cold-restart"
+        )
+        XCTAssertTrue(wedgeBlock.contains("deviceDNSRecaptureRestartPending ? .deviceDNSRecapture : .wedge"))
+        XCTAssertTrue(wedgeBlock.contains("reason: restartReason,"))
+        XCTAssertTrue(wedgeBlock.contains("performGuardedSelfReconnectTeardown(reason: restartReason"))
+        // The wedge path must no longer hard-code `.wedge` for the teardown.
+        XCTAssertFalse(wedgeBlock.contains("performGuardedSelfReconnectTeardown(reason: .wedge"))
+
+        // 3) The flag is cleared on recovery so a later unrelated wedge uses the wedge cap.
+        let clearBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func clearReconnectNeededActivitySuppression",
+            endingBefore: "#if LAVA_QA_TOOLS"
+        )
+        XCTAssertTrue(clearBlock.contains("deviceDNSRecaptureRestartPending = false"))
+
+        // 4) ...and on a fresh tunnel lifecycle (resetHealth), so a reused provider instance
+        //    (manual stop/start without a process kill) can't carry recapture intent into an
+        //    unrelated wedge with the higher ceiling (Codex P2).
+        let resetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetHealth",
+            endingBefore: "private func startPathMonitor"
+        )
+        XCTAssertTrue(resetBlock.contains("deviceDNSRecaptureRestartPending = false"))
+    }
+
     func testWakeProactivelyReHandshakesResolverAfterSuspend() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let wakeBlock = try sourceBlock(
@@ -383,6 +601,167 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(helperBlock.contains("cancelTunnelWithError(nil)"))
     }
 
+    func testSelfReconnectReValidatesNetworkPathBeforeCancel() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows",
+            endingBefore: "private static func loadSelfReconnectAttemptTimes"
+        )
+
+        // The .reconnect decision is computed on dnsStateQueue but the network path can
+        // flip before the teardown lands. The cancel must be re-validated on a fresh
+        // dnsStateQueue turn and gated on the path still being satisfied — tearing down
+        // into a dead path hands Connect-On-Demand nothing to recover into and lengthens
+        // the OFF window (field-confirmed).
+        XCTAssertTrue(
+            helperBlock.contains("dnsStateQueue.async"),
+            "The cancel must be deferred to a fresh dnsStateQueue turn so an enqueued path update settles first."
+        )
+        // Must gate on the handler-stamped freshest path state, NOT only
+        // health.networkPathIsSatisfied (which lands via a second deferred hop and can be
+        // stale-satisfied when a delivered path update hasn't been applied yet).
+        XCTAssertTrue(
+            helperBlock.contains("self.latestMonitoredPathIsSatisfied"),
+            "The teardown must re-check the handler-stamped latestMonitoredPathIsSatisfied, not just the deferred health flag."
+        )
+
+        // The path guard must PRECEDE the cancel: the cancel cannot fire on an
+        // unsatisfied path.
+        let guardRange = try XCTUnwrap(
+            helperBlock.range(of: "guard self.latestMonitoredPathIsSatisfied"),
+            "Expected a latestMonitoredPathIsSatisfied guard in selfReconnectIfPolicyAllows."
+        )
+        let cancelRange = try XCTUnwrap(
+            helperBlock.range(of: "cancelTunnelWithError(nil)"),
+            "Expected a cancelTunnelWithError(nil) call in selfReconnectIfPolicyAllows."
+        )
+        XCTAssertTrue(
+            guardRange.lowerBound < cancelRange.lowerBound,
+            "The networkPathIsSatisfied guard must come before cancelTunnelWithError."
+        )
+
+        // The persisted attempt (which counts against the per-window cap) must also be
+        // committed only on the satisfied path, after the guard — a skipped teardown
+        // must not burn a cap slot.
+        // Target the COMMIT save (updatedAttempts), not the earlier normalization
+        // self-heal save (attempts) that runs before the decision.
+        let saveRange = try XCTUnwrap(
+            helperBlock.range(of: "saveSelfReconnectAttemptTimes(updatedAttempts)"),
+            "Expected the committed-attempt saveSelfReconnectAttemptTimes(updatedAttempts) in selfReconnectIfPolicyAllows."
+        )
+        XCTAssertTrue(
+            guardRange.lowerBound < saveRange.lowerBound,
+            "The self-reconnect attempt must be persisted only after the path guard passes."
+        )
+
+        // On an unsatisfied path: release the latch so a later satisfied settle can
+        // retry, re-arm the lighter wedge-recovery probe, and record why it was skipped.
+        XCTAssertTrue(
+            helperBlock.contains("self.hasRequestedSelfReconnect = false"),
+            "A skipped teardown must release the self-reconnect latch so recovery isn't permanently suppressed."
+        )
+        XCTAssertTrue(
+            helperBlock.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"),
+            "A skipped teardown must re-arm the wedge-recovery probe instead of cancelling blind."
+        )
+        XCTAssertTrue(
+            helperBlock.contains("event: \"self-reconnect-skipped-path-unsatisfied\""),
+            "A skipped teardown must be observable in the device log."
+        )
+    }
+
+    func testSelfReconnectReValidatesWedgeBeforeCancel() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows",
+            endingBefore: "private static func loadSelfReconnectAttemptTimes"
+        )
+
+        // A queued smoke-probe / organic-query success can run on dnsStateQueue between the
+        // .reconnect decision and the deferred cancel turn, clearing the wedge without
+        // clearing hasRequestedSelfReconnect. The deferred turn must RE-RUN THE FULL
+        // self-reconnect policy against fresh health and bail unless it still says reconnect
+        // — re-deriving only the assessment and checking primaryAction == .reconnect is too
+        // loose, because a wedge that cleared to .dnsSlow can still report .reconnect while
+        // the policy is .noAction (Codex P2). Otherwise it tears down a now-healthy / covered
+        // / merely-slow tunnel.
+        let revalidateRange = try XCTUnwrap(
+            helperBlock.range(of: "let revalidatedAssessment = ProtectionConnectivityPolicy.assessment"),
+            "The deferred cancel turn must re-derive the connectivity assessment."
+        )
+        let decisionRange = try XCTUnwrap(
+            helperBlock.range(of: "let revalidatedDecision = TunnelSelfReconnectPolicy.decision"),
+            "The deferred cancel turn must re-run the full self-reconnect policy, not just the assessment."
+        )
+        let wedgeGuardRange = try XCTUnwrap(
+            helperBlock.range(of: "guard revalidatedDecision == .reconnect else"),
+            "The deferred cancel must be gated on the FULL policy still returning .reconnect."
+        )
+        // The wedge re-check must precede both the committed attempt and the cancel.
+        let saveRange = try XCTUnwrap(
+            helperBlock.range(of: "saveSelfReconnectAttemptTimes(updatedAttempts)"),
+            "Expected the committed-attempt save in selfReconnectIfPolicyAllows."
+        )
+        let cancelRange = try XCTUnwrap(
+            helperBlock.range(of: "cancelTunnelWithError(nil)"),
+            "Expected a cancelTunnelWithError(nil) call in selfReconnectIfPolicyAllows."
+        )
+        XCTAssertTrue(revalidateRange.lowerBound < decisionRange.lowerBound)
+        XCTAssertTrue(decisionRange.lowerBound < wedgeGuardRange.lowerBound)
+        XCTAssertTrue(
+            wedgeGuardRange.lowerBound < saveRange.lowerBound,
+            "The wedge re-check must come before the persisted attempt."
+        )
+        XCTAssertTrue(
+            wedgeGuardRange.lowerBound < cancelRange.lowerBound,
+            "The wedge re-check must come before cancelTunnelWithError."
+        )
+        // On a cleared wedge, release the latch (so a later real wedge can retry) and bail.
+        let latchReleaseRange = try XCTUnwrap(
+            helperBlock.range(of: "self.hasRequestedSelfReconnect = false"),
+            "A bailed cancel must release the self-reconnect latch."
+        )
+        XCTAssertTrue(wedgeGuardRange.lowerBound < latchReleaseRange.upperBound)
+
+        // The teardown must be issued on the SAME dnsStateQueue turn the path was validated —
+        // no DispatchQueue.main.async hop, which would reopen a path-flip window AFTER the
+        // attempt was already burned (Codex P2). cancelTunnelWithError is async to iOS, and
+        // setTunnelNetworkSettings is already called off-main here, so an off-main cancel is safe.
+        XCTAssertFalse(
+            helperBlock.contains("DispatchQueue.main.async"),
+            "The cancel must not hop to the main queue — it reopens a cancel-into-dead-network window after the path guard."
+        )
+    }
+
+    func testPathMonitorStampsFreshSatisfiedStateBeforeDeferringHandling() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let monitorBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func startPathMonitor",
+            endingBefore: "private func handleNetworkPathUpdate"
+        )
+
+        // The handler runs on dnsStateQueue but defers the heavy handleNetworkPathUpdate
+        // (which applies health.networkPathIsSatisfied) to a SECOND dnsStateQueue.async.
+        // The freshest-state stamp must happen SYNCHRONOUSLY in the handler, BEFORE that
+        // deferral, so the self-reconnect guard can observe a delivered-but-not-yet-applied
+        // path change one hop earlier (the cancel-into-dead-network race).
+        let stampRange = try XCTUnwrap(
+            monitorBlock.range(of: "self.latestMonitoredPathIsSatisfied = update.isSatisfied"),
+            "The pathUpdateHandler must stamp latestMonitoredPathIsSatisfied synchronously."
+        )
+        let deferRange = try XCTUnwrap(
+            monitorBlock.range(of: "self.dnsStateQueue.async"),
+            "The pathUpdateHandler defers handleNetworkPathUpdate to a second turn."
+        )
+        XCTAssertTrue(
+            stampRange.lowerBound < deferRange.lowerBound,
+            "The synchronous stamp must precede the deferred handleNetworkPathUpdate hop."
+        )
+    }
+
     func testRecoveryFromAReconnectNeededWedgeIsLogged() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
 
@@ -459,6 +838,66 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(resetHealthBlock.contains("reconnectNeededSince = nil"))
     }
 
+    func testEncryptedFallbackSuccessRecordsServingSignalButNeverStampsTheWedgeMarker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+        let fallbackBranch = try sourceBlock(
+            in: recordBlock,
+            startingAt: "if result.usedEncryptedFallback {",
+            endingBefore: "} else {"
+        )
+
+        // The branch records the serving-fallback signal the policy reads for coverage...
+        XCTAssertTrue(
+            fallbackBranch.contains("health.lastEncryptedFallbackSuccessAt = now"),
+            "The fallback branch must record the serving-fallback signal."
+        )
+        // ...but must NEVER stamp the wedge marker. The marker is overloaded (it flips
+        // treatsResolverRejectionAsFallbackTrigger and survives path changes), so stamping it
+        // for the covered state would bypass authoritative SERVFAIL/REFUSED. Coverage works via
+        // the per-query fallback + the policy suppression; in-place recovery for the covered
+        // state is a deferred follow-up that must not reuse this marker.
+        XCTAssertFalse(
+            fallbackBranch.contains("reconnectNeededSince = now"),
+            "The encrypted-fallback branch must NOT stamp the wedge marker (it flips the rejection-as-fallback trigger)."
+        )
+    }
+
+    func testPrimaryRecoveryClearsTheEncryptedFallbackServingTimestamp() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // The serving signal must be cleared on a forwarding primary recovery so a stale
+        // success can't cover a later outage's probe (the policy keys coverage on an absolute
+        // freshness window, relying on this clear to scope it to the current outage).
+        let recordBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordUpstreamResult",
+            endingBefore: "private func updateResolverBackoff"
+        )
+        XCTAssertTrue(
+            recordBlock.contains("health.lastPrimaryUpstreamSuccessAt = now")
+                && recordBlock.contains("health.lastEncryptedFallbackSuccessAt = nil"),
+            "A forwarding primary recovery must clear the encrypted-fallback serving timestamp."
+        )
+
+        // ...and on an accepted primary SMOKE-probe recovery (which never sets
+        // lastPrimaryUpstreamSuccessAt), otherwise a smoke-only recovery would leave the stale
+        // timestamp covering a new outage.
+        let smokeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func applyResolverSmokeProbeResult",
+            endingBefore: "private func invalidateInFlightSmokeProbes"
+        )
+        XCTAssertTrue(
+            smokeBlock.contains("health.lastEncryptedFallbackSuccessAt = nil"),
+            "An accepted primary smoke-probe recovery must clear the encrypted-fallback serving timestamp."
+        )
+    }
+
     func testWedgedResolverSelfRecoversWithoutAManualToggle() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
 
@@ -485,9 +924,46 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // A wedge is often stale resolvers from a prior network — re-capture
         // device DNS before re-probing so the device-DNS user gets fresh addresses.
         XCTAssertTrue(recoveryBlock.contains("refreshDeviceDNSResolverAddressesOnDNSQueue(reason: \"resolver-wedge-recovery\")"))
-        XCTAssertTrue(recoveryBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"resolver-wedge-recovery\")"))
+        XCTAssertTrue(recoveryBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: isCoveredWedge ? \"covered-primary-recapture\" : \"resolver-wedge-recovery\")"))
         XCTAssertTrue(recoveryBlock.contains("assessment.primaryAction == .reconnect"))
-        XCTAssertTrue(source.contains("private let resolverWedgeRecoveryProbeInterval: TimeInterval = 30"))
+        // The recovery loop re-arms on an escalating cadence (LAV-92 fast guide), not a flat
+        // 30s interval, so a brief blip recovers in seconds while a sustained wedge backs off to
+        // the legacy 30s ceiling. The flat constant must be gone.
+        XCTAssertFalse(source.contains("resolverWedgeRecoveryProbeInterval"))
+        XCTAssertTrue(source.contains("private let resolverWedgeRecoveryCadence = ResolverWedgeRecoveryCadence()"))
+        XCTAssertTrue(recoveryBlock.contains("resolverWedgeRecoveryCadence.delay(forAttempt: resolverWedgeRecoveryAttempt)"))
+        XCTAssertTrue(recoveryBlock.contains("resolverWedgeRecoveryAttempt += 1"))
+        // The fast ramp is confined to the UNCOVERED down-wedge (user offline). A COVERED wedge
+        // (online via encrypted fallback) keeps the gentle ceiling cadence and zeroes the ramp so
+        // a later real down-wedge still starts fast.
+        XCTAssertTrue(recoveryBlock.contains("ProtectionConnectivityPolicy.isEncryptedFallbackCoveringWedge(health: health, now: now)"))
+        XCTAssertTrue(recoveryBlock.contains("resolverWedgeRecoveryCadence.maxInterval"))
+        // A pending probe must be preempted whenever a SOONER one is now warranted (coverage lapsed,
+        // or a down probe already backed off to the cap) — a deadline comparison that subsumes every
+        // covered<->uncovered transition, so the offline user never waits out a stale timer
+        // (Codex P2 ×2). The fire path and cancel/resetHealth clear the armed deadline.
+        // Preempt a pending probe when the cadence MODE changed (covered<->uncovered) OR a sooner
+        // probe is warranted within the same mode. The mode check stops a covered/online wedge from
+        // being fast-probed (which could tear down a working fallback) AND speeds an offline user up
+        // when coverage lapses (Codex P2 r1/r2/r5).
+        XCTAssertTrue(recoveryBlock.contains("let modeChanged = resolverWedgeRecoveryArmedCovered != coveredNow"))
+        XCTAssertTrue(recoveryBlock.contains("guard modeChanged || deadline < armedDeadline else {"))
+        XCTAssertTrue(recoveryBlock.contains("resolverWedgeRecoveryArmedDeadline = deadline"))
+        XCTAssertTrue(recoveryBlock.contains("resolverWedgeRecoveryArmedCovered = coveredNow"))
+        // The fast ramp is floored at the recovery probe's ACTUAL smoke-probe timeout (computed the
+        // same way the probe computes it — transport + device-DNS-fallback availability), so a
+        // sooner re-arm can't fire a new probe while the previous one is still in flight and discard
+        // it / churn the session. Covers encrypted AND fallback-capable plain primaries (Codex P2
+        // r3/r4).
+        XCTAssertTrue(recoveryBlock.contains("Self.smokeProbeTimeoutSeconds("))
+        XCTAssertTrue(recoveryBlock.contains("reason: \"resolver-wedge-recovery\""))
+        XCTAssertTrue(recoveryBlock.contains("delay = max(rampDelay, probeTimeout)"))
+        // The fired probe finding the wedge already gone must end the episode (reset the ramp),
+        // not strand the counter at a backed-off value for the next wedge (adversarial P2).
+        XCTAssertGreaterThanOrEqual(
+            recoveryBlock.components(separatedBy: "resolverWedgeRecoveryAttempt = 0").count - 1, 2,
+            "the no-longer-wedged early return and the covered branch must both zero the ramp counter"
+        )
 
         // Every recovery/success path funnels through the suppression clear, which
         // is the single cancel point that keeps the recovery loop bounded to the
@@ -498,6 +974,18 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "#if LAVA_QA_TOOLS"
         )
         XCTAssertTrue(suppressionBlock.contains("cancelResolverWedgeRecoveryProbe()"))
+        // Cancelling the probe (recovery / lifecycle reset) resets the episode counter so the
+        // next wedge restarts the fast escalation ramp rather than inheriting a backed-off delay.
+        XCTAssertTrue(source.contains("resolverWedgeRecoveryAttempt = 0"))
+        // The lifecycle reset must also own wedge-probe teardown, so a reused provider instance
+        // (manual stop/start without a process kill) can't inherit a stranded probe/counter
+        // (adversarial P3 — resetHealth previously relied on stop always preceding start).
+        let resetHealthBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetHealth()",
+            endingBefore: "private func startPathMonitor()"
+        )
+        XCTAssertTrue(resetHealthBlock.contains("cancelResolverWedgeRecoveryProbe()"))
 
         // A suppressed self-reconnect must be diagnosable from the Release log so a
         // "said reconnect needed but never recovered" report carries the reason.
@@ -513,7 +1001,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(selfReconnectBlock.contains("if changed || cooldownElapsed {"))
     }
 
-    func testRecoveryAcknowledgementDoesNotExtendProblemNotificationThrottle() throws {
+    func testRecordDeliveryOnlyAdvancesThrottleForProblems() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let recordBlock = try sourceBlock(
             in: source,
@@ -522,8 +1010,8 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
 
         // The 600s minimum-problem-delivery throttle keys off the delivered-at
-        // timestamp; only a problem delivery may advance it, so a .reconnected
-        // acknowledgement can't suppress a fresh problem after a flappy recovery.
+        // timestamp; only a problem delivery may advance it. (Only actionable problem
+        // banners are delivered now — no recovery acknowledgement.)
         let prefix = try sourceBlock(
             in: recordBlock,
             startingAt: "let defaults",
@@ -531,11 +1019,277 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
         XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
         let problemBranch = try sourceBlock(
-            in: recordBlock,
+            in: source,
             startingAt: "if notification.kind.isProblem {",
-            endingBefore: "} else if notification.kind == .reconnected {"
+            endingBefore: "private static func removeSupersededProtectionNotifications"
         )
         XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        // No recovery-acknowledgement delivery path remains in recordDelivery.
+        XCTAssertFalse(recordBlock.contains(".reconnected"))
+    }
+
+    func testEncryptedFallbackSilentClearAlsoLiftsTheDuplicateGuardID() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // Back-dating `lastDeliveredAt` alone is not enough: the silent supersede removed
+        // the reconnect banner, so the persisted last-delivered *id* must also be cleared.
+        // Otherwise a lapse back to `.needsReconnect` with the same event id is suppressed by
+        // notification(for:)'s exact-id duplicate guard until a later probe shifts the id,
+        // defeating the back-dated cooldown. The clear must live in the cooldown branch so a
+        // real `.healthy` recovery (cooldownAnchor == nil) keeps its duplicate guard intact.
+        let cooldownBranch = try sourceBlock(
+            in: source,
+            startingAt: "if let cooldownAnchor {",
+            endingBefore: "let requestIdentifiers = identifiers.map {"
+        )
+        XCTAssertTrue(
+            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
+        )
+    }
+
+    func testEncryptedFallbackCoverageClearsOnSustainedCarriedFailureNotASingleTransient() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // In the covered state the primary is wedged, so the policy is re-assessed inside
+        // the SAME recordUpstreamResult call (appendReconnectNeededIfPolicyRequiresReconnect)
+        // with the smoke-failure count already at the reconnect threshold. So a lone
+        // forwarding transient that cleared coverage would synchronously self-reconnect — the
+        // LAV-80-class restart this path suppresses. The clear MUST be gated on a sustained
+        // carried-query streak, never the first failure.
+        let failureBranch = try sourceBlock(
+            in: source,
+            startingAt: "health.lastFailureReason = result.failureSummary",
+            endingBefore: "health.upstreamSuccessCount += 1"
+        )
+        XCTAssertTrue(
+            failureBranch.contains("consecutiveCarriedQueryFailureCount += 1"),
+            "A real-forwarding total failure must advance the carried-query streak."
+        )
+        XCTAssertTrue(
+            failureBranch.contains("if consecutiveCarriedQueryFailureCount >= encryptedFallbackCoverageClearFailureThreshold {"),
+            "The encrypted-fallback coverage teardown must be GATED on a sustained streak, not the first failure."
+        )
+        XCTAssertTrue(
+            failureBranch.contains("health.lastEncryptedFallbackSuccessAt = nil"),
+            "A sustained carried-query outage must drop the fallback serving timestamp so the restart can surface."
+        )
+        // The gate must use the forwarding-only counter — NOT health.consecutiveUpstreamFailureCount,
+        // which a failed PRIMARY smoke probe also bumps; that pollution is the over-escalation trap
+        // (a lone transient layered on a smoke-inflated count).
+        XCTAssertFalse(
+            failureBranch.contains("consecutiveUpstreamFailureCount >="),
+            "The coverage-clear gate must use the forwarding-only streak, not the smoke-polluted counter."
+        )
+
+        // A carried success resets the streak so a fresh outage re-accumulates from zero.
+        let successBranch = try sourceBlock(
+            in: source,
+            startingAt: "health.upstreamSuccessCount += 1",
+            endingBefore: "if result.usedEncryptedFallback {"
+        )
+        XCTAssertTrue(
+            successBranch.contains("consecutiveCarriedQueryFailureCount = 0"),
+            "Any carried success must reset the carried-query streak."
+        )
+    }
+
+    func testEncryptedFallbackCoverageBackstopIsAFixedCarriedFailureCountByDesign() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // LAV-96 removed the wall-clock freshness ceiling; the ONLY backstop that tears down
+        // encrypted-fallback coverage on a still-wedged primary is now the carried-query FAILURE
+        // STREAK. This pins that threshold so it can't silently drift, and records the deliberate
+        // tradeoff Codex flagged on #104: with the ceiling gone, the first
+        // (encryptedFallbackCoverageClearFailureThreshold - 1) real carried failures after an idle
+        // window still read as covered and suppress the reconnect. That is INTENTIONAL — clearing
+        // on a lone transient would synchronously fire the LAV-80-class restart this path exists to
+        // prevent (locked by testEncryptedFallbackCoverageClearsOnSustainedCarriedFailureNotASingleTransient).
+        // A genuine page load bursts many DNS queries, so the streak trips near-instantly under
+        // real use; only a near-idle device waits, where the user is not actively resolving. Tuning
+        // the count down — faster escalation in the dead-everything-after-idle case — is LAV-93's
+        // within-identity escalation scope, deliberately deferred from LAV-96.
+        XCTAssertTrue(
+            source.contains("private let encryptedFallbackCoverageClearFailureThreshold = 3"),
+            "The encrypted-fallback coverage backstop is a fixed 3-carried-failure streak (LAV-96 design; tuning is LAV-93)."
+        )
+    }
+
+    func testCoveredWedgeRecaptureRunsWithoutTheMarkerAndDoesNotChurnTheFallback() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let scheduleBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func scheduleResolverWedgeRecoveryProbeIfNeeded()",
+            endingBefore: "private func cancelResolverWedgeRecoveryProbe()"
+        )
+
+        // The covered wedge (encrypted fallback carrying a transition-stale primary) holds
+        // no marker, so the accelerated recovery probe must re-confirm on the policy's coverage
+        // predicate — the explicit named helper, derived purely from health — alongside the
+        // down-wedge signals, or it would abort and strand the primary on the fallback.
+        XCTAssertTrue(scheduleBlock.contains("let isCoveredWedge = ProtectionConnectivityPolicy.isEncryptedFallbackCoveringWedge(health: self.health, now: now)"))
+        // The loop stays ALIVE on the broader carrying signal (survives a rejected recapture probe,
+        // which flips the gated covered predicate false while the marker is unstamped); isCoveredWedge
+        // still drives the recapture reason + churn-skip.
+        XCTAssertTrue(scheduleBlock.contains("let isCarryingFallback = ProtectionConnectivityPolicy.isEncryptedFallbackCarryingWedge(health: self.health, now: now)"))
+        XCTAssertTrue(scheduleBlock.contains("isDownWedge || isCarryingFallback"))
+        XCTAssertTrue(scheduleBlock.contains("\"covered-primary-recapture\""))
+
+        // HARD CONSTRAINT — the reason recovery-in-place was deferred: the covered recapture
+        // must NEVER stamp `reconnectNeededSince`. Stamping it feeds currentDeviceResolverWedged
+        // into DNSResolverRuntimePlan, flipping treatsResolverRejectionAsFallbackTrigger and
+        // bypassing authoritative SERVFAIL/REFUSED on a freshly handed-off network.
+        XCTAssertFalse(
+            scheduleBlock.contains("reconnectNeededSince ="),
+            "Covered-state recapture must not stamp the overloaded wedge marker."
+        )
+
+        // The DoH/DoT session churn must be gated to a DOWN wedge that the fallback is NOT
+        // carrying. In the covered state — INCLUDING the overlap where a stale down-wedge
+        // marker is also held — those sessions are ACTIVELY carrying the fallback, so resetting
+        // them would disrupt the very path keeping the user online. The `!isCoveredWedge`
+        // conjunct is what suppresses the churn when the marker is held but coverage is live.
+        let gatedResetRegion = try sourceBlock(
+            in: scheduleBlock,
+            startingAt: "self.resolverBackoffPolicy.reset()",
+            endingBefore: "self.scheduleResolverSmokeProbeIfNeeded("
+        )
+        XCTAssertTrue(
+            gatedResetRegion.contains("if isDownWedge, !isCoveredWedge {"),
+            "resetResolverTransientState must skip the churn whenever coverage is live, even if the wedge marker is also held."
+        )
+        XCTAssertTrue(gatedResetRegion.contains("resetResolverTransientState()"))
+    }
+
+    func testCoveredWedgeRecaptureLoopReArmsWithoutTheMarker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // The smoke-probe-failure path re-arms the recovery loop on the marker for the down
+        // wedge; the covered wedge holds none, so it must ALSO re-arm on the carrying signal
+        // (isEncryptedFallbackCarryingWedge = covering MINUS the rejected==0 gate, still requiring a
+        // failed smoke-probe context — survives a rejected recapture probe, unlike the gated
+        // covering predicate), else the covered recapture loop stalls after its own rejected
+        // re-probe until the 300s routine probe.
+        XCTAssertTrue(
+            source.contains("if currentDeviceResolverWedged() || ProtectionConnectivityPolicy.isEncryptedFallbackCarryingWedge(health: health, now: now) {"),
+            "The covered recapture loop must re-arm on the fallback-carrying signal in the smoke-failure path."
+        )
+    }
+
+    func testDeviceResolverWedgedStaysPurelyTheDownWedgeMarker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // HARD CONSTRAINT (the reason the covered recapture got its own read, not the marker):
+        // currentDeviceResolverWedged() — which feeds DNSResolverRuntimePlan.make's
+        // deviceResolverWedged and thus treatsResolverRejectionAsFallbackTrigger (the
+        // authoritative-SERVFAIL/REFUSED bypass) — must read ONLY reconnectNeededSince, never the
+        // encrypted-fallback coverage signal. If a future edit routes coverage through here, a
+        // transition blip would start bypassing authoritative rejections.
+        let wedgedBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func currentDeviceResolverWedged() -> Bool {",
+            endingBefore: "private func orderedResolverAddressesForCurrentNetwork"
+        )
+        XCTAssertTrue(wedgedBlock.contains("reconnectNeededSince != nil"))
+        XCTAssertFalse(
+            wedgedBlock.contains("EncryptedFallback") || wedgedBlock.contains("isEncryptedFallbackCoveringWedge"),
+            "currentDeviceResolverWedged() must stay purely the down-wedge marker — no coverage signal."
+        )
+        // And the rejection-trigger feed stays the marker only.
+        XCTAssertTrue(source.contains("deviceResolverWedged: currentDeviceResolverWedged()"))
+    }
+
+    func testCarriedQueryFailureStreakResetsOnContextResets() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // The episode-scoped carried-query failure streak must be cleared by the context-reset
+        // paths (a network change / recovery and a fresh tunnel session), not only by a later
+        // forwarding success — otherwise a 1–2 count from a prior episode carries over and the
+        // first carried failure in the next one tears down a freshly-serving fallback.
+        let recoveryReset = try sourceBlock(
+            in: source,
+            startingAt: "private func resetFailureAndFallbackStateForRecovery()",
+            endingBefore: "private func invalidateInFlightSmokeProbes("
+        )
+        XCTAssertTrue(
+            recoveryReset.contains("consecutiveCarriedQueryFailureCount = 0"),
+            "A network-change / recovery reset must clear the carried-query failure streak."
+        )
+        let healthReset = try sourceBlock(
+            in: source,
+            startingAt: "private func resetHealth()",
+            endingBefore: "private func startPathMonitor("
+        )
+        XCTAssertTrue(
+            healthReset.contains("consecutiveCarriedQueryFailureCount = 0"),
+            "A fresh tunnel session (resetHealth) must clear the carried-query failure streak."
+        )
+        // A resolver-runtime reset (config / preset change) also opens a fresh fallback episode.
+        let runtimeReset = try sourceBlock(
+            in: source,
+            startingAt: "private func collectPendingResponsesAndResetResolverRuntime(",
+            endingBefore: "private func writeServerFailures("
+        )
+        XCTAssertTrue(
+            runtimeReset.contains("consecutiveCarriedQueryFailureCount = 0"),
+            "A resolver-runtime reset must clear the carried-query failure streak for the new resolver context."
+        )
+        // The DNS-health-context baseline keys on lastResolverIdentityChangeAt, which must be bumped
+        // ONLY on an actual PRIMARY-resolver switch — never a forced same-resolver runtime reset, and
+        // never a fallback-only change (the full identifier moves, but the primary identity does not) —
+        // so a benign reload / fallback swap can't advance the baseline and hide a still-wedged primary.
+        XCTAssertTrue(
+            runtimeReset.contains("if let previousPrimaryIdentifier, previousPrimaryIdentifier != currentPrimaryIdentifier {")
+                && runtimeReset.contains("health.lastResolverIdentityChangeAt = Date()"),
+            "lastResolverIdentityChangeAt must be gated on an actual PRIMARY-resolver-identity change."
+        )
+
+        // The identity-scoped rejected streak must be cleared ONLY on a genuine identity change
+        // (stale evidence about the old resolver would otherwise block the new resolver's coverage
+        // via the round-19 nonzero-count gate) — and NEVER on a same-resolver reset, so it survives
+        // the network-flap churn LAV-87 relies on.
+        let identityChangeBranch = try sourceBlock(
+            in: runtimeReset,
+            startingAt: "if let previousPrimaryIdentifier, previousPrimaryIdentifier != currentPrimaryIdentifier {",
+            endingBefore: "return pendingResponses"
+        )
+        XCTAssertTrue(
+            identityChangeBranch.contains("health.consecutiveRejectedSmokeResponseCount = 0")
+                && identityChangeBranch.contains("health.rejectedSmokeResponseResolverIdentity = nil"),
+            "A genuine resolver-identity change must clear the stale identity-scoped rejected streak."
+        )
+        let beforeIdentityBranch = try sourceBlock(
+            in: runtimeReset,
+            startingAt: "consecutiveCarriedQueryFailureCount = 0",
+            endingBefore: "if let previousPrimaryIdentifier, previousPrimaryIdentifier != currentPrimaryIdentifier {"
+        )
+        XCTAssertFalse(
+            beforeIdentityBranch.contains("consecutiveRejectedSmokeResponseCount"),
+            "The rejected streak must NOT be cleared on a same-resolver reset (LAV-87 churn survival)."
+        )
+        // The encrypted-fallback COVERAGE timestamp must be invalidated on ANY runtime reset (it
+        // is fallback-side state — a fallback-only change leaves the primary baseline untouched, so
+        // a just-disabled / swapped fallback would otherwise keep suppressing reconnect via its
+        // stale success). It is in the always-runs reset block, NOT the primary-identity branch.
+        XCTAssertTrue(
+            beforeIdentityBranch.contains("health.lastEncryptedFallbackSuccessAt = nil"),
+            "A runtime reset must invalidate the encrypted-fallback coverage timestamp (fallback-side state)."
+        )
+    }
+
+    // (LAV-96) The former `testEncryptedFallbackCoverageWindowExceedsRecoveryProbeCadence`
+    // invariant was removed with the `encryptedFallbackCoverageWindow` constant: coverage no
+    // longer lapses on a wall-clock timer, so there is no window-vs-cadence knife-edge to lock.
+    // The new behaviour (idle does not lapse coverage; a sustained carried-query failure does)
+    // is locked behaviourally in ProtectionConnectivityPolicyTests.
+
+    func testEncryptedFallbackCoverageLiftsDuplicateGuardWithNoOutstandingBanner() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        // Tunnel-side mirror of the app: coverage with no outstanding banner must still lift the
+        // exact-id duplicate guard so a later lapse to a same-second reconnect id isn't suppressed.
+        let coverageBranch = try sourceBlock(
+            in: source,
+            startingAt: "} else if assessment.severity == .usingEncryptedFallback {",
+            endingBefore: "// Use the pre-clear"
+        )
+        XCTAssertTrue(
+            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            "Coverage with no outstanding banner must lift the duplicate-guard id (tunnel consumer)."
+        )
     }
 
     func testNetworkFlapCoalescesProactiveResolverRebuild() throws {
@@ -746,7 +1500,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let loadBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadCompiledSnapshot(",
-            endingBefore: "private func loadCompactPreparedSnapshot()"
+            endingBefore: "private func reusableCompactSnapshot("
         )
         let activePauseBlock = try sourceBlock(
             in: source,
@@ -762,12 +1516,237 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(activePauseBlock.contains("pauseUntil > now"))
     }
 
+    func testTunnelArtifactReadsResolveThroughThePointer() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // The tunnel must read artifacts through the published pointer (versioned dir,
+        // root fallback), not by hardcoding the root container artifact paths.
+        XCTAssertTrue(
+            source.contains("FilterArtifactStore(directoryURL: containerURL).readableStore()"),
+            "Tunnel artifact reads must resolve through readableStore() (pointer -> versioned, root fallback)."
+        )
+
+        let loadBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadCompiledSnapshot(",
+            endingBefore: "private func reusableCompactSnapshot("
+        )
+        XCTAssertTrue(
+            loadBlock.contains("readableArtifactStore()"),
+            "loadCompiledSnapshot must resolve the pointer store."
+        )
+        XCTAssertTrue(
+            loadBlock.contains("FilterArtifactStore(directoryURL: containerURL)"),
+            "A resolved-store miss must fall back to the fresh root store before recompiling."
+        )
+        XCTAssertTrue(
+            loadBlock.contains("reusableCompactSnapshot(") && loadBlock.contains("reusablePreparedSnapshot("),
+            "Both reads must go through the reuse+budget gated helpers (no decode before the gate)."
+        )
+    }
+
+    func testTunnelKeepsLastKnownGoodOnFailedReloadAndDoesNotFlicker() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // A reload must only DISCARD the resident snapshot pre-decode when a reusable,
+        // in-budget artifact is present (the decode is then all-but-certain). Otherwise
+        // the resident is kept so a build failure (e.g. a stale-pinned-hash refresh)
+        // degrades to "keep last-known-good", never to fail-closed.
+        XCTAssertTrue(
+            source.contains("let hasReusableArtifact = self.readCompactSnapshotSummary(configuration: configuration) != nil"),
+            "Pre-decode discard must be gated on a reusable artifact being present."
+        )
+        // Keep-last-known-good must require the resident to be a genuine FILTERING
+        // snapshot. A non-nil identity also covers the permissive pass-through built for
+        // an empty config; keeping that when the new config wants filtering would fail
+        // OPEN (protection connected, nothing filtered). So the keep guard must also test
+        // currentResidentSnapshotHasEnabledFilters(); otherwise it falls through to
+        // fail-closed.
+        XCTAssertTrue(
+            source.contains("if hasResidentSnapshot && !freedResidentBeforeDecode && self.currentResidentSnapshotHasEnabledFilters() {"),
+            "A failed reload may only keep last-known-good when the resident is a genuine filtering snapshot."
+        )
+        XCTAssertTrue(
+            source.contains("residentHasEnabledFilters: !configuration.enabledBlocklistIDs.isEmpty"),
+            "The resident's filtering status must be committed atomically with the loaded snapshot."
+        )
+        XCTAssertTrue(
+            source.contains("event: \"loadSnapshot-reload-failed-keeping-resident\""),
+            "Keeping last-known-good on a failed reload must be observable."
+        )
+
+        // Clearing the snapshot-unavailable marker from a detached reload branch (no-op,
+        // keep-resident, filters-disabled) must be generation-gated, so a stale reload
+        // can't erase a newer reload's fail-closed marker and re-arm the self-reconnect
+        // loop. The ungated setter must not exist for the clear path.
+        XCTAssertTrue(
+            source.contains("private func clearResidentFailClosedDueToUnavailableSnapshot(ifCurrentGeneration generation: UInt64)"),
+            "Marker clears from detached reload branches must be generation-gated."
+        )
+        XCTAssertFalse(
+            source.contains("setResidentFailClosedDueToUnavailableSnapshot(false)"),
+            "Marker must never be cleared ungated (use the generation-gated clear)."
+        )
+
+        // A snapshot-unavailable fail-closed must NOT escalate to a self-reconnect
+        // restart loop (the wedge that bricked Guard). The suppression guard must run
+        // BEFORE the reconnect policy decision.
+        let reconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func selfReconnectIfPolicyAllows(",
+            endingBefore: "private static func isOnDemandConfirmedEnabled("
+        )
+        let guardRange = try XCTUnwrap(reconnectBlock.range(of: "guard !isResidentFailClosedDueToUnavailableSnapshot() else {"))
+        let decisionRange = try XCTUnwrap(reconnectBlock.range(of: "TunnelSelfReconnectPolicy.decision("))
+        XCTAssertTrue(
+            guardRange.lowerBound < decisionRange.lowerBound,
+            "Self-reconnect must be suppressed for a snapshot-unavailable fail-closed before the policy decision."
+        )
+        XCTAssertTrue(
+            reconnectBlock.contains("event: \"self-reconnect-suppressed-snapshot-unavailable\""),
+            "Suppressing self-reconnect for an unavailable snapshot must be observable."
+        )
+    }
+
+    func testTunnelServesLastKnownGoodOnColdStartBuildFailure() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+
+        // The live-reload keep-resident path only protects reloads that have an in-memory
+        // resident. On a COLD start (forced by a DNS-handoff self-reconnect) there is no
+        // resident, so a failed fresh (re)compile — the rotating-upstream / stale-pinned-
+        // hash wedge — would fail CLOSED and clear protection to zero. loadCompiledSnapshot
+        // must instead serve a config-matched last-known-good artifact from disk.
+        let loadBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadCompiledSnapshot(",
+            endingBefore: "private func reusableCompactSnapshot("
+        )
+
+        // The compile-error catch must fall back, not return nil/fail-closed directly.
+        let compileErrorRange = try XCTUnwrap(
+            loadBlock.range(of: "event: \"loadSnapshot-cache-compile-error\"")
+        )
+        let fallbackCallRange = try XCTUnwrap(
+            loadBlock.range(
+                of: "return serveLastKnownGoodOrFailClosed()",
+                range: compileErrorRange.upperBound ..< loadBlock.endIndex
+            )
+        )
+        XCTAssertTrue(
+            compileErrorRange.upperBound <= fallbackCallRange.lowerBound,
+            "A failed in-extension recompile must attempt the last-known-good fallback, not fail closed directly."
+        )
+
+        // An over-budget FRESH compile (a same-config rotation can grow a source past the
+        // budget while an older in-budget artifact for the same config still exists) must
+        // also route through the fallback, not return nil and clear protection. The fallback
+        // is itself budget-gated, so it can only ever serve an in-budget last-known-good.
+        let overBudgetRange = try XCTUnwrap(
+            loadBlock.range(of: "event: \"loadSnapshot-compiled-over-budget\"")
+        )
+        let overBudgetFallbackRange = try XCTUnwrap(
+            loadBlock.range(
+                of: "return serveLastKnownGoodOrFailClosed()",
+                range: overBudgetRange.upperBound ..< loadBlock.endIndex
+            )
+        )
+        XCTAssertTrue(
+            overBudgetRange.upperBound <= overBudgetFallbackRange.lowerBound,
+            "An over-budget fresh compile must attempt the last-known-good fallback before failing closed."
+        )
+
+        // The fallback is gated on the user wanting filtering (non-empty config) AND on
+        // there being no keepable resident, so an empty config still returns the permissive
+        // pass-through and a live reload keeps its in-memory snapshot.
+        XCTAssertTrue(
+            loadBlock.contains("if !hasKeepableFilteringResident, !configuration.enabledBlocklistIDs.isEmpty {"),
+            "The last-known-good fallback must only serve for a filtering config with no keepable resident."
+        )
+        XCTAssertTrue(
+            loadBlock.contains("event: \"loadSnapshot-last-known-good\""),
+            "Serving a last-known-good artifact on a failed cold-start build must be observable."
+        )
+
+        // The disk decode is COLD-START ONLY: it must be gated on there being no keepable
+        // filtering resident, so a live reload that still holds a healthy resident keeps it
+        // in memory (the caller's existing keep-resident branch) instead of decoding a
+        // multi-MB artifact and risking the 2x-resident jetsam peak.
+        let keepableGateRange = try XCTUnwrap(
+            loadBlock.range(of: "let hasKeepableFilteringResident = self.currentResidentSnapshotIdentity() != nil")
+        )
+        XCTAssertTrue(
+            loadBlock.contains("&& self.currentResidentSnapshotHasEnabledFilters()"),
+            "The keepable-resident gate must require the resident to be a genuine filtering snapshot."
+        )
+        let lastKnownGoodEventRange = try XCTUnwrap(
+            loadBlock.range(of: "event: \"loadSnapshot-last-known-good\"")
+        )
+        XCTAssertTrue(
+            keepableGateRange.upperBound <= lastKnownGoodEventRange.lowerBound,
+            "The disk last-known-good decode must be gated on no keepable filtering resident (cold-start only)."
+        )
+
+        // The fallback reader must use the config-only gate (canServeAsLastKnownGood),
+        // NOT the strict catalog-hash gate — otherwise it would reject the very artifact
+        // the rotated catalog invalidated and we would still fail closed.
+        let fallbackBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func lastKnownGoodCompactSnapshot(",
+            endingBefore: "private func reusablePreparedSnapshot("
+        )
+        XCTAssertTrue(
+            fallbackBlock.contains("summary.canServeAsLastKnownGood(for: configuration)"),
+            "The last-known-good reader must gate on the config-only predicate, not the strict catalog-hash gate."
+        )
+        XCTAssertTrue(
+            fallbackBlock.contains("FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: ruleCount)"),
+            "The last-known-good reader must still enforce the compact memory budget before decoding."
+        )
+    }
+
+    func testReusablePreparedSnapshotRebindsToManifestAndRebudgetsAfterDecode() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let preparedBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func reusablePreparedSnapshot(",
+            endingBefore: "private func loadPreparedSnapshot("
+        )
+
+        // The manifest and prepared file are read separately, so a concurrent root
+        // republish can pair an in-budget manifest with over-budget prepared bytes.
+        // The decoded prepared must be re-bound to the manifest it was budget-gated on
+        // (identity + generatedAt + summary, mirroring FilterArtifactStore.preparedSelection)
+        // and re-budgeted against its OWN summary before it can become resident — never
+        // weaker than the baseline it replaced.
+        XCTAssertTrue(
+            preparedBlock.contains("prepared.identity == manifest.snapshotIdentity"),
+            "Prepared decode must re-bind to the manifest identity (no manifest<->prepared skew)."
+        )
+        XCTAssertTrue(
+            preparedBlock.contains("prepared.snapshot.generatedAt == manifest.generatedAt"),
+            "Prepared decode must re-bind to the manifest generation."
+        )
+        XCTAssertTrue(
+            preparedBlock.contains("prepared.summary == manifest.summary"),
+            "Prepared decode must re-bind to the manifest summary (the budget-gated counts)."
+        )
+        // Authority budget gate is the DECODED prepared's own counts, not the manifest's.
+        XCTAssertTrue(
+            preparedBlock.contains("let ruleCount = prepared.summary.blockRuleCount + prepared.summary.allowRuleCount + prepared.summary.guardrailRuleCount"),
+            "Budget must be re-checked against the decoded prepared's own summary post-decode."
+        )
+        XCTAssertTrue(
+            preparedBlock.contains("FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: ruleCount)"),
+            "An over-budget decoded prepared must be refused before becoming resident."
+        )
+    }
+
     func testTunnelDoesNotFallBackToUnboundLegacySnapshots() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let loadBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadCompiledSnapshot(",
-            endingBefore: "private func loadCompactPreparedSnapshot()"
+            endingBefore: "private func reusableCompactSnapshot("
         )
         let initialStateBlock = try sourceBlock(
             in: source,
@@ -782,13 +1761,24 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
 
         XCTAssertFalse(source.contains("loadLegacyPersistedSnapshot"))
         XCTAssertTrue(loadBlock.contains("let baseSnapshot = configuration.filterSnapshot()"))
-        // The in-extension compile fallback must enforce the rule budget before its
-        // result can become resident (the compact-header guard only covers on-disk
-        // artifacts), so a post-upgrade v2 re-parse that overshoots fails closed
-        // instead of jetsamming the extension.
+        // The in-extension compile streams sources into a memory-mapped CompactFilterSnapshot
+        // (never a dirty union), so the resident snapshot is the 9 B/rule mapped-compact form
+        // and the last-line resident gate is the compact device budget (`exceedsBudget` /
+        // `maxFilterRuleCount`) — the same ceiling the app's mapped artifact uses. The
+        // streaming compiler enforces its own (lower) transient ceiling and fails closed
+        // before this point. A post-upgrade re-parse that overshoots fails closed instead of
+        // jetsamming the extension.
         XCTAssertTrue(loadBlock.contains("FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: compiledRuleCount)"))
         XCTAssertTrue(loadBlock.contains("configuration.enabledBlocklistIDs.isEmpty ? (baseSnapshot, expectedIdentity) : nil"))
         XCTAssertTrue(loadBlock.contains("CachedFilterSnapshotCompiler(\n                cacheDirectoryURL: catalogCacheURL\n            )"))
+        // Scratch from a jetsam-killed compile is reclaimed ONCE at startTunnel, before any
+        // reload spawns a compile — NOT per-compile, which would race a concurrent reload's
+        // in-flight scratch dir. So the sweep must be absent from the compile path and sit
+        // immediately before the startTunnel snapshot load.
+        XCTAssertFalse(loadBlock.contains("sweepStaleScratch"))
+        XCTAssertTrue(source.contains(
+            "CachedFilterSnapshotCompiler.sweepStaleScratch(cacheDirectoryURL: catalogCacheURL)\n            }\n            self.loadSnapshotInBackground(reason: \"startTunnel\""
+        ))
         XCTAssertTrue(initialStateBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
         XCTAssertTrue(loadSnapshotBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
         XCTAssertTrue(loadSnapshotBlock.contains("\"resolver\": configuration.resolverDiagnosticDisplayName"))
@@ -889,7 +1879,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(loadBlock.contains("loadSnapshot-failclosed-before-decode"))
         // Tunnel backstop: an over-budget artifact must be refused (fail-closed)
         // before the decode, never jetsam.
-        XCTAssertTrue(loadBlock.contains("compactSnapshotRuleCountExceedingBudget()"))
+        XCTAssertTrue(loadBlock.contains("compactSnapshotRuleCountExceedingBudget(configuration: configuration)"))
         XCTAssertTrue(loadBlock.contains("loadSnapshot-over-budget"))
 
         let refreshConfigIndex = try XCTUnwrap(loadBlock.range(of: "self.refreshConfigurationIfNeeded(force: true)")?.lowerBound)
@@ -1677,10 +2667,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // appendReconnectNeededIfPolicyRequiresReconnect won't re-arm when an encrypted-
         // fallback success has reset consecutiveUpstreamFailureCount below the reconnect
         // threshold, so the smoke-probe failure path must ALSO re-arm directly while the
-        // wedge marker is held — otherwise a marker-only recovery probe runs once and stalls.
+        // wedge marker is held (or, for the markerless covered wedge, while coverage is
+        // live) — otherwise a recovery probe runs once and stalls.
         XCTAssertTrue(
-            applyBlock.contains("if currentDeviceResolverWedged() {"),
-            "A failed smoke probe must re-arm the wedge-recovery loop while the wedge marker is held."
+            applyBlock.contains("if currentDeviceResolverWedged() || ProtectionConnectivityPolicy.isEncryptedFallbackCarryingWedge(health: health, now: now) {"),
+            "A failed smoke probe must re-arm the wedge-recovery loop while the wedge marker is held (or the encrypted fallback is carrying a failed probe — even across a rejected recapture probe)."
         )
         XCTAssertTrue(
             applyBlock.contains("scheduleResolverWedgeRecoveryProbeIfNeeded()"),
@@ -1706,7 +2697,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         //   * Device-DNS fallback *mode* — a non-device configured resolver resolves via
         //     `.deviceDNS` without setting `deviceDNSFallbackSucceeded`.
         // Without these guards a fallback-carried query would falsely clear the reconnect
-        // banner and post "Lava reconnected".
+        // banner while DNS still depends on the fallback.
         let successBranch = try sourceBlock(
             in: recordBlock,
             startingAt: "if result.usedEncryptedFallback {",
@@ -1846,13 +2837,15 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             streakResetIndex,
             "The streak reset must sit alongside the primary-only success timestamp."
         )
-        // The encrypted-fallback branch must NOT reset the streak.
+        // The encrypted-fallback branch must NOT reset the streak (it may READ it — e.g. to
+        // gate stamping the wedge marker on a current-context failure — but never zero it,
+        // which would let a fallback-carried success mask a wedged primary).
         let encryptedFallbackBranch = try sourceBlock(
             in: recordBlock,
             startingAt: "if result.usedEncryptedFallback {",
             endingBefore: "} else {"
         )
-        XCTAssertFalse(encryptedFallbackBranch.contains("consecutiveDNSSmokeProbeFailureCount"))
+        XCTAssertFalse(encryptedFallbackBranch.contains("consecutiveDNSSmokeProbeFailureCount = 0"))
 
         // A network/path change is a fresh primary-health context, so the recovery reset
         // (shared by the network-change + wake paths) must also clear the streak —
@@ -1916,9 +2909,35 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(probeBlock.contains("\"fallbackAccepted\": \"\\(fallbackSucceeded)\""))
     }
 
+    /// The app reads the self-reconnect timeline for a bug report's incident summary (LAV-94 B)
+    /// from `LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey`, while the tunnel WRITES it under
+    /// its own private `selfReconnectAttemptsDefaultsKey`. Both are the same magic string — lock the
+    /// two literals together (cross-file) so a future rename on one side can't silently strand the
+    /// app's read of a key the tunnel no longer writes.
+    func testSelfReconnectAttemptTimesDefaultsKeyMatchesSharedConstant() throws {
+        let key = "tunnel.selfReconnectAttemptTimes"
+        let tunnelSource = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let sharedSource = try readSource("Shared/AppGroup.swift")
+        XCTAssertTrue(
+            tunnelSource.contains("selfReconnectAttemptsDefaultsKey = \"\(key)\""),
+            "Tunnel must persist the self-reconnect timeline under the shared key literal."
+        )
+        XCTAssertTrue(
+            sharedSource.contains("selfReconnectAttemptTimesDefaultsKey = \"\(key)\""),
+            "The shared app-group constant the app reads must equal the tunnel's persisted key."
+        )
+    }
+
     private func readSource(_ relativePath: String) throws -> String {
         let sourceURL = packageRootURL.appendingPathComponent(relativePath)
         return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    /// Extracts the literal value of a `<name>: TimeInterval = <number>` declaration from source.
+    private func timeIntervalConstant(_ name: String, in source: String) throws -> Double {
+        let start = try XCTUnwrap(source.range(of: "\(name): TimeInterval = ")?.upperBound)
+        let digits = source[start...].prefix { $0.isNumber || $0 == "." || $0 == "_" }
+        return try XCTUnwrap(Double(String(digits).replacingOccurrences(of: "_", with: "")))
     }
 
     private var packageRootURL: URL {

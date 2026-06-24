@@ -31,6 +31,7 @@ public struct BlocklistSource: Identifiable, Hashable, Codable, Sendable {
     public let name: String
     public let sourceURL: URL
     public let licenseName: String
+    public let category: BlocklistCategory
     public let defaultEnabled: Bool
     public let warningLevel: WarningLevel
 
@@ -39,6 +40,7 @@ public struct BlocklistSource: Identifiable, Hashable, Codable, Sendable {
         name: String,
         sourceURL: URL,
         licenseName: String,
+        category: BlocklistCategory = .security,
         defaultEnabled: Bool = false,
         warningLevel: WarningLevel = .normal
     ) {
@@ -46,8 +48,23 @@ public struct BlocklistSource: Identifiable, Hashable, Codable, Sendable {
         self.name = name
         self.sourceURL = sourceURL
         self.licenseName = licenseName
+        self.category = category
         self.defaultEnabled = defaultEnabled
         self.warningLevel = warningLevel
+    }
+
+    // Tolerant decode: `category` was added in the catalog-categories work. Nothing
+    // persists a `BlocklistSource` (only enabled ids are stored), but keep decode
+    // resilient so any incidental archive without the field still loads.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        sourceURL = try container.decode(URL.self, forKey: .sourceURL)
+        licenseName = try container.decode(String.self, forKey: .licenseName)
+        category = try container.decodeIfPresent(BlocklistCategory.self, forKey: .category) ?? .security
+        defaultEnabled = try container.decodeIfPresent(Bool.self, forKey: .defaultEnabled) ?? false
+        warningLevel = try container.decodeIfPresent(WarningLevel.self, forKey: .warningLevel) ?? .normal
     }
 }
 
@@ -55,6 +72,46 @@ public enum WarningLevel: String, Codable, Sendable {
     case normal
     case advanced
     case aggressive
+}
+
+/// User-facing blocklist sections. Mirrors the `categories` taxonomy in the canonical
+/// catalog spec (lavasec-doc/data/blocklist-catalog.yml); the raw values match the
+/// backend `blocklist_sources.category` column. `sortOrder` and `displayLabel` drive
+/// the sectioned picker and its jump-pills. Labels are localized via `.lavaLocalized`.
+public enum BlocklistCategory: String, Codable, CaseIterable, Sendable {
+    case security
+    case multiPurpose = "multi_purpose"
+    case adsTracking = "ads_tracking"
+    case social
+    case nsfw
+    case gambling
+    case piracy
+
+    /// Display order, matching the canonical taxonomy's `order` field.
+    public var sortOrder: Int {
+        switch self {
+        case .security: 10
+        case .multiPurpose: 15
+        case .adsTracking: 20
+        case .social: 30
+        case .nsfw: 40
+        case .gambling: 50
+        case .piracy: 60
+        }
+    }
+
+    /// Section header + jump-pill label (English key; localized at the view layer).
+    public var displayLabel: String {
+        switch self {
+        case .security: "Security & Threat Intel"
+        case .multiPurpose: "Multi-purpose"
+        case .adsTracking: "Ads & Trackers"
+        case .social: "Social Media"
+        case .nsfw: "Adult Content"
+        case .gambling: "Gambling"
+        case .piracy: "Piracy & Torrent"
+        }
+    }
 }
 
 public enum BlocklistSourceSizeBucket: String, Codable, Sendable {
@@ -114,141 +171,32 @@ public struct SourceSnapshotMetadata: Hashable, Codable, Sendable {
     }
 }
 
+/// The bundled blocklist catalog.
+///
+/// The source *data* — every `BlocklistSource` constant and `curatedSources` — is
+/// generated into `Generated/DefaultCatalog+Generated.swift` from the canonical spec
+/// (lavasec-doc/data/blocklist-catalog.yml, vendored at Catalog/blocklist-catalog.json).
+/// Regenerate with `node scripts/generate-blocklist-catalog.mjs`. This file holds only
+/// the derived logic so the data and the rules stay cleanly separated.
 public enum DefaultCatalog {
-    public static let blockListProjectBasic = BlocklistSource(
-        id: "blocklistproject-basic",
-        name: "Block List Basic",
-        sourceURL: URL(string: "https://blocklistproject.github.io/Lists/basic.txt")!,
-        licenseName: "Unlicense",
-        warningLevel: .normal
-    )
-
-    public static let blockListProjectMalware = BlocklistSource(
-        id: "blocklistproject-malware",
-        name: "Block List Project Malware",
-        sourceURL: URL(string: "https://blocklistproject.github.io/Lists/malware.txt")!,
-        licenseName: "Unlicense",
-        warningLevel: .advanced
-    )
-
-    public static let blockListProjectPhishing = BlocklistSource(
-        id: "blocklistproject-phishing",
-        name: "Block List Project Phishing",
-        sourceURL: URL(string: "https://blocklistproject.github.io/Lists/phishing.txt")!,
-        licenseName: "Unlicense",
-        defaultEnabled: true,
-        warningLevel: .advanced
-    )
-
-    public static let blockListProjectScam = BlocklistSource(
-        id: "blocklistproject-scam",
-        name: "Block List Project Scam",
-        sourceURL: URL(string: "https://blocklistproject.github.io/Lists/scam.txt")!,
-        licenseName: "Unlicense",
-        defaultEnabled: true,
-        warningLevel: .advanced
-    )
-
-    public static let blockListProjectRansomware = BlocklistSource(
-        id: "blocklistproject-ransomware",
-        name: "Block List Project Ransomware",
-        sourceURL: URL(string: "https://blocklistproject.github.io/Lists/ransomware.txt")!,
-        licenseName: "Unlicense",
-        warningLevel: .advanced
-    )
-
-    public static let phishingDatabaseActive = BlocklistSource(
-        id: "phishing-database-active",
-        name: "Phishing.Database Active Domains",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt")!,
-        licenseName: "MIT",
-        warningLevel: .advanced
-    )
-
-    public static let hageziMultiLight = BlocklistSource(
-        id: "hagezi-multi-light",
-        name: "HaGeZi Multi Light",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .normal
-    )
-
-    public static let hageziMultiNormal = BlocklistSource(
-        id: "hagezi-multi-normal",
-        name: "HaGeZi Multi Normal",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .normal
-    )
-
-    public static let hageziMultiProMini = BlocklistSource(
-        id: "hagezi-multi-pro-mini",
-        name: "HaGeZi Multi PRO mini",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.mini-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .normal
-    )
-
-    public static let hageziMultiPro = BlocklistSource(
-        id: "hagezi-multi-pro",
-        name: "HaGeZi Multi PRO",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .advanced
-    )
-
-    public static let hageziMultiProPlusMini = BlocklistSource(
-        id: "hagezi-multi-pro-plus-mini",
-        name: "HaGeZi Multi PRO++ mini",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.mini-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .advanced
-    )
-
-    public static let hageziMultiUltimateMini = BlocklistSource(
-        id: "hagezi-multi-ultimate-mini",
-        name: "HaGeZi Multi Ultimate mini",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate.mini-onlydomains.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .aggressive
-    )
-
-    public static let oisdSmall = BlocklistSource(
-        id: "oisd-small",
-        name: "OISD Small",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/sjhgvr/oisd/main/oisd_small.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .normal
-    )
-
-    public static let oisdBig = BlocklistSource(
-        id: "oisd-big",
-        name: "OISD Big",
-        sourceURL: URL(string: "https://raw.githubusercontent.com/sjhgvr/oisd/main/oisd_big.txt")!,
-        licenseName: "GPL-3.0",
-        warningLevel: .advanced
-    )
-
-    public static let curatedSources: [BlocklistSource] = [
-        blockListProjectBasic,
-        blockListProjectPhishing,
-        blockListProjectScam,
-        blockListProjectRansomware,
-        phishingDatabaseActive,
-        hageziMultiLight,
-        hageziMultiNormal,
-        hageziMultiProMini,
-        hageziMultiPro,
-        oisdSmall
-    ]
-
     /// The recommended default blocklist set, derived from each curated source's
     /// `defaultEnabled` flag — the single source of truth for the fresh-install
-    /// default. Mirrors the backend catalog's `default_enabled` column (see the
-    /// `blocklist_sources` migration). To change the default, flip the flag on the
-    /// source; do not hardcode a list elsewhere.
+    /// default. Mirrors the backend catalog's `default_enabled` column. To change the
+    /// default, flip the flag in the canonical spec and regenerate; never hardcode a
+    /// list elsewhere.
     public static var recommendedDefaultSourceIDs: Set<String> {
         Set(curatedSources.filter(\.defaultEnabled).map(\.id))
+    }
+
+    /// Curated sources grouped into their display sections, ordered by category and
+    /// dropping any empty category. Backs the sectioned blocklist picker.
+    public static var curatedSourcesByCategory: [(category: BlocklistCategory, sources: [BlocklistSource])] {
+        BlocklistCategory.allCases
+            .sorted { $0.sortOrder < $1.sortOrder }
+            .compactMap { category in
+                let sources = curatedSources.filter { $0.category == category }
+                return sources.isEmpty ? nil : (category, sources)
+            }
     }
 
     public static let guardrailSources: [BlocklistSource] = []

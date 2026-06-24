@@ -54,6 +54,7 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
         protectionState: LavaActivityAttributes.ProtectionState?,
         resumeDate: Date?,
         shieldStyle: GuardianShieldStyle,
+        pauseMinutes: Int,
         pauseRequiresAuthentication: Bool
     ) async {
         let requestedProtectionState = protectionState
@@ -80,7 +81,8 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
             protectionState: protectionState,
             resumeDate: resumeDate,
             pauseRequiresAuthentication: pauseRequiresAuthentication,
-            shieldStyle: shieldStyle
+            shieldStyle: shieldStyle,
+            pauseMinutes: pauseMinutes
         )
         let content = ActivityContent(state: state, staleDate: resumeDate)
 

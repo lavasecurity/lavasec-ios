@@ -127,7 +127,7 @@ struct ProtectionStatusPanel: View {
         switch viewModel.vpnStatus {
         case .connected:
             switch viewModel.protectionConnectivitySeverity {
-            case .healthy, .usingDeviceDNSFallback:
+            case .healthy, .usingDeviceDNSFallback, .usingEncryptedFallback:
                 return .awake
             case .recovering, .networkUnavailable:
                 return .retrying

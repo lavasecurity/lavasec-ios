@@ -39,6 +39,30 @@
             "state" : "translated",
             "value" : "Lava Security"
           }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava Security"
+          }
         }
       }
     },
@@ -80,6 +104,96 @@
             "state" : "translated",
             "value" : "LavaSec"
           }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LavaSec"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LavaSec"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LavaSec"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LavaSec"
+          }
+        }
+      }
+    },
+    "NSCameraUsageDescription" : {
+      "comment" : "Explains why Lava requests camera access to scan a shared filter setup QR code.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava verwendet die Kamera, um einen geteilten QR-Code zur Filtereinrichtung zu scannen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava uses the camera to scan a shared filter setup QR code"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava utilise l’appareil photo pour scanner un QR code de configuration de filtre partagé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lavaは、共有されたフィルター設定のQRコードを読み取るためにカメラを使用します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用相机扫描共享的筛选器设置二维码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava 使用相機掃描共享的篩選器設定 QR code"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava usa la cámara para escanear un código QR de configuración de filtro compartido"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava는 공유된 필터 설정 QR 코드를 스캔하기 위해 카메라를 사용해요"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Lava usa a câmera para escanear um QR code de configuração de filtro compartilhado"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava usa la fotocamera per scansionare un QR code di configurazione filtro condiviso"
+          }
         }
       }
     },
@@ -120,6 +234,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lava Security 會使用 Face ID 解鎖你選擇防護的 app 區域"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava usa Face ID para desbloquear las áreas protegidas de la app que tú elijas"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava는 사용자가 선택한 보호 화면을 잠금 해제하는 데 Face ID를 사용해요"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A Lava usa o Face ID para desbloquear as áreas protegidas do app que você escolher"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lava usa Face ID per sbloccare le schermate protette dell'app che scegli tu"
           }
         }
       }
