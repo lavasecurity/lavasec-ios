@@ -111,7 +111,7 @@ jobs:
         # GitHub Advanced Security there, so upload-sarif 403s ("Resource not accessible
         # by integration") and fails the job. Public repos get code scanning for free.
         if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && github.event.repository.visibility == 'public' }}
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: mobsfscan.sarif
           category: mobsfscan
