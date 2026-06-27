@@ -53,7 +53,7 @@ jobs:
       # observe the build — but the network/resolution cost is removed. Build products are NOT
       # cached: CodeQL needs to see a real compile to extract its database.
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             SourcePackages
