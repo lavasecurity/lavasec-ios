@@ -137,7 +137,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
                        "The moon glyph must not Plus-gate.")
     }
 
-    func testHowToSheetOffersAJumpToSettings() throws {
+    func testHowToSheetGuidesFocusSetupViaStepsNotAMisroutingSettingsButton() throws {
         let source = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
         XCTAssertTrue(source.contains(".sheet(isPresented: $isShowingFocusInfo) {"),
                       "The how-to sheet must be presented from the moon glyph's state.")
@@ -146,8 +146,15 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             startingAt: "private struct FocusFilterHowToSheet: View {",
             endingBefore: "private struct FiltersOverviewPanel: View {"
         )
-        XCTAssertTrue(sheet.contains("UIApplication.openSettingsURLString"),
-                      "The how-to must offer a jump into the Settings app (no deep link to Focus exists).")
+        // Codex #29: NO jump-to-app-Settings button. The app-settings deep link opens Lava's OWN pane, but
+        // Focus setup lives at the Settings ROOT -> Focus (no iOS deep link), so a button only misroutes the
+        // user DEEPER into the wrong place. The numbered steps must guide the manual path instead.
+        XCTAssertFalse(sheet.contains("openSettingsURLString"),
+                       "The how-to must NOT route to the app-settings pane — it misroutes away from Focus setup (Codex #29).")
+        XCTAssertFalse(sheet.contains("UIApplication.shared.open"),
+                       "The how-to must not open any URL — Focus setup is a manual Settings navigation.")
+        XCTAssertTrue(sheet.contains("Open the Settings app, then tap Focus."),
+                      "The how-to must guide the manual path to Settings -> Focus via the numbered steps.")
     }
 
     // MARK: - Build wiring (root cause of the original metadata-export failure)

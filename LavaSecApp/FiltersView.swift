@@ -1038,14 +1038,10 @@ private struct FocusFilterHowToSheet: View {
                     .font(.footnote)
                     .foregroundStyle(LavaStyle.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button {
-                    guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
-                    UIApplication.shared.open(settingsURL)
-                } label: {
-                    Text("Open Settings".lavaLocalized)
-                }
-                .buttonStyle(LavaStandaloneActionButtonStyle())
+                // No "Open Settings" button: an app-settings deep link opens Lava's OWN settings pane, but
+                // Focus setup lives at the Settings ROOT -> Focus (iOS exposes no deep link to it), so a button
+                // here only sends users DEEPER into the wrong place — contradicting step 1 ("Open the Settings
+                // app, then tap Focus"). The numbered steps guide the manual path instead. (Codex #29.)
             }
             .navigationTitle("Focus filters".lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
