@@ -3559,7 +3559,7 @@ final class AppViewModel: ObservableObject {
             // token and persistArtifacts' staging step no-ops — it re-materializes the dir from the
             // in-memory snapshot only if it was GC'd between validation and the flip (fail-closed),
             // never serving stale rules (the reuse validation already matched the current catalog).
-            try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)
+            let publishOutcome = try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)
             // persistSharedState's last step awaits the artifact-publish actor, a main-actor
             // suspension. A restore/import/switch/draft-apply that completed during it now owns the
             // live configuration+library. Re-check BEFORE the side-effect tail: applyCatalogSyncResult
@@ -3569,6 +3569,23 @@ final class AppViewModel: ObservableObject {
             // The newer owner drives the UI/tunnel; dismiss our cover only if it's a non-cover-driver.
             guard configurationReplacementGate.isCurrent(switchToken) else {
                 dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+            // Now that the in-process supersession guard above has confirmed THIS switch still owns the gate,
+            // an `.abortedSuperseded` here is the CROSS-PROCESS case: a concurrent Focus/App Intents commit won
+            // the active-filter race, so the flip degrade-ABORTED and the live pointer + disk name the newer
+            // Focus target. Treat it as a deferred, non-winning switch — dismiss OUR cover WITHOUT flashing
+            // "Success" for a filter that didn't take, and let the re-dispatched reconcile (the defer above)
+            // adopt the genuinely-newer on-disk selection. Marker recovery already preserved correctness (the
+            // kept Focus marker's requestedAt necessarily postdates this switch's initiation, so reconcile
+            // adopts the Focus target); this only removes the transient wrong-"Success" toast. The NON-current
+            // (in-process superseded) case is handled by the gate guard above — NOT here — so this silent
+            // dismiss can never clobber a newer in-process cover-driving switch's UI (Codex review, lavasec-ios#29).
+            if case .abortedSuperseded = publishOutcome {
+                filterEditTargetID = nil
+                pendingSwitchFilterID = nil
+                filterPreparationState = .idle
+                isFilterPreparationScreenPresented = false
                 return
             }
             // Stamp the foreground switch time so a pending Focus marker recorded BEFORE this switch was
@@ -9776,6 +9793,7 @@ final class AppViewModel: ObservableObject {
     // was relocated to LavaSecCore.HeadlessFocusFilterSwitchEngine (LAV-100 Phase 4) so it can run in the
     // App Intents extension with no AppViewModel. The foreground reconcile + persist paths below STAY here.
 
+    @discardableResult
     private func persistSharedState(
         preparedSnapshot: PreparedFilterSnapshot? = nil,
         rewritesRuleArtifacts: Bool = true,
@@ -9796,7 +9814,7 @@ final class AppViewModel: ObservableObject {
         // therefore also rewrite artifacts (i.e. actually flip); a config-only persist neither flips nor needs
         // the veto (founder review P2-1).
         commitBeforeFlip: (@Sendable () throws -> Void)? = nil
-    ) async throws {
+    ) async throws -> FilterSnapshotPreparationService.PublishOutcome {
         guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
@@ -9847,6 +9865,11 @@ final class AppViewModel: ObservableObject {
             scheduleAutomaticBackupAfterConfigurationChange()
         }
 
+        // The artifact-publish outcome of the flip below. `.published` for a config-only persist (no flip,
+        // so never superseded); the flip path overwrites it. Surfaced to the foreground switch caller so an
+        // `.abortedSuperseded` (a concurrent cross-process Focus commit won the active-filter race) is treated
+        // as a deferred, non-winning switch rather than a false success (Codex review, lavasec-ios#29).
+        var publishOutcome = FilterSnapshotPreparationService.PublishOutcome.published
         if didRewriteArtifacts {
             // Reciprocal flip fence (Codex P1, state-agnostic switch). The cross-process WRITE lock above is
             // released before persistPreparedSnapshotArtifacts takes the artifact PUBLISH lock, so the App
@@ -9862,7 +9885,7 @@ final class AppViewModel: ObservableObject {
             // wrote the library atomically) is treated as not-superseded — never abort on an uncertain read.
             let flipTargetFilterID = library.activeFilterID
             let filterLibraryURL = containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename)
-            try await persistPreparedSnapshotArtifacts(
+            publishOutcome = try await persistPreparedSnapshotArtifacts(
                 snapshotToPersist,
                 supersededWhileLocked: { @Sendable _ in
                     guard let onDiskActive = SharedFilterStatePersistence.onDiskActiveFilterID(at: filterLibraryURL)
@@ -9872,6 +9895,7 @@ final class AppViewModel: ObservableObject {
                 commitBeforeFlip: commitBeforeFlip
             )
         }
+        return publishOutcome
     }
 
     /// Persist the live configuration + library at a freshly-bumped generation.

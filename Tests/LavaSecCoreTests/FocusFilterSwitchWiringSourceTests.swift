@@ -536,6 +536,49 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "The in-flight clear must exist and be generation-gated.")
     }
 
+    /// Codex review (lavasec-ios#29): the foreground manual switch must treat an `.abortedSuperseded`
+    /// artifact-publish (a concurrent cross-process Focus commit won the active-filter race, so the flip
+    /// was degrade-aborted and the live pointer names the Focus target) as a DEFERRED, non-winning switch —
+    /// not a false success. It must surface the PublishOutcome from persistSharedState and, on abort,
+    /// dismiss the cover + return early (no foreground-switch stamp, no "Success" toast), letting the
+    /// re-dispatched reconcile adopt the genuinely-newer on-disk selection.
+    func testForegroundSwitchTreatsAbortedSupersededFlipAsDeferredNotSuccess() throws {
+        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+
+        // persistSharedState must SURFACE the publish outcome (not discard it) so the caller can react.
+        XCTAssertTrue(app.contains("@discardableResult\n    private func persistSharedState("),
+                      "persistSharedState must be @discardableResult so the 13 non-switch callers stay byte-identical while switchToFilter can read the outcome.")
+        XCTAssertTrue(app.contains(") async throws -> FilterSnapshotPreparationService.PublishOutcome {"),
+                      "persistSharedState must return the PublishOutcome of the artifact flip.")
+        XCTAssertTrue(app.contains("publishOutcome = try await persistPreparedSnapshotArtifacts("),
+                      "The flip outcome must be captured, not discarded.")
+
+        let block = try Self.sourceBlock(
+            in: app,
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
+            endingBefore: "private func prepareSwitchPublication("
+        )
+        XCTAssertTrue(block.contains("let publishOutcome = try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)"),
+                      "switchToFilter must capture persistSharedState's outcome.")
+        XCTAssertTrue(block.contains("if case .abortedSuperseded = publishOutcome {"),
+                      "switchToFilter must branch on an aborted (cross-process-superseded) flip.")
+
+        // The abort branch must precede the success path (stamp + 'Success'), and early-return.
+        let gateIdx = try XCTUnwrap(block.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {")?.lowerBound)
+        let abortIdx = try XCTUnwrap(block.range(of: "if case .abortedSuperseded = publishOutcome {")?.lowerBound)
+        let stampIdx = try XCTUnwrap(block.range(of: "PendingFilterSwitchStore.recordForegroundSwitch(at: switchInitiatedAt")?.lowerBound)
+        let successToastIdx = try XCTUnwrap(block.range(of: "message: \"Success\"")?.lowerBound)
+        XCTAssertLessThan(gateIdx, abortIdx,
+                          "The in-process supersession gate guard must precede the cross-process abort dismiss, so a newer in-process cover-driving switch is never clobbered (Codex #29 follow-up).")
+        XCTAssertLessThan(abortIdx, stampIdx, "The aborted-flip branch must come before the foreground-switch stamp.")
+        XCTAssertLessThan(abortIdx, successToastIdx, "The aborted-flip branch must come before the Success toast.")
+        let abortArm = try Self.sourceBlock(in: block, startingAt: "if case .abortedSuperseded = publishOutcome {", endingBefore: "// Stamp the foreground switch time")
+        XCTAssertTrue(abortArm.contains("return"),
+                      "The aborted-flip branch must early-return (defer to the reconcile) rather than stamping success.")
+        XCTAssertTrue(abortArm.contains("isFilterPreparationScreenPresented = false"),
+                      "The aborted-flip branch must dismiss the preparation cover.")
+    }
+
     // MARK: - Source introspection helpers
 
     private static func source(named fileName: String, in directoryName: String) throws -> String {
