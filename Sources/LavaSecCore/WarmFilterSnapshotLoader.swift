@@ -78,6 +78,27 @@ public enum WarmFilterSnapshotLoader {
         cacheURL: URL?,
         freshnessMaxAge: TimeInterval
     ) async -> ReusablePreparedFilterSnapshot? {
+        // Reject warm reuse ONLY when the cold path would actually network-refresh custom lists — i.e.
+        // custom lists are allowed to refresh (Plus active) AND the target has an ENABLED custom source.
+        // Rationale: when custom lists CAN refresh, reusing a cache-only warm artifact for an enabled custom
+        // source could serve STALE bytes (the artifact's fingerprint records the LAST-ACCEPTED hash, and an
+        // INACTIVE filter's custom sources are never network-refreshed), so we force the cold network-first
+        // path instead. But the guard is scoped tightly:
+        //   • ENABLED custom IDs only — a merely-stored DISABLED custom source contributes no bytes to the
+        //     artifact (snapshot inputs / custom sync consider only `enabledBlocklistIDs`, cf.
+        //     `enabledCustomBlocklists`), so it must not block warm reuse.
+        //   • allowsCustomBlocklists only — for a LAPSED Plus user the cold path uses `.cacheOnly` (frozen
+        //     lists are never re-downloaded), so forcing cold gains NO freshness and would only discard a
+        //     valid retained artifact (or fail when the payload cache is gone); warm-reuse the frozen bytes.
+        // Gated HERE in the shared load primitive (not in reusableSnapshotForSwitch) so it covers BOTH the
+        // headless Focus path (reusableSnapshotForSwitch → loadReusable) AND the foreground manual switch
+        // (AppViewModel.warmReusableSnapshotForSwitch → loadReusable, which bypasses reusableSnapshotForSwitch).
+        // (Codex review, lavasec-ios#29.)
+        if configuration.limits.allowsCustomBlocklists,
+           configuration.customBlocklists.contains(where: { configuration.enabledBlocklistIDs.contains($0.id) }) {
+            return nil
+        }
+
         let tokenDirectoryURL = FilterArtifactStore(directoryURL: containerURL).versionedDirectoryURL(token: token)
 
         return await Task.detached(priority: .userInitiated) {
