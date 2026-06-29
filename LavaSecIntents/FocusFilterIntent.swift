@@ -109,6 +109,14 @@ struct LavaFilterEntityQuery: EntityQuery {
     }
 
     static func loadHostedFilters() -> [Filter] {
+        // Fence-free read BY DESIGN (Kilo review, lavasec-ios#29): this only populates the DISPLAY list for
+        // the Settings › Focus › Focus Filters picker. The writer persists filter-library.json with `.atomic`
+        // (temp-then-rename), so this read never sees a torn/partial file — at worst it returns the previous
+        // COMPLETE library for a few ms if it races a concurrent write, which self-corrects on the next picker
+        // open. Taking the cross-process write flock here would add lock machinery to a cosmetic read path for
+        // a window a single user can't realistically hit (the picker lives in iOS Settings; filter edits happen
+        // in the app — not concurrently). The actual SWITCH is fully fenced: the engine commits under the
+        // generation CAS + flock at switch time. This query never drives a commit.
         guard let url = LavaSecAppGroup.containerURL?
             .appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
             let data = try? Data(contentsOf: url),
