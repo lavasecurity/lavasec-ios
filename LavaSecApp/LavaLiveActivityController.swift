@@ -76,15 +76,29 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
             requestedProtectionState,
             activePauseUntil: activePauseUntil
         )
-        let resumeDate = protectionState == .paused ? (activePauseUntil ?? resumeDate) : nil
+        // Both transient states carry their self-resolve deadline in resumeDate so
+        // the widget can advance them to .on on its own clock. `.paused` uses the
+        // active pause-until; `.restarting` must preserve the deadline passed in
+        // (otherwise the reconcile would republish restarting with no deadline and
+        // the Dynamic Island could stay stuck on "Restarting…" if the app is killed
+        // before the final restore).
+        let publishedResumeDate: Date?
+        switch protectionState {
+        case .paused:
+            publishedResumeDate = activePauseUntil ?? resumeDate
+        case .restarting:
+            publishedResumeDate = resumeDate
+        case .on:
+            publishedResumeDate = nil
+        }
         let state = LavaActivityAttributes.ContentState(
             protectionState: protectionState,
-            resumeDate: resumeDate,
+            resumeDate: publishedResumeDate,
             pauseRequiresAuthentication: pauseRequiresAuthentication,
             shieldStyle: shieldStyle,
             pauseMinutes: pauseMinutes
         )
-        let content = ActivityContent(state: state, staleDate: resumeDate)
+        let content = ActivityContent(state: state, staleDate: publishedResumeDate)
 
         logReconcile(
             requestedProtectionState: requestedProtectionState,

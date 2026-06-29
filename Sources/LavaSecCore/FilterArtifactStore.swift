@@ -311,7 +311,11 @@ public struct FilterArtifactStore: Sendable {
             blockRuleCount: compactSummary.blockRuleCount,
             blockedDomainRuleCount: compactSummary.blockedDomainRuleCount,
             allowRuleCount: compactSummary.allowRuleCount,
-            guardrailRuleCount: compactSummary.guardrailRuleCount
+            guardrailRuleCount: compactSummary.guardrailRuleCount,
+            // The tier budget total is a manifest-level record (the compact snapshot doesn't carry
+            // it), so inherit it from the manifest — otherwise this equality check would always fail
+            // once the manifest records a budget.
+            tierBudgetRuleCount: manifest.summary.tierBudgetRuleCount
         )
 
         guard summary == manifest.summary else {

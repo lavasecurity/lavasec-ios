@@ -1,4 +1,5 @@
 import XCTest
+import LavaSecCore
 
 /// Phase 1 of the design-system foundation: spacing/radius/danger tokens and the
 /// `LavaTier` depth-semantics vocabulary. These pin the token contract so a later
@@ -72,6 +73,70 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(settings.contains(".lavaTier(.celebratory)"))
         // Read-through demonstrated on a technical metric block.
         XCTAssertTrue(settings.contains(".lavaTierMetadata()"))
+    }
+
+    // MARK: - Glyph-size scale (LavaIconSize) + typography
+
+    /// The shared SF Symbol size scale exists and has reconciled the near-duplicate
+    /// hand-tuned sizes to one value per role.
+    func testIconSizeScaleExistsAndReconcilesDuplicates() {
+        // Hero security shield: the headline deviation — one symbol, six call sites,
+        // four sizes (42/44/46/48) — collapses to a single value.
+        XCTAssertEqual(LavaIconSize.hero, 44)
+        // The success-check / failure-triangle pair that shared one slot (54/58) → one.
+        XCTAssertEqual(LavaIconSize.heroResult, 56)
+        // The odd 9.9 badge becomes a whole point.
+        XCTAssertEqual(LavaIconSize.badge, 10)
+        XCTAssertEqual(LavaIconSize.inline, 13)
+        XCTAssertEqual(LavaIconSize.small, 16)
+        XCTAssertEqual(LavaIconSize.control, 17)
+        XCTAssertEqual(LavaIconSize.endpointCompact, 25)
+        XCTAssertEqual(LavaIconSize.endpoint, 30)
+        XCTAssertEqual(LavaIconSize.node, 40)
+    }
+
+    /// The scale lives in `LavaSecCore` (not `LavaTokens.swift`) so the widget
+    /// extension can share it — the app target's tokens file is invisible to it.
+    func testIconSizeScaleLivesInCoreSoTheWidgetCanShareIt() throws {
+        let scale = try Self.source(named: "LavaIconSize.swift", in: "Sources/LavaSecCore")
+        XCTAssertTrue(scale.contains("public enum LavaIconSize"))
+        let widget = try Self.source(named: "LavaSecWidget.swift", in: "LavaSecWidget")
+        XCTAssertTrue(widget.contains("fontSize: LavaIconSize.control"))
+        XCTAssertTrue(widget.contains("fontSize: LavaIconSize.small"))
+    }
+
+    /// The hero shield call sites consume the token and no longer carry their old
+    /// disagreeing literals.
+    func testHeroShieldCallSitesConsumeTheToken() throws {
+        for (file, dir) in [
+            ("SecurityController.swift", "LavaSecApp"),
+            ("DiagnosticsView.swift", "LavaSecApp"),
+            ("SettingsView.swift", "LavaSecApp"),
+        ] {
+            let source = try Self.source(named: file, in: dir)
+            XCTAssertTrue(source.contains(".font(.system(size: LavaIconSize.hero, weight: .semibold))"),
+                          "\(file) should render the hero shield via LavaIconSize.hero")
+            for stale in [
+                ".font(.system(size: 42, weight: .semibold))",
+                ".font(.system(size: 44, weight: .semibold))",
+                ".font(.system(size: 46, weight: .semibold))",
+                ".font(.system(size: 48, weight: .semibold))",
+            ] {
+                XCTAssertFalse(source.contains(stale), "\(file) still has a stale hero literal: \(stale)")
+            }
+        }
+    }
+
+    /// Genuinely-fixed display faces are tokenized in `LavaTypography`, and the
+    /// overview metric block consumes it instead of an inline `.system(size:)`.
+    func testTypographyTokenExistsAndIsConsumed() throws {
+        let tokens = try Self.tokens()
+        XCTAssertTrue(tokens.contains("enum LavaTypography"))
+        XCTAssertTrue(tokens.contains("static let metricNumeral = Font.system(size: 42, weight: .bold, design: .rounded)"))
+
+        let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
+        XCTAssertTrue(components.contains(".font(LavaTypography.metricNumeral)"))
+        XCTAssertFalse(components.contains(".font(.system(size: 42, weight: .bold, design: .rounded))"))
     }
 
     // MARK: - Helpers

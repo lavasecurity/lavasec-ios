@@ -1,0 +1,8 @@
+/* LavaSecCore notification body strings — localized via Bundle.module (app + extension + tunnel). */
+
+"notif.body.switchedTo" = "已將篩選器切換至 %@";
+"notif.body.couldNotSwitchTo" = "無法切換至 %@";
+"notif.body.reconnectTitle" = "重新連線 Lava";
+"notif.body.reconnectMessage" = "DNS 在此網路上無法解析。點一下即可重新連線保護。";
+"notif.body.dnsSlowTitle" = "Lava DNS 反應緩慢";
+"notif.body.dnsSlowMessage" = "所選的 DNS 解析器回應緩慢。點一下即可重新連線保護。";

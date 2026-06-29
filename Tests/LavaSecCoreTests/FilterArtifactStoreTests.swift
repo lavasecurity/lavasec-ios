@@ -359,6 +359,38 @@ final class FilterArtifactStoreTests: XCTestCase {
         )
     }
 
+    /// The warm-switch fail-closed safety: if the target filter's warm token directory was GC'd
+    /// between reuse-validation and the publish, re-staging the (in-memory) snapshot must
+    /// re-materialize the directory and flip the pointer to it — never leave a dangling pointer.
+    func testReStagingAGarbageCollectedTokenReMaterializesAndFlipsPointer() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let store = FilterArtifactStore(directoryURL: directoryURL)
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog)
+        let writtenAt = Date(timeIntervalSince1970: 2_000)
+
+        // Publish the warm artifact, then simulate the GC reaping its directory.
+        let pointer = try store.persistVersioned(preparedSnapshot: prepared, writtenAt: writtenAt)
+        let tokenDirectoryURL = store.versionedDirectoryURL(token: pointer.token)
+        try FileManager.default.removeItem(at: tokenDirectoryURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokenDirectoryURL.path))
+
+        // The warm-switch publish: re-stage the same snapshot (a pointer flip when the dir exists;
+        // here a re-materialization because it was reaped). Same content-addressed token either way.
+        let pointer2 = try store.persistVersioned(preparedSnapshot: prepared, writtenAt: writtenAt)
+        XCTAssertEqual(pointer2.token, pointer.token, "An identical snapshot keeps its content-addressed token.")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: tokenDirectoryURL.appendingPathComponent("filter-snapshot.compact").path),
+            "A GC'd token directory must be re-materialized on re-stage, not left dangling."
+        )
+        XCTAssertEqual(store.loadArtifactPointer()?.token, pointer.token,
+                       "The pointer is flipped to the (re-materialized) warm directory.")
+        XCTAssertNotNil(store.currentVersionedStore(), "The pointer must resolve to a present versioned directory.")
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

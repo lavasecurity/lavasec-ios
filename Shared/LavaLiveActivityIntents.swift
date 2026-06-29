@@ -80,9 +80,14 @@ public struct ResumeLavaProtectionIntent: AppIntent, LiveActivityIntent {
     }
 }
 
+// Restart control surfaced on the Live Activity. The type name and the
+// underlying `.reconnect` command are unchanged (a full tunnel stop→start);
+// only the user-facing wording is "Restart", which reads as a neutral always-
+// available control rather than implying a disconnected status the UI no
+// longer surfaces.
 public struct ReconnectLavaProtectionIntent: AppIntent, LiveActivityIntent {
-    nonisolated(unsafe) public static var title: LocalizedStringResource = "Reconnect Lava Protection"
-    nonisolated(unsafe) public static var description = IntentDescription("Reconnect Lava protection now.")
+    nonisolated(unsafe) public static var title: LocalizedStringResource = "Restart Lava Protection"
+    nonisolated(unsafe) public static var description = IntentDescription("Restart Lava protection now.")
     nonisolated(unsafe) public static var isDiscoverable = false
 
     public init() {}

@@ -141,6 +141,23 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
             tierRuleLimit: FilterRuleTierLimit(limit: 1_000, isPaid: false)
         )
         XCTAssertEqual(result.snapshot.summary.blocklistRuleCount, 2)
+        // The cold gate persists the exact budget total it evaluated, so a warm reuse can apply the
+        // same tier limit without recompiling. It must be populated, bounded by the limit just
+        // accepted, and at least the block-rule count, and it must survive a codec round-trip.
+        let budget = try XCTUnwrap(result.snapshot.summary.tierBudgetRuleCount)
+        XCTAssertLessThanOrEqual(budget, 1_000, "An accepted prepare must record a budget within the tier limit.")
+        XCTAssertGreaterThanOrEqual(budget, result.snapshot.summary.blockRuleCount)
+        let decoded = try JSONDecoder().decode(
+            PreparedFilterSnapshot.self,
+            from: JSONEncoder().encode(result.snapshot)
+        )
+        XCTAssertEqual(decoded.summary.tierBudgetRuleCount, budget, "tierBudgetRuleCount must survive a round-trip.")
+        // A legacy artifact predating the field decodes to nil (the warm path then cold-compiles).
+        let legacy = try JSONDecoder().decode(
+            PreparedFilterSnapshotSummary.self,
+            from: Data(#"{"blockRuleCount":5,"allowRuleCount":0,"guardrailRuleCount":1}"#.utf8)
+        )
+        XCTAssertNil(legacy.tierBudgetRuleCount)
     }
 
     func testDisplayNameResolvesCustomCatalogAndFallback() throws {

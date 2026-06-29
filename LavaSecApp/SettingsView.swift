@@ -374,7 +374,7 @@ private struct LavaSecurityPlusGlyph: View {
             .foregroundStyle(LavaStyle.safeGreen)
             .overlay {
                 Image(systemName: "plus")
-                    .font(.system(size: 9.9, weight: .heavy))
+                    .font(.system(size: LavaIconSize.badge, weight: .heavy))
                     .foregroundStyle(LavaStyle.softGreen)
                     .offset(y: -1)
             }
@@ -1660,6 +1660,31 @@ private struct CustomizationSettingsView: View {
                 }
             }
 
+            LavaSectionGroup("Notifications") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Filter changes", isOn: notificationBinding(for: .filterChanged))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Tells you when a Focus switches your filter while Lava is closed or in the background.".lavaLocalized)
+                        .lavaQuietNoteText()
+
+                    Toggle("Filter couldn't switch", isOn: notificationBinding(for: .filterCouldNotApply))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Tells you when a Focus couldn't switch your filter, for example while editing is locked.".lavaLocalized)
+                        .lavaQuietNoteText()
+
+                    Toggle("Connection updates", isOn: notificationBinding(for: .connectivity))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Alerts when protection needs your help to reconnect on a network.".lavaLocalized)
+                        .lavaQuietNoteText()
+                }
+            }
+
             LavaSectionGroup("Appearance") {
                 Picker("Appearance", selection: appearanceBinding) {
                     ForEach(LavaAppearancePreference.allCases) { preference in
@@ -1724,6 +1749,20 @@ private struct CustomizationSettingsView: View {
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
                 viewModel.setUsesLavaHaptics(isEnabled)
+            }
+        }
+    }
+
+    private func notificationBinding(for category: LavaNotificationCategory) -> Binding<Bool> {
+        Binding {
+            switch category {
+            case .filterChanged: return viewModel.notifiesFilterChanges
+            case .filterCouldNotApply: return viewModel.notifiesFilterCouldNotApply
+            case .connectivity: return viewModel.notifiesConnectivity
+            }
+        } set: { isEnabled in
+            performAppSettingsMutation(reason: "Edit Customization settings") {
+                viewModel.setNotificationCategoryEnabled(category, isEnabled)
             }
         }
     }
@@ -1899,8 +1938,9 @@ private enum LavaGuardLookRowMetrics {
     static let mascotSize: CGFloat = 48
     static let mascotFrameSize: CGFloat = 52
     static let minRowHeight: CGFloat = 64
-    static let titleFontSize: CGFloat = 16
-    static let subtitleFontSize: CGFloat = 15
+    /// Proportion of the masked-icon frame used by the "?" placeholder glyph
+    /// (the unknown/locked Guard look). Proportional, so it scales with the frame.
+    static let unknownGlyphRatio: CGFloat = 0.44
 }
 
 private struct LavaGuardLookContent: View {
@@ -1926,7 +1966,7 @@ private struct LavaGuardLookContent: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(availability.title(for: look).lavaLocalized)
-                    .font(.system(size: LavaGuardLookRowMetrics.titleFontSize, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(availability.titleColor(for: look))
                     .lineLimit(1)
                     .minimumScaleFactor(0.84)
@@ -1934,7 +1974,7 @@ private struct LavaGuardLookContent: View {
 
                 if showsDescription, let subtitle = availability.subtitle(for: look) {
                     Text(subtitle.lavaLocalized)
-                        .font(.system(size: LavaGuardLookRowMetrics.subtitleFontSize))
+                        .font(.subheadline)
                         .foregroundStyle(LavaStyle.secondaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -1984,7 +2024,7 @@ private struct MaskedLavaGuardIcon: View {
                 .frame(width: contourSize, height: contourSize)
 
             Text("?")
-                .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
+                .font(.system(size: size * LavaGuardLookRowMetrics.unknownGlyphRatio, weight: .bold, design: .rounded))
                 .foregroundStyle(LavaStyle.secondaryText)
         }
         .frame(width: LavaGuardLookRowMetrics.mascotFrameSize, height: LavaGuardLookRowMetrics.mascotFrameSize)
@@ -3728,7 +3768,7 @@ private struct SecurityPasscodeSetupView: View {
                 Spacer()
 
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 46, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 VStack(spacing: 8) {
@@ -4658,7 +4698,7 @@ private struct BugReportSheetLockMask: View {
 
             VStack(spacing: 18) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 44, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 Text("Lava Locked")

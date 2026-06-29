@@ -97,15 +97,17 @@ public enum ProtectionConnectivityNotificationPolicy {
             candidate = (
                 .reconnectNeeded,
                 health.lastDNSSmokeProbeAt ?? health.lastUpstreamFailureAt,
-                "Reconnect Lava",
-                "DNS is not resolving on this network. Tap to reconnect protection."
+                // Localized against the package catalog (Bundle.module) — these post from the app AND the NE
+                // tunnel, whose bundles lack the app's string catalog.
+                String(localized: "notif.body.reconnectTitle", bundle: .module),
+                String(localized: "notif.body.reconnectMessage", bundle: .module)
             )
         case .dnsSlow:
             candidate = (
                 .dnsSlow,
                 health.lastSlowUpstreamResponseAt,
-                "Lava DNS is slow",
-                "The selected DNS resolver is responding slowly. Tap to reconnect protection."
+                String(localized: "notif.body.dnsSlowTitle", bundle: .module),
+                String(localized: "notif.body.dnsSlowMessage", bundle: .module)
             )
         case .healthy, .recovering, .usingEncryptedFallback:
             // No banner for the encrypted-fallback handoff: it is brief and self-recovering

@@ -170,6 +170,38 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertEqual(diagnosticsBody["has_domain_history"] as? Bool, true)
     }
 
+    func testRequestBodySurfacesPrivacySafeFocusSwitchDiagnostic() throws {
+        // LAV-100 Phase 4: a closed-app Focus failure must be debuggable from the (Release) bug report —
+        // the last switch attempt's outcome + target filter id + time, no domains/rules.
+        let at = Date(timeIntervalSinceReferenceDate: 765_000)
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .websiteAccess, affectedSite: "checkout.example",
+                details: "Focus didn't switch my filter.", includeDiagnostics: true
+            ),
+            lastFocusSwitch: FocusSwitchDiagnosticRecord(outcome: "deferred", targetFilterID: "filter-extra", at: at, reason: "deferred-no-warm-artifact")
+        )
+        let body = bundle.makeRequestBody()
+        let incident = try XCTUnwrap(body["incident"] as? [String: Any])
+        let focus = try XCTUnwrap(incident["focus_last_switch"] as? [String: Any])
+        XCTAssertEqual(focus["outcome"] as? String, "deferred")
+        XCTAssertEqual(focus["target_filter_id"] as? String, "filter-extra")
+        XCTAssertEqual(focus["at"] as? String, SharedDateFormatting.iso8601.string(from: at))
+        XCTAssertEqual(focus["reason"] as? String, "deferred-no-warm-artifact",
+                       "The bug report must surface the specific defer/outcome reason for closed-app debugging.")
+    }
+
+    func testRequestBodyOmitsFocusSwitchDiagnosticWhenAbsent() throws {
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .websiteAccess, affectedSite: "checkout.example",
+                details: "No focus switch yet.", includeDiagnostics: true
+            )
+        )
+        let incident = try XCTUnwrap(bundle.makeRequestBody()["incident"] as? [String: Any])
+        XCTAssertNil(incident["focus_last_switch"], "No record ⇒ no focus_last_switch key.")
+    }
+
     func testBugReportDoesNotIncludeNetworkActivityLogByDefault() throws {
         let bundle = makeBundle()
         let body = bundle.makeRequestBody()
@@ -616,6 +648,22 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertFalse(incident.hasContent, "A clean snapshot with no failures or reconnects has nothing to report.")
     }
 
+    func testIncidentSummaryFocusSwitchAloneCountsAsContent() {
+        // A closed-app Focus switch can be the ONLY evidence in a report (e.g. it failed/deferred with no DNS
+        // failures or self-reconnects). It must flag has_incident_summary so backend/support triage keyed off
+        // that flag doesn't skip the very Focus diagnostic this surfaces (Codex round 7).
+        let incident = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            lastFocusSwitch: FocusSwitchDiagnosticRecord(
+                outcome: "deferred",
+                targetFilterID: "filter-extra",
+                at: Date(timeIntervalSinceReferenceDate: 800_720_000)
+            )
+        )
+        XCTAssertTrue(incident.hasContent, "A Focus-switch diagnostic alone must count as incident content.")
+    }
+
     func testIncidentSummaryCarriesNoResolvedDomains() throws {
         let bundle = makeBundle(
             context: BugReportContext(
@@ -698,7 +746,8 @@ final class BugReportBundleTests: XCTestCase {
         diagnostics: DiagnosticsStore = DiagnosticsStore(startedAt: Date(timeIntervalSinceReferenceDate: 100)),
         debugLogEntries: [BugReportDebugLogEntry] = [],
         health: TunnelHealthSnapshot? = nil,
-        selfReconnectTimes: [Date] = []
+        selfReconnectTimes: [Date] = [],
+        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil
     ) -> BugReportBundle {
         BugReportBundle(
             reportID: reportID,
@@ -742,7 +791,8 @@ final class BugReportBundleTests: XCTestCase {
             diagnostics: diagnostics,
             localHistoryEnabled: false,
             debugLogEntries: debugLogEntries,
-            selfReconnectTimes: selfReconnectTimes
+            selfReconnectTimes: selfReconnectTimes,
+            lastFocusSwitch: lastFocusSwitch
         )
     }
 

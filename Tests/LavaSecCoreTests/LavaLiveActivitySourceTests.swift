@@ -197,8 +197,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("private enum LavaGuardLookRowMetrics"))
         XCTAssertTrue(customizationBlock.contains(".frame(width: LavaGuardLookRowMetrics.mascotFrameSize, height: LavaGuardLookRowMetrics.mascotFrameSize)"))
         XCTAssertTrue(customizationBlock.contains(".frame(minHeight: LavaGuardLookRowMetrics.minRowHeight)"))
-        XCTAssertTrue(customizationBlock.contains("static let titleFontSize: CGFloat = 16"))
-        XCTAssertTrue(customizationBlock.contains("static let subtitleFontSize: CGFloat = 15"))
+        // Row title/subtitle dropped their fixed 16/15pt sizes and now ride Dynamic Type
+        // (.headline/.subheadline), so they scale with the user's text-size setting like
+        // every sibling row. The "?" placeholder glyph keeps its proportional sizing as a
+        // named ratio rather than a magic 0.44.
+        XCTAssertFalse(customizationBlock.contains("static let titleFontSize"))
+        XCTAssertFalse(customizationBlock.contains("static let subtitleFontSize"))
+        XCTAssertTrue(customizationBlock.contains("static let unknownGlyphRatio: CGFloat = 0.44"))
+        XCTAssertTrue(customizationBlock.contains(".font(.headline)"))
+        XCTAssertTrue(customizationBlock.contains(".font(.subheadline)"))
         // The selected row is now marked by the radio glyph alone — the tinted
         // background (and the metrics that drove it) is gone.
         XCTAssertFalse(customizationBlock.contains("static let selectedCornerRadius"))
@@ -703,80 +710,243 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(commandService.contains("pauseMinutes: persistedPauseMinutes(defaults: defaults)"))
     }
 
-    func testReconnectStateSurfacesTriangleGlyphAndReconnectButton() throws {
+    func testDynamicIslandModelsOnPausedAndTransientRestartingOnly() throws {
         let attributes = try readSource("Shared/LavaActivityAttributes.swift")
         let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let intents = try readSource("Shared/LavaLiveActivityIntents.swift")
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
         let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
 
-        XCTAssertTrue(attributes.contains("case needsReconnect"))
-        XCTAssertTrue(widget.contains("\"exclamationmark.triangle.fill\""))
-        XCTAssertTrue(attributes.contains("\"Lava Security needs to reconnect\""))
+        // ProtectionState models the two states the surface can keep honest while
+        // suspended (on/paused) plus `restarting`, a transient set and cleared
+        // entirely within a user-initiated Restart command. The ambient connectivity
+        // states stay removed — they changed while the app could not push.
+        XCTAssertTrue(attributes.contains("case on"))
+        XCTAssertTrue(attributes.contains("case paused"))
+        XCTAssertTrue(attributes.contains("case restarting"))
+        XCTAssertFalse(attributes.contains("case reconnecting"))
+        XCTAssertFalse(attributes.contains("case needsReconnect"))
+        XCTAssertFalse(attributes.contains("case networkUnavailable"))
 
-        XCTAssertTrue(widget.contains("ReconnectLavaProtectionIntent()"))
-        XCTAssertTrue(widget.contains("liveActivityActionLabel(\"Reconnect\")"))
+        // The ambient alarm glyphs/titles stay gone. The spinner glyph is back, but
+        // only for the transient restarting feedback.
+        XCTAssertFalse(widget.contains("\"exclamationmark.triangle.fill\""))
+        XCTAssertFalse(widget.contains("\"wifi.slash\""))
+        XCTAssertFalse(widget.contains("Lava Security needs to reconnect"))
+        XCTAssertFalse(widget.contains("Waiting for network"))
+        XCTAssertTrue(widget.contains("\"checkmark\""))
+        XCTAssertTrue(widget.contains("\"pause.fill\""))
+        XCTAssertTrue(widget.contains("\"arrow.triangle.2.circlepath\""))
+        XCTAssertTrue(widget.contains("\"Restarting…\""))
+
+        // The status mapping still only ever emits on/paused/nil — restarting is
+        // pushed by the Restart command, never derived from connectivity status.
+        let mappingBlock = try sourceBlock(
+            in: appViewModel,
+            startingAt: "private func liveActivityProtectionState",
+            endingBefore: "func turnOffProtection()"
+        )
+        XCTAssertTrue(mappingBlock.contains("if isProtectionTemporarilyPaused {\n            return .paused\n        }"))
+        XCTAssertTrue(mappingBlock.contains("return .on"))
+        XCTAssertFalse(mappingBlock.contains("return .needsReconnect"))
+        XCTAssertFalse(mappingBlock.contains("return .reconnecting"))
+        XCTAssertFalse(mappingBlock.contains("return .networkUnavailable"))
+
+        // restarting is emitted only while a Restart is in flight (a user action),
+        // never derived from connectivity — and gated BEFORE the vpnStatus guard so
+        // the activity isn't ended while the restart bounces the tunnel's status.
+        XCTAssertTrue(mappingBlock.contains("if restartInFlightDeadline != nil {\n            return .restarting\n        }"))
+        let restartingIdx = try XCTUnwrap(mappingBlock.range(of: "return .restarting")?.lowerBound)
+        let vpnGuardIdx = try XCTUnwrap(mappingBlock.range(of: "guard vpnStatus == .connected")?.lowerBound)
+        XCTAssertLessThan(restartingIdx, vpnGuardIdx)
+
+        // An in-flight activity an older build encoded with a now-removed state
+        // must still decode (resolving to .on) instead of failing.
+        XCTAssertTrue(
+            attributes.contains("(try? container.decode(ProtectionState.self, forKey: .protectionState)) ?? .on")
+        )
+    }
+
+    func testDynamicIslandActionLayoutIsPausePrimaryWithSecondaryRestart() throws {
+        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+        let intents = try readSource("Shared/LavaLiveActivityIntents.swift")
+        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+
+        let actionBlock = try sourceBlock(
+            in: widget,
+            startingAt: "// Action row.",
+            endingBefore: ".frame(maxWidth: .infinity, alignment: .leading)"
+        )
+        let onIdx = try XCTUnwrap(actionBlock.range(of: "case .on:")?.lowerBound)
+        let pausedIdx = try XCTUnwrap(actionBlock.range(of: "case .paused:")?.lowerBound)
+        let restartingIdx = try XCTUnwrap(actionBlock.range(of: "case .restarting:")?.lowerBound)
+        XCTAssertLessThan(onIdx, pausedIdx)
+        XCTAssertLessThan(pausedIdx, restartingIdx)
+
+        // On: Pause is primary (takes the row), Restart recedes to a secondary icon;
+        // when Pause is auth-locked the lone Restart is promoted to a labelled button.
+        let onBlock = String(actionBlock[onIdx..<pausedIdx])
+        XCTAssertTrue(onBlock.contains("if !state.pauseRequiresAuthentication"))
+        XCTAssertTrue(onBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
+        XCTAssertTrue(onBlock.contains("restartIconButton"))
+        XCTAssertTrue(onBlock.contains("restartLabeledButton"))
+
+        // Paused: only Resume. Restarting: no action (the title carries status).
+        let pausedBlock = String(actionBlock[pausedIdx..<restartingIdx])
+        XCTAssertTrue(pausedBlock.contains("resumeButton"))
+        XCTAssertFalse(pausedBlock.contains("restart"), "Paused must not surface Restart.")
+        XCTAssertTrue(actionBlock[restartingIdx...].contains("EmptyView()"))
+
+        // Pause/Resume keep the prominent green tint; both Restart variants are the
+        // muted secondary grey and reuse the reconnect command via an icon + label.
+        XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaGreen)"))
+        XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaSecondaryGray)"))
+        XCTAssertTrue(widget.contains("Image(systemName: \"arrow.clockwise\")"))
+        XCTAssertTrue(widget.contains(".accessibilityLabel(\"Restart\")"))
+        XCTAssertTrue(widget.contains("Button(intent: ReconnectLavaProtectionIntent())"))
+        XCTAssertTrue(widget.contains("restartActivityActionLabel(\"Restart\")"))
+        XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
+        XCTAssertFalse(widget.contains("liveActivityActionLabel(\"Reconnect\")"))
 
         XCTAssertTrue(intents.contains("struct ReconnectLavaProtectionIntent"))
+        XCTAssertTrue(intents.contains("\"Restart Lava Protection\""))
         XCTAssertTrue(intents.contains("LavaProtectionCommandService.perform(.reconnect)"))
-        XCTAssertTrue(commandService.contains("private static func performReconnect()"))
-        XCTAssertTrue(commandService.contains("manager.connection.startVPNTunnel()"))
-
-        XCTAssertTrue(appViewModel.contains("return .needsReconnect"))
         XCTAssertTrue(appViewModel.contains("case .reconnect:\n            reconnectProtection()"))
     }
 
-    func testNetworkLostAndReconnectingStatesSurfaceDistinctGlyphsWithoutActions() throws {
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+    func testLiveActivityRestartPerformsRealStopThenStart() throws {
+        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+
+        // Restart is now offered while the tunnel is already connected, so a bare
+        // start would be a no-op. performReconnect must stop, wait, then start.
+        let reconnectBlock = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func performReconnect()",
+            endingBefore: "private static let reconnectStopWaitTimeout"
+        )
+        let stopIndex = try XCTUnwrap(reconnectBlock.range(of: "stopVPNTunnel()")?.lowerBound)
+        let waitIndex = try XCTUnwrap(reconnectBlock.range(of: "waitForTunnelToStop(")?.lowerBound)
+        let startIndex = try XCTUnwrap(reconnectBlock.range(of: "startVPNTunnel()")?.lowerBound)
+        let reconnectWaitIndex = try XCTUnwrap(reconnectBlock.range(of: "waitForTunnelToReconnect(")?.lowerBound)
+        XCTAssertLessThan(stopIndex, waitIndex, "Restart must stop the tunnel before waiting.")
+        XCTAssertLessThan(waitIndex, startIndex, "Restart must wait for the stop before starting.")
+        // After starting, wait for the tunnel to settle so the post-start grace
+        // window doesn't end the activity on a successful restart.
+        XCTAssertLessThan(startIndex, reconnectWaitIndex, "Restart must wait for reconnect after starting.")
+        XCTAssertTrue(commandService.contains("private static func waitForTunnelToReconnect(timeout: TimeInterval) async"))
+
+        // On-demand must NOT be disabled here — a background-woken intent could
+        // leave protection un-armed if its window expired before re-enabling it.
+        XCTAssertFalse(reconnectBlock.contains("isOnDemandEnabled = false"))
+        XCTAssertFalse(reconnectBlock.contains("disableOnDemand"))
+
+        // The explicit start is gated on a confirmed stop; the wait reports a Bool.
+        XCTAssertTrue(commandService.contains("private static func waitForTunnelToStop(timeout: TimeInterval) async -> Bool"))
+        XCTAssertTrue(commandService.contains("case .disconnected, .invalid, nil:"))
+        XCTAssertTrue(reconnectBlock.contains("if await waitForTunnelToStop("))
+
+        // A slow/wedged stop must not log a phantom restart: on timeout it either
+        // credits an on-demand reconnect (real bounce) or surfaces the failure.
+        XCTAssertTrue(reconnectBlock.contains("reconnect-restarted-by-ondemand"))
+        XCTAssertTrue(reconnectBlock.contains("throw RestartError.stopTimedOut"))
+
+        // The on-demand credit branch must ALSO settle to .connected before
+        // returning (a pending .connecting/.reasserting handoff would otherwise be
+        // sampled by the restore and end the activity on a successful restart), so
+        // both the explicit-start and on-demand paths wait for reconnect.
+        let reconnectWaits = reconnectBlock.components(separatedBy: "waitForTunnelToReconnect(").count - 1
+        XCTAssertGreaterThanOrEqual(
+            reconnectWaits,
+            2,
+            "Both the explicit-start and on-demand restart paths must settle to .connected before returning."
+        )
+    }
+
+    func testLiveActivityRestartShowsTransientRestartingFeedback() throws {
+        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+
+        XCTAssertTrue(commandService.contains("private static let restartingStaleWindow: TimeInterval"))
+
+        let performBlock = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func performReconnect()",
+            endingBefore: "private static func restoreLiveActivityAfterRestart()"
+        )
+        // Claim the in-flight slot first (rejects double-taps), then show "restarting"
+        // before the work begins. The claim returns the exact deadline it stored so
+        // the slot can be released by compare-and-set (a stale restart can't clear a
+        // newer tap's lease).
+        XCTAssertTrue(performBlock.contains("guard let claimedDeadline = claimRestartInFlight(window: Self.restartingStaleWindow, now: now) else"))
+        XCTAssertTrue(performBlock.contains("reconnect-already-in-flight"))
+        let claimIdx = try XCTUnwrap(performBlock.range(of: "claimRestartInFlight(window:")?.lowerBound)
+        let restartingIdx = try XCTUnwrap(performBlock.range(of: "protectionState: .restarting")?.lowerBound)
+        let runIdx = try XCTUnwrap(performBlock.range(of: "runTunnelRestart()")?.lowerBound)
+        XCTAssertLessThan(claimIdx, restartingIdx, "The in-flight slot must be claimed before showing restarting.")
+        XCTAssertLessThan(restartingIdx, runIdx, "Restarting feedback must show before the restart work starts.")
+
+        // The deadline travels in resumeDate so the widget self-advances .restarting
+        // → .on on its own clock (it can't be left stranded by a killed window).
+        XCTAssertTrue(performBlock.contains("resumeDate: now.addingTimeInterval(Self.restartingStaleWindow)"))
+
+        // Both exit paths release the slot by compare-and-set and restore via the
+        // status-derived helper — NOT an unconditional .on push (a failed restart
+        // must not claim On). Restore runs ONLY when we still owned the lease, so a
+        // stale restart that lost its slot to a newer tap can't clobber it.
+        XCTAssertTrue(performBlock.contains("if clearRestartInFlight(claimedDeadline: claimedDeadline) {\n                await restoreLiveActivityAfterRestart()\n            }\n            throw error"))
+        let clears = performBlock.components(separatedBy: "clearRestartInFlight(claimedDeadline: claimedDeadline)").count - 1
+        XCTAssertEqual(clears, 2, "The in-flight slot must be released (compare-and-set) on both the failure and success paths.")
+        let restores = performBlock.components(separatedBy: "restoreLiveActivityAfterRestart()").count - 1
+        XCTAssertEqual(restores, 2, "Both exit paths must restore via the status-derived helper.")
+        let guardedRestores = performBlock.components(separatedBy: "if clearRestartInFlight(claimedDeadline: claimedDeadline) {").count - 1
+        XCTAssertEqual(guardedRestores, 2, "Each restore must be gated on still owning the lease.")
+        XCTAssertFalse(performBlock.contains("updateLiveActivities(protectionState: .on"))
+
+        // restoreLiveActivityAfterRestart re-derives from the real tunnel status and
+        // ends the activity (never claims On) when the tunnel is down.
+        let restoreBlock = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func restoreLiveActivityAfterRestart()",
+            endingBefore: "private static func endLiveActivities()"
+        )
+        // A pause that landed during the restart is honored before any On push.
+        let pauseIdx = try XCTUnwrap(restoreBlock.range(of: "pauseStore.currentPauseState()")?.lowerBound)
+        let onIdx = try XCTUnwrap(restoreBlock.range(of: "protectionState: .on")?.lowerBound)
+        XCTAssertLessThan(pauseIdx, onIdx, "An active pause must be honored before falling back to On.")
+        XCTAssertTrue(restoreBlock.contains("protectionState: .paused, resumeDate: pauseState.pausedUntil"))
+        // Only a CONFIRMED .connected publishes On; connecting/reasserting/down all
+        // end the activity rather than asserting a permanent (uncorrectable) On.
+        XCTAssertTrue(restoreBlock.contains("case .connected:"))
+        XCTAssertFalse(restoreBlock.contains("case .connected, .connecting, .reasserting:"))
+        XCTAssertTrue(restoreBlock.contains("updateLiveActivities(protectionState: .on, resumeDate: nil)"))
+        XCTAssertTrue(restoreBlock.contains("await endLiveActivities()"))
+        XCTAssertTrue(commandService.contains("await activity.end(nil, dismissalPolicy: .immediate)"))
+
+        // The in-flight slot is an auto-expiring shared deadline read by the app's
+        // status reconcile (isRestartInFlight) so the two never fight. The claim
+        // returns its deadline and the clear is a compare-and-set keyed on that exact
+        // value, so an older expired-but-unwinding restart can't delete a newer tap's
+        // lease (which would drop the newer restart's `.restarting` guard).
+        XCTAssertTrue(commandService.contains("private static func claimRestartInFlight(window: TimeInterval, now: Date) -> Date?"))
+        XCTAssertTrue(commandService.contains("private static func clearRestartInFlight(claimedDeadline: Date) -> Bool"))
+        XCTAssertTrue(commandService.contains("guard stored == claimedDeadline.timeIntervalSinceReferenceDate else"))
+        XCTAssertTrue(commandService.contains("LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey"))
+        XCTAssertTrue(commandService.contains("LavaProtectionCommandFileLock.withExclusiveLock"))
+
+        // The app's reconcile path carries the same deadline as resumeDate when
+        // restarting, so the widget self-clear is consistent across both push paths.
         let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        XCTAssertTrue(appViewModel.contains("private var isRestartInFlight: Bool"))
+        XCTAssertTrue(appViewModel.contains("private var restartInFlightDeadline: Date?"))
+        XCTAssertTrue(appViewModel.contains("protectionState == .restarting ? restartDeadline : temporaryProtectionPauseUntil"))
 
-        // Both states exist with their own glyph + title (not folded into .on).
-        XCTAssertTrue(attributes.contains("case networkUnavailable"))
-        XCTAssertTrue(attributes.contains("case reconnecting"))
-        XCTAssertTrue(widget.contains("\"wifi.slash\""))
-        XCTAssertTrue(widget.contains("\"arrow.triangle.2.circlepath\""))
-        XCTAssertTrue(attributes.contains("\"Waiting for network\""))
-        XCTAssertTrue(attributes.contains("\"Lava Security is reconnecting\""))
+        // The widget resolves BOTH transient states to On via its own clock.
+        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+        XCTAssertTrue(widget.contains("case .paused, .restarting:"))
 
-        // The connectivity assessment maps to the new states.
-        XCTAssertTrue(appViewModel.contains("protectionConnectivityAssessment.severity == .networkUnavailable"))
-        XCTAssertTrue(appViewModel.contains("return .networkUnavailable"))
-        XCTAssertTrue(appViewModel.contains("protectionConnectivityAssessment.severity == .recovering"))
-        XCTAssertTrue(appViewModel.contains("return .reconnecting"))
-
-        // Precedence: a lost network must resolve to .networkUnavailable BEFORE
-        // the primaryAction == .reconnect branch, so it never inherits the
-        // Reconnect button (reconnecting cannot help with no network path).
-        let mappingBlock = try sourceBlock(
-            in: appViewModel,
-            startingAt: "private var liveActivityProtectionState",
-            endingBefore: "func turnOffProtection()"
-        )
-        let networkUnavailableIndex = try XCTUnwrap(
-            mappingBlock.range(of: "return .networkUnavailable")?.lowerBound
-        )
-        let reconnectActionIndex = try XCTUnwrap(
-            mappingBlock.range(of: "primaryAction == .reconnect")?.lowerBound
-        )
-        XCTAssertLessThan(
-            networkUnavailableIndex,
-            reconnectActionIndex,
-            "Network Lost must be classified before the reconnect-action branch so it never shows a useless Reconnect button."
-        )
-
-        // Neither state offers an action button in the expanded Dynamic Island;
-        // both recover on their own.
-        let expandedActionBlock = try sourceBlock(
-            in: widget,
-            startingAt: "case .needsReconnect:",
-            endingBefore: ".frame(maxWidth: .infinity, alignment: .leading)"
-        )
-        XCTAssertTrue(expandedActionBlock.contains("case .reconnecting, .networkUnavailable:"))
-        XCTAssertTrue(expandedActionBlock.contains("EmptyView()"))
-
-        XCTAssertTrue(widget.contains("\"Waiting for network\""))
-        XCTAssertTrue(widget.contains("\"Reconnecting\""))
+        // The controller must PRESERVE the deadline for .restarting (not null it like
+        // .on), or the reconcile-path republish would strip the widget's self-clear.
+        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
+        XCTAssertTrue(controller.contains("case .restarting:\n            publishedResumeDate = resumeDate"))
+        XCTAssertTrue(controller.contains("case .on:\n            publishedResumeDate = nil"))
+        XCTAssertTrue(controller.contains("ActivityContent(state: state, staleDate: publishedResumeDate)"))
     }
 
     func testLiveActivityPauseActionsAreHiddenAndDeniedWhenPauseRequiresAuthentication() throws {
@@ -903,7 +1073,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let actionRequestBlock = try sourceBlock(
             in: appViewModel,
             startingAt: "func performLiveActivityActionRequest(_ request: LavaLiveActivityActionRequest)",
-            endingBefore: "private var liveActivityProtectionState"
+            endingBefore: "private func liveActivityProtectionState"
         )
         XCTAssertFalse(actionRequestBlock.contains("turnOffProtection()"))
     }
@@ -939,7 +1109,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         let liveActivityProtectionStateBlock = try sourceBlock(
             in: appViewModel,
-            startingAt: "private var liveActivityProtectionState",
+            startingAt: "private func liveActivityProtectionState",
             endingBefore: "func turnOffProtection()"
         )
         let connectedGuardIndex = try XCTUnwrap(
@@ -1007,7 +1177,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(project.contains("LavaActivityAttributes.swift in Sources"))
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget"))
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.widget"))
-        XCTAssertTrue(project.contains("SWIFT_EMIT_CONST_VALUE_PROTOCOLS = \"AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider\""))
+        // Restored to Xcode's default const-value-protocols list (the project had overridden it with a
+        // narrower set that dropped EntityQuery/DynamicOptionsProvider, breaking AppEntity-query metadata
+        // export — LAV-100 Phase 4) while preserving the project-added LiveActivityIntent. Still bare
+        // names (not the AppIntents.-qualified form asserted-against below).
+        XCTAssertTrue(project.contains("SWIFT_EMIT_CONST_VALUE_PROTOCOLS = \"AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver\""))
         XCTAssertFalse(project.contains("SWIFT_EMIT_CONST_VALUE_PROTOCOLS = \"AppIntents.AppIntent AppIntents.LiveActivityIntent"))
 
         XCTAssertTrue(sharedMascot.contains("struct SoftShieldGuardian: View"))
@@ -1034,8 +1208,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("Image(systemName: statusSymbolName(for: protectionState))"))
         XCTAssertTrue(widget.contains(".font(.system(size: fontSize, weight: .semibold))"))
         XCTAssertFalse(widget.contains(".font(.system(size: fontSize, weight: .bold))"))
-        XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state, fontSize: 17)"))
-        XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state, fontSize: 16)"))
+        XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state, fontSize: LavaIconSize.control)"))
+        XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state, fontSize: LavaIconSize.small)"))
         XCTAssertTrue(widget.contains(".foregroundStyle(state.shieldStyle.dynamicIslandStatusGlyphColor)"))
         XCTAssertFalse(widget.contains("statusGlyphColor(for shieldStyle: GuardianShieldStyle)"))
         XCTAssertTrue(sharedMascot.contains("var dynamicIslandStatusGlyphColor: Color"))
@@ -1060,23 +1234,22 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaGreen)"))
         XCTAssertTrue(widget.contains("static let expandedMascotContentSpacing: CGFloat = 12"))
         XCTAssertTrue(widget.contains("static let expandedActionButtonSpacing: CGFloat = 12"))
-        XCTAssertTrue(widget.contains("static let expandedActionButtonWidth: CGFloat = 82"))
-        XCTAssertTrue(widget.contains("static var expandedResumeButtonWidth: CGFloat"))
-        XCTAssertTrue(widget.contains("expandedActionButtonWidth * 2 + expandedActionButtonSpacing"))
         XCTAssertTrue(widget.contains("static let expandedActionFontSize: CGFloat = 16"))
         XCTAssertTrue(widget.contains("static let expandedActionSymbolFontSize: CGFloat = 15"))
         XCTAssertTrue(widget.contains("static let expandedActionLabelSpacing: CGFloat = 8"))
         XCTAssertTrue(widget.contains("HStack(alignment: .center, spacing: LavaLiveActivityStyle.expandedMascotContentSpacing)"))
-        // The two-up pause HStack is gone; a single full-width Pause button replaces it.
-        XCTAssertFalse(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing)"))
+        // The two actions sit side by side in a two-up HStack (pause/resume + restart).
+        XCTAssertTrue(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing)"))
         XCTAssertTrue(widget.contains("HStack(spacing: LavaLiveActivityStyle.expandedActionLabelSpacing)"))
-        // The Pause label now sizes to the full (resume) button width, not the half width.
-        XCTAssertFalse(widget.contains(".frame(width: LavaLiveActivityStyle.expandedActionButtonWidth)"))
-        XCTAssertTrue(widget.contains(".frame(width: LavaLiveActivityStyle.expandedResumeButtonWidth)"))
+        // Both action labels flex to fill their half of the row rather than pinning
+        // to a fixed width; the old fixed-width button constants were removed.
+        XCTAssertFalse(widget.contains("expandedResumeButtonWidth"))
+        XCTAssertFalse(widget.contains("expandedActionButtonWidth"))
+        XCTAssertTrue(widget.contains(".frame(maxWidth: .infinity)"))
         XCTAssertTrue(widget.contains(".buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))"))
         XCTAssertEqual(
             widget.components(separatedBy: "size: LavaLiveActivityStyle.expandedActionFontSize").count - 1,
-            2
+            3
         )
         XCTAssertTrue(widget.contains(".activitySystemActionForegroundColor(LavaLiveActivityStyle.lavaGreen)"))
         XCTAssertTrue(widget.contains(".activityBackgroundTint(LavaLiveActivityStyle.lockScreenBackgroundTint)"))

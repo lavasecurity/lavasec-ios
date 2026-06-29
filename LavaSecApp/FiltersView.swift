@@ -90,7 +90,9 @@ struct FiltersView: View {
                     }
 
                     ImportOptionRow(
-                        systemImage: "music.note.list",
+                        // Same list glyph as Guard's "How Lava filters" row (LavaIconRole.filters),
+                        // so the library entry reads as the same concept across surfaces.
+                        systemImage: "line.3.horizontal.decrease.circle",
                         title: "Your filters",
                         subtitle: "Switch or manage the filters"
                     ) {
@@ -220,6 +222,8 @@ private struct AllFiltersView: View {
     @State private var isEditing = false
     @State private var isShowingCreate = false
     @State private var isShowingPaywall = false
+    // Tapping the moon glyph opens the Focus-filter how-to (all tiers — no paywall).
+    @State private var isShowingFocusInfo = false
     @State private var isShowingDetail = false
     // Blocklist-style staged deletion: tapping a row's delete only marks it here; the toolbar
     // checkmark (enabled only while this is non-empty) opens a confirmation bottom sheet that
@@ -245,7 +249,7 @@ private struct AllFiltersView: View {
             LavaInfoPanel(
                 title: "How filters work",
                 description: "Each filter is its own set of blocklists. Apply one to make it the filter in effect — your others stay saved.",
-                systemImage: "music.note.list",
+                systemImage: "line.3.horizontal.decrease.circle",
                 tint: LavaStyle.safeGreen
             )
 
@@ -339,7 +343,17 @@ private struct AllFiltersView: View {
                     .disabled(stagedDeletions.isEmpty)
                 }
             } else {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    // A moon "signpost" to the Focus auto-switch how-to, immediately LEFT of the
+                    // edit pencil and only in the non-editing branch (so it's hidden in edit mode).
+                    // Focus auto-switch is available to all tiers (no paywall), so every user gets
+                    // the how-to.
+                    NativeToolbarIconButton(
+                        systemName: "moon",
+                        accessibilityLabel: "Switch filters with a Focus"
+                    ) {
+                        isShowingFocusInfo = true
+                    }
                     NativeToolbarIconButton(systemName: "square.and.pencil", accessibilityLabel: "Edit") {
                         Task {
                             // Edit mode enables add / rename / delete — gate it on the
@@ -378,6 +392,9 @@ private struct AllFiltersView: View {
         }
         .sheet(isPresented: $isShowingPaywall) {
             LavaPlusUpgradeSheet()
+        }
+        .sheet(isPresented: $isShowingFocusInfo) {
+            FocusFilterHowToSheet()
         }
         .sheet(item: $renamingFilter) { filter in
             RenameFilterSheet(
@@ -677,11 +694,14 @@ private struct FilterLibraryRow: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(LavaStyle.secondaryText)
         } else if isActive {
-            // (3) Quiet "in use" text rightmost marks the in-effect filter (other rows switch
-            // on tap via the Apply / View & edit dialog).
-            Text("in use".lavaLocalized)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(LavaStyle.secondaryText)
+            // (3) The in-effect filter is marked by the same "Now filtering" play glyph used on the
+            // Filters tab's in-effect row — sized and framed to match the delete glyph so the active
+            // row's marker and an editable row's delete control occupy the same trailing slot.
+            Image(systemName: "play.circle.fill")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(LavaStyle.safeGreen)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("Now filtering".lavaLocalized)
         }
     }
 }
@@ -935,17 +955,17 @@ private struct DeleteFiltersConfirmationSheet: View {
                     borderTint: LavaStyle.lavaOrange
                 )
 
-                LavaTextInputPanel {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(names, id: \.self) { name in
-                            HStack(spacing: 8) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundStyle(.red)
-                                Text(name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(LavaStyle.primaryText)
-                                Spacer(minLength: 0)
-                            }
+                // Same compact, aligned change-row scaffold as the "Now filtering" review sheet
+                // (DiffGroup → FilterReviewChangeRow): a simple "minus" glyph and the shared row
+                // format, so staged removals read identically to a filter edit's removed rows.
+                LavaCondensedList {
+                    ForEach(Array(names.enumerated()), id: \.offset) { index, name in
+                        // Filter names are user data — render them raw (don't localize), so a name
+                        // matching a localization key still identifies the exact filter being removed.
+                        FilterReviewChangeRow(symbol: "-", title: name, tint: LavaStyle.lavaOrange, localizesTitle: false)
+
+                        if index < names.count - 1 {
+                            LavaCondensedDivider(leadingInset: 52)
                         }
                     }
                 }
@@ -967,6 +987,75 @@ private struct DeleteFiltersConfirmationSheet: View {
             }
         }
         .presentationDetents([.height(360)])
+    }
+}
+
+/// How-to for the Focus auto-switch (LAV-100 Phase 4). The capability is a
+/// `SetFocusFilterIntent` (`LavaFocusFilterIntent`) the user wires up in
+/// Settings › Focus; iOS exposes no deep link into the Focus section, so this
+/// explains the four steps and offers a jump to the Settings app. Reached from
+/// the moon glyph on the filters list (shown to all tiers — Focus auto-switch has no paywall).
+private struct FocusFilterHowToSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private let steps: [String] = [
+        "Open the Settings app, then tap Focus.",
+        "Choose a Focus like Sleep or Work — or create one.",
+        "Tap Focus Filters, then Add Filter.",
+        "Choose Lava, then pick the filter to switch to."
+    ]
+
+    var body: some View {
+        NavigationStack {
+            LavaSheetScaffold(spacing: 18, scrolls: true) {
+                LavaInfoPanel(
+                    // Raw literals: LavaInfoPanel self-localizes title + description (matches every
+                    // other call site). The steps/tip/button below go through plain Text, so they
+                    // keep their own .lavaLocalized.
+                    title: "Switch filters automatically",
+                    description: "Pick a filter for a Focus and Lava switches to it on its own whenever that Focus turns on — no taps needed.",
+                    systemImage: "moon"
+                )
+
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LavaStyle.safeGreen)
+                                .frame(width: 22, height: 22)
+                                .background(LavaStyle.softGreen, in: Circle())
+                            Text(step.lavaLocalized)
+                                .font(.subheadline)
+                                .foregroundStyle(LavaStyle.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Tip: put the Focus on a schedule to switch filters automatically by time of day.".lavaLocalized)
+                    .font(.footnote)
+                    .foregroundStyle(LavaStyle.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(settingsURL)
+                } label: {
+                    Text("Open Settings".lavaLocalized)
+                }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+            }
+            .navigationTitle("Focus filters".lavaLocalized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .cancel, action: dismiss.callAsFunction)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
@@ -1001,7 +1090,7 @@ private struct FiltersFlowDiagram: View {
             HStack(alignment: .top, spacing: 0) {
                 node(label: "Phone".lavaLocalized) {
                     Image(systemName: "iphone")
-                        .font(.system(size: 40, weight: .regular))
+                        .font(.system(size: LavaIconSize.node, weight: .regular))
                         .foregroundStyle(LavaStyle.secondaryText)
                 }
                 .frame(width: width * nodeRatio)
@@ -1017,7 +1106,7 @@ private struct FiltersFlowDiagram: View {
 
                 node(label: "Internet".lavaLocalized) {
                     Image(systemName: "globe")
-                        .font(.system(size: 40, weight: .regular))
+                        .font(.system(size: LavaIconSize.node, weight: .regular))
                         .foregroundStyle(LavaStyle.secondaryText)
                 }
                 .frame(width: width * nodeRatio)
@@ -1042,7 +1131,7 @@ private struct FiltersFlowDiagram: View {
 
     private var connector: some View {
         Image(systemName: "arrow.right")
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: LavaIconSize.small, weight: .semibold))
             .foregroundStyle(LavaStyle.secondaryText.opacity(0.6))
             .frame(height: iconBoxHeight)
     }
@@ -1679,7 +1768,7 @@ private struct FilterAddButton: View {
 
 private enum FilterActionLabelMetrics {
     static let iconFrameSize: CGFloat = 16
-    static let iconPointSize: CGFloat = 13
+    static let iconPointSize: CGFloat = LavaIconSize.inline
     static let iconTextSpacing: CGFloat = 7
 }
 

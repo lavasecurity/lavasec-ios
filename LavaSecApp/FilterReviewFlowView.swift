@@ -137,6 +137,11 @@ struct FilterReviewChangeRow: View {
     let symbol: String
     let title: String
     let tint: Color
+    // Diff titles are usually fixed UI strings (localize them), but user-supplied values —
+    // e.g. a filter's name in the delete-review sheet — must render raw: a name that happens
+    // to match a localization key (`Cancel`, `Save`, the default `Filter`) would otherwise show
+    // a translated UI string and misidentify what's being removed in non-English locales.
+    var localizesTitle: Bool = true
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -145,7 +150,7 @@ struct FilterReviewChangeRow: View {
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
 
-            Text(title.lavaLocalized)
+            Text(localizesTitle ? title.lavaLocalized : title)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(LavaStyle.primaryText)
                 .lineLimit(2)
@@ -191,7 +196,7 @@ struct FilterPreparationScreen: View {
                 case .preparing(let progress, let message):
                     if progress >= 1 {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 58, weight: .bold))
+                            .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                             .foregroundStyle(LavaStyle.safeGreen)
                         PreparationTickerTitle("Success")
                     } else {
@@ -205,7 +210,7 @@ struct FilterPreparationScreen: View {
 
                 case .failed(let message):
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 54, weight: .bold))
+                        .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                         .foregroundStyle(LavaStyle.lavaOrange)
 
                     VStack(spacing: 10) {

@@ -167,7 +167,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(myListBlock.contains("FilterAddButton(title: \"Add an exception\", systemImage: \"plus\")"))
         XCTAssertTrue(filterAddButtonBlock.contains("private enum FilterActionLabelMetrics"))
         XCTAssertTrue(filterAddButtonBlock.contains("static let iconFrameSize: CGFloat = 16"))
-        XCTAssertTrue(filterAddButtonBlock.contains("static let iconPointSize: CGFloat = 13"))
+        XCTAssertTrue(filterAddButtonBlock.contains("static let iconPointSize: CGFloat = LavaIconSize.inline"))
         XCTAssertTrue(filterAddButtonBlock.contains("static let iconTextSpacing: CGFloat = 7"))
         XCTAssertTrue(filterAddButtonBlock.contains("FilterActionLabel(title: title, systemImage: systemImage)"))
         XCTAssertTrue(filterAddButtonBlock.contains("HStack(spacing: FilterActionLabelMetrics.iconTextSpacing)"))

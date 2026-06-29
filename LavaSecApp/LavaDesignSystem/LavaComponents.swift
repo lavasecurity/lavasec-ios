@@ -402,7 +402,7 @@ struct LavaOverviewMetricBlock: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 42, weight: .bold, design: .rounded))
+                .font(LavaTypography.metricNumeral)
                 .foregroundStyle(LavaStyle.ink)
                 .monospacedDigit()
                 .lineLimit(1)

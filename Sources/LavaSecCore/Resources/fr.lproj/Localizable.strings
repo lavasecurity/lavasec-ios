@@ -1,0 +1,8 @@
+/* LavaSecCore notification body strings — localized via Bundle.module (app + extension + tunnel). */
+
+"notif.body.switchedTo" = "Filtre basculé sur %@";
+"notif.body.couldNotSwitchTo" = "Impossible de basculer sur %@";
+"notif.body.reconnectTitle" = "Reconnecter Lava";
+"notif.body.reconnectMessage" = "Le DNS ne répond pas sur ce réseau. Touchez pour reconnecter la protection.";
+"notif.body.dnsSlowTitle" = "Le DNS Lava est lent";
+"notif.body.dnsSlowMessage" = "Le résolveur DNS sélectionné répond lentement. Touchez pour reconnecter la protection.";

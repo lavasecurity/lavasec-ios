@@ -33,6 +33,12 @@
 		1A0000010000000000000024 /* LavaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001024 /* LavaComponents.swift */; };
 		1A0000010000000000000010 /* LavaCondensedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001010 /* LavaCondensedList.swift */; };
 		1A0000010000000000000004 /* FiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001004 /* FiltersView.swift */; };
+		1A0000080000000000003001 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000005001 /* LavaSecIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1A0000080000000000001101 /* LavaSecIntentsExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000001001 /* LavaSecIntentsExtension.swift */; };
+		1A0000080000000000001102 /* FocusFilterIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001FFF /* FocusFilterIntent.swift */; };
+		1A0000080000000000001103 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
+		1A0000080000000000001104 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000002001 /* FocusSwitchEnvironment.swift */; };
+		1A0000080000000000001105 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000080000000000007008 /* LavaSecCore */; };
 		1A00000100000000000000D0 /* ShareableFiltersUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010D0 /* ShareableFiltersUI.swift */; };
 		1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101D /* FilterReviewFlowView.swift */; };
 		1A0000010000000000000020 /* SecurityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001020 /* SecurityController.swift */; };
@@ -43,6 +49,7 @@
 		1A0000010000000000000005 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001005 /* DiagnosticsView.swift */; };
 		1A0000010000000000000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001006 /* SettingsView.swift */; };
 		1A0000010000000000000007 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
+		1A0000080000000000000001 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000002001 /* FocusSwitchEnvironment.swift */; };
 		1A0000030000000000000005 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002002 /* SoftShieldGuardian.swift */; };
 		1A0000030000000000000007 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002003 /* LavaActivityAttributes.swift */; };
 		1A0000030000000000000009 /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */; };
@@ -103,6 +110,13 @@
 			remoteGlobalIDString = 1A0000010000000000008001;
 			remoteInfo = LavaSec;
 		};
+		1A0000080000000000006001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A0000010000000000009001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0000080000000000008001;
+			remoteInfo = LavaSecIntents;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -116,6 +130,17 @@
 				1A0000030000000000000002 /* LavaSecWidget.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000080000000000004004 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				1A0000080000000000003001 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */,
+			);
+			name = "Embed ExtensionKit Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -148,6 +173,7 @@
 		1A0000010000000000001024 /* LavaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaComponents.swift; sourceTree = "<group>"; };
 		1A0000010000000000001010 /* LavaCondensedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaCondensedList.swift; sourceTree = "<group>"; };
 		1A0000010000000000001004 /* FiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersView.swift; sourceTree = "<group>"; };
+		1A0000010000000000001FFF /* FocusFilterIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusFilterIntent.swift; sourceTree = "<group>"; };
 		1A00000100000000000010D0 /* ShareableFiltersUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableFiltersUI.swift; sourceTree = "<group>"; };
 		1A000001000000000000101D /* FilterReviewFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterReviewFlowView.swift; sourceTree = "<group>"; };
 		1A0000010000000000001020 /* SecurityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityController.swift; sourceTree = "<group>"; };
@@ -171,6 +197,7 @@
 		1A0000010000000000001009 /* AdminQAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminQAView.swift; sourceTree = "<group>"; };
 		1A000001000000000000100A /* RageShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RageShakeDetector.swift; sourceTree = "<group>"; };
 		1A0000010000000000002001 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
+		1A0000080000000000002001 /* FocusSwitchEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSwitchEnvironment.swift; sourceTree = "<group>"; };
 		1A0000030000000000002002 /* SoftShieldGuardian.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftShieldGuardian.swift; sourceTree = "<group>"; };
 		1A0000030000000000002003 /* LavaActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaActivityAttributes.swift; sourceTree = "<group>"; };
 		1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityActionRequest.swift; sourceTree = "<group>"; };
@@ -189,6 +216,10 @@
 			1A0000020000000000001001 /* SecuritySettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsUITests.swift; sourceTree = "<group>"; };
 			1A0000020000000000001002 /* CoreFlowDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreFlowDeviceTests.swift; sourceTree = "<group>"; };
 			1A0000020000000000005001 /* LavaSecUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LavaSecUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000080000000000005001 /* LavaSecIntents.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = LavaSecIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000080000000000001001 /* LavaSecIntentsExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecIntentsExtension.swift; sourceTree = "<group>"; };
+		1A0000080000000000002002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A0000080000000000002003 /* LavaSecIntents.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecIntents.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -225,6 +256,14 @@
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
+		1A0000080000000000004002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000080000000000001105 /* LavaSecCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -244,6 +283,7 @@
 				1A0000010000000000009003 /* LavaSecApp */,
 				1A0000010000000000009004 /* LavaSecTunnel */,
 				1A0000030000000000009007 /* LavaSecWidget */,
+				1A0000080000000000009008 /* LavaSecIntents */,
 				1A0000010000000000009005 /* Shared */,
 				1A0000020000000000009001 /* LavaSecUITests */,
 				1A0000010000000000009006 /* Products */,
@@ -324,6 +364,7 @@
 				1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */,
 				1A0000030000000000002005 /* LavaLiveActivityIntents.swift */,
 				1A0000040000000000002001 /* LavaProtectionCommandService.swift */,
+				1A0000080000000000002001 /* FocusSwitchEnvironment.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -358,6 +399,17 @@
 				path = LavaSecUITests;
 				sourceTree = "<group>";
 		};
+		1A0000080000000000009008 /* LavaSecIntents */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000080000000000001001 /* LavaSecIntentsExtension.swift */,
+				1A0000010000000000001FFF /* FocusFilterIntent.swift */,
+				1A0000080000000000002002 /* Info.plist */,
+				1A0000080000000000002003 /* LavaSecIntents.entitlements */,
+			);
+			path = LavaSecIntents;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -369,12 +421,14 @@
 				1A0000010000000000004002 /* Frameworks */,
 				1A0000010000000000004003 /* Resources */,
 				1A0000010000000000004004 /* Embed App Extensions */,
+				1A0000080000000000004004 /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				1A0000010000000000006002 /* PBXTargetDependency */,
 				1A0000030000000000006004 /* PBXTargetDependency */,
+				1A0000080000000000006002 /* PBXTargetDependency */,
 			);
 			name = LavaSec;
 			packageProductDependencies = (
@@ -446,6 +500,26 @@
 			productReference = 1A0000020000000000005001 /* LavaSecUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		1A0000080000000000008001 /* LavaSecIntents */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A000008000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */;
+			buildPhases = (
+				1A0000080000000000004001 /* Sources */,
+				1A0000080000000000004002 /* Frameworks */,
+				1A0000080000000000004003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LavaSecIntents;
+			packageProductDependencies = (
+				1A0000080000000000007008 /* LavaSecCore */,
+			);
+			productName = LavaSecIntents;
+			productReference = 1A0000080000000000005001 /* LavaSecIntents.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -463,6 +537,9 @@
 						CreatedOnToolsVersion = 26.3;
 					};
 					1A0000030000000000008003 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					1A0000080000000000008001 = {
 						CreatedOnToolsVersion = 26.3;
 					};
 					1A0000020000000000008001 = {
@@ -501,6 +578,7 @@
 				1A0000010000000000008001 /* LavaSec */,
 				1A0000010000000000008002 /* LavaSecTunnel */,
 				1A0000030000000000008003 /* LavaSecWidget */,
+				1A0000080000000000008001 /* LavaSecIntents */,
 				1A0000020000000000008001 /* LavaSecUITests */,
 			);
 		};
@@ -539,6 +617,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A0000020000000000004003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000080000000000004003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -594,6 +679,7 @@
 				1A0000030000000000000009 /* LavaLiveActivityActionRequest.swift in Sources */,
 				1A000003000000000000000B /* LavaLiveActivityIntents.swift in Sources */,
 				1A0000040000000000000001 /* LavaProtectionCommandService.swift in Sources */,
+				1A0000080000000000000001 /* FocusSwitchEnvironment.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -631,6 +717,17 @@
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};
+		1A0000080000000000004001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000080000000000001102 /* FocusFilterIntent.swift in Sources */,
+				1A0000080000000000001101 /* LavaSecIntentsExtension.swift in Sources */,
+				1A0000080000000000001103 /* AppGroup.swift in Sources */,
+				1A0000080000000000001104 /* FocusSwitchEnvironment.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -648,6 +745,11 @@
 			isa = PBXTargetDependency;
 			target = 1A0000010000000000008001 /* LavaSec */;
 			targetProxy = 1A0000020000000000006001 /* PBXContainerItemProxy */;
+		};
+		1A0000080000000000006002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A0000080000000000008001 /* LavaSecIntents */;
+			targetProxy = 1A0000080000000000006001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -848,7 +950,7 @@
 				MARKETING_VERSION = "$(inherited)";
 	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
 	                PRODUCT_NAME = LavaSec;
-					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 					SWIFT_VERSION = 6.0;
 					TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -882,7 +984,7 @@
 	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
 	                PRODUCT_NAME = LavaSec;
 					SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 					SWIFT_VERSION = 6.0;
 					TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -914,7 +1016,7 @@
 				MARKETING_VERSION = "$(inherited)";
                 PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa;
                 PRODUCT_NAME = LavaSec;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1017,7 +1119,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1045,7 +1147,7 @@
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1072,7 +1174,7 @@
 				PRODUCT_NAME = LavaSecWidget;
 				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG LAVA_QA_TOOLS";
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent AppEntity AppEnum AppShortcutsProvider";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -1131,6 +1233,87 @@
 			};
 			name = QA;
 		};
+		1A0000080000000000B001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1A0000080000000000B002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_INTENTS_PROFILE)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1A0000080000000000B003 /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = QA;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1184,6 +1367,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		1A000008000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000080000000000B001 /* Debug */,
+				1A0000080000000000B002 /* Release */,
+				1A0000080000000000B003 /* QA */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -1230,6 +1423,11 @@
 			package = 1A0000010000000000007005 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
 		};
+			1A0000080000000000007008 /* LavaSecCore */ = {
+				isa = XCSwiftPackageProductDependency;
+				package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
+				productName = LavaSecCore;
+			};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1A0000010000000000009001 /* Project object */;

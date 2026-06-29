@@ -1,0 +1,8 @@
+/* LavaSecCore notification body strings — localized via Bundle.module (app + extension + tunnel). */
+
+"notif.body.switchedTo" = "필터가 %@(으)로 전환됨";
+"notif.body.couldNotSwitchTo" = "%@(으)로 전환할 수 없음";
+"notif.body.reconnectTitle" = "Lava 다시 연결";
+"notif.body.reconnectMessage" = "이 네트워크에서 DNS가 확인되지 않습니다. 탭하여 보호 기능을 다시 연결하세요.";
+"notif.body.dnsSlowTitle" = "Lava DNS 응답이 느림";
+"notif.body.dnsSlowMessage" = "선택한 DNS 확인 서버의 응답이 느립니다. 탭하여 보호 기능을 다시 연결하세요.";
