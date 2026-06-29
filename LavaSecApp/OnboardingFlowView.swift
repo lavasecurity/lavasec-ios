@@ -74,7 +74,7 @@ struct LavaOnboardingView: View {
             if !pageHistory.isEmpty {
                 Button(action: goBack) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: LavaIconSize.control, weight: .semibold))
                         .foregroundStyle(LavaStyle.ink)
                         .frame(width: 38, height: 38)
                         .background(.regularMaterial, in: Circle())

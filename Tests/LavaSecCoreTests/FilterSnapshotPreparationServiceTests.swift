@@ -141,6 +141,23 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
             tierRuleLimit: FilterRuleTierLimit(limit: 1_000, isPaid: false)
         )
         XCTAssertEqual(result.snapshot.summary.blocklistRuleCount, 2)
+        // The cold gate persists the exact budget total it evaluated, so a warm reuse can apply the
+        // same tier limit without recompiling. It must be populated, bounded by the limit just
+        // accepted, and at least the block-rule count, and it must survive a codec round-trip.
+        let budget = try XCTUnwrap(result.snapshot.summary.tierBudgetRuleCount)
+        XCTAssertLessThanOrEqual(budget, 1_000, "An accepted prepare must record a budget within the tier limit.")
+        XCTAssertGreaterThanOrEqual(budget, result.snapshot.summary.blockRuleCount)
+        let decoded = try JSONDecoder().decode(
+            PreparedFilterSnapshot.self,
+            from: JSONEncoder().encode(result.snapshot)
+        )
+        XCTAssertEqual(decoded.summary.tierBudgetRuleCount, budget, "tierBudgetRuleCount must survive a round-trip.")
+        // A legacy artifact predating the field decodes to nil (the warm path then cold-compiles).
+        let legacy = try JSONDecoder().decode(
+            PreparedFilterSnapshotSummary.self,
+            from: Data(#"{"blockRuleCount":5,"allowRuleCount":0,"guardrailRuleCount":1}"#.utf8)
+        )
+        XCTAssertNil(legacy.tierBudgetRuleCount)
     }
 
     func testDisplayNameResolvesCustomCatalogAndFallback() throws {
@@ -379,6 +396,62 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
 
         // readableStore() resolves the published versioned dir.
         XCTAssertEqual(store.readableStore().directoryURL, versioned.directoryURL)
+    }
+
+    func testPersistArtifactsAbortsFlipWhenSupersededWhileLocked() async throws {
+        // Kilo #29 (warm-flip rollback arm): when the in-lock supersession check fires, persistArtifacts must
+        // NOT flip the pointer and must return .abortedSuperseded — nothing is published, so the tunnel is
+        // never pointed at a snapshot built from a superseded basis.
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration, customSources: [], catalogFreshnessMaxAge: 3_600)
+        let container = try Fixture.makeTemporaryDirectory()
+
+        let outcome = try await service.persistArtifacts(
+            result.snapshot,
+            containerURL: container,
+            snapshotFilename: "filter-snapshot.json",
+            compactSnapshotFilename: "filter-snapshot.compact",
+            supersededWhileLocked: { _ in true }
+        )
+
+        guard case .abortedSuperseded = outcome else {
+            return XCTFail("Expected .abortedSuperseded, got \(outcome)")
+        }
+        XCTAssertNil(
+            FilterArtifactStore(directoryURL: container).loadArtifactPointer(),
+            "An aborted (superseded) flip must publish no pointer."
+        )
+    }
+
+    func testPersistArtifactsDoesNotFlipWhenCommitBeforeFlipVetoes() async throws {
+        // Kilo #29 (warm-flip rollback arm): a commitBeforeFlip veto (e.g. the caller detects its catalog
+        // basis moved) throws BEFORE the pointer moves, so the publish leaves no pointer — config-leads-pointer
+        // stays fail-closed.
+        struct VetoError: Error {}
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration, customSources: [], catalogFreshnessMaxAge: 3_600)
+        let container = try Fixture.makeTemporaryDirectory()
+
+        do {
+            _ = try await service.persistArtifacts(
+                result.snapshot,
+                containerURL: container,
+                snapshotFilename: "filter-snapshot.json",
+                compactSnapshotFilename: "filter-snapshot.compact",
+                commitBeforeFlip: { throw VetoError() }
+            )
+            XCTFail("A commitBeforeFlip veto must propagate as a throw.")
+        } catch is VetoError {
+            // expected
+        }
+        XCTAssertNil(
+            FilterArtifactStore(directoryURL: container).loadArtifactPointer(),
+            "A vetoed commitBeforeFlip must publish no pointer."
+        )
     }
 
     func testPersistArtifactsPreservesPreExistingLegacyRootAsPassiveFallback() async throws {

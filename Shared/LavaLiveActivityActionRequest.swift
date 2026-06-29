@@ -18,7 +18,7 @@ enum LavaLiveActivityActionRequest: String, Codable, Sendable {
         case .resume:
             "Resume Lava protection"
         case .reconnect:
-            "Reconnect Lava protection"
+            "Restart Lava protection"
         }
     }
 

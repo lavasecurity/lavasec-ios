@@ -270,22 +270,23 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         XCTAssertTrue(config.contains("public var configurationGeneration: Int"))
 
         let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        // Both foreground writers advance the token via the monotonic helper (never a raw
-        // +=1), so it cannot reset/collide across a backup restore that replaces the
-        // in-memory configuration with a default-0 token.
-        let sharedBlock = try Self.block(in: viewModel, from: "private func persistSharedState(", to: "private func advanceConfigurationGeneration(")
-        XCTAssertTrue(sharedBlock.contains("advanceConfigurationGeneration()"),
-                      "persistSharedState must advance the supersession token.")
-        let configOnlyBlock = try Self.block(in: viewModel, from: "private func persistConfigurationOnly(", to: "private func uploadEncryptedBackup(")
-        XCTAssertTrue(configOnlyBlock.contains("advanceConfigurationGeneration()"),
-                      "persistConfigurationOnly must advance the supersession token.")
-        // The helper derives the next token from the live ON-DISK value, so it stays
-        // monotonic across a restore that resets the in-memory configuration to 0.
-        XCTAssertTrue(viewModel.contains("max(configuration.configurationGeneration, onDiskConfigurationGeneration()) &+ 1"))
-        XCTAssertTrue(viewModel.contains("private func onDiskConfigurationGeneration()"))
+        // Both foreground writers persist via the single shared writer, which advances the token
+        // monotonically — so it cannot reset/collide across a backup restore that replaces the in-memory
+        // configuration with a default-0 token, and the two publishers can't drift from the headless switch.
+        let sharedBlock = try Self.block(in: viewModel, from: "private func persistSharedState(", to: "private func persistConfigurationOnly(")
+        XCTAssertTrue(sharedBlock.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
+                      "persistSharedState must persist via the shared writer (which advances the supersession token).")
+        let configOnlyBlock = try Self.block(in: viewModel, from: "private func persistConfigurationOnly(", to: "private func syncActiveFilterFromConfiguration()")
+        XCTAssertTrue(configOnlyBlock.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
+                      "persistConfigurationOnly must persist via the shared writer.")
+        // The shared writer derives the next token from the live ON-DISK value, so it stays monotonic
+        // across a restore that resets the in-memory configuration to 0.
+        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        XCTAssertTrue(writer.contains("max(configuration.configurationGeneration, onDiskConfigurationGeneration(at: configurationURL)) + 1"))
+        XCTAssertTrue(writer.contains("public static func onDiskConfigurationGeneration("))
         // The old raw bump must be gone (it reset to 1 after a restore).
         XCTAssertFalse(viewModel.contains("configuration.configurationGeneration &+= 1"),
-                       "Raw token increments reset after a restore — use the monotonic helper.")
+                       "Raw token increments reset after a restore — use the monotonic shared writer.")
     }
 
     func testBackgroundPublishBuildsSnapshotOffMainActorFromReloadedConfig() throws {
@@ -427,8 +428,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     func testForegroundWritesConfigBeforeFlippingArtifactPointer() throws {
         let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let block = try Self.block(in: viewModel, from: "private func persistSharedState(", to: "private func persistConfigurationOnly(")
-        let configWriteIdx = try XCTUnwrap(block.range(of: "configurationData.write(to: configurationURL")?.lowerBound)
-        let artifactIdx = try XCTUnwrap(block.range(of: "persistPreparedSnapshotArtifacts(snapshotToPersist)")?.lowerBound)
+        // The config write now goes through the shared writer; that call must precede the artifact
+        // pointer flip (persistPreparedSnapshotArtifacts) so config (the advanced generation) leads the
+        // pointer and a background writer never observes a flip ahead of the bump.
+        let configWriteIdx = try XCTUnwrap(block.range(of: "SharedFilterStatePersistence.writeConfigurationAndLibrary(")?.lowerBound)
+        let artifactIdx = try XCTUnwrap(block.range(of: "persistPreparedSnapshotArtifacts(")?.lowerBound)
         XCTAssertLessThan(
             configWriteIdx, artifactIdx,
             "persistSharedState must write configuration.json (advancing the supersession token) BEFORE flipping the artifact pointer, so a background writer never observes a flip ahead of the generation bump."

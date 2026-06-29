@@ -131,7 +131,7 @@ private struct ActivityAuthenticationGateView: View {
         LavaPrimaryTabScreenContent(title: "Activity") {
             VStack(spacing: 18) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 48, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 Text("Unlock to view Activity")

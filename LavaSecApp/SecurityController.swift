@@ -533,7 +533,7 @@ struct SecurityLockOverlay: View {
 
             VStack(spacing: 18) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 44, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 Text("Lava Locked")
@@ -557,7 +557,7 @@ struct SecurityPrivacyMaskOverlay: View {
 
             VStack(spacing: 14) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 42, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 Text("Lava Security")
@@ -581,7 +581,7 @@ struct SecurityPasscodeAuthenticationView: View {
                 Spacer()
 
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 46, weight: .semibold))
+                    .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
 
                 VStack(spacing: 8) {

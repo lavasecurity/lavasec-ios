@@ -52,8 +52,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         )
         XCTAssertTrue(block.contains("syncActiveFilterFromConfiguration()"),
                       "Config-only writes must mirror the active filter into the library.")
-        XCTAssertTrue(block.contains("try persistFilterLibrary()"),
-                      "Config-only writes must persist filter-library.json alongside the config.")
+        XCTAssertTrue(block.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
+                      "Config-only writes go through the shared writer (config + library together, one source of truth).")
     }
 
     func testSharedStatePersistSyncsRecordsTokenAndWritesLibrary() throws {
@@ -64,7 +64,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             endingBefore: "private func persistConfigurationOnly("
         )
         XCTAssertTrue(block.contains("syncActiveFilterFromConfiguration()"))
-        XCTAssertTrue(block.contains("try persistFilterLibrary()"))
+        XCTAssertTrue(block.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("))
         // Only a real artifact rewrite records the compiled token (so GC keeps the
         // active filter's dir warm); a reuse/no-op publish must not mint a token.
         XCTAssertTrue(block.contains("if didRewriteArtifacts {"))
@@ -174,21 +174,22 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let block = try Self.sourceBlock(
             in: source,
-            startingAt: "func switchToFilter(id: String) async {",
-            endingBefore: "private func duplicateName(of name: String)"
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
+            endingBefore: "private enum SwitchPublication"
         )
-        // Refuses no-op / unknown / frozen targets.
-        XCTAssertTrue(block.contains("guard id != library.activeFilterID,"))
+        // Refuses no-op / unknown / frozen targets (no-op + unknown via the shared FilterSwitchPlan).
+        XCTAssertTrue(block.contains("FilterSwitchPlan.make(toFilterID: id, configuration: configuration, library: library)"))
         XCTAssertTrue(block.contains("!isFilterFrozen(id)"))
-        // Prepares first; commits configuration + active id only after a successful prepare.
-        let prepareIdx = try XCTUnwrap(block.range(of: "try await prepareFilterSnapshot(for: nextConfiguration)")?.lowerBound)
+        // Prepares (warm reuse OR cold compile) first; commits configuration + active id only after.
+        let prepareIdx = try XCTUnwrap(block.range(of: "prepareSwitchPublication(")?.lowerBound)
         let commitIdx = try XCTUnwrap(block.range(of: "library.setActiveFilter(id: id)")?.lowerBound)
-        XCTAssertLessThan(prepareIdx, commitIdx, "The switch must commit only after prepare succeeds.")
+        XCTAssertLessThan(prepareIdx, commitIdx, "The switch must commit only after prepare/reuse succeeds.")
         XCTAssertTrue(block.contains("configuration = nextConfiguration"))
-        XCTAssertTrue(block.contains("try await persistSharedState(preparedSnapshot: prepared.snapshot)"))
-        // Derived rule caches (applyCatalogSyncResult) are applied only AFTER the throwing persist,
-        // so a failed switch never leaves them describing the target (the rollback can't restore them).
-        let persistIdx = try XCTUnwrap(block.range(of: "try await persistSharedState(preparedSnapshot: prepared.snapshot)")?.lowerBound)
+        XCTAssertTrue(block.contains("try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)"))
+        // Derived rule caches (applyCatalogSyncResult / applyReusablePreparedSnapshot) are applied only
+        // AFTER the throwing persist, so a failed switch never leaves them describing the target (the
+        // rollback can't restore them).
+        let persistIdx = try XCTUnwrap(block.range(of: "try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)")?.lowerBound)
         let applyCatalogIdx = try XCTUnwrap(block.range(of: "applyCatalogSyncResult(prepared.catalogResult)")?.lowerBound)
         XCTAssertLessThan(persistIdx, applyCatalogIdx, "Derived catalog/rule state must be applied only after the switch persists.")
         // persistSharedState ends in an artifact-actor await; a superseded switch must re-check the
@@ -235,6 +236,352 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The rollback must be persisted (persistSharedState may have written the target to disk before the publish threw).")
         XCTAssertFalse(catchBlock.contains("configuration = nextConfiguration"), "Failure must not commit the target config.")
         XCTAssertFalse(catchBlock.contains("setActiveFilter(id: id)"), "Failure must not commit the target active id.")
+    }
+
+    /// Instant switch-back: a switch reuses the target filter's still-warm compiled artifacts (a
+    /// pointer flip) when valid, and only cold-compiles on a miss — without ever serving stale rules.
+    func testSwitchReusesWarmArtifactBeforeCompiling() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+
+        // prepareSwitchPublication: try warm reuse FIRST (gated on the target's lastCompiledToken),
+        // fall back to the cold prepareFilterSnapshot on a miss.
+        let prepareBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func prepareSwitchPublication(",
+            endingBefore: "private func warmReusableSnapshotForSwitch("
+        )
+        // Try the shared warm-reuse helper FIRST, fall back to the cold prepareFilterSnapshot on a miss.
+        let warmIdx = try XCTUnwrap(prepareBlock.range(of: "warmReusableSnapshotForSwitch(target: target")?.lowerBound)
+        let coldIdx = try XCTUnwrap(prepareBlock.range(of: "try await prepareFilterSnapshot(for: configuration)")?.lowerBound)
+        XCTAssertLessThan(warmIdx, coldIdx, "Warm reuse must be attempted before a cold compile.")
+        // Warm reuse is skipped while a catalog sync is in flight — the quiescence gate that makes the
+        // warm fast path mutually exclusive with syncs (it bails to a cold compile, which coalesces
+        // with / follows the sync) so a warm flip can never race a refresh's recompile/republish.
+        XCTAssertTrue(prepareBlock.contains("!isCatalogSyncInFlight"),
+                      "Warm reuse must be skipped while a catalog sync is in flight (bail to cold).")
+        XCTAssertTrue(prepareBlock.contains("return .warm(reusable)"))
+        XCTAssertTrue(prepareBlock.contains("return .compiled(prepared)"))
+
+        // The shared candidate loop (used by the foreground switch AND the headless warm switch): try
+        // the library token + the sidecar token, each validated by the per-token loader.
+        let warmCandidateBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func warmReusableSnapshotForSwitch(",
+            endingBefore: "private func loadReusableWarmSnapshotForSwitch("
+        )
+        XCTAssertTrue(warmCandidateBlock.contains("target.lastCompiledToken"),
+                      "Warm reuse is gated on the target's recorded compiled token.")
+        XCTAssertTrue(warmCandidateBlock.contains("loadReusableWarmSnapshotForSwitch(token: token"),
+                      "Each candidate token is validated by the per-token loader.")
+
+        // The app's per-token loader delegates to the SHARED LavaSecCore validation core
+        // (WarmFilterSnapshotLoader) so the foreground switch and the headless Focus engine can never
+        // drift on reuse safety (LAV-100 Phase 4).
+        let appLoadBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func loadReusableWarmSnapshotForSwitch(",
+            endingBefore: "private func duplicateName(of name: String)"
+        )
+        XCTAssertTrue(appLoadBlock.contains("WarmFilterSnapshotLoader.loadReusable("),
+                      "The app loader must delegate to the shared core validator, not reimplement reuse safety.")
+
+        // WarmFilterSnapshotLoader.loadReusable (LavaSecCore): the load-bearing safety. It validates the
+        // warm token's manifest + decoded snapshot against the TARGET's current configuration + cached
+        // catalog (same checks as warm-startup reuse), and requires the snapshot to hash back to the
+        // directory it came from so the later pointer flip targets exactly the validated dir.
+        let loader = try Self.source(named: "WarmFilterSnapshotLoader.swift", in: "Sources/LavaSecCore")
+        let loadBlock = try Self.sourceBlock(
+            in: loader,
+            startingAt: "public static func loadReusable(",
+            endingBefore: "public static func stillReusableAgainstCachedCatalog("
+        )
+        XCTAssertTrue(loadBlock.contains("versionedDirectoryURL(token: token)"),
+                      "Reuse must read the target's specific token directory, not the live pointer.")
+        XCTAssertTrue(loadBlock.contains("manifest.reuseRejectionReason(configuration: configuration, cachedCatalog: cachedCatalog) == nil"),
+                      "Manifest-level reuse validation (coverage + source hashes + catalog version + resolver).")
+        XCTAssertTrue(loadBlock.contains("preparedSnapshot.canReuseForProtectionStartup("),
+                      "The decoded snapshot stays the authoritative reuse check.")
+        XCTAssertTrue(loadBlock.contains("FilterArtifactStore.versionedToken(for: preparedSnapshot) == token"),
+                      "The decoded snapshot must hash to its directory, so the pointer flip targets the validated dir.")
+        // Reuse additionally requires a FRESH cached catalog (mirroring warmFilterArtifact's own
+        // precondition). The identity check above accepts an artifact built from a stale cache, so
+        // without this a token warmed while fresh could pointer-flip to a stale-catalog artifact long
+        // after — instead of the cold path, which network-first refreshes when the cache is stale (r8).
+        XCTAssertTrue(loadBlock.contains("hasFreshCachedCatalog(in: cacheURL, maxAge: freshnessMaxAge)"),
+                      "Warm reuse must require a fresh cached catalog, falling back to the network-first cold path when stale.")
+        // The warm path must enforce the SAME tier rule-limit gate as the cold compile, or a lapsed
+        // Plus user could pointer-flip back to an oversized filter and bypass the free-tier cap. It
+        // uses the budget total the cold gate persisted (summary.tierBudgetRuleCount), since the
+        // per-field summary counts can't reconstruct it exactly; a legacy artifact without it falls
+        // back to a cold compile.
+        XCTAssertTrue(loadBlock.contains("preparedSnapshot.summary.tierBudgetRuleCount,"),
+                      "Warm reuse uses the persisted cold-gate budget total, not a re-derived count.")
+        XCTAssertTrue(loadBlock.contains("tierBudgetRuleCount <= configuration.limits.maxFilterRules"),
+                      "Warm reuse must reject a filter exceeding the tier rule limit and fall back to cold compile.")
+        // The warm switch must hydrate the FULL guardrail (the snapshot carries only the
+        // allowlist-overlap subset), or AllowlistValidator could allow a threat domain after a switch.
+        XCTAssertTrue(loadBlock.contains("loadCached(enabledSourceIDs: [], includesGuardrails: true)"),
+                      "Warm switch must hydrate the full guardrail (guardrail-only cache load).")
+        XCTAssertTrue(loadBlock.contains("fullThreatGuardrail: fullThreatGuardrail"),
+                      "The hydrated full guardrail must be carried to the apply step.")
+        // ...and the app's OWN snapshot builders (which record lastCompiledToken on every in-place edit
+        // / background publish) must populate that budget too, or a warm switch-back to a freshly
+        // persisted token would ALWAYS fail the tier gate and cold-compile, defeating the feature for
+        // the common case (Codex #133). Mirror the cold formula: block-merge + FULL guardrail (not the
+        // snapshot's allowlist-overlap subset) + allowed + blocked.
+        for builder in ["private func preparedSummary(for snapshot: FilterSnapshot)",
+                        "nonisolated static func buildBackgroundPreparedSnapshot("] {
+            let builderBlock = try Self.sourceBlock(in: source, startingAt: builder, endingBefore: "\n    private func ")
+            XCTAssertTrue(builderBlock.contains("tierBudgetRuleCount: blocklistRuleCount.map {")
+                            && builderBlock.contains("$0 + threatGuardrail.count + configuration.allowedDomains.count + configuration.blockedDomains.count"),
+                          "\(builder) must populate tierBudgetRuleCount with the cold-gate formula so warm reuse isn't always rejected.")
+        }
+        XCTAssertTrue(source.contains("threatGuardrail = reusable.fullThreatGuardrail ?? reusable.preparedSnapshot.snapshot.nonAllowableThreatRules"),
+                      "Apply must use the full guardrail when present, falling back to the subset only for startup reuse.")
+
+        // The shared switch tail applies the reused snapshot's already-compiled rules + catalog the
+        // same way the warm-startup path does, and only a compiled publish updates the source hashes.
+        let switchBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
+            endingBefore: "private enum SwitchPublication"
+        )
+        XCTAssertTrue(switchBlock.contains("applyReusablePreparedSnapshot(reusable)"),
+                      "A warm reuse applies the reused snapshot's derived state.")
+        XCTAssertTrue(switchBlock.contains("if case .compiled(let prepared) = publication {"),
+                      "Only a cold compile updates the app's per-source hash tracking.")
+        // A warm reuse leaves the per-source rule-set caches stale (it reused the published artifact),
+        // so it schedules a background rehydration so a later edit doesn't rebuild from the wrong
+        // filter's caches. Cache-only + superseded-checked, never re-publishing (Codex #133 r4).
+        XCTAssertTrue(switchBlock.contains("rehydrateRuleSetCachesAfterWarmSwitch("),
+                      "A warm switch must schedule a background per-source cache rehydration.")
+        // A catalog sync that ran while a warm switch prepares (the reuse load + holds suspend the main
+        // actor) would race the warm flip. The pre-commit gate bails warm→cold on EITHER signal: a sync
+        // is in flight RIGHT NOW (liveness), OR the live catalog no longer matches the one the warm
+        // snapshot was validated against (content — a sync that started AND finished between the entry
+        // gate and here leaves catalogSyncTask nil yet moved the catalog; liveness alone can't see it).
+        XCTAssertTrue(switchBlock.contains("if case .warm(let reusable) = publication {"),
+                      "The pre-commit gate must bind the reused snapshot to compute catalog movement.")
+        XCTAssertTrue(switchBlock.contains("if isCatalogSyncInFlight || catalogMovedSinceValidation {"),
+                      "A warm reuse must bail to cold on a live sync OR a catalog that moved since validation.")
+        // The content check is by per-source identity, not the catalog_version string, so a source
+        // rotation that keeps catalog_version constant is still caught.
+        XCTAssertTrue(switchBlock.contains("reusable.preparedSnapshot.identity.snapshotInputMismatches("),
+                      "Catalog movement is detected by snapshot-input identity (per-source hashes).")
+        XCTAssertTrue(switchBlock.contains("publication = .compiled(try await prepareFilterSnapshot(for: nextConfiguration))"),
+                      "...recompiling cold against the now-current catalog rather than publishing a stale warm flip.")
+        // Post-persist: the .warm branch guards the apply against a sync that moved the catalog while
+        // persistSharedState was suspended — applyReusablePreparedSnapshot would otherwise roll
+        // currentCatalog/blockRules back over that sync's fresh state and wedge the rehydration gate.
+        // It SKIPS the apply (the sync owns the fresh state) rather than rolling back; it must NOT
+        // inline-recompile (the heavy machinery the simplification removed).
+        XCTAssertTrue(switchBlock.contains("let catalogMovedDuringPersist = currentCatalog.map {")
+                        && switchBlock.contains("if !catalogMovedDuringPersist {"),
+                      "The .warm post-persist branch must skip the reuse apply if a sync moved the catalog during the persist.")
+        XCTAssertEqual(switchBlock.components(separatedBy: "try await persistSharedState(").count - 1, 1,
+                       "The warm switch must publish once — no post-persist inline recompile/republish.")
+        let rehydrateBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func rehydrateRuleSetCachesAfterWarmSwitch(",
+            endingBefore: "private func duplicateName(of name: String)"
+        )
+        XCTAssertTrue(rehydrateBlock.contains("loadCached(enabledSourceIDs: enabledIDs)"),
+                      "Rehydration loads the now-active filter's enabled source rule sets from cache.")
+        XCTAssertTrue(rehydrateBlock.contains("configurationReplacementGate.isCurrent(switchToken)"),
+                      "Rehydration must bail if a newer replacement superseded the warm switch.")
+        XCTAssertTrue(rehydrateBlock.contains("configuration.enabledBlocklistIDs == enabledIDs")
+                        && rehydrateBlock.contains("enabledCustomBlocklists(in: configuration) == customSources"),
+                      "Rehydration must re-check the captured inputs (an in-place edit doesn't advance the token).")
+        XCTAssertTrue(rehydrateBlock.contains("results.0.catalog == currentCatalog"),
+                      "Rehydration must re-check the catalog by CONTENT (loaded == live), catching a source rotation a completed sync produced.")
+        XCTAssertTrue(rehydrateBlock.contains("applySyncResults(catalogResult:"),
+                      "Rehydration applies the loaded rule sets to the per-source caches.")
+        XCTAssertFalse(rehydrateBlock.contains("persistSharedState") || rehydrateBlock.contains("writeArtifactPointer"),
+                       "Rehydration must NOT re-publish artifacts — the pointer already names the warm dir.")
+        // A rehydration that can't load the caches (rare disk error) self-heals via an authoritative
+        // sync so the pending-edit gate doesn't stick.
+        XCTAssertTrue(rehydrateBlock.contains("await syncCatalog()"),
+                      "Rehydration must fall back to a catalog sync if the cache load fails, so the edit gate self-heals.")
+
+        // Warm-switch cache gate (Codex #133): a warm switch leaves cachedBlockRuleSets describing the
+        // PREVIOUS filter, so in-place blocklist edits must be deferred until the rehydration lands or
+        // they'd rebuild + publish the target filter from the wrong filter's rule sets. The flag is set
+        // in the .warm branch and cleared at the single fresh-cache chokepoint (applyCatalogSyncResult).
+        XCTAssertTrue(switchBlock.contains("hasPendingWarmSwitchCacheRehydration = true"),
+                      "The warm switch must mark the per-source caches pending so in-place edits defer.")
+        let applyResultBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func applyCatalogSyncResult(",
+            endingBefore: "private func loadCachedCatalogAfterSyncFailure("
+        )
+        XCTAssertTrue(applyResultBlock.contains("cachedBlockRuleSets = result.sourceRuleSets")
+                        && applyResultBlock.contains("hasPendingWarmSwitchCacheRehydration = false"),
+                      "Loading fresh per-source caches must clear the warm-switch edit gate.")
+        // Every in-place blocklist edit checks the gate and refuses while pending.
+        XCTAssertTrue(source.contains("private func deferralReasonForInPlaceBlocklistEdit() -> String? {")
+                        && source.contains("guard hasPendingWarmSwitchCacheRehydration else { return nil }"),
+                      "A shared helper reports when in-place blocklist edits must be deferred.")
+        for method in ["func toggleBlocklist(", "func addCustomBlocklist(", "func removeCustomBlocklist("] {
+            let editBlock = try Self.sourceBlock(in: source, startingAt: method, endingBefore: "\n    func ")
+            XCTAssertTrue(editBlock.contains("deferralReasonForInPlaceBlocklistEdit()"),
+                          "\(method) must defer while a warm-switch cache rehydration is pending.")
+        }
+        // restoreFiltersToDefault supersedes the warm switch and rebuilds + sync-fills its own
+        // coverage, so it must clear the pending flag (the superseded rehydration bails without
+        // clearing) — else a warm switch whose target was fully cached would wedge the flag.
+        let restoreDefaultBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func restoreFiltersToDefault() {",
+            endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
+        )
+        XCTAssertTrue(restoreDefaultBlock.contains("hasPendingWarmSwitchCacheRehydration = false"),
+                      "restoreFiltersToDefault must clear the warm-switch cache gate it supersedes.")
+
+        // warmFilterArtifact must re-validate BOTH the filter fields AND the catalog after its compile
+        // await, before stamping lastCompiledToken. A sync that moved the cache mid-compile would
+        // otherwise stamp a token built from the previous catalog that warm reuse later rejects — the
+        // filter would look warm yet cold-compile on its next switch. It stamps only a token the switch
+        // reuse gate would honor NOW: the SAME canReuseForProtectionStartup check, against a freshly
+        // re-read cached catalog (Codex r12).
+        let warmBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "func warmFilterArtifact(forFilterID",
+            endingBefore: "private func reconcileWarmNonActiveFilters("
+        )
+        // A background warm must stay read-only w.r.t. the shared catalog cache: it skips when a
+        // low-risk launch migration is pending (prepareFilterSnapshot's migrate can purge latest.json
+        // expecting a sync the cache-only warm never runs), letting the normal refresh path handle it
+        // and reconcile re-warm afterward (Codex r15).
+        XCTAssertTrue(warmBlock.contains("cachedCatalogRequiresLowRiskLaunchRefresh("),
+                      "Warm must skip when a low-risk launch migration is pending (stay read-only w.r.t. the cache).")
+        XCTAssertTrue(warmBlock.contains("current.enabledBlocklistIDs == compiledEnabled"),
+                      "Warm must re-check the filter fields it compiled before stamping the token.")
+        XCTAssertTrue(warmBlock.contains("loadCachedCatalogMetadata()")
+                        && warmBlock.contains("prepared.snapshot.canReuseForProtectionStartup("),
+                      "Warm must re-validate the catalog (canReuseForProtectionStartup vs the re-read cache) before stamping, so a sync that moved the catalog mid-compile can't stamp a token reuse rejects.")
+        XCTAssertTrue(warmBlock.contains("lastCompiledToken = result.token"),
+                      "Warm stamps the shared core's compiled token only after both re-validations pass.")
+        XCTAssertTrue(warmBlock.contains("await compileAndStageWarmArtifact(forFilterID:"),
+                      "Foreground warm delegates compile+stage+revalidate to the shared core (also used by the background sidecar path).")
+        XCTAssertTrue(warmBlock.contains("if Task.isCancelled { return nil }"),
+                      "The shared warm core must bail before staging if the BGTask deadline passed during the compile await (Codex #138 r3).")
+        // Repeated warms of the same filter mint fresh generatedAt tokens and overwrite
+        // lastCompiledToken; stageArtifacts never GCs, so warm must reclaim the prior orphaned dir
+        // after a successful stamp or disk grows past the filter cap in edit-heavy sessions (Codex r14).
+        XCTAssertTrue(warmBlock.contains("collectWarmArtifactGarbage(")
+                        && warmBlock.contains("retaining: retainedFilterArtifactTokens()"),
+                      "Warm must reclaim orphaned artifact dirs after stamping, retaining every hosted token.")
+    }
+
+    /// Phase 2 sidecar warm-index wiring: the BACKGROUND BGTask warms non-active filters into the
+    /// sidecar (never the library), the foreground READS the sidecar (switch read-fallback + GC union)
+    /// and PROMOTES valid entries into the library. The load-bearing safety invariant is that the
+    /// background warm loop never writes filter-library.json / app-configuration.json.
+    func testBackgroundWarmIndexSidecarWiring() throws {
+        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+
+        // Switch read-fallback: try BOTH the library token and the sidecar token (validated
+        // identically). A non-nil-but-STALE library token must not block the fresh sidecar one
+        // (Codex #138) — so it's a two-candidate try, not a plain ?? that picks only one.
+        XCTAssertTrue(source.contains("loadBackgroundWarmIndex().token(forFilterID: target.id)"),
+                      "A switch must consider the sidecar token.")
+        XCTAssertTrue(source.contains("sidecarToken != target.lastCompiledToken"),
+                      "A switch must try the sidecar token even when the library token is non-nil (stale), deduping only an identical token.")
+
+        // GC union: background-warmed dirs are referenced only by the sidecar until promotion, so the
+        // retain set must include them — but ONLY for filters that still exist and are switchable, or a
+        // deleted/frozen filter's dir leaks until a BGTask rewrites the sidecar (Codex #138 r5).
+        XCTAssertTrue(source.contains("loadBackgroundWarmIndex().entries")
+                        && source.contains("library.filter(id: filterID) != nil && !isFilterFrozen(filterID)"),
+                      "retainedFilterArtifactTokens must retain sidecar tokens only for current, switchable filters.")
+
+        // The background warm pass runs ONLY on bg-published — the one outcome that committed the fresh
+        // catalog to latest.json. bg-unchanged does NOT qualify (latest.json not committed; sync may have
+        // used cache or fetched non-active changes), nor do aborted outcomes (Codex #138 r6 P1).
+        XCTAssertTrue(source.contains("actionStatus == \"bg-published\""),
+                      "Background warming must be gated on bg-published (catalog committed to latest.json).")
+        XCTAssertFalse(source.contains("touchCachedCatalogFreshness"),
+                       "The freshness touch is removed — latest.json is only trustworthy-current on a commit, which already refreshes its mtime (Codex #138 r6 P1).")
+
+        // Promotion: reconcile promotes a valid sidecar token into the library instead of recompiling.
+        let reconcileBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func reconcileWarmNonActiveFilters(",
+            endingBefore: "/// Promote a sidecar"
+        )
+        XCTAssertTrue(reconcileBlock.contains("warmIndex.token(forFilterID:"),
+                      "Reconcile must consider a sidecar token before recompiling.")
+        XCTAssertTrue(reconcileBlock.contains("promoteWarmTokenIntoLibrary("),
+                      "Reconcile must promote a valid sidecar token into the library.")
+        // A trigger that arrives while a pass is in flight (e.g. a catalog apply) must QUEUE a rerun, not be
+        // dropped — else the non-active filters stay stale and a closed-app Focus switch to them defers-to-cold
+        // instead of warm (Codex P2). Mirrors reconcilePendingFilterSwitch's pendingReconcileRerun.
+        XCTAssertTrue(reconcileBlock.contains("pendingWarmReconcileRerun = true"),
+                      "An overlapping warm-reconcile trigger must queue a rerun, not drop the pass.")
+        XCTAssertTrue(reconcileBlock.contains("await reconcileWarmNonActiveFiltersOnce()"),
+                      "The wrapper must drain via the single-pass method in a rerun loop.")
+        let promoteBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func promoteWarmTokenIntoLibrary(",
+            endingBefore: "private func warmNonActiveFiltersInBackground("
+        )
+        XCTAssertTrue(promoteBlock.contains("persistLibraryOnlyChange(rollingBackTo:"),
+                      "Promotion is a foreground library-only write.")
+
+        // The background warm loop is wired into the BGTask refresh, after the active publish.
+        XCTAssertTrue(source.contains("await warmNonActiveFiltersInBackground()"),
+                      "The background refresh must warm non-active filters after publishing the active one.")
+
+        let bgBlock = try Self.sourceBlock(
+            in: source,
+            startingAt: "private func warmNonActiveFiltersInBackground(",
+            endingBefore: "// MARK: - Focus auto-switch coordination (LAV-100 Phase 3)"
+        )
+        XCTAssertTrue(bgBlock.contains("guard isHeadless"),
+                      "The background warm loop runs only headless (the foreground uses the library path).")
+        XCTAssertTrue(bgBlock.contains("compileAndStageWarmArtifact(forFilterID:"),
+                      "The background warm loop reuses the shared compile+stage+revalidate core.")
+        XCTAssertTrue(bgBlock.contains("store.save("),
+                      "The background warm loop records warmed filters in the sidecar (its only write).")
+        XCTAssertTrue(bgBlock.contains("configuration.limits.maxFilterRules"),
+                      "The per-run budget must be sized to the user's TIER, not the free ceiling, or Plus-sized filters never background-warm (panel finding).")
+        XCTAssertTrue(bgBlock.contains("min(estimatedRuleCount(forFilterID: id), perRunRuleBudget)"),
+                      "The over-counting estimate must be capped at the budget so the coldest candidate always fits (panel finding).")
+        XCTAssertEqual(bgBlock.components(separatedBy: "guard !Task.isCancelled else { return }").count - 1, 3,
+                       "Every app-group-mutating path (empty-candidates save, post-loop save, pre-GC) must be deadline-guarded (panel findings).")
+        XCTAssertTrue(bgBlock.contains("estimatedRuleCount(forFilterID:"),
+                      "The per-run budget must be enforced via a PRE-compile estimate, so one oversized filter can't blow the cap (Codex #138 r4/r6).")
+        XCTAssertTrue(bgBlock.contains("syncedAt(forFilterID:"),
+                      "The background warm loop orders most-stale-first by the sidecar's last syncedAt.")
+        XCTAssertTrue(bgBlock.contains("Task.isCancelled"),
+                      "The background warm loop respects the BGTask deadline between filters.")
+        XCTAssertTrue(bgBlock.contains("guard !Task.isCancelled else { return }"),
+                      "The background warm loop must not rewrite the sidecar / GC past the BGTask deadline (Codex #138 r2).")
+        XCTAssertTrue(bgBlock.contains("collectWarmArtifactGarbage("),
+                      "The background warm loop runs one GC after the loop, retaining the sidecar set.")
+        XCTAssertTrue(bgBlock.contains("persistedLibraryArtifactTokens()"),
+                      "The background GC must also retain the CURRENT on-disk library tokens, so a foreground warm during the pass isn't reaped (Codex #138 r7).")
+        // Load-bearing: the background must NEVER write the library or app-configuration.
+        XCTAssertFalse(bgBlock.contains("persistLibraryOnlyChange") || bgBlock.contains("persistSharedState") || bgBlock.contains("persistConfigurationOnly"),
+                       "The background warm loop must never write filter-library.json / app-configuration.json.")
+    }
+
+    /// A warm reuse flips the pointer to an OLD directory whose mtime the GC grace window no longer
+    /// protects, so a concurrent publisher could reap it between the off-lock stage and the flip.
+    /// persistArtifacts must re-stage UNDER the publish lock (re-materializing a reaped dir) before
+    /// flipping, so the pointer never names a missing directory (Codex #133 r3).
+    func testPublishReStagesUnderThePublishLockBeforeFlipping() throws {
+        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
+        let flip = try Self.sourceBlock(
+            in: service,
+            startingAt: "let flipUnderLock: () throws -> PublishOutcome = {",
+            endingBefore: "switch lockMode {"
+        )
+        let supersedeIdx = try XCTUnwrap(flip.range(of: "supersededWhileLocked(previousToken)")?.lowerBound)
+        let reStageIdx = try XCTUnwrap(flip.range(of: "artifactStore.stageVersionedArtifacts(preparedSnapshot: preparedSnapshot, writtenAt: writtenAt)")?.lowerBound)
+        let flipIdx = try XCTUnwrap(flip.range(of: "writeArtifactPointer(pointer)")?.lowerBound)
+        XCTAssertLessThan(supersedeIdx, reStageIdx, "Re-stage only after the supersession check passes.")
+        XCTAssertLessThan(reStageIdx, flipIdx, "Re-stage (re-materialize a reaped dir) before flipping the pointer.")
     }
 
     /// All FOUR wholesale config+library replacers (switch, restore, import, draft-apply) must
@@ -312,16 +659,23 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "Retryability is cleared only on the single deleted/frozen dead-end edge.")
     }
 
-    func testWarmArtifactRetentionIsBounded() throws {
+    func testWarmArtifactRetentionKeepsEveryNonFrozenFilter() throws {
         let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
         let block = try Self.sourceBlock(
             in: source,
             startingAt: "private func retainedFilterArtifactTokens() -> [String] {",
-            endingBefore: "private func persistSharedState("
+            endingBefore: "func warmFilterArtifact(forFilterID"
         )
-        // Disk stays bounded as the library grows: the warm set is capped, not O(N filters).
-        XCTAssertTrue(source.contains("maxWarmFilterArtifacts = 8"))
-        XCTAssertTrue(block.contains("prefix(Self.maxWarmFilterArtifacts)"))
+        // Every non-frozen hosted filter stays warm so a switch to ANY of them (manual or a
+        // Focus auto-switch) is an instant pointer flip — no artificial count cap.
+        XCTAssertTrue(block.contains("!isFilterFrozen(filter.id)"),
+                      "Frozen (read-only) filters are excluded from the warm set.")
+        XCTAssertTrue(block.contains("filter.lastCompiledToken"),
+                      "Retention is built from each non-frozen filter's compiled token.")
+        XCTAssertFalse(source.contains("maxWarmFilterArtifacts"),
+                       "The fixed warm-set cap was removed — keep every non-frozen filter warm.")
+        XCTAssertFalse(block.contains("prefix("),
+                       "No count cap truncating the warm set.")
     }
 
     func testCreateFilterIsPlusGatedAndLibraryOnly() throws {
@@ -335,8 +689,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "Creating a filter must be gated on the tier filter cap.")
         XCTAssertTrue(block.contains("library.append(newFilter)"))
         XCTAssertTrue(block.contains("persistFilterLibrary()"))
+        // The new filter is warmed off the hot path (background Task) so a later switch is an
+        // instant pointer flip; creation itself stays library-only and never republishes.
+        XCTAssertTrue(block.contains("Task { await warmFilterArtifact(forFilterID: newID) }"),
+                      "A new filter is warmed off the hot path for instant later switching.")
         XCTAssertFalse(block.contains("notifyTunnelSnapshotUpdated"),
-                       "A new (non-active) filter must not recompile or republish.")
+                       "A new (non-active) filter must not republish / reload the live tunnel.")
     }
 
     func testDeleteFilterDelegatesToInvariantSafeRemoval() throws {
@@ -344,7 +702,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let deleteBlock = try Self.sourceBlock(
             in: source,
             startingAt: "func deleteFilter(id: String) -> Bool {",
-            endingBefore: "func switchToFilter(id: String) async {"
+            endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
         )
         // library.remove refuses the active filter and the last remaining filter; the
         // model also enforces the read-only freeze (below the UI affordances).
@@ -424,28 +782,37 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // the library (source of truth) BEFORE config (derived cache); a RESTORE persists config
         // FIRST (prioritizesConfigurationDurability) because the config carries device-global
         // fields the library can't reconstruct.
-        let persistBlock = try Self.sourceBlock(
-            in: app,
-            startingAt: "let configurationURL = containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename)",
-            endingBefore: "if didRewriteArtifacts {"
-        )
-        let cfgIdx = try XCTUnwrap(persistBlock.range(of: "configurationData.write(to: configurationURL")?.lowerBound)
-        // Normal edits persist the library (source of truth) BEFORE the config it derives.
-        let normalLibIdx = try XCTUnwrap(persistBlock.range(of: "try persistFilterLibrary()")?.lowerBound)
-        XCTAssertLessThan(normalLibIdx, cfgIdx, "Normal edits must persist the library before the config it derives.")
-        // Restore (config-durable) writes the unreconstructable config FIRST, then the library AFTER
-        // it — a kill before the config lands can't destroy existing filters (Codex r19); a kill
-        // after it leaves a lower-generation library that load rejects (Codex r20). No destructive
+        // The ordering now lives in the single shared writer (SharedFilterStatePersistence). Normal
+        // edits persist the library (source of truth) BEFORE config (derived cache); a RESTORE
+        // (prioritizesConfigurationDurability) persists the unreconstructable device-global config FIRST,
+        // then the library — a kill before the config lands can't destroy existing filters (Codex r19);
+        // a kill after it leaves a lower-generation library that load rejects (Codex r20). No destructive
         // pre-delete: the generation stamp, not file removal, invalidates a stale library.
-        let restoreLibIdx = try XCTUnwrap(persistBlock.range(of: "try persistFilterLibrary()", options: .backwards)?.lowerBound)
-        XCTAssertLessThan(cfgIdx, restoreLibIdx, "A config-durable (restore) persist must write the new library AFTER the config.")
-        XCTAssertFalse(persistBlock.contains("removeFilterLibraryFile"),
+        // The shared writer writes config exactly once; the library write moves to one side: a normal
+        // edit's library write (in the `if !prioritizesConfigurationDurability` block, source-first)
+        // precedes the config write; a restore's library write (in the `if prioritizes…` block,
+        // source-last) follows it.
+        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let cfgIdx = try XCTUnwrap(writer.range(of: "configurationData.write(to: configurationURL")?.lowerBound)
+        let normalLibIdx = try XCTUnwrap(writer.range(of: "libraryData.write(to: filterLibraryURL")?.lowerBound)
+        let restoreLibIdx = try XCTUnwrap(writer.range(of: "libraryData.write(to: filterLibraryURL", options: .backwards)?.lowerBound)
+        XCTAssertLessThan(normalLibIdx, cfgIdx, "Normal edits must persist the library before the config it derives.")
+        XCTAssertLessThan(cfgIdx, restoreLibIdx, "A config-durable (restore) persist must write the config before the library.")
+        XCTAssertFalse(app.contains("removeFilterLibraryFile"),
                        "The generation marker replaces the destructive pre-delete on the restore path.")
 
-        // The write-race generation marker: persistFilterLibrary stamps the library with the config
-        // generation it is paired with, and load rejects a library whose stamp lost the race.
-        XCTAssertTrue(app.contains("library.configurationGeneration = configuration.configurationGeneration"),
-                      "persistFilterLibrary must stamp the library with the paired config generation.")
+        // The write-race generation marker: a library-only edit advances the shared generation via the pair
+        // writer (persistFilterLibrary delegates to persistConfigurationOnly), and load rejects a library
+        // whose stamp lost the race. Delegating — rather than an un-bumped library-only write — is what lets
+        // a foreground edit trip the App Intents extension's stale-reader fence (Codex P1, state-agnostic
+        // switch); the actual stamp is single-sourced in the shared writer (asserted below at lines ~813).
+        let persistFilterLibraryBlock = try Self.sourceBlock(
+            in: app,
+            startingAt: "private func persistFilterLibrary(",
+            endingBefore: "private func uploadEncryptedBackup("
+        )
+        XCTAssertTrue(persistFilterLibraryBlock.contains("persistConfigurationOnly("),
+                      "persistFilterLibrary must delegate to persistConfigurationOnly so a library-only edit bumps the shared generation (and the extension's fence can trip).")
         let loadBlock = try Self.sourceBlock(
             in: app,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
@@ -453,16 +820,13 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         )
         XCTAssertTrue(loadBlock.contains("lostWriteRace(againstConfigurationGeneration: configuration.configurationGeneration)"),
                       "Load must reject a library that lost the two-file write race against the config.")
-        // persistConfigurationOnly must bump the generation BEFORE writing the library, so the
-        // library it stamps and the config it writes carry the same (new) generation.
-        let cfgOnlyBlock = try Self.sourceBlock(
-            in: app,
-            startingAt: "private func persistConfigurationOnly(",
-            endingBefore: "private func syncActiveFilterFromConfiguration()"
-        )
-        let bumpIdx = try XCTUnwrap(cfgOnlyBlock.range(of: "advanceConfigurationGeneration()")?.lowerBound)
-        let libWriteIdx = try XCTUnwrap(cfgOnlyBlock.range(of: "try persistFilterLibrary()")?.lowerBound)
-        XCTAssertLessThan(bumpIdx, libWriteIdx, "persistConfigurationOnly must bump the generation before stamping/writing the library.")
+        // The shared writer bumps the generation monotonically (max of in-memory + on-disk) and stamps
+        // the library to pair with the config — so the library it stamps and the config it writes always
+        // carry the same (new) generation.
+        XCTAssertTrue(writer.contains("max(configuration.configurationGeneration, onDiskConfigurationGeneration(at: configurationURL)) + 1"),
+                      "The shared writer must bump the generation monotonically from the on-disk value (survives a restore reset).")
+        XCTAssertTrue(writer.contains("nextLibrary.configurationGeneration = nextConfiguration.configurationGeneration"),
+                      "The shared writer must stamp the library with the paired (bumped) config generation.")
     }
 
     func testBackupReSealsOnChangeAndRestoreIsLibraryAuthoritative() throws {
@@ -577,7 +941,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let restore = try Self.sourceBlock(
             in: app,
             startingAt: "func restoreFiltersToDefault() {",
-            endingBefore: "func switchToFilter(id: String) async {"
+            endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
         )
         XCTAssertTrue(restore.contains("configurationReplacementGate.begin()"),
                       "Restore must claim the replacement gate.")
@@ -769,9 +1133,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(nonActive.contains("persistLibraryOnlyChange(rollingBackTo: previousLibrary)"))
         // Validation runs but reports inline (returns the message) — no failure cover.
         XCTAssertTrue(nonActive.contains("return validationMessage"))
-        // Never compiles, never writes shared state / reloads the tunnel, never presents the cover.
+        // The inline save never compiles, writes shared state, reloads the tunnel, or presents the
+        // cover; the compile happens off the hot path via a fire-and-forget warm (asserted below).
+        XCTAssertTrue(nonActive.contains("Task { await warmFilterArtifact(forFilterID: targetID) }"),
+                      "A non-active edit re-warms the filter off the hot path for instant switching.")
         XCTAssertFalse(nonActive.contains("prepareFilterSnapshot"),
-                       "A non-active edit must not compile a snapshot.")
+                       "A non-active edit must not compile a snapshot INLINE (warm is off-path).")
         XCTAssertFalse(nonActive.contains("persistSharedState"),
                        "A non-active edit must not write shared state / reload the tunnel.")
         XCTAssertFalse(nonActive.contains("notifyTunnelSnapshotUpdated"),
@@ -801,7 +1168,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(app.contains("filterPreparationOrigin = origin"))
         let switchBlock = try Self.sourceBlock(
             in: app,
-            startingAt: "func switchToFilter(id: String) async {",
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
             endingBefore: "private func duplicateName(of name: String)"
         )
         XCTAssertTrue(switchBlock.contains("filterPreparationOrigin = .filters"),

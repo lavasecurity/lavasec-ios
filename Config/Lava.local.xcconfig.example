@@ -11,6 +11,7 @@ DEVELOPMENT_TEAM = YOUR_TEAM_ID
 LAVASEC_APP_PROFILE =
 LAVASEC_TUNNEL_PROFILE =
 LAVASEC_WIDGET_PROFILE =
+LAVASEC_INTENTS_PROFILE =
 
 // ---- Supabase (your OWN project; anon/publishable key only, never service_role) ----
 // xcconfig treats `//` as a comment, so build the scheme separators via a var:

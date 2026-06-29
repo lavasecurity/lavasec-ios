@@ -1086,7 +1086,9 @@ final class AppViewModelSourceTests: XCTestCase {
             "Preparation (sync ladder, validation, merge, build) must route through FilterSnapshotPreparationService; its behavior is covered by FilterSnapshotPreparationServiceTests."
         )
         XCTAssertTrue(persistBlock.contains("summary.coversEnabledBlocklists(in: configuration)"))
-        XCTAssertTrue(persistBlock.contains("persistPreparedSnapshotArtifacts(snapshotToPersist)"))
+        XCTAssertTrue(persistBlock.contains("persistPreparedSnapshotArtifacts(")
+                        && persistBlock.contains("snapshotToPersist,"),
+                      "The artifact publish must route through persistPreparedSnapshotArtifacts(snapshotToPersist, …).")
         // The rewrite is gated on rewritesRuleArtifacts AND coverage, hoisted into a
         // `didRewriteArtifacts` flag (multi-filter reuses the same flag to decide
         // whether to record the active filter's compiled token). Same guarantee:

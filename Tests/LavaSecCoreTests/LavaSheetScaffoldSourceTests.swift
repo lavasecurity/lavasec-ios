@@ -88,7 +88,7 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
 
         XCTAssertEqual(
             appSources.occurrences(of: "LavaSheetScaffold(") + appSources.occurrences(of: "LavaSheetScaffold {"),
-            21
+            22
         )
         XCTAssertFalse(appSources.contains("safeAreaBar(edge: .bottom"))
     }

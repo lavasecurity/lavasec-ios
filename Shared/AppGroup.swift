@@ -11,6 +11,10 @@ enum LavaSecAppGroup {
     // so the tunnel + the ~25 existing config readers are untouched; this file is the
     // source of truth for the set of filters and the active selection.
     static let filterLibraryFilename = "filter-library.json"
+    // Sidecar warm-index (Focus auto-switch Phase 2). The background BGTask is the SOLE writer;
+    // the foreground only reads it (and promotes valid entries into filter-library.json). Kept
+    // separate from filter-library.json so background warming can never clobber a foreground edit.
+    static let backgroundWarmIndexFilename = "background-warm-index.json"
     static let tunnelHealthFilename = "tunnel-health.json"
     static let diagnosticsFilename = "diagnostics.json"
     static let diagnosticsControlFilename = "diagnostics-control.json"
@@ -27,6 +31,16 @@ enum LavaSecAppGroup {
     static let protectionNotificationRouteUserInfoKey = "lavaRoute"
     static let protectionNotificationGuardRouteValue = "guard"
     static let protectionNotificationRequestIdentifierPrefix = "com.lavasec.protection."
+    /// Request-identifier prefix for the simple EVENT notifications (filter switched / couldn't apply /
+    /// paused-resumed) posted via `LavaEventNotificationPoster`. Distinct from the connectivity prefix so
+    /// the two families never collide or supersede each other.
+    static let eventNotificationRequestIdentifierPrefix = "com.lavasec.event."
+    /// Best-effort "the app is in the foreground RIGHT NOW" flag (Bool), written by the app on scene-phase
+    /// transitions and read by the App Intents extension to gate the filter-switch notification to
+    /// closed/backgrounded only (the foreground app shows the switch in-UI, so a banner would be redundant).
+    /// Distinct from the REMOVED `AppForegroundActivityState` switch-defer machinery (no stale window, no
+    /// effect on the switch itself) — a wrong read at worst shows/suppresses one cosmetic notification.
+    static let appForegroundActiveDefaultsKey = "lavasec.app.foregroundActive"
     static let protectionNotificationKindUserInfoKey = "lavaNotificationKind"
     static let protectionNotificationIDUserInfoKey = "lavaNotificationID"
     static let protectionLastDeliveredNotificationIDDefaultsKey = "lavasec.protection.lastDeliveredNotificationID"
@@ -39,6 +53,13 @@ enum LavaSecAppGroup {
     // cancel only recovers if on-demand will bring the tunnel back, and the app
     // persists `protectionEnabled = true` even when arming on-demand fails.
     static let protectionOnDemandConfirmedEnabledDefaultsKey = "lavasec.protection.onDemandConfirmedEnabled"
+    // Deadline (Double, timeIntervalSinceReferenceDate) marking a Dynamic Island
+    // Restart as in progress. Written by the Restart command, read by the app's
+    // status reconcile so it reports `.restarting` (instead of clobbering the
+    // transient with `.on`/end via the status notifications the restart emits) and
+    // so a second concurrent Restart tap is rejected. Stored as a deadline so a
+    // killed background intent window auto-clears it.
+    static let protectionRestartInFlightUntilDefaultsKey = "lavasec.protection.restartInFlightUntil"
     // The tunnel persists its recent self-reconnect attempt timestamps ([Double] epoch seconds)
     // here for the cooldown/cap policy. Shared so the app can READ the self-reconnect timeline for
     // a bug report's incident summary (LAV-94 B) without touching the tunnel's frozen recovery
@@ -52,6 +73,25 @@ enum LavaSecAppGroup {
     static let protectionTemporaryPauseSessionIDDefaultsKey = ProtectionPauseStore.Keys.pausedSessionID
     static let protectionCommandRevisionDefaultsKey = ProtectionPauseStore.Keys.commandRevision
     static let protectionCommandLockFilename = "protection-command.lock"
+    // Serializes concurrent headless Focus warm-switches (LAV-100 Phase 3). A dedicated lock (not the
+    // protection-command lock) so a Focus switch and a Live Activity pause/resume never block each
+    // other. (Cross-process write-safety against the FOREGROUND writer is the separate
+    // configurationWriteLock + generation fence below, taken by both sides; this lock only serializes
+    // concurrent headless switches with each other.)
+    static let focusFilterSwitchLockFilename = "focus-filter-switch.lock"
+    // Cross-process CAS for the shared (config, library) pair write (LAV-100 Phase 4). The Phase-3
+    // single-@MainActor-funnel invariant held only while every writer ran in ONE process; the App
+    // Intents EXTENSION is now a second writer process, so SharedFilterStatePersistence's read-generation
+    // -then-write critical section is wrapped in an exclusive lock on this file — taken by BOTH the
+    // foreground publishers and the extension's commit — so two processes can never read the same on-disk
+    // generation or interleave the two file writes.
+    static let configurationWriteLockFilename = "app-configuration-write.lock"
+    // Cross-process lock for the pending-Focus-switch MARKER (LAV-100 Phase 4). The marker's
+    // compare-and-clear was safe only while every mutator ran on the app's @MainActor; the App Intents
+    // extension now RECORDS from a second process, so the extension's `record` and the foreground's
+    // `clearIfMatches` take this shared lock so a record can't interleave a clear's read→remove (which
+    // would silently drop a just-recorded Focus request).
+    static let pendingFilterSwitchMarkerLockFilename = "focus-filter-marker.lock"
     // Content-addressed pointer-swap substrate for the shared filter-artifact set
     // (LAV-90 Phase 1). The lock arbitrates writer-vs-writer only; the tunnel reads
     // the pointer-swapped set lock-free. App + tunnel share these strings.

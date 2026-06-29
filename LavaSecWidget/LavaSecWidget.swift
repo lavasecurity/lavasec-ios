@@ -24,9 +24,9 @@ struct LavaProtectionLiveActivityWidget: Widget {
             } compactLeading: {
                 LavaLiveActivityCompactGuardianView(state: context.state)
             } compactTrailing: {
-                LavaLiveActivityStatusGlyphView(state: context.state, fontSize: 17)
+                LavaLiveActivityStatusGlyphView(state: context.state, fontSize: LavaIconSize.control)
             } minimal: {
-                LavaLiveActivityStatusGlyphView(state: context.state, fontSize: 16)
+                LavaLiveActivityStatusGlyphView(state: context.state, fontSize: LavaIconSize.small)
             }
             .keylineTint(context.state.shieldStyle.dynamicIslandStatusGlyphColor.opacity(0.55))
         }
@@ -62,12 +62,8 @@ private struct LavaLiveActivityCompactGuardianView: View {
             "Lava Security is on"
         case .paused:
             "Lava Security is paused"
-        case .reconnecting:
-            "Lava Security is reconnecting"
-        case .needsReconnect:
-            "Lava Security needs to reconnect"
-        case .networkUnavailable:
-            "Lava Security is waiting for the network"
+        case .restarting:
+            "Lava Security is restarting"
         }
     }
 }
@@ -92,12 +88,8 @@ private struct LavaLiveActivityStatusGlyphView: View {
             "checkmark"
         case .paused:
             "pause.fill"
-        case .reconnecting:
+        case .restarting:
             "arrow.triangle.2.circlepath"
-        case .needsReconnect:
-            "exclamationmark.triangle.fill"
-        case .networkUnavailable:
-            "wifi.slash"
         }
     }
 
@@ -107,12 +99,8 @@ private struct LavaLiveActivityStatusGlyphView: View {
             "On"
         case .paused:
             "Paused"
-        case .reconnecting:
-            "Reconnecting"
-        case .needsReconnect:
-            "Reconnection needed"
-        case .networkUnavailable:
-            "Waiting for network"
+        case .restarting:
+            "Restarting"
         }
     }
 }
@@ -150,29 +138,30 @@ private struct LavaLiveActivityExpandedView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
 
+                    // Action row. The Dynamic Island is reliable for user-initiated
+                    // actions (a tap wakes the app to run the intent) even though it
+                    // can't keep connectivity status fresh, so it leads with actions,
+                    // not status.
                     switch protectionState {
                     case .on:
                         if !state.pauseRequiresAuthentication {
-                            pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))
+                            // Pause is the primary action and takes the row; Restart
+                            // recedes to a small secondary icon beside it.
+                            HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
+                                pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))
+                                restartIconButton
+                            }
+                        } else {
+                            // Pause is locked behind authentication, so Restart stands
+                            // alone — promote it to a full labelled control.
+                            restartLabeledButton
                         }
                     case .paused:
-                        Button(intent: ResumeLavaProtectionIntent()) {
-                            liveActivityActionLabel("Resume")
-                        }
-                        .controlSize(.regular)
-                        .tint(LavaLiveActivityStyle.lavaGreen)
-                        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
-                    case .needsReconnect:
-                        Button(intent: ReconnectLavaProtectionIntent()) {
-                            liveActivityActionLabel("Reconnect")
-                        }
-                        .controlSize(.regular)
-                        .tint(LavaLiveActivityStyle.lavaGreen)
-                        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
-                    case .reconnecting, .networkUnavailable:
-                        // Both recover on their own (DNS re-establishing / network
-                        // returning); offering Pause or Reconnect here would be a
-                        // no-op, so the state stays purely informational.
+                        // The only meaningful action is Resume; it fills the row.
+                        resumeButton
+                    case .restarting:
+                        // Restart is in progress — the title carries the status and no
+                        // action is offered until it settles.
                         EmptyView()
                     }
                 }
@@ -197,6 +186,74 @@ private struct LavaLiveActivityExpandedView: View {
         .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
     }
 
+    @ViewBuilder
+    private var resumeButton: some View {
+        Button(intent: ResumeLavaProtectionIntent()) {
+            liveActivityActionLabel("Resume")
+        }
+        .controlSize(.regular)
+        .tint(LavaLiveActivityStyle.lavaGreen)
+        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
+    }
+
+    // Secondary recovery control shown beside Pause: a small grey icon so it never
+    // competes with the primary green Pause. Reuses the existing reconnect command
+    // (a full tunnel stop→start); a tap wakes the app to run it even from a locked
+    // state, which is why the Dynamic Island can offer it reliably.
+    @ViewBuilder
+    private var restartIconButton: some View {
+        Button(intent: ReconnectLavaProtectionIntent()) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(
+                    size: LavaLiveActivityStyle.expandedActionSymbolFontSize,
+                    weight: .semibold,
+                    design: .rounded
+                ))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .accessibilityLabel("Restart")
+        }
+        .controlSize(.small)
+        .tint(LavaLiveActivityStyle.lavaSecondaryGray)
+        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
+    }
+
+    // When Pause is locked behind authentication, Restart is the only action, so it
+    // gets a full labelled button — still grey/secondary so it reads as recovery
+    // rather than a primary control.
+    @ViewBuilder
+    private var restartLabeledButton: some View {
+        Button(intent: ReconnectLavaProtectionIntent()) {
+            restartActivityActionLabel("Restart")
+        }
+        .controlSize(.regular)
+        .tint(LavaLiveActivityStyle.lavaSecondaryGray)
+        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
+    }
+
+    private func restartActivityActionLabel(_ title: String) -> some View {
+        HStack(spacing: LavaLiveActivityStyle.expandedActionLabelSpacing) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(
+                    size: LavaLiveActivityStyle.expandedActionSymbolFontSize,
+                    weight: .semibold,
+                    design: .rounded
+                ))
+
+            Text(title)
+                .font(.system(
+                    size: LavaLiveActivityStyle.expandedActionFontSize,
+                    weight: .semibold,
+                    design: .rounded
+                ))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+    }
+
     private func pauseActivityActionLabel(_ title: String) -> some View {
         HStack(spacing: LavaLiveActivityStyle.expandedActionLabelSpacing) {
             Image(systemName: "pause.fill")
@@ -217,7 +274,7 @@ private struct LavaLiveActivityExpandedView: View {
         .minimumScaleFactor(0.82)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .frame(width: LavaLiveActivityStyle.expandedResumeButtonWidth)
+        .frame(maxWidth: .infinity)
     }
 
     private func liveActivityActionLabel(_ title: String) -> some View {
@@ -231,7 +288,7 @@ private struct LavaLiveActivityExpandedView: View {
             .minimumScaleFactor(0.82)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .frame(width: LavaLiveActivityStyle.expandedResumeButtonWidth)
+            .frame(maxWidth: .infinity)
     }
 
     private func expandedTitle(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
@@ -240,23 +297,17 @@ private struct LavaLiveActivityExpandedView: View {
             "Lava Security is On"
         case .paused:
             "Lava Security is Paused"
-        case .reconnecting:
-            "Lava Security is reconnecting"
-        case .needsReconnect:
-            "Lava Security needs to reconnect"
-        case .networkUnavailable:
-            "Waiting for network"
+        case .restarting:
+            "Restarting…"
         }
     }
 }
 
 private enum LavaLiveActivityStyle {
     static let expandedMascotContentSpacing: CGFloat = 12
+    // Gap between the primary Pause button and the secondary Restart icon when both
+    // are shown in the On state.
     static let expandedActionButtonSpacing: CGFloat = 12
-    static let expandedActionButtonWidth: CGFloat = 82
-    static var expandedResumeButtonWidth: CGFloat {
-        expandedActionButtonWidth * 2 + expandedActionButtonSpacing
-    }
 
     static let expandedActionFontSize: CGFloat = 16
     static let expandedActionSymbolFontSize: CGFloat = 15
@@ -284,17 +335,35 @@ private enum LavaLiveActivityStyle {
             )
         }
     )
+
+    // Muted neutral tint for the secondary Restart control so it reads as recovery,
+    // not a primary action, against the prominent green Pause/Resume.
+    static let lavaSecondaryGray = Color(
+        uiColor: UIColor { traits in
+            let white: CGFloat = traits.userInterfaceStyle == .dark ? 0.62 : 0.46
+            return UIColor(white: white, alpha: 1)
+        }
+    )
 }
 
 private extension LavaActivityAttributes.ContentState {
+    // Both transient states carry their self-resolve deadline in `resumeDate`, and
+    // the expanded views advance on a 1-second TimelineView, so the Dynamic Island
+    // resolves them on its OWN clock without a fresh push from the app:
+    //  - paused → on at the resume time,
+    //  - restarting → on at the restart deadline (so a restart killed mid-flight,
+    //    before the app could restore state, can't strand the island on
+    //    "Restarting…"; on-demand brings the tunnel back, and the next app wake
+    //    reconciles the true state).
     func effectiveProtectionState(now: Date) -> LavaActivityAttributes.ProtectionState {
-        guard protectionState == .paused,
-              let resumeDate,
-              resumeDate <= now
-        else {
-            return protectionState
+        switch protectionState {
+        case .paused, .restarting:
+            guard let resumeDate, resumeDate <= now else {
+                return protectionState
+            }
+            return .on
+        case .on:
+            return .on
         }
-
-        return .on
     }
 }

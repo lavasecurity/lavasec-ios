@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SwiftUI
 import UIKit
@@ -142,6 +143,11 @@ private final class ProtectionUserNotificationController {
         // unresolved-problem markers, but notification(for:)'s escalation / exact-id
         // duplicate-guard logic needs to see the outstanding marker. Re-reading would
         // always miss it.
+        // Customization → Notifications: the "Connection updates" toggle gates only the CREATION of new
+        // connectivity/reconnect banners — placed AFTER the resolved-banner cleanup above so disabling the
+        // category mid-problem still clears a stale banner when the network recovers (Codex P2).
+        guard LavaNotificationPreferences.isEnabled(.connectivity, in: defaults) else { return }
+
         guard let notification = ProtectionConnectivityNotificationPolicy.notification(
             for: assessment,
             health: health,
@@ -587,10 +593,9 @@ private final class FilterPreparationProgressPresenter {
     }
 }
 
-private struct ReusablePreparedFilterSnapshot: Sendable {
-    let preparedSnapshot: PreparedFilterSnapshot
-    let cachedCatalog: BlocklistCatalog?
-}
+// `ReusablePreparedFilterSnapshot` was promoted to LavaSecCore (LAV-100 Phase 4) so the foreground
+// switch and the headless Focus engine share one warm-reuse value type + validation core
+// (see WarmFilterSnapshotLoader). Referenced here unqualified via `import LavaSecCore`.
 
 private final class ProtectionStopNotificationWaiter: @unchecked Sendable {
     private let lock = NSLock()
@@ -917,8 +922,22 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var usesLiveActivities = false
     @Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes
     @Published private(set) var usesLavaHaptics = true
+    /// Customization → Notifications per-category toggles. SwiftUI-bindable mirrors of the cross-process
+    /// app-group store (`LavaNotificationPreferences`) the extension + tunnel read; default ON.
+    @Published private(set) var notifiesFilterChanges = true
+    @Published private(set) var notifiesFilterCouldNotApply = true
+    @Published private(set) var notifiesConnectivity = true
     @Published private(set) var isSyncingCatalog = false
     private var catalogSyncTask: Task<Void, Never>?
+    /// Whether a catalog sync is queued or in progress. `catalogSyncTask` is assigned synchronously
+    /// at the start of `syncCatalog` — BEFORE the deferred `isSyncingCatalog` flips inside
+    /// `performCatalogSync` — so this also catches a sync that's been triggered but hasn't begun its
+    /// work yet, and stays true for the entire sync (it's cleared only after the recompile/republish
+    /// finishes). The warm-artifact switch path bails to a cold compile whenever this is true: a cold
+    /// compile syncs + recompiles fresh, so an instant pointer flip can never race an in-flight
+    /// refresh's recompile/republish. This makes the warm fast path mutually exclusive with catalog
+    /// syncs — the whole warm-vs-sync race class — leaving only the quiescent (common) case instant.
+    private var isCatalogSyncInFlight: Bool { catalogSyncTask != nil }
     @Published private(set) var catalogStatusMessage = "Filter will update from Lava Security's source catalog."
     @Published private(set) var catalogStatusIsError = false
     @Published private(set) var catalogVersion: String?
@@ -960,11 +979,61 @@ final class AppViewModel: ObservableObject {
     private var blockRules = DomainRuleSet()
     private var threatGuardrail = DomainRuleSet()
     private var cachedBlockRuleSets: [String: DomainRuleSet] = [:]
+    /// True while a warm (instant) switch has published the target filter but its background per-source
+    /// cache rehydration (`rehydrateRuleSetCachesAfterWarmSwitch`) hasn't completed — so
+    /// `cachedBlockRuleSets` still describes the PREVIOUS filter. Per-source caches are keyed by source
+    /// id and filter-independent, so they never hold WRONG rules — but they OMIT the target filter's
+    /// sources the previous filter didn't have, so an in-place edit that rebuilds `blockRules` from
+    /// them and re-publishes would publish an UNDER-COVERING snapshot for the target filter (Codex
+    /// #133). In-place edits therefore defer while this is set. Set in the warm-switch branch; cleared
+    /// by `applyCatalogSyncResult` — the chokepoint every FRESH-cache load funnels through (the warm
+    /// rehydration, a cold switch / import / draft-apply, or any catalog sync) — and explicitly by
+    /// `restoreFiltersToDefault` (which supersedes the warm switch and drives its own coverage). A
+    /// superseding path that does NOT refresh the caches (backup restore; a failed switch's rollback)
+    /// correctly leaves it set — the caches really are stale for the now-active filter — and it
+    /// self-heals on the next fresh-cache load (it's in-memory, so it also resets each launch). (The
+    /// multi-filter UI edits via drafts today, so this guards a latent path + the deferred
+    /// in-place-edit follow-up.)
+    private var hasPendingWarmSwitchCacheRehydration = false
     private var catalogSourcesByID: [String: CatalogBlocklistSource] = [:]
     private var currentCatalog: BlocklistCatalog?
     private var tunnelManager: NETunnelProviderManager?
     private var vpnStatusObserver: NSObjectProtocol?
     private var tunnelHealthNudgeObserver: DarwinNotificationObserver?
+    // Foreground-only: the headless Focus warm-switch posts this Darwin nudge after recording a
+    // deferred switch so the foreground reconciles the pending-switch marker promptly (LAV-100 P3).
+    private var focusPendingSwitchObserver: DarwinNotificationObserver?
+    // Re-entrancy guard for reconcilePendingFilterSwitch — onAppear, scene .active, and the Darwin
+    // nudge can all fire it, and overlapping runs would launch duplicate switchToFilter attempts.
+    // These two flags are unsynchronized Bools BY DESIGN: the guard's correctness relies on every
+    // access being @MainActor-confined (this class is @MainActor; the Darwin observer hops via
+    // `Task { @MainActor in … }` before touching reconcile). A future off-actor read/write of either
+    // flag would silently break the serialization (review P3-4).
+    private var isReconcilingPendingFilterSwitch = false
+    // Set when a wake trigger arrives while a reconcile is in flight, so the in-flight run loops once
+    // more — a newer marker recorded during a (possibly slow cold-compile) apply isn't stranded until
+    // the next scene-phase event.
+    private var pendingReconcileRerun = false
+    // Coalesces the non-active warm pass: it is triggered on BOTH onAppear and scene .active (and after a
+    // catalog apply), which can overlap; a concurrent second pass would redundantly re-scan + double-compile
+    // the same cold filters. @MainActor-confined, like the reconcile flags above.
+    private var isReconcilingWarmNonActiveFilters = false
+    // Set when a warm-reconcile trigger arrives while one is already in flight, so the in-flight run loops
+    // once more instead of DROPPING the new trigger. The trigger that matters is a catalog apply landing
+    // mid-pass: the in-flight pass may have already judged tokens against the OLD catalog (or discarded a
+    // compile when its recheck saw the move), so without a rerun the non-active filters can stay cold/stale —
+    // and a closed-app Focus switch to them defers-to-cold instead of landing warm, defeating the
+    // warm-after-install/catalog goal this serves (Codex P2). Mirrors `pendingReconcileRerun`.
+    private var pendingWarmReconcileRerun = false
+    // True while a genuine USER-initiated switchToFilter (stampsForegroundSwitch == true) is in flight, from
+    // entry until it commits-or-fails. The Focus reconcile reads this and DEFERS rather than applying a marker
+    // via its own switchToFilter, which would begin a newer replacement epoch and make the user's in-flight
+    // switch bail as superseded — letting an OLDER Focus request win over the user's newer manual choice. The
+    // stamp (lastForegroundSwitch) can't cover this: it lands only AFTER the manual switch succeeds, so it is
+    // still nil/old while the switch is preparing (Codex round-18). @MainActor-confined, like the reconcile flags.
+    private var isForegroundManualSwitchInFlight = false
+    // (The foreground-active scene flag + its 60s heartbeat were REMOVED 2026-06-29 — the headless switch is
+    // state-agnostic now, so nothing reads a foreground-active hint. See HeadlessFocusFilterSwitchEngine.)
     private var automaticBackupTask: Task<Void, Never>?
     private let vpnConfigurationName = LavaTunnelConfigurationIdentity.currentDisplayName
     private let protectionStatusRefreshInterval: TimeInterval = 8
@@ -1087,6 +1156,17 @@ final class AppViewModel: ObservableObject {
             scheduleTemporaryProtectionResume()
             liveActivityController.startObservingAuthorizationChanges { [weak self] _ in
                 self?.reconcileLiveActivity()
+            }
+            // A headless Focus switch that deferred (app was active) posts this nudge so the
+            // foreground applies the pending-switch marker promptly, rather than waiting for the
+            // next scene-phase reconcile. Delivered to the foreground app only (the headless poster
+            // runs in this same app's background process), so it is the correct channel here.
+            focusPendingSwitchObserver = DarwinNotificationObserver(
+                name: FocusFilterSwitchSignal.darwinNotificationName
+            ) { [weak self] in
+                Task { @MainActor in
+                    await self?.reconcilePendingFilterSwitch()
+                }
             }
         }
 
@@ -3126,6 +3206,12 @@ final class AppViewModel: ObservableObject {
         }
         filterEditDraft = nil
         ProtectionHapticFeedback.play(.actionSucceeded)
+        // The edit invalidated this filter's compiled artifact (token cleared above); re-warm it
+        // off the hot path so a later switch stays an instant pointer flip. Fire-and-forget — the
+        // inline save remains library-only and warmFilterArtifact never republishes or reloads the
+        // tunnel; if the user keeps editing, the post-compile staleness recheck drops any superseded
+        // compile, and a switch arriving before the token is stamped just cold-compiles (self-healing).
+        Task { await warmFilterArtifact(forFilterID: targetID) }
         return nil
     }
 
@@ -3229,6 +3315,12 @@ final class AppViewModel: ObservableObject {
         let previousLibrary = library
         library.append(newFilter)
         guard persistLibraryOnlyChange(rollingBackTo: previousLibrary) else { return nil }
+        // Warm the new (non-active) filter off the hot path so a later switch — manual or a
+        // Focus auto-switch — is an instant pointer flip, not a cold compile. Fire-and-forget:
+        // creation stays library-only/non-blocking, and warmFilterArtifact never republishes or
+        // touches the live tunnel/pointer (it only stages the new filter's own artifact dir). A switch
+        // arriving before the token is stamped just cold-compiles (a rare, self-healing redundant compile).
+        Task { await warmFilterArtifact(forFilterID: newID) }
         return newID
     }
 
@@ -3289,9 +3381,19 @@ final class AppViewModel: ObservableObject {
         // Restore is a wholesale config+library replacement, so it must claim the replacement
         // gate like switch/import/restore-backup/draft-apply: advancing the epoch makes any
         // in-flight replacer (e.g. a switch suspended at its prepare) bail at its commit instead
-        // of silently reverting this restore. The swap below is synchronous, so this restore is
-        // the current owner through its commit.
+        // of silently reverting this restore.
         _ = configurationReplacementGate.begin()
+        // Like every other foreground config writer, this can race a headless Focus commit. The cross-process
+        // write lock + generation fence (SharedFilterStatePersistence, taken by both sides) make that safe —
+        // the loser aborts cleanly — and the headless path records its pending-switch marker first, so the
+        // foreground reconcile re-applies any Focus target afterward (last-writer-wins, never wrong rules or a
+        // wedge). No per-writer bracketing or foreground-active gating needed.
+        // This supersedes any in-flight warm switch and drives its own coverage below (rebuild from
+        // cache + startOnboardingDefaultBlocklistSyncIfNeeded fills any missing source), so the
+        // superseded warm switch's stale-cache deferral no longer applies — clear it (the superseded
+        // rehydration will bail without clearing). Otherwise a warm switch whose target's sources were
+        // all already cached would leave the flag wrongly stuck after this reseed.
+        hasPendingWarmSwitchCacheRehydration = false
         // The whole library is reseeded, so every per-filter draft + the detail target are now
         // invalid — wipe them so a preserved edit can't resume over a freshly seeded filter.
         filterEditDrafts.removeAll()
@@ -3310,25 +3412,48 @@ final class AppViewModel: ObservableObject {
     /// prepare + publish, and reload the tunnel. A cold target shows the preparation
     /// screen ("Applying protection…"); on failure the previously-loaded filter is kept
     /// (never a half-applied state). Refuses a no-op, an unknown id, or a frozen filter.
-    func switchToFilter(id: String) async {
-        guard id != library.activeFilterID,
-              let target = library.filter(id: id),
-              !isFilterFrozen(id)
+    func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {
+        // The four-scoped-field mirroring is the shared FilterSwitchPlan transition (same source of
+        // truth as the headless warm switch); it already rejects a no-op / unknown target. The library's
+        // active selection is committed on the LIVE library at the commit point below (not from the
+        // plan's captured copy) so a concurrent warm-token stamp during the async prepare isn't lost.
+        guard !isFilterFrozen(id),
+              let plan = FilterSwitchPlan.make(toFilterID: id, configuration: configuration, library: library),
+              let target = library.filter(id: id)
         else {
             return
         }
 
-        var nextConfiguration = configuration
-        nextConfiguration.enabledBlocklistIDs = target.enabledBlocklistIDs
-        nextConfiguration.customBlocklists = target.customBlocklists
-        nextConfiguration.blockedDomains = target.blockedDomains
-        nextConfiguration.allowedDomains = target.allowedDomains
+        // Mark a genuine USER switch in flight so the Focus reconcile defers to it (round-18) rather than
+        // superseding it mid-prepare. On exit, re-dispatch a reconcile: a Focus marker that deferred to this
+        // switch had its Darwin nudge consumed while we held the flag, so without this it would strand until a
+        // later scene event (same hazard as the round-17 re-dispatch). By the time the Task runs the flag is
+        // cleared and lastForegroundSwitch is stamped (on success), so the reconcile drops a now-stale marker
+        // or applies one genuinely newer than this switch. Gated on stampsForegroundSwitch so the reconcile's
+        // OWN replay switchToFilter(false) neither sets the flag nor re-dispatches (no loop).
+        if stampsForegroundSwitch {
+            isForegroundManualSwitchInFlight = true
+        }
+        defer {
+            if stampsForegroundSwitch {
+                isForegroundManualSwitchInFlight = false
+                Task { @MainActor [weak self] in await self?.reconcilePendingFilterSwitch() }
+            }
+        }
+
+        let nextConfiguration = plan.configuration
 
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
         // Snapshot the loaded state so ANY failure restores the previously-loaded filter
         // exactly — a cold-compile failure (before commit) or a mid-publish error (after).
         let previousConfiguration = configuration
         let previousActiveID = library.activeFilterID
+        // Capture the INITIATION instant NOW — before the (possibly slow) async prepare below — so the
+        // foreground-switch supersession stamp records when the USER STARTED this switch, not when it
+        // finished. A cold compile can take seconds; stamping completion time would misclassify a Focus
+        // request that fired DURING the prepare (genuinely newer than this switch's initiation) as
+        // "older" and silently drop it. Stamped only at the commit point on success (Codex round-15).
+        let switchInitiatedAt = Date()
         // Remember the target so the shared failure screen's "Try Again" retries THIS
         // switch (there is no edit draft in the switch path).
         pendingSwitchFilterID = id
@@ -3346,11 +3471,17 @@ final class AppViewModel: ObservableObject {
 
         do {
             let progressPresenter = FilterPreparationProgressPresenter()
-            let prepared = try await prepareFilterSnapshot(for: nextConfiguration) { update in
-                await progressPresenter.present(update) { state in
-                    self.filterPreparationState = state
-                }
-            }
+            // Instant switch-back: reuse the target's still-warm compiled artifacts (a pointer flip)
+            // when its lastCompiledToken is valid for the current config + a FRESH cached catalog, else
+            // cold-compile. Both yield a PreparedFilterSnapshot the shared tail below commits + publishes
+            // identically. A switch to a filter whose proactive warm is still in flight (token not yet
+            // stamped) simply cold-compiles — a rare, self-healing redundant compile, not wrong rules;
+            // cross-task coalescing was removed to keep this path small (see the LAV-100 plan).
+            var publication = try await prepareSwitchPublication(
+                target: target,
+                configuration: nextConfiguration,
+                progressPresenter: progressPresenter
+            )
 
             await progressPresenter.present(
                 FilterPreparationProgressUpdate(progress: 0.86, phase: .saving)
@@ -3358,6 +3489,34 @@ final class AppViewModel: ObservableObject {
                 self.filterPreparationState = state
             }
             await progressPresenter.holdCurrentPhaseIfNeeded()
+
+            // A catalog sync that ran while we prepared (the reuse load + the holds above suspend the
+            // main actor) would race a warm flip: the sync recompiles + republishes the active filter's
+            // artifacts on the refreshed catalog and advances latest.json, so a warm flip to the
+            // pre-refresh artifact would leave latest.json ahead of the pointer (the fail-closed
+            // stale-source-hash wedge), and applyReusablePreparedSnapshot would roll currentCatalog
+            // back to the stale one. Bail warm→cold on EITHER signal:
+            //   • liveness — a sync is in flight RIGHT NOW (started during prepare, about to republish);
+            //   • content  — the live catalog no longer matches the one the warm snapshot was validated
+            //     against, i.e. a sync STARTED AND FINISHED entirely between the entry gate and here, so
+            //     catalogSyncTask is already nil yet the catalog moved (Codex #133 — liveness alone
+            //     can't see a completed sync). The content check is by per-source identity, not the
+            //     top-level catalog_version string, so a source rotation (hagezi ~4x/day, catalog hash
+            //     pinned) that keeps catalog_version constant is still caught.
+            // The cold fallback compiles fresh against the now-current catalog. After this gate passes
+            // the catalog is BOTH quiescent and content-matched, so persistSharedState's sub-millisecond
+            // pointer flip cannot be out-raced by a freshly triggered (seconds-long) sync — no
+            // post-persist drift reconciliation is needed.
+            if case .warm(let reusable) = publication {
+                let catalogMovedSinceValidation = currentCatalog.map {
+                    !reusable.preparedSnapshot.identity.snapshotInputMismatches(
+                        against: PreparedFilterSnapshotIdentity.make(configuration: nextConfiguration, catalog: $0)
+                    ).isEmpty
+                } ?? false
+                if isCatalogSyncInFlight || catalogMovedSinceValidation {
+                    publication = .compiled(try await prepareFilterSnapshot(for: nextConfiguration))
+                }
+            }
 
             // A newer replacement superseded this one while it was preparing. Don't touch
             // config/library (the newer owner has them); dismiss the preparation cover this switch
@@ -3381,18 +3540,26 @@ final class AppViewModel: ObservableObject {
                 return
             }
 
-            // Commit the switch only after a successful prepare.
+            // Commit the switch only after a successful prepare/reuse.
             configuration = nextConfiguration
             library.setActiveFilter(id: id)
-            updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
-            // Apply the (global) catalog sync result only AFTER the switch durably persists. It
-            // mutates derived rule state — currentCatalog, cachedBlockRuleSets, threatGuardrail,
-            // blockRules — that the failure rollback below does NOT restore. Deferring it past the
-            // throwing persist means a failed switch never leaves those caches describing the
-            // target filter (which a later preparedSnapshotForCurrentConfiguration could publish
-            // under the rolled-back configuration). persistSharedState uses the explicit
-            // prepared.snapshot, not these caches, so the deferral is safe.
-            try await persistSharedState(preparedSnapshot: prepared.snapshot)
+            // A compiled publish carries fresh per-source hashes; a warm reuse validated the existing
+            // ones against the current catalog, so it leaves the app's hash tracking untouched.
+            if case .compiled(let prepared) = publication {
+                updateCustomBlocklistHashes(prepared.customResult.sourceHashes)
+            }
+            // The derived-cache apply below (applyCatalogSyncResult / applyReusablePreparedSnapshot)
+            // mutates rule state — currentCatalog, cachedBlockRuleSets, threatGuardrail, blockRules —
+            // that the failure rollback does NOT restore, so it runs only AFTER the throwing persist +
+            // the ownership re-check: a failed/superseded switch never leaves those caches describing
+            // the target. persistSharedState uses the explicit prepared snapshot, not these caches.
+            //
+            // For a WARM reuse the target's content-addressed token dir already exists, so the publish
+            // is a pointer FLIP, not a recompile: persistSharedState records the (unchanged) compiled
+            // token and persistArtifacts' staging step no-ops — it re-materializes the dir from the
+            // in-memory snapshot only if it was GC'd between validation and the flip (fail-closed),
+            // never serving stale rules (the reuse validation already matched the current catalog).
+            let publishOutcome = try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)
             // persistSharedState's last step awaits the artifact-publish actor, a main-actor
             // suspension. A restore/import/switch/draft-apply that completed during it now owns the
             // live configuration+library. Re-check BEFORE the side-effect tail: applyCatalogSyncResult
@@ -3404,7 +3571,81 @@ final class AppViewModel: ObservableObject {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
-            applyCatalogSyncResult(prepared.catalogResult)
+            // Now that the in-process supersession guard above has confirmed THIS switch still owns the gate,
+            // an `.abortedSuperseded` here is the CROSS-PROCESS case: a concurrent Focus/App Intents commit won
+            // the active-filter race, so the flip degrade-ABORTED and the live pointer + disk name the newer
+            // Focus target. Treat it as a deferred, non-winning switch — dismiss OUR cover WITHOUT flashing
+            // "Success" for a filter that didn't take, and let the re-dispatched reconcile (the defer above)
+            // adopt the genuinely-newer on-disk selection. Marker recovery already preserved correctness (the
+            // kept Focus marker's requestedAt necessarily postdates this switch's initiation, so reconcile
+            // adopts the Focus target); this only removes the transient wrong-"Success" toast. The NON-current
+            // (in-process superseded) case is handled by the gate guard above — NOT here — so this silent
+            // dismiss can never clobber a newer in-process cover-driving switch's UI (Codex review, lavasec-ios#29).
+            if case .abortedSuperseded = publishOutcome {
+                filterEditTargetID = nil
+                pendingSwitchFilterID = nil
+                filterPreparationState = .idle
+                isFilterPreparationScreenPresented = false
+                return
+            }
+            // Stamp the foreground switch time so a pending Focus marker recorded BEFORE this switch was
+            // INITIATED is dropped by reconcile rather than reverting the user's newer explicit choice.
+            // Stamp the captured INITIATION instant (switchInitiatedAt), NOT Date() here: a slow cold compile
+            // can take seconds, and stamping completion time would misclassify a Focus request that fired
+            // DURING the prepare — genuinely newer than this switch's initiation — as stale and drop it
+            // (Codex round-15). Stamp ONLY HERE — after persistSharedState SUCCEEDED and the post-persist
+            // re-check confirms this switch still owns the gate — so a manual switch that threw or was
+            // superseded never stamps a timestamp that would clear a still-valid pending Focus request as
+            // stale (Codex round-11). ONLY for genuine USER switches: reconcile's replay passes
+            // stampsForegroundSwitch: false so a programmatic Focus apply never poisons the supersession
+            // timestamp nor suppresses a newer Focus request.
+            if stampsForegroundSwitch {
+                PendingFilterSwitchStore.recordForegroundSwitch(at: switchInitiatedAt, in: LavaSecAppGroup.sharedDefaults)
+            }
+            switch publication {
+            case .compiled(let prepared):
+                applyCatalogSyncResult(prepared.catalogResult)
+            case .warm(let reusable):
+                // Guard the apply against a catalog sync that moved the live catalog while
+                // persistSharedState was suspended on the publish lock/artifact actor. If it moved,
+                // applyReusablePreparedSnapshot below would roll currentCatalog + blockRules BACK to the
+                // warm snapshot's validation-time catalog, and the background rehydration's catalog
+                // re-check (results.catalog == currentCatalog) would then never match — wedging the gate
+                // and leaving later publishes built against the stale catalog (Codex #133). When the
+                // catalog moved, that sync already applied fresh, correct state for the now-committed
+                // target filter (it rebuilds against the live config) and published its own artifacts,
+                // so KEEP it: skip the stale reuse apply and the rehydration (caches are already fresh).
+                // This needs a sync to fetch + compile within persistSharedState's sub-millisecond flip,
+                // which the pre-commit gate's liveness+content checks make unreachable in practice — but
+                // the guard keeps the post-persist apply robust WITHOUT re-introducing an inline recompile.
+                let catalogMovedDuringPersist = currentCatalog.map {
+                    !reusable.preparedSnapshot.identity.snapshotInputMismatches(
+                        against: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: $0)
+                    ).isEmpty
+                } ?? false
+                if !catalogMovedDuringPersist {
+                    // The reused snapshot already carries the target's compiled rules + the catalog it
+                    // was validated against; apply them the same way the warm-startup path does.
+                    applyReusablePreparedSnapshot(reusable)
+                    // A warm reuse left the per-source rule-set caches (cachedBlockRuleSets) describing
+                    // the PREVIOUS filter — it reused the published artifact, not the per-source sets,
+                    // whereas a COLD switch leaves them fresh from its catalog sync. Mark the caches
+                    // pending so in-place blocklist edits are deferred (they'd otherwise rebuild
+                    // blockRules from the wrong filter's caches and publish them — Codex #133), then
+                    // rehydrate in the background (the switch itself stays instant; no artifact
+                    // re-publish — the pointer already names the correct directory). applyCatalogSyncResult
+                    // clears the flag once the rehydration (or any fresh-cache load) lands.
+                    hasPendingWarmSwitchCacheRehydration = true
+                    let rehydrationToken = switchToken
+                    let rehydrationFilterID = id
+                    Task { [weak self] in
+                        await self?.rehydrateRuleSetCachesAfterWarmSwitch(
+                            switchToken: rehydrationToken,
+                            filterID: rehydrationFilterID
+                        )
+                    }
+                }
+            }
             appendAppNetworkActivity(.changeFilters)
 
             await notifyTunnelSnapshotUpdated()
@@ -3446,6 +3687,164 @@ final class AppViewModel: ObservableObject {
             isFilterPreparationScreenPresented = true
             ProtectionHapticFeedback.play(.actionFailed)
         }
+    }
+
+    /// How a filter switch obtains the snapshot it publishes: a warm REUSE of the target's
+    /// still-on-disk compiled artifacts (an instant pointer flip), or a cold COMPILE.
+    private enum SwitchPublication {
+        case warm(ReusablePreparedFilterSnapshot)
+        case compiled(FilterSnapshotPreparationResult)
+
+        var preparedSnapshot: PreparedFilterSnapshot {
+            switch self {
+            case .warm(let reusable): return reusable.preparedSnapshot
+            case .compiled(let result): return result.snapshot
+            }
+        }
+    }
+
+    /// Prepare the snapshot a switch will publish. Tries a warm-artifact reuse first — when the
+    /// target filter's `lastCompiledToken` directory is still on disk AND valid for the target's
+    /// CURRENT configuration + catalog — and only cold-compiles on a miss. The reuse validation is
+    /// identical to the warm-startup path (manifest `reuseRejectionReason` + the decoded snapshot's
+    /// `canReuseForProtectionStartup`), so a catalog/resolver/selection change since that compile
+    /// fails the check and falls back to a recompile: a reuse can never serve rules that don't match
+    /// the target's current inputs.
+    ///
+    /// Warm reuse is also skipped entirely while a catalog sync is in flight: that sync is about to
+    /// recompile + republish on a refreshed catalog, so a warm flip would race it. Bailing to a cold
+    /// compile (which coalesces with / follows the sync) keeps the warm fast path quiescent-only —
+    /// instant in the common case, never racing a refresh.
+    private func prepareSwitchPublication(
+        target: Filter,
+        configuration: AppConfiguration,
+        progressPresenter: FilterPreparationProgressPresenter
+    ) async throws -> SwitchPublication {
+        // Reuse the target's warm artifact when one exists (shared with the headless warm switch via
+        // warmReusableSnapshotForSwitch — same candidate set + validation). Skipped entirely while a
+        // catalog sync is in flight: that sync is about to recompile + republish, so a warm flip would
+        // race it; bailing to the cold compile keeps the warm fast path quiescent-only.
+        if !isCatalogSyncInFlight,
+           let reusable = await warmReusableSnapshotForSwitch(target: target, configuration: configuration) {
+            return .warm(reusable)
+        }
+
+        let prepared = try await prepareFilterSnapshot(for: configuration) { update in
+            await progressPresenter.present(update) { state in
+                self.filterPreparationState = state
+            }
+        }
+        return .compiled(prepared)
+    }
+
+    /// Resolve a reusable warm snapshot for switching to `target`, trying BOTH candidate tokens — the
+    /// library's own `lastCompiledToken` (foreground-warmed) AND a token the BACKGROUND staged into the
+    /// sidecar warm-index (Phase 2). A non-nil library token can be STALE (a catalog refresh re-warmed
+    /// the filter into the sidecar before the foreground promoted it), so trying only the library token
+    /// would cold-compile and never use the fresh sidecar one (Codex #138). Each candidate is validated
+    /// identically (manifest per-source hashes + a FRESH cached catalog) by the per-token loader below,
+    /// so an invalid candidate falls through to the next / to nil (the caller cold-compiles or defers).
+    /// Shared by the foreground switch (`prepareSwitchPublication`) and the headless warm switch.
+    private func warmReusableSnapshotForSwitch(
+        target: Filter,
+        configuration: AppConfiguration
+    ) async -> ReusablePreparedFilterSnapshot? {
+        var candidateTokens: [String] = []
+        if let libraryToken = target.lastCompiledToken { candidateTokens.append(libraryToken) }
+        if let sidecarToken = loadBackgroundWarmIndex().token(forFilterID: target.id),
+           sidecarToken != target.lastCompiledToken {
+            candidateTokens.append(sidecarToken)
+        }
+        for token in candidateTokens {
+            if let reusable = await loadReusableWarmSnapshotForSwitch(token: token, configuration: configuration) {
+                return reusable
+            }
+        }
+        return nil
+    }
+
+    /// Load + validate the prepared snapshot in a SPECIFIC warm token directory (the target filter's
+    /// `lastCompiledToken`) for an instant switch. `nil` ⇒ the directory is missing/undecodable, or
+    /// the artifact no longer matches `configuration` + the cached catalog (coverage, source hashes,
+    /// catalog version, resolver transport) — the caller then cold-compiles. Mirrors
+    /// `loadReusablePreparedSnapshotForProtectionStartup`, but reads the token dir (not the live
+    /// pointer) and additionally requires the decoded snapshot's content-addressed token to equal the
+    /// directory name, so the subsequent `persistSharedState` flips the pointer to THIS validated dir.
+    private func loadReusableWarmSnapshotForSwitch(
+        token: String,
+        configuration: AppConfiguration
+    ) async -> ReusablePreparedFilterSnapshot? {
+        // Load-bearing warm-reuse validation lives in LavaSecCore (WarmFilterSnapshotLoader) so the
+        // foreground switch and the headless Focus engine share ONE validation core and can't drift on
+        // reuse safety (fresh-cache + manifest/coverage/source-hash + token-match + tier-cap + full
+        // guardrail). This wrapper only supplies the App Group URLs the foreground already derives.
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return nil
+        }
+        return await WarmFilterSnapshotLoader.loadReusable(
+            token: token,
+            configuration: configuration,
+            containerURL: containerURL,
+            cacheURL: catalogCacheURL,
+            freshnessMaxAge: catalogSyncFreshnessInterval
+        )
+    }
+
+    /// Background rehydration of the per-source rule-set caches after an instant (warm) switch, so
+    /// they describe the now-active filter instead of the previous one. A warm switch reuses the
+    /// published artifact and never loads the per-source sets, leaving `cachedBlockRuleSets` stale;
+    /// a cold switch leaves them fresh. Without this, an edit path that rebuilds block rules from
+    /// those caches would use the wrong filter's sources. Cache-only (no network, no artifact
+    /// re-publish) and superseded-checked, so it never clobbers a newer switch/restore/edit or moves
+    /// the published pointer. (Codex #133 r4.)
+    private func rehydrateRuleSetCachesAfterWarmSwitch(switchToken: Int, filterID: String) async {
+        guard let cacheURL = catalogCacheURL,
+              configurationReplacementGate.isCurrent(switchToken),
+              library.activeFilterID == filterID else {
+            return
+        }
+        let enabledIDs = configuration.enabledBlocklistIDs
+        let customSources = enabledCustomBlocklists(in: configuration)
+        let loadTask = Task.detached(priority: .utility) {
+            () -> (BlocklistCatalogSyncResult, CustomBlocklistSyncResult)? in
+            let synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL)
+            guard let catalogResult = try? await synchronizer.loadCached(enabledSourceIDs: enabledIDs),
+                  let customResult = try? await synchronizer.loadCachedCustomBlocklists(customSources) else {
+                return nil
+            }
+            return (catalogResult, customResult)
+        }
+        guard let results = await loadTask.value else {
+            // The per-source caches couldn't be loaded to rehydrate (a rare disk error). The pending
+            // flag is still set, so in-place edits stay deferred (fail-safe). Fall back to an
+            // authoritative catalog sync — which reloads the caches, republishes, and clears the flag
+            // via applyCatalogSyncResult — so the gate self-heals instead of blocking edits until the
+            // next incidental sync. Only if this warm switch is still the live owner.
+            if configurationReplacementGate.isCurrent(switchToken), library.activeFilterID == filterID {
+                await syncCatalog()
+            }
+            return
+        }
+        // Re-check after the load that NOTHING the rule caches depend on moved while we loaded. The
+        // caches are a function of: the wholesale-replacement epoch (switch/restore/import/draft),
+        // the active filter, its selection (enabled IDs + custom sources incl. content hash), and the
+        // catalog version. An in-place edit (toggleBlocklist / add/removeCustomBlocklist — Codex r5)
+        // or a completed catalog refresh (syncCatalog — Codex r6) mutates these WITHOUT advancing the
+        // replacement token, and the latter already wrote fresh caches + newer artifacts; applying our
+        // stale `results` over them would rebuild later snapshots from the old catalog. If anything
+        // moved, bail — that path owns the caches and drives its own rebuild. Together these conditions
+        // are the COMPLETE set of inputs the rule caches derive from. The catalog check is by CONTENT
+        // (the loaded result must equal the live currentCatalog, BlocklistCatalog is Equatable), not
+        // the top-level catalog_version string, so a source-content rotation that left catalog_version
+        // unchanged still defers to the sync that produced the live catalog rather than reverting it.
+        guard configurationReplacementGate.isCurrent(switchToken),
+              library.activeFilterID == filterID,
+              configuration.enabledBlocklistIDs == enabledIDs,
+              enabledCustomBlocklists(in: configuration) == customSources,
+              results.0.catalog == currentCatalog else {
+            return
+        }
+        applySyncResults(catalogResult: results.0, customResult: results.1)
     }
 
     private func duplicateName(of name: String) -> String {
@@ -3894,11 +4293,20 @@ final class AppViewModel: ObservableObject {
             scheduleTemporaryProtectionResume()
         }
 
+        // Read the restart deadline ONCE and derive both the state and resumeDate
+        // from it — a second read could expire between the two and republish
+        // `.restarting` with no deadline, defeating the widget's self-clear.
+        // Both transient states carry their self-resolve deadline in `resumeDate`:
+        // the resume time when paused, the restart deadline when restarting.
+        let restartDeadline = restartInFlightDeadline
+        let protectionState = liveActivityProtectionState(restartInFlightDeadline: restartDeadline)
+        let resumeDate = protectionState == .restarting ? restartDeadline : temporaryProtectionPauseUntil
+
         Task {
             await liveActivityController.reconcile(
                 usesLiveActivities: usesLiveActivities,
-                protectionState: liveActivityProtectionState,
-                resumeDate: temporaryProtectionPauseUntil,
+                protectionState: protectionState,
+                resumeDate: resumeDate,
                 shieldStyle: lavaGuardLook,
                 pauseMinutes: liveActivityPauseMinutes,
                 pauseRequiresAuthentication: SecurityProtectedSurfaceStorage.isProtected(
@@ -3941,7 +4349,39 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private var liveActivityProtectionState: LavaActivityAttributes.ProtectionState? {
+    // The deadline of an in-flight Dynamic Island Restart (shared-defaults), or nil
+    // when none is running / it has expired. Travels as the activity's `resumeDate`
+    // so the widget self-advances `.restarting → .on` at the same instant the
+    // command's own push would, keeping the two push paths consistent.
+    private var restartInFlightDeadline: Date? {
+        let raw = appGroupDefaults.double(
+            forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey
+        )
+        guard raw > Date().timeIntervalSinceReferenceDate else {
+            return nil
+        }
+        return Date(timeIntervalSinceReferenceDate: raw)
+    }
+
+    private var isRestartInFlight: Bool {
+        restartInFlightDeadline != nil
+    }
+
+    // Takes the restart deadline as a parameter (rather than re-reading it) so the
+    // caller can derive the state and the `resumeDate` from the SAME captured value.
+    private func liveActivityProtectionState(
+        restartInFlightDeadline: Date?
+    ) -> LavaActivityAttributes.ProtectionState? {
+        // A user-initiated Restart is in flight (the Restart command set a shared
+        // deadline). Hold the Dynamic Island on the transient "restarting" feedback
+        // — checked before the vpnStatus guard — so the status notifications the
+        // restart itself emits (connected → disconnecting → connecting) neither end
+        // the activity nor clobber it with `.on`. The command pushes the same state,
+        // so the two agree; the deadline auto-expires if the restart never reports.
+        if restartInFlightDeadline != nil {
+            return .restarting
+        }
+
         guard vpnStatus == .connected else {
             return nil
         }
@@ -3950,25 +4390,15 @@ final class AppViewModel: ObservableObject {
             return .paused
         }
 
-        // No network path: there is nothing to reconnect to and Lava resumes on
-        // its own when the path returns, so this gets its own informational DI
-        // state instead of falsely reporting "On".
-        if protectionConnectivityAssessment.severity == .networkUnavailable {
-            return .networkUnavailable
-        }
-
-        // DNS is being re-established after a network change (transient). Show
-        // the reconnecting glyph rather than the all-clear checkmark.
-        if protectionConnectivityAssessment.severity == .recovering {
-            return .reconnecting
-        }
-
-        // Surface the reconnect-needed state (same assessment that drives the
-        // Guard tab) so the Dynamic Island shows the triangle + Reconnect button.
-        if protectionConnectivityAssessment.primaryAction == .reconnect {
-            return .needsReconnect
-        }
-
+        // The Dynamic Island deliberately does not surface transient connectivity
+        // status (reconnecting / needs-reconnect / no-network). Those states
+        // originate in the always-running tunnel and change while the app is
+        // suspended, so the app can never push a timely correction — a stale
+        // alarm or stale all-clear is the result. Lava is fail-closed, so a
+        // reconnect wobble blocks traffic rather than exposing it, which makes a
+        // steady "On" honest. The user's recovery affordance is the always-
+        // available Restart action, not a reactive alarm the surface can't keep
+        // fresh. The in-app Guard tab still renders live connectivity detail.
         return .on
     }
 
@@ -4163,7 +4593,23 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Reason an in-place blocklist edit must be deferred right now, or nil if it may proceed. Today
+    /// the only blocker is a pending warm-switch cache rehydration: editing while `cachedBlockRuleSets`
+    /// still describes the previous filter would rebuild + publish the target filter from the wrong
+    /// filter's rule sets (Codex #133). Callers surface the reason (String?-returning callers return
+    /// it; void callers show it via catalogStatusMessage) so the edit is refused, not silently wrong.
+    private func deferralReasonForInPlaceBlocklistEdit() -> String? {
+        guard hasPendingWarmSwitchCacheRehydration else { return nil }
+        return "Finishing the filter switch. Try again in a moment."
+    }
+
     func toggleBlocklist(_ blocklist: BlocklistSource) {
+        if let reason = deferralReasonForInPlaceBlocklistEdit() {
+            catalogStatusMessage = reason
+            catalogStatusIsError = false
+            ProtectionHapticFeedback.play(.selectionRejected)
+            return
+        }
         if configuration.enabledBlocklistIDs.contains(blocklist.id) {
             configuration.enabledBlocklistIDs.remove(blocklist.id)
             rebuildEnabledBlockRules()
@@ -4215,6 +4661,9 @@ final class AppViewModel: ObservableObject {
     }
 
     func addCustomBlocklist(displayName: String, rawURL: String) -> String? {
+        if let reason = deferralReasonForInPlaceBlocklistEdit() {
+            return reason
+        }
         guard configuration.limits.allowsCustomBlocklists else {
             return "Custom blocklist URLs are included with Lava Plus."
         }
@@ -4287,6 +4736,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func removeCustomBlocklist(id: String) {
+        if let reason = deferralReasonForInPlaceBlocklistEdit() {
+            catalogStatusMessage = reason
+            catalogStatusIsError = false
+            ProtectionHapticFeedback.play(.selectionRejected)
+            return
+        }
         configuration.customBlocklists.removeAll { $0.id == id }
         configuration.enabledBlocklistIDs.remove(id)
         cachedBlockRuleSets[id] = nil
@@ -6002,6 +6457,20 @@ final class AppViewModel: ObservableObject {
                 // Hybrid background publish: artifacts-only, never configuration.json,
                 // never protection restore. Returns before the foreground persist tail.
                 actionStatus = await publishBackgroundRefreshArtifacts(operationID: operationID, basePublishedPointerToken: basePublishedPointerToken, baseLatestCatalogData: baseLatestCatalogData)
+                // Phase 2: with the active filter republished + latest.json committed, warm the
+                // NON-active filters too (capped, most-stale-first) into the sidecar warm-index.
+                // Headless-safe — it records into the sidecar, never filter-library.json, and self-guards
+                // on the BGTask deadline + per-run budget. Run it ONLY on "bg-published": that is the one
+                // outcome where the background COMMITTED the freshly-synced catalog to latest.json (so it
+                // holds the current catalog AND its mtime is fresh). "bg-unchanged" does NOT qualify — it
+                // only means the ACTIVE filter's artifact didn't need republishing; latest.json was not
+                // committed and the sync may have fallen back to cache or fetched non-active-only changes,
+                // so warming would compile against a non-committed catalog and the freshness gate would
+                // be unreliable (Codex #138 r6 P1). Aborted outcomes never committed either. Also skip if
+                // the BGTask deadline already passed (Codex r2).
+                if !Task.isCancelled, actionStatus == "bg-published" {
+                    await warmNonActiveFiltersInBackground()
+                }
                 finishCatalogSyncTask()
                 return
             }
@@ -6484,6 +6953,18 @@ final class AppViewModel: ObservableObject {
 
     #endif
 
+    /// QA-only telemetry for the Focus-driven headless switch + its foreground reconcile. The FUNCTION must
+    /// live OUTSIDE the surrounding `#if DEBUG || LAVA_QA_TOOLS` probe block — it is called unconditionally
+    /// from `reconcilePendingFilterSwitch` and the headless commit paths, so a Release/TestFlight build would
+    /// fail to compile if the declaration were debug-only (Codex round-11 P1). Only its BODY is gated, under
+    /// the same `focus-switch-intent` component as `LavaWarmSwitchService.log` so the whole feature (intent
+    /// boundary, headless commit/rollback, reconcile apply) filters as one in device dumps.
+    private func logFocusSwitchEvent(_ event: String, details: [String: String] = [:]) {
+        #if DEBUG || LAVA_QA_TOOLS
+        LavaSecDeviceDebugLog.append(component: "focus-switch-intent", event: event, details: details)
+        #endif
+    }
+
     private func vpnStatusDebugDescription(_ status: NEVPNStatus) -> String {
         switch status {
         case .invalid:
@@ -6594,7 +7075,11 @@ final class AppViewModel: ObservableObject {
             diagnostics: diagnostics,
             localHistoryEnabled: configuration.keepDomainDiagnostics,
             debugLogEntries: inputs.debugLogEntries,
-            selfReconnectTimes: inputs.selfReconnectTimes
+            selfReconnectTimes: inputs.selfReconnectTimes,
+            // Privacy-safe Focus-switch diagnostic (LAV-100 Phase 4): the extension records the last
+            // attempt's outcome to the shared app group, so a closed-app failure is debuggable from the
+            // (Release) bug report without a device or the QA device log.
+            lastFocusSwitch: FocusSwitchDiagnostics.last(in: LavaSecAppGroup.sharedDefaults)
         )
     }
 
@@ -6872,10 +7357,20 @@ final class AppViewModel: ObservableObject {
     }
 
     private func preparedSummary(for snapshot: FilterSnapshot) -> PreparedFilterSnapshotSummary {
-        PreparedFilterSnapshotSummary(
+        let blocklistRuleCount = preparedBlocklistRuleCount()
+        return PreparedFilterSnapshotSummary(
             snapshot: snapshot,
-            blocklistRuleCount: preparedBlocklistRuleCount(),
-            blocklistSourceRuleCounts: preparedBlocklistSourceRuleCounts()
+            blocklistRuleCount: blocklistRuleCount,
+            blocklistSourceRuleCounts: preparedBlocklistSourceRuleCounts(),
+            // Persist the SAME tier-budget total a cold compile would record (block-merge + FULL
+            // guardrail + allowed + blocked — mirrors FilterSnapshotPreparationService.prepare), so a
+            // warm switch-back to this freshly persisted token passes the tier gate instead of always
+            // cold-compiling (Codex #133). threatGuardrail is the full guardrail (snapshot's
+            // nonAllowableThreatRules is only the allowlist-overlap subset). nil blocklist count ⇒ nil
+            // budget ⇒ the warm reuse correctly falls back to a cold compile.
+            tierBudgetRuleCount: blocklistRuleCount.map {
+                $0 + threatGuardrail.count + configuration.allowedDomains.count + configuration.blockedDomains.count
+            }
         )
     }
 
@@ -6990,7 +7485,14 @@ final class AppViewModel: ObservableObject {
             summary: PreparedFilterSnapshotSummary(
                 snapshot: snapshot,
                 blocklistRuleCount: blocklistRuleCount,
-                blocklistSourceRuleCounts: blocklistSourceRuleCounts
+                blocklistSourceRuleCounts: blocklistSourceRuleCounts,
+                // Same tier-budget total a cold compile records (block-merge + FULL guardrail + allowed
+                // + blocked), so a warm switch-back to this background-published token passes the tier
+                // gate instead of cold-compiling (Codex #133). nil blocklist count ⇒ nil budget ⇒
+                // warm reuse falls back to cold.
+                tierBudgetRuleCount: blocklistRuleCount.map {
+                    $0 + threatGuardrail.count + configuration.allowedDomains.count + configuration.blockedDomains.count
+                }
             )
         )
     }
@@ -7117,7 +7619,10 @@ final class AppViewModel: ObservableObject {
 
             return ReusablePreparedFilterSnapshot(
                 preparedSnapshot: preparedSnapshot,
-                cachedCatalog: cachedCatalog
+                cachedCatalog: cachedCatalog,
+                // Startup reuse keeps the snapshot subset (the concurrent launch catalog sync
+                // repopulates the full guardrail shortly after); only the warm SWITCH hydrates it.
+                fullThreatGuardrail: nil
             )
         }.value
     }
@@ -7188,7 +7693,10 @@ final class AppViewModel: ObservableObject {
         }
 
         blockRules = reusable.preparedSnapshot.snapshot.blockRules
-        threatGuardrail = reusable.preparedSnapshot.snapshot.nonAllowableThreatRules
+        // Prefer the FULL guardrail when the caller hydrated it (the warm switch path): the snapshot's
+        // nonAllowableThreatRules is only the allowlist-overlap subset, which would let
+        // AllowlistValidator allow a threat domain that isn't already allowed (Codex #133 r2).
+        threatGuardrail = reusable.fullThreatGuardrail ?? reusable.preparedSnapshot.snapshot.nonAllowableThreatRules
         compiledRuleCount = reusable.preparedSnapshot.summary.blockRuleCount
         protectedRuleCount = reusable.preparedSnapshot.summary.blockedDomainRuleCount
         if let blocklistRuleCount = reusable.preparedSnapshot.summary.blocklistRuleCount {
@@ -7207,6 +7715,7 @@ final class AppViewModel: ObservableObject {
     private func prepareFilterSnapshot(
         for configuration: AppConfiguration,
         customListPolicy: CustomBlocklistSyncPolicy = .networkFirst,
+        catalogCacheOnly: Bool = false,
         reportProgress: ((FilterPreparationProgressUpdate) async -> Void)? = nil,
         trace: LatencyTrace? = nil,
         parentSpan: LatencySpan? = nil
@@ -7237,6 +7746,7 @@ final class AppViewModel: ObservableObject {
             customSources: customSources,
             catalogFreshnessMaxAge: catalogSyncFreshnessInterval,
             customListPolicy: effectiveCustomListPolicy,
+            catalogCacheOnly: catalogCacheOnly,
             tierRuleLimit: FilterRuleTierLimit(
                 limit: configuration.limits.maxFilterRules,
                 isPaid: configuration.hasLavaSecurityPlus
@@ -7401,7 +7911,7 @@ final class AppViewModel: ObservableObject {
                     configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus)
                     // Rule artifacts were already persisted (or validly reused)
                     // above; only the configuration state changed here.
-                    try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
+                    _ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
                     #if DEBUG || LAVA_QA_TOOLS
                     logVPNDebugEvent("enable-start-wait-timeout", details: [
                         "vpnStatus": vpnStatusDebugDescription(vpnStatus)
@@ -7441,7 +7951,7 @@ final class AppViewModel: ObservableObject {
             // for notifications as a side effect — doing so surfaced the system
             // dialog at the wrong moment (e.g. during onboarding before the
             // notifications step, or on auto-restore at launch).
-            try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
+            _ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
             vpnMessage = nil
             vpnMessageIsError = false
             scheduleBackgroundCustomBlocklistRefresh()
@@ -8205,6 +8715,11 @@ final class AppViewModel: ObservableObject {
         catalogGeneratedAt = result.catalog.generatedAt
         catalogSourcesByID = Dictionary(uniqueKeysWithValues: result.catalog.sources.map { ($0.id, $0) })
         cachedBlockRuleSets = result.sourceRuleSets
+        // Fresh per-source caches now describe the active filter, so any warm-switch rehydration this
+        // would have been waiting on is satisfied (this is the chokepoint the warm rehydration, a cold
+        // switch/restore/import/draft-apply, and every catalog sync all funnel through). Re-enable
+        // in-place edits.
+        hasPendingWarmSwitchCacheRehydration = false
         threatGuardrail = result.guardrailRuleSet
 
         for source in result.catalog.sources {
@@ -8212,6 +8727,17 @@ final class AppViewModel: ObservableObject {
         }
 
         rebuildEnabledBlockRules()
+
+        // The catalog just (re)applied — reconcile the non-active warm set against it: (re)warm any
+        // filters now cold or stale so the instant-switch path survives catalog updates (incl. source
+        // rotations under a pinned catalog_version). Fire-and-forget; the reconcile is a cheap
+        // manifest-only scan that recompiles only the filters actually affected. FOREGROUND only: a
+        // headless BGTask model loaded its library at launch, so warming (which writes lastCompiledToken
+        // to filter-library.json) could clobber foreground create/edit/delete — the background-refresh-
+        // never-writes-shared-state invariant. Headless warming is the Phase-2 BGTask's job, write-safe.
+        if !isHeadless {
+            Task { await reconcileWarmNonActiveFilters() }
+        }
     }
 
     private func loadCachedCatalogAfterSyncFailure(
@@ -8356,13 +8882,14 @@ final class AppViewModel: ObservableObject {
         // singleton migration from this model's launch-time config. (The in-memory library
         // is still populated so the headless model can read it.)
         //
-        // Persist via persistConfigurationOnly (not persistFilterLibrary): a legacy config is
-        // itself generation 0, so a plain library write would stamp the freshly-migrated library
+        // Persist via persistConfigurationOnly so the migration BUMPS the generation: a legacy config is
+        // itself generation 0, so an un-bumped library write would stamp the freshly-migrated library
         // at generation 0 — the value lostWriteRace TRUSTS. A later config-first restore that's
         // killed before its library write would then leave this generation-0 file to win over the
         // restored config (Codex r23). persistConfigurationOnly bumps the generation first, so the
         // migrated library + config are written together at a non-zero generation that a future
-        // restore can supersede. Suppress the backup hook: this runs during init before the
+        // restore can supersede. (Library-only edits now route here too — see persistFilterLibrary —
+        // so every library write bumps the shared generation.) Suppress the backup hook: this runs during init before the
         // auto-backup flag is loaded, and a migration only adds the Default filter the server copy
         // already restores to (Codex r24) — the next real change re-seals + uploads.
         if !isHeadless {
@@ -8453,17 +8980,13 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    /// Cap on how many hosted filters' compiled directories stay warm for instant
-    /// switch-back. Bounds disk — each retained token is one artifact directory; beyond
-    /// this a switch recompiles (correct, just not instant). Without a real LRU we keep
-    /// the active filter first, then library order; refining to most-recently-activated
-    /// is a follow-up.
-    private static let maxWarmFilterArtifacts = 8
-
-    /// The versioned-artifact tokens to keep warm across a publish: the active filter's
-    /// compiled token first (most likely switch-back target), then other hosted filters',
-    /// capped at ``maxWarmFilterArtifacts`` so disk stays bounded as the library grows.
-    /// The active filter's freshly-staged token is also retained by the publish itself.
+    /// The versioned-artifact tokens to keep warm across a publish: EVERY non-frozen hosted
+    /// filter's compiled token (active first, the most likely switch-back target). Keeping all
+    /// of them warm makes switching to ANY filter — manually or via a Focus auto-switch — an
+    /// instant pointer flip, never a cold compile. Frozen filters (lapsed Plus, not switchable)
+    /// are excluded; the active filter's freshly-staged token is also retained by the publish
+    /// itself. Disk is bounded by the tier filter cap (Free 3 / Plus 10); a disk-pressure
+    /// escape hatch (LRU eviction) is a follow-on slice — see the LAV-100 plan.
     private func retainedFilterArtifactTokens() -> [String] {
         let activeID = library.activeFilterID
         var tokens: [String] = []
@@ -8471,17 +8994,827 @@ final class AppViewModel: ObservableObject {
             tokens.append(activeToken)
         }
         for filter in library.filters where filter.id != activeID {
-            guard let token = filter.lastCompiledToken else { continue }
+            guard !isFilterFrozen(filter.id), let token = filter.lastCompiledToken else { continue }
             tokens.append(token)
         }
-        return Array(tokens.prefix(Self.maxWarmFilterArtifacts))
+        // A background-warmed dir is referenced ONLY by the sidecar warm-index until the foreground
+        // promotes it into the library, so retain those tokens too — otherwise the foreground GC would
+        // reap a background-warmed artifact before it could be used or promoted (Phase 2). Retain ONLY
+        // entries for filters that still exist and are switchable: the foreground doesn't rewrite the
+        // sidecar on delete/freeze (background-only writer), so retaining every entry would pin dirs for
+        // deleted/frozen filters until a later BGTask rewrites the sidecar (Codex #138 r5). The
+        // background's own coherent rewrite already drops them; this keeps the foreground GC from
+        // leaking them in the meantime.
+        for (filterID, entry) in loadBackgroundWarmIndex().entries
+        where library.filter(id: filterID) != nil && !isFilterFrozen(filterID) {
+            tokens.append(entry.token)
+        }
+        return tokens
     }
 
+    /// Compile and persist the on-disk artifact for a NON-active filter so it stays warm —
+    /// a later switch (manual or, once wired, Focus-driven) is an instant pointer flip,
+    /// never a cold compile. Builds the snapshot from THAT filter's four scoped fields over
+    /// the current device-global config, stages its versioned artifact directory WITHOUT
+    /// flipping the live (tunnel-facing) pointer, and records the filter's
+    /// `lastCompiledToken`. Never touches the active configuration, the live pointer, the
+    /// supersession generation, or the tunnel — so it is safe to run alongside the active
+    /// switch/refresh paths. The active filter is excluded (it warms through
+    /// `persistSharedState`). A filter is also skipped when it is frozen (not switchable),
+    /// has custom blocklists (those refresh network-first on switch — a cache-only warm could
+    /// stamp a token that warm-reuse later serves with stale custom bytes), or the catalog
+    /// cache is STALE (warming cache-only from a stale catalog would stamp a token reused
+    /// without a freshness recheck, running protection on old bytes; the filter instead takes
+    /// the normal network-first refreshing cold path on its next switch). Best-effort: returns
+    /// false on any of those, on failure, or if the filter was edited / removed / switched-to /
+    /// frozen while compiling (the staged dir then ages out and a later warm pass retries).
+    @discardableResult
+    func warmFilterArtifact(forFilterID filterID: String) async -> Bool {
+        // Foreground only: this writes filter-library.json (persistLibraryOnlyChange). A headless
+        // BGTask model loaded its library at launch, so writing from it could clobber concurrent
+        // foreground create/edit/delete changes — the "background refresh never writes shared state"
+        // invariant. The background instead records into the sidecar warm-index
+        // (warmNonActiveFiltersInBackground), never the library.
+        guard !isHeadless,
+              let result = await compileAndStageWarmArtifact(forFilterID: filterID) else {
+            return false
+        }
+
+        // Stamp the token GC keeps warm and that switch-time reuse matches. compileAndStageWarmArtifact
+        // already re-validated the filter (fields/active/frozen) and the catalog AFTER its compile, and
+        // there is no await between its return and this stamp, so the filter is still the one we
+        // compiled (mutateFilter is a no-op for a vanished id). Warmed filters are catalog-only, so
+        // there are no custom-list hashes to reconcile.
+        let previousLibrary = library
+        library.mutateFilter(id: filterID) { $0.lastCompiledToken = result.token }
+        let stamped = persistLibraryOnlyChange(rollingBackTo: previousLibrary)
+
+        if stamped, let containerURL = LavaSecAppGroup.containerURL, let service = filterSnapshotPreparationService {
+            // Reclaim the directory the PREVIOUS warm of this filter left behind. Each warm mints a
+            // fresh generatedAt token and overwrites lastCompiledToken, and stageArtifacts never GCs,
+            // so repeated warms (e.g. several draft saves without switching) would otherwise leak a
+            // full artifact dir apiece until an unrelated publish collected them — breaking the
+            // "disk bounded by the filter cap" invariant (Codex r14). Runs AFTER the stamp so the
+            // retain set names the NEW token; the overwritten old token is no longer hosted and is
+            // reaped. Retains every hosted filter's token + the live pointer; grace-window protected.
+            await service.collectWarmArtifactGarbage(
+                containerURL: containerURL,
+                snapshotFilename: LavaSecAppGroup.snapshotFilename,
+                compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename,
+                retaining: retainedFilterArtifactTokens()
+            )
+        }
+        return stamped
+    }
+
+    /// Shared compile + stage + re-validate core for warming a NON-active filter, used by BOTH the
+    /// foreground (`warmFilterArtifact` → stamps the library) and the background
+    /// (`warmNonActiveFiltersInBackground` → records the sidecar). Compiles the filter's four scoped
+    /// fields cache-only, stages the versioned artifact (no pointer flip), and re-validates AFTER the
+    /// await — the filter's rules are byte-for-byte what we compiled, it is still non-active/non-frozen,
+    /// and the catalog has not moved (canReuse) — so the returned token always names rules that match
+    /// the filter's current config + the current cached catalog. Returns the staged token + its budget
+    /// rule count, or nil on any miss. Records NOTHING and runs NO GC: gating on `isHeadless` and the
+    /// write/GC belong to the caller. Never touches the live pointer, the active configuration, the
+    /// supersession generation, or the tunnel, so it is safe alongside the active switch/refresh paths.
+    private func compileAndStageWarmArtifact(forFilterID filterID: String) async -> (token: String, ruleCount: Int)? {
+        guard let filter = library.filter(id: filterID),
+              filterID != library.activeFilterID,
+              !isFilterFrozen(filterID),
+              // Catalog-only filters only: custom lists refresh network-first on switch, so a
+              // cache-only warm of a custom-list filter could be reused with stale custom bytes.
+              filter.customBlocklists.isEmpty,
+              let cacheURL = catalogCacheURL,
+              // Only warm from a FRESH catalog cache. A cache-only compile from a stale cache would
+              // record a token reused WITHOUT a freshness recheck — running on old bytes until an
+              // unrelated refresh. When stale, skip so the next switch takes the network-first cold path.
+              BlocklistCatalogSynchronizer.hasFreshCachedCatalog(in: cacheURL, maxAge: catalogSyncFreshnessInterval),
+              // Stay READ-ONLY w.r.t. the shared catalog cache: prepareFilterSnapshot runs
+              // migrateLowRiskLaunchCacheIfNeeded, which can PURGE latest.json (legacy guardrails /
+              // inactive GPL / missing required launch sources) expecting a follow-up SYNC a cache-only
+              // warm never does — leaving NO cached catalog until a later sync, breaking offline
+              // startup/warm reuse (Codex r15). Skip when a migration is pending; synchronous so
+              // prepareFilterSnapshot's own (now no-op) migrate can't race in before it.
+              !BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(
+                  in: cacheURL,
+                  requiredSourceIDs: DefaultCatalog.recommendedDefaultSourceIDs
+              ),
+              let containerURL = LavaSecAppGroup.containerURL,
+              let service = filterSnapshotPreparationService else {
+            return nil
+        }
+
+        // Capture the exact fields we compile so a concurrent edit/switch during the (awaiting)
+        // compile can't make us record a token onto stale rules.
+        let compiledEnabled = filter.enabledBlocklistIDs
+        let compiledCustom = filter.customBlocklists
+        let compiledBlocked = filter.blockedDomains
+        let compiledAllowed = filter.allowedDomains
+
+        var snapshotConfiguration = configuration
+        snapshotConfiguration.enabledBlocklistIDs = compiledEnabled
+        snapshotConfiguration.customBlocklists = compiledCustom
+        snapshotConfiguration.blockedDomains = compiledBlocked
+        snapshotConfiguration.allowedDomains = compiledAllowed
+
+        do {
+            // Compile against the CURRENT cache only — a warm must never trigger a catalog/custom sync
+            // that advances latest.json under a concurrent switch's warm-reuse guard (a cache miss
+            // just skips this warm). Freshness is the refresh path's job.
+            let prepared = try await prepareFilterSnapshot(
+                for: snapshotConfiguration,
+                customListPolicy: .cacheOnly,
+                catalogCacheOnly: true
+            )
+            // If the BGTask deadline passed during the (CPU-heavy) compile above, bail BEFORE staging —
+            // stageArtifacts writes a versioned directory to the app group, which must not happen past
+            // the system deadline (Codex #138 r3). Harmless in the foreground (its warm task is not
+            // deadline-cancelled). The caller's per-iteration + pre-save guards cover the later steps.
+            if Task.isCancelled { return nil }
+            let pointer = try await service.stageArtifacts(
+                prepared.snapshot,
+                containerURL: containerURL,
+                snapshotFilename: LavaSecAppGroup.snapshotFilename,
+                compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename
+            )
+
+            // Re-validate after the compile await: the filter may have been edited, deleted,
+            // switched-to (now active), or frozen while we were off compiling. Only keep the token if
+            // the filter still exists, is still non-active/non-frozen, and its rules are byte-for-byte
+            // what we compiled — otherwise the staged dir is for stale rules and a later warm pass
+            // (or a switch-time cold compile) supersedes it.
+            guard let current = library.filter(id: filterID),
+                  filterID != library.activeFilterID,
+                  !isFilterFrozen(filterID),
+                  current.enabledBlocklistIDs == compiledEnabled,
+                  current.customBlocklists == compiledCustom,
+                  current.blockedDomains == compiledBlocked,
+                  current.allowedDomains == compiledAllowed else {
+                return nil
+            }
+
+            // Also re-validate the CATALOG. A sync that advanced latest.json while we were suspended in
+            // prepare/stage would leave this artifact built from the PREVIOUS catalog; warm reuse
+            // validates against the current cached catalog by per-source hashes, so it would later
+            // reject the token and the filter would look warm yet cold-compile on its next switch. Keep
+            // only a token reuse will actually honor NOW, using the SAME check the switch reuse path
+            // applies (canReuseForProtectionStartup against the freshly re-read cached catalog). On a
+            // mismatch, return nil so the racing sync's reconcile — or a later switch — recompiles
+            // against the new catalog (Codex r12). The re-read runs off the main actor (small JSON
+            // decode), mirroring loadReusableWarmSnapshotForSwitch.
+            let recheckCacheURL = cacheURL
+            let currentCachedCatalog = await Task.detached(priority: .userInitiated) {
+                try? BlocklistCatalogSynchronizer(cacheDirectoryURL: recheckCacheURL).loadCachedCatalogMetadata()
+            }.value
+            guard let currentCachedCatalog,
+                  prepared.snapshot.canReuseForProtectionStartup(
+                      configuration: snapshotConfiguration,
+                      cachedCatalog: currentCachedCatalog
+                  ) else {
+                return nil
+            }
+
+            let ruleCount = prepared.snapshot.summary.tierBudgetRuleCount
+                ?? prepared.snapshot.summary.blocklistRuleCount
+                ?? 0
+            return (pointer.token, ruleCount)
+        } catch {
+            return nil
+        }
+    }
+
+    /// After a catalog (re)apply, bring the non-active warm set back in line with the catalog:
+    /// (re)warm filters that are COLD (no token — e.g. created/edited while the cache was stale, when
+    /// `warmFilterArtifact` skipped them) OR STALE (their artifact was built against older source
+    /// bytes, so a switch's warm-reuse gate would reject it and cold-compile, losing the instant
+    /// switch). Staleness is decided PER FILTER by the SAME cheap manifest check the switch path uses
+    /// (`reuseRejectionReason`, off the main actor, no full compile) — which keys on the per-SOURCE
+    /// content hashes, so it catches a source rotation even when the top-level `catalog_version`
+    /// stays pinned (a plain version compare would miss that, so this deliberately does NOT debounce
+    /// on the version). Only filters actually affected recompile; a no-op cache-hit apply just does
+    /// the cheap manifest reads. The BACKGROUND BGTask refresh (priority-ordered/capped, for when the
+    /// app isn't active) is the Phase-2 follow-up.
+    private func reconcileWarmNonActiveFilters() async {
+        // Coalesce overlapping runs (foreground fires this on onAppear AND scene .active, plus after a catalog
+        // apply): a concurrent second pass would redundantly re-scan + double-compile the same cold filters.
+        // But do NOT simply drop a trigger that arrives mid-pass — a catalog apply landing while a pass is in
+        // flight must still re-warm against the new catalog, or the non-active filters stay stale and a
+        // closed-app Focus switch to them defers-to-cold (Codex P2). Queue a single rerun instead, mirroring
+        // reconcilePendingFilterSwitch.
+        guard !isReconcilingWarmNonActiveFilters else {
+            pendingWarmReconcileRerun = true
+            return
+        }
+        isReconcilingWarmNonActiveFilters = true
+        defer { isReconcilingWarmNonActiveFilters = false }
+        // Bound the synchronous drain to the initial pass + one rerun (same storm guard as the pending-switch
+        // reconcile) so a burst of triggers can't monopolize this run; a rerun still queued at the cap is
+        // re-dispatched fresh on the next tick (the defer has cleared the guard by then).
+        var remainingWarmPasses = 2
+        repeat {
+            remainingWarmPasses -= 1
+            pendingWarmReconcileRerun = false
+            await reconcileWarmNonActiveFiltersOnce()
+        } while pendingWarmReconcileRerun && remainingWarmPasses > 0
+        if pendingWarmReconcileRerun {
+            Task { @MainActor [weak self] in await self?.reconcileWarmNonActiveFilters() }
+        }
+    }
+
+    /// One pass of the non-active warm reconcile. The wrapper `reconcileWarmNonActiveFilters` serializes +
+    /// re-runs this; the early returns here end the PASS, not the loop.
+    private func reconcileWarmNonActiveFiltersOnce() async {
+        guard let containerURL = LavaSecAppGroup.containerURL else { return }
+
+        // Snapshot the candidates on the main actor (catalog-only, non-active, non-frozen), each with
+        // the configuration its artifact identity is validated against.
+        let activeID = library.activeFilterID
+        let baseConfiguration = configuration
+        let candidates: [(id: String, token: String?, configuration: AppConfiguration)] =
+            library.filters.compactMap { filter in
+                guard filter.id != activeID, !isFilterFrozen(filter.id), filter.customBlocklists.isEmpty else {
+                    return nil
+                }
+                var cfg = baseConfiguration
+                cfg.enabledBlocklistIDs = filter.enabledBlocklistIDs
+                cfg.customBlocklists = filter.customBlocklists
+                cfg.blockedDomains = filter.blockedDomains
+                cfg.allowedDomains = filter.allowedDomains
+                return (filter.id, filter.lastCompiledToken, cfg)
+            }
+        guard !candidates.isEmpty else { return }
+        let cacheURL = catalogCacheURL
+        // Snapshot the sidecar so a cold/stale LIBRARY filter that the BACKGROUND already warmed can be
+        // PROMOTED (a cheap library token write) instead of recompiled from scratch (Phase 2).
+        let warmIndex = loadBackgroundWarmIndex()
+
+        // Decide per filter OFF the main actor (manifest + catalog-metadata reads), mirroring
+        // loadReusableWarmSnapshotForSwitch — cheap (no full prepared decode, no compile). For each
+        // candidate: keep (library token still valid → omit), promote (a sidecar token is valid →
+        // carry it), or recompile (neither valid → promoteToken == nil).
+        let actions: [(id: String, promoteToken: String?, configuration: AppConfiguration)] =
+            await Task.detached(priority: .utility) {
+                let cachedCatalog = cacheURL.flatMap {
+                    try? BlocklistCatalogSynchronizer(cacheDirectoryURL: $0).loadCachedCatalogMetadata()
+                }
+                let rootStore = FilterArtifactStore(directoryURL: containerURL)
+                func isValid(_ token: String, _ configuration: AppConfiguration) -> Bool {
+                    let store = FilterArtifactStore(directoryURL: rootStore.versionedDirectoryURL(token: token))
+                    guard let manifest = try? store.loadManifest() else { return false }
+                    return manifest.reuseRejectionReason(configuration: configuration, cachedCatalog: cachedCatalog) == nil
+                }
+                return candidates.compactMap { candidate in
+                    if let token = candidate.token, isValid(token, candidate.configuration) {
+                        return nil // library token still valid ⇒ keep
+                    }
+                    if let sideToken = warmIndex.token(forFilterID: candidate.id), isValid(sideToken, candidate.configuration) {
+                        return (candidate.id, sideToken, candidate.configuration) // promote the background's work
+                    }
+                    return (candidate.id, nil, candidate.configuration) // recompile
+                }
+            }.value
+
+        // Apply on the main actor. Promote is a library-only token write (the artifact dir already
+        // exists from the background); recompile goes through warmFilterArtifact. Both re-validate the
+        // filter's current fields/active/frozen state before committing, and the switch path re-checks
+        // catalog freshness at reuse time, so a catalog move mid-reconcile self-heals via the next apply.
+        for action in actions {
+            if let token = action.promoteToken {
+                promoteWarmTokenIntoLibrary(filterID: action.id, token: token, expectedConfiguration: action.configuration)
+            } else {
+                await warmFilterArtifact(forFilterID: action.id)
+            }
+        }
+    }
+
+    /// Promote a sidecar (background-warmed) token into `filter-library.json` so the library becomes
+    /// the source of truth again and the switch path reuses it directly. A foreground-only library
+    /// write (the BGTask never writes the library). Re-validates on the main actor that the filter
+    /// still exists, is non-active/non-frozen, and its four scoped fields are unchanged since the
+    /// off-main scan — so a concurrent edit can't promote a token for stale rules. Catalog freshness
+    /// is re-checked at switch time, so promotion itself needs no fresh-catalog recheck.
+    @discardableResult
+    private func promoteWarmTokenIntoLibrary(
+        filterID: String,
+        token: String,
+        expectedConfiguration: AppConfiguration
+    ) -> Bool {
+        guard let current = library.filter(id: filterID),
+              filterID != library.activeFilterID,
+              !isFilterFrozen(filterID),
+              current.enabledBlocklistIDs == expectedConfiguration.enabledBlocklistIDs,
+              current.customBlocklists == expectedConfiguration.customBlocklists,
+              current.blockedDomains == expectedConfiguration.blockedDomains,
+              current.allowedDomains == expectedConfiguration.allowedDomains else {
+            return false
+        }
+        guard current.lastCompiledToken != token else { return true } // already promoted
+        let previousLibrary = library
+        library.mutateFilter(id: filterID) { $0.lastCompiledToken = token }
+        return persistLibraryOnlyChange(rollingBackTo: previousLibrary)
+    }
+
+    /// Background (BGTask) warm pass. With the active filter just republished and the cache fresh, warm
+    /// the NON-active filters too so a later Focus-driven switch is an instant pointer-flip. Headless-
+    /// safe: it records each warmed filter in the SIDECAR warm-index, NEVER in filter-library.json
+    /// (which the background must not write). Capped per run at the free-tier rule ceiling and ordered
+    /// most-stale-first (by the sidecar's last `syncedAt`; never-warmed sorts first) so a tight BGTask
+    /// budget spends on the filters most out of date; the rest are picked up on later runs. Rewrites the
+    /// sidecar coherently each run: this run's fresh entries plus carry-over of prior entries for
+    /// filters still eligible that we did not re-warm, dropping entries for filters that are gone, now
+    /// active/frozen, or already warm in the library (i.e. promoted). One GC after the loop.
+    /// Cheap PRE-compile UPPER-BOUND estimate of a non-active filter's rule count, summed from the
+    /// catalog's per-source entry counts plus the filter's own blocked/allowed domains. Used to enforce
+    /// the background per-run budget before the expensive compile (Codex #138 r4). It is only an upper
+    /// bound: overlapping sources are NOT deduplicated, so it can OVER-count (the actual compiled count
+    /// is ≤ this and ≤ the tier cap). Callers must therefore cap it at the budget and guarantee the
+    /// coldest candidate one attempt, or an over-counted filter would be starved (panel finding). An
+    /// unknown source falls back to its cached rule-set size, else 0.
+    private func estimatedRuleCount(forFilterID filterID: String) -> Int {
+        guard let filter = library.filter(id: filterID) else { return 0 }
+        var total = filter.blockedDomains.count + filter.allowedDomains.count
+        for id in filter.enabledBlocklistIDs {
+            total += catalogSourcesByID[id]?.entryCount ?? cachedBlockRuleSets[id]?.count ?? 0
+        }
+        return total
+    }
+
+    private func warmNonActiveFiltersInBackground() async {
+        // Sidecar warming is the BGTask's job; the foreground warms via the library path
+        // (warmFilterArtifact). This also keeps the library strictly foreground-owned.
+        guard isHeadless,
+              let containerURL = LavaSecAppGroup.containerURL,
+              let cacheURL = catalogCacheURL,
+              let store = backgroundWarmIndexStore,
+              let service = filterSnapshotPreparationService else {
+            return
+        }
+        // Honor the BGTask deadline up front: cancellation can be delivered at the caller's `await`
+        // into this method, and the candidates/empty-candidates prefix below is synchronous, so without
+        // this guard the empty-candidates branch could still rewrite the sidecar past the deadline
+        // (panel finding). Every app-group mutation in this method stays behind a !Task.isCancelled gate.
+        guard !Task.isCancelled else { return }
+
+        // This runs only on the bg-published path, where the background just COMMITTED the fresh catalog
+        // to latest.json — so its mtime is already fresh and compileAndStageWarmArtifact's
+        // hasFreshCachedCatalog gate passes without any touch. (We deliberately do NOT bump the mtime
+        // here: latest.json is only trustworthy-current on a commit, and a commit already refreshes it.)
+        let activeID = library.activeFilterID
+        let prior = store.load()
+
+        // Snapshot eligible candidates (non-active, non-frozen, catalog-only) with the config their
+        // artifact identity is validated against, on the main actor.
+        let baseConfiguration = configuration
+        let candidates: [(id: String, token: String?, configuration: AppConfiguration)] =
+            library.filters.compactMap { filter in
+                guard filter.id != activeID, !isFilterFrozen(filter.id), filter.customBlocklists.isEmpty else {
+                    return nil
+                }
+                var cfg = baseConfiguration
+                cfg.enabledBlocklistIDs = filter.enabledBlocklistIDs
+                cfg.customBlocklists = filter.customBlocklists
+                cfg.blockedDomains = filter.blockedDomains
+                cfg.allowedDomains = filter.allowedDomains
+                return (filter.id, filter.lastCompiledToken, cfg)
+            }
+        guard !candidates.isEmpty else {
+            // No eligible filters: still rewrite the sidecar to drop any now-ineligible entries.
+            try? store.save(BackgroundWarmIndex())
+            return
+        }
+
+        // Classify each eligible candidate OFF the main actor by whether its LIBRARY token and/or its
+        // SIDECAR token are still valid for the current catalog (the same manifest check the switch path
+        // uses). A filter needs (re)warming only when NEITHER is valid — keying on the sidecar too means
+        // the background doesn't recompile a filter it (a prior run) already warmed every single run,
+        // and a mis-estimated oversized filter overshoots the budget at most ONCE rather than on every
+        // run (Codex #138 r8).
+        let scan: [(id: String, libraryValid: Bool, sidecarValid: Bool)] = await Task.detached(priority: .utility) {
+            let cachedCatalog = (try? BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL).loadCachedCatalogMetadata())
+            let rootStore = FilterArtifactStore(directoryURL: containerURL)
+            func tokenValid(_ token: String?, _ configuration: AppConfiguration) -> Bool {
+                guard let token else { return false }
+                let store = FilterArtifactStore(directoryURL: rootStore.versionedDirectoryURL(token: token))
+                guard let manifest = try? store.loadManifest() else { return false }
+                return manifest.reuseRejectionReason(configuration: configuration, cachedCatalog: cachedCatalog) == nil
+            }
+            return candidates.map { candidate in
+                (candidate.id,
+                 tokenValid(candidate.token, candidate.configuration),
+                 tokenValid(prior.token(forFilterID: candidate.id), candidate.configuration))
+            }
+        }.value
+
+        // To COMPILE: neither token valid (cold or stale in both stores), most-stale-first by the
+        // sidecar's last syncedAt (never-warmed ⇒ .distantPast ⇒ coldest, warmed first).
+        let needsWarming: [String] = scan
+            .filter { !$0.libraryValid && !$0.sidecarValid }
+            .sorted { (prior.syncedAt(forFilterID: $0.id) ?? .distantPast) < (prior.syncedAt(forFilterID: $1.id) ?? .distantPast) }
+            .map(\.id)
+        // Carry-over base: every filter whose LIBRARY token is invalid keeps its prior sidecar entry
+        // (it's still the best warm we have) unless replaced this run — including those skipped from
+        // warming because their SIDECAR token is already valid. Filters with a valid library token are
+        // excluded, so they're dropped (the library owns them).
+        let invalidLibraryIDs = Set(scan.filter { !$0.libraryValid }.map(\.id))
+
+        // Warm capped + most-stale-first, recording each in the new sidecar. Respect the BGTask
+        // deadline (Task.isCancelled) and the per-run rule budget. The budget is enforced BEFORE the
+        // expensive compile via a cheap pre-estimate — for EVERY candidate including the first — so one
+        // oversized filter (a Plus filter can be up to 2M rules) can never blow the cap on a
+        // deadline-bounded BGTask (Codex #138 r6). Skip (don't break) a filter that wouldn't fit the
+        // remaining budget so a smaller later one can still use it. A filter whose estimate alone
+        // exceeds the budget is therefore never background-warmed — the foreground reconcile (which has
+        // no per-run cap) warms it instead, so it isn't starved.
+        // Size the per-run budget to the user's ACTUAL tier, not the free ceiling: this warm substrate
+        // exists for the Plus-only Focus auto-switch, so measuring a Plus filter (cap 2M) against the
+        // free 500K ceiling would skip every legitimately-large filter on every run — it would never
+        // background-warm, defeating the feature for exactly the filters it targets (panel finding P2).
+        let perRunRuleBudget = configuration.limits.maxFilterRules
+        var newEntries: [String: BackgroundWarmIndexEntry] = [:]
+        var rulesCompiled = 0
+        let warmedAt = Date()
+        for id in needsWarming {
+            if Task.isCancelled { break }
+            // Cap the (overlap-inflated, dedup-free) estimate at the budget. A filter's ACTUAL compiled
+            // count can't exceed the tier cap == budget, so min(estimate, budget) is still a valid upper
+            // bound — and it guarantees the FIRST candidate of a run always fits (rulesCompiled 0 + ≤budget
+            // is never > budget), so a heavy-overlap filter whose raw sum exceeds the budget isn't starved
+            // forever in the background; the post-compile break still bounds the run (panel finding P2).
+            if rulesCompiled + min(estimatedRuleCount(forFilterID: id), perRunRuleBudget) > perRunRuleBudget {
+                continue
+            }
+            guard let result = await compileAndStageWarmArtifact(forFilterID: id) else { continue }
+            newEntries[id] = BackgroundWarmIndexEntry(token: result.token, syncedAt: warmedAt)
+            rulesCompiled += result.ruleCount
+            // The pre-estimate can UNDER-estimate (a cached source's local payload rotated beyond the
+            // catalog entryCount), letting an actually-over-budget filter through. Stop once the ACTUAL
+            // accumulated rules reach the cap so a single underestimated filter can't drag the run into
+            // compiling more past it (Codex #138 r8). The just-compiled filter is still recorded — its
+            // work is done and it's a valid warm; we simply don't start another compile.
+            if rulesCompiled >= perRunRuleBudget { break }
+        }
+
+        // If the BGTask deadline passed mid-pass, do NOT mutate the app-group further — skip the sidecar
+        // rewrite and GC so nothing runs past the system deadline (Codex #138 r2). Any artifacts staged
+        // this run are grace-window-protected and reaped by a later run's GC, so skipping leaks nothing.
+        guard !Task.isCancelled else { return }
+
+        // Coherent wholesale rewrite: this run's fresh entries + carry-over of prior entries for every
+        // filter whose LIBRARY token is invalid (it still relies on the sidecar) that we did NOT replace
+        // this run. Keying carry-over on `invalidLibraryIDs` (NOT `needsWarming`) is essential now that
+        // `needsWarming` excludes filters with an already-valid SIDECAR token: those skipped-but-warm
+        // filters must keep their prior entry, and a stale-library-token filter not reached this run
+        // (cap) keeps its still-usable warm rather than being dropped and then GC'd (Codex #138). Filters
+        // with a VALID library token are excluded (dropped — the library owns them); gone/active/frozen
+        // filters never entered the scan. Carry-overs aren't re-validated — the read path re-checks every
+        // token, so a stale carry-over is harmless and self-heals next run.
+        let warmedThisRun = Set(newEntries.keys)
+        var rewritten = newEntries
+        for id in invalidLibraryIDs where !warmedThisRun.contains(id) {
+            if let carried = prior.entries[id] { rewritten[id] = carried }
+        }
+        try? store.save(BackgroundWarmIndex(entries: rewritten))
+
+        // Re-check the deadline immediately before the GC: collectWarmArtifactGarbage is an `await` into
+        // the preparation actor (a suspension point), so a cancellation that lands between the post-loop
+        // guard above and here would otherwise let the GC removeItem app-group directories past the
+        // system deadline (panel finding — the TOCTOU the staging/save guards already close elsewhere).
+        guard !Task.isCancelled else { return }
+
+        // One GC after the loop: retain (in-memory library + just-written sidecar + live pointer) UNION
+        // the CURRENT on-disk library tokens. The on-disk union is essential here: a foreground
+        // create/edit/warm during this (potentially slow) headless pass writes tokens our launch-time
+        // in-memory snapshot doesn't have, and once that foreground-staged dir ages out of the grace
+        // window the GC would otherwise reap a dir the live library references (Codex #138 r7).
+        // grace-window protected for very recent stages on top of that.
+        let retain = retainedFilterArtifactTokens() + persistedLibraryArtifactTokens()
+        await service.collectWarmArtifactGarbage(
+            containerURL: containerURL,
+            snapshotFilename: LavaSecAppGroup.snapshotFilename,
+            compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename,
+            retaining: retain
+        )
+    }
+
+    // MARK: - Focus auto-switch coordination (LAV-100 Phase 3)
+
+    // `HeadlessFocusSwitchOutcome` was relocated to LavaSecCore with the headless switch engine
+    // (LAV-100 Phase 4). The foreground reconcile + the non-active warm-keep helper below STAY here.
+
+    /// Foreground-only: keep the non-active filters — including the seeded defaults (Core/Balanced/Extra) —
+    /// WARM whenever the app comes to the foreground, so a closed-app Focus switch to any of them can commit
+    /// instantly (warm) instead of deferring to a foreground cold-compile. `reconcileWarmNonActiveFilters` is
+    /// a cheap manifest-only scan that recompiles ONLY filters that are actually cold or stale, so running it
+    /// on every activation is near-free in the steady state (everything already warm ⇒ no work, no writes).
+    /// This complements the existing after-catalog-apply warm pass; together they ensure the defaults are
+    /// warm after install + on every open, not only right after a catalog refresh.
+    func warmNonActiveFiltersOnAppForeground() {
+        guard !isHeadless else { return }
+        Task { await reconcileWarmNonActiveFilters() }
+    }
+
+    /// Publish a lightweight "the app is in the foreground RIGHT NOW" flag to the shared app-group defaults,
+    /// read by the App Intents extension to gate the Focus-switch notification to closed/backgrounded only
+    /// (a foreground app shows the switch in-UI, so a banner would be redundant). Set true on scene .active
+    /// / onAppear, false on .background. NOT the removed `AppForegroundActivityState` switch-defer machinery
+    /// — this has no stale window and never affects a switch; a wrong read just shows/suppresses one banner.
+    func setAppForegroundActive(_ active: Bool) {
+        guard !isHeadless else { return }
+        LavaSecAppGroup.sharedDefaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey)
+    }
+
+    /// Foreground-only: apply any pending Focus switch recorded by the headless path. Run on appear, on
+    /// becoming active, and on the headless wake nudge. The pending-switch marker is the feature's
+    /// correctness guarantee: this is the single place that CLEARS it, and only after confirming the
+    /// target is active (headless committed it) or applying the switch through the normal foreground
+    /// path (which cold-compiles if no warm artifact exists). Compare-and-clear so a newer Focus request
+    /// recorded meanwhile is never dropped.
+    func reconcilePendingFilterSwitch() async {
+        guard !isHeadless else { return }
+        // Re-entrancy guard: the three wake triggers (onAppear, scene .active, Darwin nudge) could
+        // otherwise both read the same marker and launch duplicate switchToFilter attempts (the
+        // replacement gate makes the loser bail, but it still does redundant work). One drives a marker
+        // at a time — but a trigger that arrives while a run is in flight sets pendingReconcileRerun so
+        // the in-flight run loops once more, instead of stranding a newer marker (recorded during a slow
+        // cold-compile apply) until the next scene-phase event (Codex P2).
+        guard !isReconcilingPendingFilterSwitch else {
+            pendingReconcileRerun = true
+            return
+        }
+        isReconcilingPendingFilterSwitch = true
+        defer { isReconcilingPendingFilterSwitch = false }
+        // Bound each SYNCHRONOUS drain to the initial pass + one re-run (mirrors the protection-status refresh
+        // loop's storm guard), so a rapid Focus-toggle burst can't monopolize this run in one unbroken
+        // sequence. Cap at 2 ("loops once more", above — Codex round-16 audit).
+        var remainingReconcilePasses = 2
+        repeat {
+            remainingReconcilePasses -= 1
+            pendingReconcileRerun = false
+            await applyPendingFilterSwitchOnce()
+        } while pendingReconcileRerun && remainingReconcilePasses > 0
+        // Hitting the cap with a re-run STILL queued means a newer marker landed during the final pass and
+        // its Darwin nudge was already consumed by the re-entrancy guard above — so do NOT drop it (that would
+        // strand the newest durable marker, leaving an active foreground app on the previous filter until a
+        // later scene/Focus event). Re-dispatch a FRESH reconcile on the next runloop tick: the defer has reset
+        // the guard by the time it runs, so it re-enters cleanly and drains the queue, while the per-run cap
+        // keeps any single synchronous burst bounded (Codex round-17). Best-effort promptness only — the
+        // durable marker stays the correctness guarantee, so even if the app backgrounds before this Task runs
+        // the next onAppear/.active reconcile applies it.
+        if pendingReconcileRerun {
+            Task { @MainActor [weak self] in await self?.reconcilePendingFilterSwitch() }
+        }
+    }
+
+    /// One pass of the pending-switch reconcile. The wrapper `reconcilePendingFilterSwitch` serializes +
+    /// re-runs this; the early returns here end the PASS, not the loop.
+    private func applyPendingFilterSwitchOnce() async {
+        let defaults = LavaSecAppGroup.sharedDefaults
+        guard let request = PendingFilterSwitchStore.current(in: defaults) else { return }
+
+        // Re-check the SAME fail-closed SECURITY gate the headless record path enforces. Focus auto-switch is
+        // available to all tiers (the Plus paywall was dropped), but a marker recorded while editing was
+        // unprotected must NOT apply if filter editing has since become auth-protected — an unattended switch
+        // would otherwise bypass the auth-to-edit boundary (the record-time gate alone does not survive a gate
+        // change between record and reconcile). Gate now closed ⇒ the request is moot; drop it. Invariant: a
+        // disallowed switch must not happen now or on a later reconcile.
+        guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults) else {
+            PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
+            return
+        }
+
+        // ADOPT a cross-process commit before deciding (LAV-100). The App Intents extension commits the switch
+        // to DISK; a resident app that was SUSPENDED in the background couldn't receive the post-commit Darwin
+        // nudge, so its in-memory (configuration, library) is STALE. Without re-reading disk here, the
+        // already-active check below compares the marker against a stale `activeFilterID`, misses that the
+        // extension already applied the switch WARM on disk, and falls through to `switchToFilter` — which then
+        // cold-compiles (its warm-reuse reads the in-memory `lastCompiledToken`, but the extension stamped the
+        // token on disk) and shows the recompile sheet on return to foreground. Reloading lets the already-active
+        // branch recognize the committed switch and just re-notify+clear (a pointer the tunnel poll already
+        // adopted, or adopts within its interval). GATED so it's a no-op on the common path: only when the
+        // on-disk generation is NEWER than ours (another process wrote since we loaded), and NOT while a user
+        // switch is in flight — that path owns the in-memory state and the reconcile defers to it below.
+        if !isForegroundManualSwitchInFlight,
+           let configurationURL, let filterLibraryURL, let containerURL = LavaSecAppGroup.containerURL,
+           SharedFilterStatePersistence.onDiskConfigurationGeneration(at: configurationURL) > configuration.configurationGeneration {
+            // A newer on-disk commit exists (the App Intents extension wrote config/library while this resident
+            // app was suspended — its post-commit Darwin nudge couldn't reach a suspended run loop). Adopt it
+            // ONLY if the headless commit COMPLETED: the extension flips the artifact pointer LAST, so require
+            // the live pointer to name the on-disk active filter's compiled artifact. If it's mid-commit (the
+            // config-leads-pointer window, which may still roll back via the in-lock catalog/failure path),
+            // DEFER — `return`, do NOT fall through to the switchToFilter path below, which would race the
+            // extension's in-flight commit and cold-recompile (Codex P2). The kept marker + the next reconcile
+            // (the post-flip nudge) adopt it cleanly once it lands; a rollback leaves config+pointer consistent
+            // and the active-change gate below no-ops it.
+            guard let pointerToken = FilterArtifactStore(directoryURL: containerURL).loadArtifactPointer()?.token,
+                  SharedFilterStatePersistence.onDiskActiveFilterCompiledToken(at: filterLibraryURL) == pointerToken
+            else {
+                return
+            }
+            // Re-read disk to adopt the committed switch into the stale in-memory (configuration, library).
+            let previousActiveID = library.activeFilterID
+            // Capture BEFORE the reload (mirrors switchToFilter): whether protection should be re-established.
+            let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
+            loadPersistedConfiguration()
+            // RE-VALIDATE completeness AFTER the reload (closes the check-then-reload TOCTOU, Codex P2): a
+            // back-to-back commit C can land between the pre-check above and this reload, so
+            // loadPersistedConfiguration could pick up an in-flight C whose pointer hasn't flipped. If the
+            // reloaded active filter's artifact is no longer the one the live pointer names, disk is mid-commit
+            // — DEFER (keep the marker, return) so the tail / already-active branch never act on a switch that
+            // may still roll back; a later reconcile re-evaluates once the flip lands. The kept marker + the
+            // next reconcile re-read heal the (transient) in-memory state if that commit rolls back.
+            guard library.filter(id: library.activeFilterID)?.lastCompiledToken
+                    == FilterArtifactStore(directoryURL: containerURL).loadArtifactPointer()?.token else {
+                return
+            }
+            // Only when the adopt ACTUALLY moved the active filter (Codex P2: a bare generation bump that left
+            // the active filter unchanged — the extension's catalog-moved/failed-commit ROLLBACK — must be a
+            // no-op so the rehydration flag isn't set spuriously and left stuck). Run the FULL warm-switch tail
+            // (not a piecemeal patch): without it the already-active branch below would cold-recompile / the
+            // app would consume stale blockRules on an immediate edit (Codex found 4 such gaps on the partial
+            // version). The extension already persisted + flipped the pointer, so this is the TAIL only.
+            if library.activeFilterID != previousActiveID {
+                let adoptToken = configurationReplacementGate.begin()
+                await applyCommittedOnDiskActiveFilter(adoptToken: adoptToken, shouldRestoreProtection: shouldRestoreProtection)
+            }
+        }
+
+        // A foreground switch INITIATED after this Focus request was recorded is the user's newer explicit
+        // choice and wins — drop the stale marker rather than reverting their manual switch. The stamp is
+        // the switch's INITIATION instant (not its completion), so a Focus request that fired DURING a slow
+        // manual switch — i.e. after the user started it — still wins over that switch (Codex round-15).
+        // Exact tie (`<=`): an identical instant intentionally favors the MANUAL switch (the user's explicit
+        // action outranks the automation), and is the safe direction anyway — a wrongly-dropped Focus marker
+        // is re-recorded by the next Focus edge, whereas a wrongly-KEPT one would silently revert the user
+        // (founder review P2-3).
+        if let lastForegroundSwitchAt = PendingFilterSwitchStore.lastForegroundSwitch(in: defaults),
+           request.requestedAt <= lastForegroundSwitchAt {
+            PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
+            return
+        }
+
+        // Target gone or frozen (deleted, or Plus-cap froze it) ⇒ the request is moot; clear it.
+        guard library.filter(id: request.targetFilterID) != nil, !isFilterFrozen(request.targetFilterID) else {
+            PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
+            return
+        }
+        // Already active: a headless immediate commit applied this switch (or a manual switch did). A
+        // headless commit could NOT schedule the encrypted-backup upload (its model never loaded the
+        // backup state), so schedule it here on the foreground — which HAS the backup state loaded — so
+        // an auto-backup user's Focus-driven config change is re-sealed + uploaded rather than waiting
+        // for the next foreground edit (Codex P2). Safe to call even if a concurrent foreground switch to the
+        // same target also schedules: scheduleAutomaticBackupAfterConfigurationChange CANCELS-AND-REPLACES the
+        // single debounced automaticBackupTask and content-gates its re-seal, so overlapping calls coalesce to
+        // one upload rather than double-firing (founder review P2-2). Then clear the (now-applied) marker.
+        guard request.targetFilterID != library.activeFilterID else {
+            scheduleAutomaticBackupAfterConfigurationChange()
+            // Re-notify the tunnel BEFORE clearing: disk shows the target active, but the running tunnel may
+            // still hold the OLD in-memory snapshot if the headless commit's notify was killed (App Intent
+            // terminated after persistSharedState) or swallowed a send error. Clearing without this would
+            // remove the only retry path until an unrelated update / VPN restart (Codex round-10). Idempotent
+            // when the tunnel already has it (a lock-free pointer re-read); a no-op when protection is off.
+            // This brings the already-active branch to parity with the foreground switch path, which always
+            // notifies after a commit; if the notify itself fails, the same reconnect fallback applies.
+            //
+            // We re-notify only (no republish): a *partial* headless commit — process TERMINATED inside
+            // persistSharedState after the config/library pair-write but before the latest.json pointer flip —
+            // is NOT repaired here, and intentionally so. That residual is closed MARKER-INDEPENDENTLY by
+            // reconcileTunnelSnapshotAfterLaunch(), which on every cold launch with protection active
+            // re-prepares the on-disk active filter and re-persists with rewritesRuleArtifacts when the
+            // persisted artifact doesn't match — flipping a stale pointer out of fail-closed (it exists for
+            // exactly this "tunnel fail-closed at launch" class). A Swift task suspended at that await simply
+            // RESUMES and completes the flip (only true termination loses it → next launch is cold → heals),
+            // and the token dir is content-addressed (identical compiled rules ⇒ same dir ⇒ pointer was never
+            // stale). So adding a republish here would churn the frozen warm path for an already-covered,
+            // fail-closed-safe case (Codex round-15 finding B — verified not reachable as a persistent state).
+            await notifyTunnelSnapshotUpdated()
+            PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
+            return
+        }
+        // Do NOT supersede an IN-FLIGHT user-initiated switch (round-18): it claimed the replacement gate
+        // first but hasn't stamped lastForegroundSwitch yet (the stamp lands only on success), so the stale
+        // check above couldn't see it. Applying here would begin a NEWER gate epoch and make the user's
+        // in-flight manual switch bail as superseded — letting this (older) Focus request wrongly win. Defer:
+        // KEEP the marker; that switch's completion re-dispatches a reconcile (switchToFilter's defer), which
+        // re-evaluates with lastForegroundSwitch now stamped — dropping this marker if the manual switch was
+        // newer, or applying it if it is genuinely newer than the manual switch.
+        guard !isForegroundManualSwitchInFlight else {
+            logFocusSwitchEvent("reconcile-deferred-manual-switch-in-flight", details: ["filterID": request.targetFilterID])
+            return
+        }
+        // Apply through the normal foreground switch (puts up the preparation cover, cold-compiles on a
+        // warm miss; for a resident foreground re-syncing an already-committed headless switch it's a fast
+        // warm pointer-flip). stampsForegroundSwitch: false — this is replaying a Focus automation, NOT a
+        // user-initiated switch, so it must not poison the lastForegroundSwitch supersession timestamp and
+        // suppress a newer Focus request recorded during this (possibly slow) apply.
+        // Log every reconcile-driven apply so a transient failure that keeps re-recording (Focus re-fires,
+        // each cold-compile fails) surfaces as a repeating reconcile-apply for the same filter in QA dumps.
+        // switchToFilter shows its own failure screen; the marker is cleared after the attempt either way.
+        logFocusSwitchEvent("reconcile-apply", details: ["filterID": request.targetFilterID])
+        await switchToFilter(id: request.targetFilterID, stampsForegroundSwitch: false)
+        // Clear the marker ONLY if the switch actually took effect. switchToFilter returns Void and LEAVES
+        // the active filter unchanged on a preparation/publish failure (a cold-compile network blip, a
+        // transient catalog miss) while showing its own failure screen. Clearing unconditionally would
+        // silently DROP the user's Focus automation with no retry (Codex round-8). Keeping the marker on
+        // failure lets the next foreground — or a Focus re-fire — retry until it succeeds. (A permanent
+        // failure therefore re-shows the cover each foreground; a visible, actionable degradation, strictly
+        // better than a silent drop, and the failure screen still offers manual retry.) The compare-and-clear
+        // below still protects a NEWER marker recorded during this apply.
+        guard library.activeFilterID == request.targetFilterID else {
+            logFocusSwitchEvent("reconcile-apply-failed-kept-marker", details: ["filterID": request.targetFilterID])
+            return
+        }
+        PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
+    }
+
+    /// Adopt — in the RESIDENT foreground app — a Focus switch the App Intents extension already committed to
+    /// disk (config + library written, artifact pointer flipped) while the app was suspended. This runs the
+    /// post-commit TAIL of a warm switch ONLY: the caller has already `loadPersistedConfiguration()`'d the new
+    /// (config, library) from disk and begun the replacement epoch (`adoptToken`); there is NO prepare/compile,
+    /// NO `persistSharedState` (the extension already persisted + flipped — re-persisting would churn the warm
+    /// path), and NO `lastForegroundSwitch` stamp (this is not a user-initiated foreground switch — stamping
+    /// would wrongly out-rank a genuine later manual switch). It deliberately does NOT touch the preparation UI
+    /// cover or play a haptic — the adopt is SILENT (no recompile sheet), which is the whole point.
+    ///
+    /// Why a shared tail (not a piecemeal patch of the already-active branch): `loadPersistedConfiguration`
+    /// moved config/library, but `blockRules`/`threatGuardrail`/`cachedBlockRuleSets`/sourceStates/counts still
+    /// describe the PREVIOUS filter. Applying the on-disk filter's warm snapshot SYNCHRONOUSLY here sets
+    /// blockRules + the full threatGuardrail in one main-actor pass, eliminating the stale window an immediate
+    /// allowlist/blocklist edit would otherwise serialize into a wrong-rules publish (Codex found 4 such gaps
+    /// closing them one at a time).
+    private func applyCommittedOnDiskActiveFilter(adoptToken: Int, shouldRestoreProtection: Bool) async {
+        let adoptedFilterID = library.activeFilterID
+        // Re-validate the adopted target exists + is switchable (a concurrent edit/delete could have landed).
+        guard let target = library.filter(id: adoptedFilterID), !isFilterFrozen(adoptedFilterID) else { return }
+
+        // Apply the adopted filter's warm snapshot from disk (the extension already published this token's
+        // dir + flipped the pointer to it). Loads by the now-on-disk `lastCompiledToken`. A concurrent newer
+        // switch during the async load supersedes us — bail without clobbering its state.
+        if let reusable = await warmReusableSnapshotForSwitch(target: target, configuration: configuration),
+           configurationReplacementGate.isCurrent(adoptToken),
+           library.activeFilterID == adoptedFilterID {
+            // Guard against a catalog refresh that landed DURING the async warm load: applying a snapshot
+            // validated against the PRE-refresh catalog would roll currentCatalog/blockRules BACK over the
+            // active filter the refresh just rebuilt + published. Mirrors switchToFilter's
+            // catalogMovedDuringPersist check (Codex P2). On a move, skip the apply — the rehydration below
+            // (its syncCatalog fallback) heals to the fresh catalog.
+            let catalogMovedDuringLoad = currentCatalog.map {
+                !reusable.preparedSnapshot.identity.snapshotInputMismatches(
+                    against: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: $0)
+                ).isEmpty
+            } ?? false
+            if !catalogMovedDuringLoad {
+                applyReusablePreparedSnapshot(reusable)
+            }
+        }
+        guard configurationReplacementGate.isCurrent(adoptToken) else { return }
+
+        // The per-source caches (cachedBlockRuleSets) are still the previous filter's even after the snapshot
+        // apply (applyReusablePreparedSnapshot doesn't populate them) — defer in-place edits + rehydrate in the
+        // background, exactly like a warm switchToFilter. applyCatalogSyncResult clears the flag once fresh
+        // caches land; the rehydration's syncCatalog fallback self-heals if the warm load above failed.
+        hasPendingWarmSwitchCacheRehydration = true
+        Task { [weak self] in
+            await self?.rehydrateRuleSetCachesAfterWarmSwitch(switchToken: adoptToken, filterID: adoptedFilterID)
+        }
+
+        // Drop any non-active detail target so the detail accessors fall back to the now-active filter (else
+        // saving its draft would go through the library-only saveNonActiveFilterDraft and never publish).
+        filterEditTargetID = nil
+        pendingSwitchFilterID = nil
+
+        appendAppNetworkActivity(.changeFilters)
+        await notifyTunnelSnapshotUpdated()
+        await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
+        scheduleAutomaticBackupAfterConfigurationChange()
+    }
+
+    // The headless Focus warm-switch orchestration (FocusWarmSwitchCatalogMovedError,
+    // nudgeForegroundReconcile, performHeadlessFocusFilterSwitch, warmSnapshotStillReusableAgainstCachedCatalog)
+    // was relocated to LavaSecCore.HeadlessFocusFilterSwitchEngine (LAV-100 Phase 4) so it can run in the
+    // App Intents extension with no AppViewModel. The foreground reconcile + persist paths below STAY here.
+
+    @discardableResult
     private func persistSharedState(
         preparedSnapshot: PreparedFilterSnapshot? = nil,
         rewritesRuleArtifacts: Bool = true,
-        prioritizesConfigurationDurability: Bool = false
-    ) async throws {
+        prioritizesConfigurationDurability: Bool = false,
+        schedulesAutomaticBackup: Bool = true,
+        // Optional in-lock veto, evaluated immediately BEFORE the artifact pointer flip (inside the held
+        // publish lock). The foreground passes nil — its warm→cold rebind already guarantees a
+        // current-basis snapshot — so its behavior is byte-identical. The headless warm switch passes a
+        // catalog-basis re-check here so a background refresh that committed a newer catalog after the
+        // off-lock revalidation can't be out-raced into flipping a stale-basis warm artifact (Codex round-16).
+        //
+        // SCOPE: commitBeforeFlip is honored ONLY when `didRewriteArtifacts` (below) is true — i.e. it is
+        // co-gated with the artifact pointer FLIP it guards. There is no flip without didRewriteArtifacts, so
+        // the veto's reachability is exactly the flip's: it can never be silently skipped while a flip still
+        // happens. For the headless commit, didRewriteArtifacts is true because the off-lock
+        // `canReuseForProtectionStartup` gate already requires the warm snapshot to COVER the target's enabled
+        // blocklists (so `coversEnabledBlocklists` holds). A caller that relies on the in-lock veto must
+        // therefore also rewrite artifacts (i.e. actually flip); a config-only persist neither flips nor needs
+        // the veto (founder review P2-1).
+        commitBeforeFlip: (@Sendable () throws -> Void)? = nil
+    ) async throws -> FilterSnapshotPreparationService.PublishOutcome {
         guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
@@ -8506,70 +9839,63 @@ final class AppViewModel: ObservableObject {
             library.mutateFilter(id: library.activeFilterID) { $0.lastCompiledToken = token }
         }
 
-        // Advance the supersession token and write configuration.json BEFORE flipping the
-        // artifact pointer, so the on-disk generation already leads any pointer flip a
-        // concurrent background refresh could observe (see AppConfiguration.configurationGeneration).
-        // If the order were reversed, a background writer could take the publish lock after
-        // the foreground flip but before the bump, read the stale generation, and clobber the
-        // foreground's fresh artifacts. The brief window where config leads the pointer is
-        // fail-closed: a reader resolving the pointer then sees an under-covering artifact and
-        // falls back / cold-rebuilds, never serving wrong rules.
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let configurationURL = containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename)
-        advanceConfigurationGeneration()
-        let configurationData = try encoder.encode(configuration)
-        // The library and config are two separate atomic files, NOT a transactional pair — a kill
-        // can land between them. Each library write is stamped with the config generation it is
-        // paired with (persistFilterLibrary), and load rejects a library whose stamp is older than
-        // the config on disk (FilterLibrary.lostWriteRace). That makes BOTH orderings safe, so we
-        // order purely by which side is unreconstructable if a partial write happens:
-        //  • NORMAL edits write the library (source of truth) FIRST.
-        //  • A RESTORE writes the unreconstructable device-global config FIRST, then the library: a
-        //    kill before the config lands leaves the prior config+library intact (a restore that
-        //    never landed can't destroy existing filters — Codex r19); a kill after it lands leaves
-        //    a lower-generation old library that load rejects in favour of the restored config,
-        //    migrating it into one Default filter (Codex r20). No destructive pre-delete needed.
-        // Exactly one physical config write either way (SharedConfigurationWriterInvariant).
-        if !prioritizesConfigurationDurability {
-            try persistFilterLibrary()
+        // Bump the supersession token + write filter-library.json and configuration.json atomically in
+        // the fail-safe order, BEFORE flipping the artifact pointer below (config leads the pointer so a
+        // concurrent background publish reads the already-advanced generation and degrade-aborts; the
+        // brief config-leads-pointer window is fail-closed — a reader sees an under-covering artifact and
+        // cold-rebuilds, never wrong rules). The ordering + generation-token + library-stamp logic lives
+        // in the single shared writer (SharedFilterStatePersistence) so the foreground and the headless
+        // warm switch can never drift; sync the bumped/stamped values back into the published state.
+        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+            configuration: configuration,
+            library: library,
+            configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
+            filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
+            prioritizesConfigurationDurability: prioritizesConfigurationDurability,
+            // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
+            crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
+        )
+        configuration = written.configuration
+        library = written.library
+        // Suppressed for the headless warm switch: that model skips loadAutomaticBackupPreference /
+        // loadEncryptedBackupState, so its isAutomaticBackupEnabled is the default false and touching the
+        // backup envelope here would mishandle it (same hazard as the launch-time persists). The
+        // foreground reconcile re-seals + schedules the upload for the committed change instead.
+        if schedulesAutomaticBackup {
+            scheduleAutomaticBackupAfterConfigurationChange()
         }
-        try configurationData.write(to: configurationURL, options: [.atomic])
-        if prioritizesConfigurationDurability {
-            try persistFilterLibrary()
-        }
-        scheduleAutomaticBackupAfterConfigurationChange()
 
+        // The artifact-publish outcome of the flip below. `.published` for a config-only persist (no flip,
+        // so never superseded); the flip path overwrites it. Surfaced to the foreground switch caller so an
+        // `.abortedSuperseded` (a concurrent cross-process Focus commit won the active-filter race) is treated
+        // as a deferred, non-winning switch rather than a false success (Codex review, lavasec-ios#29).
+        var publishOutcome = FilterSnapshotPreparationService.PublishOutcome.published
         if didRewriteArtifacts {
-            try await persistPreparedSnapshotArtifacts(snapshotToPersist)
+            // Reciprocal flip fence (Codex P1, state-agnostic switch). The cross-process WRITE lock above is
+            // released before persistPreparedSnapshotArtifacts takes the artifact PUBLISH lock, so the App
+            // Intents extension can commit + flip a NEWER switch in that gap. Before flipping our pointer,
+            // confirm the on-disk selection is STILL the filter this staged artifact is for; if a newer write
+            // changed the active filter (a concurrent Focus commit), ABORT the flip rather than overwriting the
+            // newer pointer with our stale-basis artifact — which would leave app-configuration.json selecting
+            // the Focus target while the live pointer named our snapshot. The pending-switch marker then drives
+            // the foreground reconcile to apply the newer selection. The extension's commit has the symmetric
+            // in-flip fence; this closes the reverse interleaving. We compare the ACTIVE FILTER (not the raw
+            // generation) so a concurrent library-only bump that KEPT our filter active (a warm-token promote,
+            // which has no marker to recover an aborted flip) does NOT needlessly abort us. A nil read (just
+            // wrote the library atomically) is treated as not-superseded — never abort on an uncertain read.
+            let flipTargetFilterID = library.activeFilterID
+            let filterLibraryURL = containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename)
+            publishOutcome = try await persistPreparedSnapshotArtifacts(
+                snapshotToPersist,
+                supersededWhileLocked: { @Sendable _ in
+                    guard let onDiskActive = SharedFilterStatePersistence.onDiskActiveFilterID(at: filterLibraryURL)
+                    else { return false }
+                    return onDiskActive != flipTargetFilterID
+                },
+                commitBeforeFlip: commitBeforeFlip
+            )
         }
-    }
-
-    /// Advance the supersession token to a value that has never been used — even across a
-    /// backup restore, which replaces `configuration` with a freshly-decoded value whose
-    /// token defaults to 0. Deriving the next token from the max of the in-memory and the
-    /// live ON-DISK generation means a post-restore save exceeds the newest persisted token
-    /// instead of resetting to 1 (which an in-flight background refresh could already hold as
-    /// its `builtGeneration`, letting it pass the in-lock supersession check and clobber the
-    /// restore). Monotonic ⇒ never repeats. Foreground writes run on the main actor, so this
-    /// read-modify-write is not racy; the background only ever READS the token (under the
-    /// publish lock).
-    private func advanceConfigurationGeneration() {
-        configuration.configurationGeneration = max(configuration.configurationGeneration, onDiskConfigurationGeneration()) &+ 1
-    }
-
-    /// The supersession token currently persisted on disk, or 0 if there is no readable
-    /// configuration yet. Read just before a write to keep `advanceConfigurationGeneration`
-    /// monotonic across an in-memory reset.
-    private func onDiskConfigurationGeneration() -> Int {
-        guard let configurationURL,
-              let data = try? Data(contentsOf: configurationURL),
-              let persisted = try? JSONDecoder().decode(AppConfiguration.self, from: data)
-        else {
-            return 0
-        }
-
-        return persisted.configurationGeneration
+        return publishOutcome
     }
 
     /// Persist the live configuration + library at a freshly-bumped generation.
@@ -8584,25 +9910,25 @@ final class AppViewModel: ObservableObject {
     /// changes only the (backup-stripped) generation, so neither alters backed-up content — the next
     /// real user change re-seals and uploads normally.
     private func persistConfigurationOnly(schedulesAutomaticBackup: Bool = true) throws {
-        guard let configurationURL else {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
 
         syncActiveFilterFromConfiguration()
 
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        // Bump the supersession token (see AppConfiguration.configurationGeneration) so a concurrent
-        // background refresh built against the prior config aborts its flip — BEFORE persisting the
-        // library, so persistFilterLibrary stamps the library with the SAME (new) generation the
-        // config below carries. Otherwise the library would stamp the pre-bump generation and load
-        // would wrongly read it as stale.
-        advanceConfigurationGeneration()
-        // Persist the library (source of truth) BEFORE the config (its derived cache), so a
-        // kill between the two writes is reconciled in the library's favour on next launch.
-        try persistFilterLibrary()
-        let configurationData = try encoder.encode(configuration)
-        try configurationData.write(to: configurationURL, options: [.atomic])
+        // Bump the generation + write library (source of truth) then config, via the single shared
+        // writer (see SharedFilterStatePersistence) so the ordering + generation token can't drift from
+        // persistSharedState / the headless switch. Sync the bumped/stamped values back into state.
+        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+            configuration: configuration,
+            library: library,
+            configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
+            filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
+            // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
+            crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
+        )
+        configuration = written.configuration
+        library = written.library
         if schedulesAutomaticBackup {
             scheduleAutomaticBackupAfterConfigurationChange()
         }
@@ -8639,22 +9965,24 @@ final class AppViewModel: ObservableObject {
         configuration.allowedDomains = active.allowedDomains
     }
 
+    /// Persist a LIBRARY-ONLY edit (rename / delete / create / warm-token promote — no active-filter or
+    /// device-global change). This ADVANCES the shared (config, library) generation via the pair writer.
+    ///
+    /// It MUST bump the generation, not write the library alone at the current generation: the Focus switch
+    /// is now state-agnostic (LAV-100 Phase 4), so the App Intents extension can commit a (config, library)
+    /// pair concurrently while the app is foreground. The extension's stale-reader fence (`rejectsAdvancedBeyond`)
+    /// watches only the on-disk CONFIG generation — so a library write that left the config generation
+    /// unbumped would NOT trip it, and the extension would overwrite this edit with the stale library snapshot
+    /// it loaded before the lock (Codex P1: a just-created filter lost / a just-deleted filter resurrected, made
+    /// permanent if the app is terminated before the resident in-memory library re-persists). Routing through
+    /// `persistConfigurationOnly` bumps the generation so the extension's commit instead fences out
+    /// (`deferred-superseded`); the durable pending-switch marker then re-applies the Focus switch onto THIS
+    /// updated library on the next foreground reconcile. The config file content is unchanged (a library-only
+    /// edit never touches the active filter), so this is purely a generation bump, not a device-global write.
+    /// Backup scheduling stays with the caller (`persistLibraryOnlyChange`), so suppress it here to avoid a
+    /// double schedule.
     private func persistFilterLibrary() throws {
-        guard let filterLibraryURL else {
-            throw LavaSecAppError.appGroupUnavailable
-        }
-        // Stamp the library with the config generation it is being written alongside, so the load
-        // path can reject a library that lost a two-file write race (see FilterLibrary.lostWriteRace
-        // / loadOrMigrateFilterLibrary). Callers bump the generation (advanceConfigurationGeneration)
-        // BEFORE persisting, so the value read here matches the config written in the same operation.
-        // Guard the assignment so an unchanged stamp doesn't churn @Published.
-        if library.configurationGeneration != configuration.configurationGeneration {
-            library.configurationGeneration = configuration.configurationGeneration
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(library)
-        try data.write(to: filterLibraryURL, options: [.atomic])
+        try persistConfigurationOnly(schedulesAutomaticBackup: false)
     }
 
     private func uploadEncryptedBackup(
@@ -8795,6 +10123,27 @@ final class AppViewModel: ObservableObject {
         )
 
         usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true
+
+        // Notification toggles live in the SHARED app-group defaults (the extension + tunnel read them);
+        // mirror them into the @Published properties for the Customization → Notifications section.
+        notifiesFilterChanges = LavaNotificationPreferences.isEnabled(.filterChanged, in: appGroupDefaults)
+        notifiesFilterCouldNotApply = LavaNotificationPreferences.isEnabled(.filterCouldNotApply, in: appGroupDefaults)
+        notifiesConnectivity = LavaNotificationPreferences.isEnabled(.connectivity, in: appGroupDefaults)
+    }
+
+    /// Set a Customization → Notifications category toggle: persist to the shared app-group store (so the
+    /// extension + tunnel see it), update the @Published mirror, and — when ENABLING — request notification
+    /// permission contextually (the user just asked for this kind of alert), mirroring onboarding's request.
+    func setNotificationCategoryEnabled(_ category: LavaNotificationCategory, _ enabled: Bool) {
+        LavaNotificationPreferences.setEnabled(enabled, for: category, in: appGroupDefaults)
+        switch category {
+        case .filterChanged: notifiesFilterChanges = enabled
+        case .filterCouldNotApply: notifiesFilterCouldNotApply = enabled
+        case .connectivity: notifiesConnectivity = enabled
+        }
+        if enabled {
+            Task { _ = await protectionUserNotifications.requestAuthorization() }
+        }
     }
 
     private func loadLavaGuardProgress() {
@@ -9116,12 +10465,18 @@ final class AppViewModel: ObservableObject {
         #if targetEnvironment(simulator)
         return
         #else
+        // Runs on the HEADLESS model too: a Focus warm switch must reload the RUNNING tunnel so the new
+        // filter takes effect in the background — do NOT guard this whole method on !isHeadless (that would
+        // silently defeat the background switch). Only the @Published vpnMessage writes below are guarded,
+        // since they would be dead state on the throwaway headless model (review #5).
         if tunnelManager == nil {
             do {
                 tunnelManager = try await loadExistingTunnelManager()
             } catch {
-                vpnMessage = fallbackMessage
-                vpnMessageIsError = false
+                if !isHeadless {
+                    vpnMessage = fallbackMessage
+                    vpnMessageIsError = false
+                }
                 return
             }
         }
@@ -9162,8 +10517,10 @@ final class AppViewModel: ObservableObject {
             details["status"] = "send-error"
             span.end(details: details)
             #endif
-            vpnMessage = fallbackMessage
-            vpnMessageIsError = false
+            if !isHeadless {
+                vpnMessage = fallbackMessage
+                vpnMessageIsError = false
+            }
         }
         #endif
     }
@@ -9205,12 +10562,51 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    /// Cross-process lock for the pending-Focus-switch marker (LAV-100 Phase 4): the foreground reconcile's
+    /// `clearIfMatches` takes the SAME lock the App Intents extension's `record` does, so an extension record
+    /// can't interleave a clear's read→remove (Codex P2).
+    private var pendingFilterSwitchMarkerLockURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.pendingFilterSwitchMarkerLockFilename)
+    }
+
     private var configurationURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.configurationFilename)
     }
 
     private var filterLibraryURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename)
+    }
+
+    private var backgroundWarmIndexURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.backgroundWarmIndexFilename)
+    }
+
+    /// The sidecar warm-index store, or nil if the App Group container is unavailable. The background
+    /// BGTask is the only writer; the foreground reads it for the switch read-fallback, GC retention,
+    /// and reconcile promotion.
+    private var backgroundWarmIndexStore: BackgroundWarmIndexStore? {
+        backgroundWarmIndexURL.map(BackgroundWarmIndexStore.init(fileURL:))
+    }
+
+    /// The currently persisted sidecar warm-index (empty on a miss). Cheap JSON read; callers that
+    /// need it more than once in a tight scope should snapshot the result.
+    private func loadBackgroundWarmIndex() -> BackgroundWarmIndex {
+        backgroundWarmIndexStore?.load() ?? BackgroundWarmIndex()
+    }
+
+    /// Every `lastCompiledToken` recorded in the CURRENT on-disk `filter-library.json` (empty on a
+    /// miss/decode failure). The headless BGTask loads its in-memory library once at launch, so a
+    /// foreground create/edit/warm during a long background pass writes tokens this process can't see;
+    /// the background GC unions these on-disk tokens into its retain set so it never reaps a directory
+    /// the live library references (Codex #138 r7). Not eligibility-filtered: anything the live library
+    /// names must be retained (over-retaining is safe; under-retaining reaps a referenced dir).
+    private func persistedLibraryArtifactTokens() -> [String] {
+        guard let url = filterLibraryURL,
+              let data = try? Data(contentsOf: url),
+              let persisted = try? JSONDecoder().decode(FilterLibrary.self, from: data) else {
+            return []
+        }
+        return persisted.filters.compactMap(\.lastCompiledToken)
     }
 
     private var diagnosticsURL: URL? {
@@ -9512,3 +10908,9 @@ struct ProtectionStatusChangeWaiter: VPNStatusChangeWaiting {
         await ProtectionStopNotificationWaiter().wait(timeout: timeout)
     }
 }
+
+// The Focus-driven warm filter switch is driven by the App Intents EXTENSION (LavaSecIntents), whose
+// `perform()` calls `FocusSwitchEnvironment.performSwitch` → the shared LavaSecCore
+// `HeadlessFocusFilterSwitchEngine`. perform() runs in the extension even while Lava is closed (WWDC22
+// §10121), so there is no app-target switch entry; the app keeps only the foreground reconcile
+// (`reconcilePendingFilterSwitch`), the manual `switchToFilter`, and the non-active warm-keep helper.

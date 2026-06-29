@@ -191,6 +191,22 @@ enum LavaSpacing {
     static let screenBottom: CGFloat = 96
 }
 
+// MARK: - Typography
+
+/// SwiftUI `Font` tokens for the few places the app needs a specific, non-Dynamic-Type
+/// display face. Body and label text uses the system semantic styles directly
+/// (`.headline`, `.subheadline`, …) so it tracks the user's text-size setting; this
+/// enum is only for genuinely fixed display faces that those styles don't cover.
+///
+/// Portable *numeric* glyph sizes live in `LavaIconSize` (in `LavaSecCore`, so the
+/// widget can share them); these helpers wrap SwiftUI's `Font`, which is app-only.
+enum LavaTypography {
+    /// Large rounded numeral for an overview metric block's headline value (e.g.
+    /// the "blocked today" count). Apply `.monospacedDigit()` at the call site so
+    /// the digits stay column-aligned as the value animates.
+    static let metricNumeral = Font.system(size: 42, weight: .bold, design: .rounded)
+}
+
 // MARK: - Row metrics
 
 /// Shared minimum height for settings / scaffold table rows. Standardizes the

@@ -237,6 +237,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let resolverBackoffStateQueue = DispatchQueue(label: "com.lavasec.tunnel.resolver-backoff", qos: .utility)
     private let pathMonitor = Network.NWPathMonitor()
     private static let resolverSmokeProbeInterval: TimeInterval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+    // How often the always-on tunnel checks for a Focus-committed config change (LAV-100 Phase 4 P4d). A
+    // closed-app Focus switch is enforced within this window; short enough to feel prompt, long enough that
+    // a cheap config-generation read per minute is negligible.
+    private static let focusConfigurationPollInterval: TimeInterval = 60
     // Fast recovery cadence for a same-network resolver wedge. Far shorter than
     // the 300s routine probe: when DNS is failed-closed, the user is offline now,
     // so re-probe (after clearing the backoff penalty box) until it recovers. One
@@ -286,8 +290,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let encryptedFallbackCoverageClearFailureThreshold = 3
     private var resolverSmokeProbeGeneration = 0
     private var resolverSmokeProbeTimer: DispatchSourceTimer?
+    // LAV-100 Phase 4 P4d: dedicated poll that adopts a Focus-committed filter switch made by the App
+    // Intents extension while the app is closed. The extension can't push to the tunnel (sendProviderMessage
+    // is app-only) and a tunnel-side Darwin observer was proven unreliable in the NE extension (0 callbacks /
+    // 14 device probes — see PacketTunnelDNSRuntimeSourceTests), so the always-on tunnel POLLS the on-disk
+    // configuration generation and reloads through the existing path when it advances. dnsStateQueue-confined.
+    private var focusConfigurationPollTimer: DispatchSourceTimer?
+    private var lastObservedConfigurationGeneration = 0
     private var protectionPauseResumeTimer: DispatchSourceTimer?
     private var snapshotReloadGeneration: UInt64 = 0
+    // dnsStateQueue-confined: true while the LATEST-requested snapshot reload is still running. The Focus
+    // config poll checks it and SKIPS a tick rather than calling requestSnapshotReload again — re-requesting
+    // would bump `snapshotReloadGeneration` and invalidate the in-flight load (and reset the DNS runtime), so
+    // a load/compile slower than the poll interval would be restarted forever and never adopt (Codex round 5).
+    // Set at the single reload chokepoint (`nextSnapshotReloadGeneration`), cleared when the load resolves
+    // (generation-gated, so an overlapping newer load keeps ownership) and on an explicit invalidation.
+    private var snapshotReloadInFlight = false
     private var lastAppliedTemporaryProtectionPauseIsActive = false
     // dnsStateQueue-confined: marks the first DNS decision after tunnel start so
     // the "first DNS after start" latency target is measurable end to end.
@@ -579,6 +597,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self.prewarmResolverBootstrapIfNeeded()
             self.scheduleResolverSmokeProbeIfNeeded(reason: "startTunnel")
             self.startPeriodicResolverSmokeProbe()
+            self.startFocusConfigurationPoll()
             self.readPackets()
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "startTunnel-ready")
             #if DEBUG || LAVA_QA_TOOLS
@@ -744,6 +763,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         dotResolver.cancel()
         doqResolver.cancel()
         stopPeriodicResolverSmokeProbe()
+        stopFocusConfigurationPoll()
         cancelProtectionPauseResumeTimer()
         endProtectionVPNSession(reason: reason)
         cancelFallbackRecoverySmokeProbe()
@@ -2210,6 +2230,101 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         resolverSmokeProbeTimer?.cancel()
         resolverSmokeProbeTimer = nil
+    }
+
+    // MARK: - Focus filter switch config poll (LAV-100 Phase 4 P4d)
+
+    /// Start the periodic poll that adopts a Focus-committed filter switch made by the App Intents
+    /// extension while Lava is closed. The extension commits config + library + the artifact-pointer flip
+    /// (that part works headless); this is how the always-on tunnel NOTICES — it reads the on-disk
+    /// configuration generation each tick and reloads through the EXISTING `requestSnapshotReload` entry
+    /// when it advances past the generation the tunnel last loaded. Reliable where a Darwin observer is not
+    /// (the tunnel run loop does not service Darwin notifications when idle). Does NOT touch DNS recovery.
+    private func startFocusConfigurationPoll() {
+        guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
+            dnsStateQueue.async { [weak self] in
+                self?.startFocusConfigurationPoll()
+            }
+            return
+        }
+
+        focusConfigurationPollTimer?.cancel()
+        // Do NOT seed the watermark from disk here: the on-disk generation may already reflect a closed-app
+        // switch the tunnel has NOT yet ADOPTED (config-leads-pointer), and seeding from it would suppress the
+        // retry forever. Leave the watermark at whatever the startup snapshot LOAD adopted — the load advances
+        // it at its adopt point — so the first tick reloads iff the on-disk generation is genuinely ahead of
+        // what we actually adopted (Codex round 5).
+
+        let timer = DispatchSource.makeTimerSource(queue: dnsStateQueue)
+        timer.schedule(
+            deadline: .now() + Self.focusConfigurationPollInterval,
+            repeating: Self.focusConfigurationPollInterval
+        )
+        timer.setEventHandler { [weak self] in
+            self?.reloadSnapshotIfConfigurationGenerationAdvanced()
+        }
+        focusConfigurationPollTimer = timer
+        timer.resume()
+    }
+
+    private func stopFocusConfigurationPoll() {
+        guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
+            dnsStateQueue.async { [weak self] in
+                self?.stopFocusConfigurationPoll()
+            }
+            return
+        }
+
+        focusConfigurationPollTimer?.cancel()
+        focusConfigurationPollTimer = nil
+    }
+
+    /// Advance the Focus config-poll watermark to a generation the tunnel has ADOPTED — either via a full
+    /// snapshot decode or because the resident snapshot already satisfies the reload. Guarded by the live
+    /// reload-generation token (like `replaceSnapshot`) so a superseded load doesn't record. Passive
+    /// bookkeeping only — never touches the recovery/fail-closed flow. A reload that fail-closed never
+    /// reaches an adopt point, so the poll keeps retrying until the flipped artifact is adopted; a successful
+    /// foreground/app-message reload advances it too, so the poll never redundantly reloads after one. (P4d.)
+    private func advanceFocusConfigurationWatermark(toAdoptedGeneration adoptedGeneration: Int, ifCurrentReloadGeneration generation: UInt64) {
+        dnsStateQueue.async { [weak self] in
+            guard let self else { return }
+            // dnsStateQueue-confined invariant (Kilo #29): the watermark advance and the in-flight-marker
+            // clear are both enqueued on dnsStateQueue so they stay strictly FIFO-ordered (the snapshot-reload
+            // correctness relies on it). Assert here so a future refactor that moves this mutation off the
+            // queue trips instead of silently breaking the ordering.
+            dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
+            guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
+            self.lastObservedConfigurationGeneration = max(self.lastObservedConfigurationGeneration, adoptedGeneration)
+        }
+    }
+
+    /// One poll tick (dnsStateQueue): if the on-disk configuration generation advanced past the last one the
+    /// tunnel last ADOPTED, reload the snapshot. `force: true` because a Focus switch changed the published
+    /// artifact + config, not the pause state (the only thing the non-force path acts on). Reuses the same
+    /// reload entry the app's `reload-snapshot` provider message drives.
+    ///
+    /// The watermark (`lastObservedConfigurationGeneration`) is advanced by the snapshot LOAD on a successful
+    /// adopt — NOT here. The extension writes app-configuration.json BEFORE flipping the artifact pointer
+    /// (config-leads-pointer), so a poll can observe the new generation during that window; advancing the
+    /// watermark on mere observation would skip the retry if this reload runs before the flip (loads the old
+    /// pointer / fail-closes). Leaving the watermark to the adopt point means the poll keeps retrying every
+    /// interval until the flipped artifact is actually adopted, and a foreground provider-message reload (which
+    /// also adopts) advances it too, so the poll never redundantly reloads after a foreground switch (Codex P2).
+    ///
+    /// In-flight guard (round 5, Codex): never re-request while the latest reload is still running. Each
+    /// request bumps `snapshotReloadGeneration`, which invalidates the in-flight load (and resets the DNS
+    /// runtime), so a load/compile slower than the poll interval would be restarted forever and never adopt.
+    /// We retry on the NEXT tick after it resolves — preserving the retry-until-adopted behavior (which is what
+    /// correctly picks up the artifact-pointer FLIP in the config-leads-pointer window) without starving a slow
+    /// load. The poll deliberately does NOT permanently bound a non-adopting generation: a same-generation
+    /// pointer flip must still be retried (the extension cannot send a provider reload), so the only cost of a
+    /// genuinely-unadoptable config is one in-flight-gated reload per interval until the generation advances or
+    /// a publish makes it adoptable (Codex round 6).
+    private func reloadSnapshotIfConfigurationGenerationAdvanced() {
+        guard !snapshotReloadInFlight else { return }
+        let onDiskGeneration = loadConfiguration()?.configurationGeneration ?? lastObservedConfigurationGeneration
+        guard onDiskGeneration > lastObservedConfigurationGeneration else { return }
+        requestSnapshotReload(reason: "focus-config-poll", force: true)
     }
 
     private func scheduleFallbackRecoverySmokeProbeIfNeeded() {
@@ -3800,6 +3915,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
         }
 
+        // Customization → Notifications: the "Connection updates" toggle gates only the CREATION of new
+        // reconnect banners — placed AFTER the resolved-banner cleanup above so disabling mid-problem still
+        // clears a stale banner when the network recovers (Codex P2).
+        guard LavaNotificationPreferences.isEnabled(.connectivity, in: defaults) else { return }
+
         // Use the pre-clear `history`: clearResolvedProblemNotifications above wipes
         // the unresolved-problem markers from defaults, but notification(for:)'s
         // escalation / exact-id duplicate-guard logic needs to see the outstanding
@@ -4797,7 +4917,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         snapshotReloadGeneration += 1
+        // A reload is now starting and is the latest. Mark it in flight so the Focus config poll won't bump
+        // the generation out from under it (cleared when this load resolves — see clearSnapshotReloadInFlight).
+        snapshotReloadInFlight = true
         return snapshotReloadGeneration
+    }
+
+    /// Clear the in-flight marker when a load resolves, but ONLY if it is still the latest reload — an
+    /// overlapping newer load (a concurrent app provider-message reload) keeps ownership and clears it itself.
+    /// dnsStateQueue-confined, mirroring the other reload-generation bookkeeping.
+    private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64) {
+        dnsStateQueue.async { [weak self] in
+            guard let self else { return }
+            // dnsStateQueue-confined invariant (Kilo #29): see advanceFocusConfigurationWatermark — the clear
+            // is FIFO-after the watermark advance only because both run on this queue. Assert so an off-queue
+            // refactor trips.
+            dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
+            guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
+            self.snapshotReloadInFlight = false
+        }
     }
 
     private func isCurrentSnapshotReloadGeneration(_ generation: UInt64) -> Bool {
@@ -4819,6 +4957,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         snapshotReloadGeneration += 1
+        // An invalidation abandons any in-flight load (it will be rejected by the generation gate), and no new
+        // load follows — so clear the in-flight marker, else the poll would skip forever waiting on a load that
+        // will never resolve.
+        snapshotReloadInFlight = false
 
         #if DEBUG || LAVA_QA_TOOLS
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "snapshot-reload-invalidated", details: [
@@ -4847,6 +4989,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 #endif
                 return
             }
+            // Clear the in-flight marker once the (expensive) load body finishes via ANY of its returns, so the
+            // poll can fire the next reload. Generation-gated, so a newer overlapping load keeps the marker
+            // (Codex round 5). CORRECTNESS INVARIANT: this clear is `dnsStateQueue.async`, enqueued from `defer`
+            // when the SYNCHRONOUS body returns — therefore strictly FIFO-AFTER the watermark advance the body
+            // already enqueued (advanceFocusConfigurationWatermark). A poll tick that later observes the marker
+            // cleared is dequeued after this clear, hence after that watermark advance, so it never sees a stale
+            // watermark. Do NOT move a watermark advance into a nested async block that could run AFTER this
+            // defer, or that invariant breaks.
+            defer { self.clearSnapshotReloadInFlight(ifCurrentGeneration: generation) }
 
             let startedAt = Date()
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-begin", details: [
@@ -4864,6 +5015,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             if self.residentSnapshotSatisfiesReload(configuration: configuration) {
                 // Resident already satisfies the reload → it is a healthy real snapshot.
                 self.clearResidentFailClosedDueToUnavailableSnapshot(ifCurrentGeneration: generation)
+                // The resident already covers this config ⇒ the tunnel has effectively ADOPTED this
+                // generation, so advance the Focus config-poll watermark here too — otherwise a config-only
+                // / equivalent-filter generation bump would never advance it and the poll would force a
+                // reload (+ DNS-runtime reset) every interval (Codex P2). Same guarded advance as a full adopt.
+                self.advanceFocusConfigurationWatermark(
+                    toAdoptedGeneration: configuration.configurationGeneration,
+                    ifCurrentReloadGeneration: generation
+                )
                 #if DEBUG || LAVA_QA_TOOLS
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-reload-noop", details: [
                     "generation": "\(generation)",
@@ -5051,6 +5210,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 identity: loaded.identity,
                 residentHasEnabledFilters: !configuration.enabledBlocklistIDs.isEmpty,
                 generation: generation
+            )
+
+            // Adopted a full snapshot ⇒ advance the Focus config-poll watermark (LAV-100 Phase 4 P4d).
+            self.advanceFocusConfigurationWatermark(
+                toAdoptedGeneration: configuration.configurationGeneration,
+                ifCurrentReloadGeneration: generation
             )
 
             let duration = Date().timeIntervalSince(startedAt)

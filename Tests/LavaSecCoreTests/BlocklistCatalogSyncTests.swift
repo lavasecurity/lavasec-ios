@@ -918,6 +918,7 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         )
     }
 
+
     func testCatalogFreshnessPolicyKeepsInitialEvaluationWindowFresh() {
         let policy = BlocklistCatalogFreshnessPolicy(maxAge: 7 * 24 * 60 * 60)
 

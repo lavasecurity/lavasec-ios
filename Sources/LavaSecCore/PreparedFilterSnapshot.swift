@@ -30,7 +30,11 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
         self.summary = PreparedFilterSnapshotSummary(
             snapshot: snapshot,
             blocklistRuleCount: decodedSummary?.blocklistRuleCount,
-            blocklistSourceRuleCounts: decodedSummary?.blocklistSourceRuleCounts
+            blocklistSourceRuleCounts: decodedSummary?.blocklistSourceRuleCounts,
+            // Preserve the persisted budget total: like blocklistRuleCount it cannot be re-derived
+            // from the snapshot (it needs the FULL guardrail set), so the snapshot-recomputed summary
+            // would otherwise drop it and a warm reuse would always cold-compile.
+            tierBudgetRuleCount: decodedSummary?.tierBudgetRuleCount
         )
     }
 
@@ -72,6 +76,15 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
     public let blockedDomainRuleCount: Int
     public let allowRuleCount: Int
     public let guardrailRuleCount: Int
+    /// The exact rule total the COLD compile gate budgets against
+    /// (`FilterSnapshotPreparationService.prepare`: merged block rules + the FULL guardrail rule
+    /// set + allowed exceptions + blocked domains). Persisted so a warm-artifact reuse can apply the
+    /// identical tier/device rule-limit gate WITHOUT recompiling — the per-field summary counts
+    /// can't reconstruct it (`blockRuleCount` already folds in blocked domains, and
+    /// `guardrailRuleCount` is only the allowlist-overlap subset, not the full guardrail set).
+    /// Optional so legacy artifacts predating this field decode to `nil`; a reuse path that needs it
+    /// then falls back to a cold compile.
+    public let tierBudgetRuleCount: Int?
 
     private enum CodingKeys: String, CodingKey {
         case blocklistRuleCount
@@ -80,6 +93,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         case blockedDomainRuleCount
         case allowRuleCount
         case guardrailRuleCount
+        case tierBudgetRuleCount
     }
 
     public init(
@@ -88,7 +102,8 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         blockRuleCount: Int,
         blockedDomainRuleCount: Int? = nil,
         allowRuleCount: Int,
-        guardrailRuleCount: Int
+        guardrailRuleCount: Int,
+        tierBudgetRuleCount: Int? = nil
     ) {
         self.blocklistRuleCount = blocklistRuleCount
         self.blocklistSourceRuleCounts = blocklistSourceRuleCounts
@@ -96,6 +111,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         self.blockedDomainRuleCount = blockedDomainRuleCount ?? blockRuleCount
         self.allowRuleCount = allowRuleCount
         self.guardrailRuleCount = guardrailRuleCount
+        self.tierBudgetRuleCount = tierBudgetRuleCount
     }
 
     public init(from decoder: Decoder) throws {
@@ -110,12 +126,14 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
             ?? blockRuleCount
         allowRuleCount = try container.decode(Int.self, forKey: .allowRuleCount)
         guardrailRuleCount = try container.decode(Int.self, forKey: .guardrailRuleCount)
+        tierBudgetRuleCount = try container.decodeIfPresent(Int.self, forKey: .tierBudgetRuleCount)
     }
 
     public init(
         snapshot: FilterSnapshot,
         blocklistRuleCount: Int? = nil,
-        blocklistSourceRuleCounts: [String: Int]? = nil
+        blocklistSourceRuleCounts: [String: Int]? = nil,
+        tierBudgetRuleCount: Int? = nil
     ) {
         self.init(
             blocklistRuleCount: blocklistRuleCount,
@@ -126,7 +144,8 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
                 nonAllowableThreatRules: snapshot.nonAllowableThreatRules
             ),
             allowRuleCount: snapshot.allowRules.count,
-            guardrailRuleCount: snapshot.nonAllowableThreatRules.count
+            guardrailRuleCount: snapshot.nonAllowableThreatRules.count,
+            tierBudgetRuleCount: tierBudgetRuleCount
         )
     }
 

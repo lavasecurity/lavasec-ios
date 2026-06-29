@@ -265,7 +265,7 @@ private struct DiagramEndpoint: View {
     var body: some View {
         VStack(spacing: isCompact ? 4 : 6) {
             Image(systemName: systemImage)
-                .font(.system(size: isCompact ? 25 : 30, weight: .semibold))
+                .font(.system(size: isCompact ? LavaIconSize.endpointCompact : LavaIconSize.endpoint, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: isCompact ? 46 : 54, height: isCompact ? 46 : 54)
                 .background(tint.opacity(0.12), in: Circle())

@@ -577,8 +577,16 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
     public let lastResolverRuntimeResetReason: String?
     public let resolverRuntimeResetCount: Int
     public let lastResolverIdentityChangeAt: Date?
+    /// The most recent Focus-driven switch attempt (LAV-100 Phase 4). Diagnostic-only, privacy-safe; lets a
+    /// closed-app Focus failure be localized on internal TestFlight without a device or the QA device log.
+    public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
 
-    public init(health: TunnelHealthSnapshot, selfReconnectTimes: [Date], now: Date = Date()) {
+    public init(
+        health: TunnelHealthSnapshot,
+        selfReconnectTimes: [Date],
+        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        now: Date = Date()
+    ) {
         // Prune to the tunnel's active attempt window FIRST. The persisted defaults array is
         // only normalized by the tunnel when it evaluates a wedge (TunnelSelfReconnectPolicy),
         // so a report filed after a quiet stretch would otherwise carry self-reconnect timestamps
@@ -604,6 +612,7 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
         self.lastResolverRuntimeResetReason = health.lastResolverRuntimeResetReason
         self.resolverRuntimeResetCount = health.resolverRuntimeResetCount
         self.lastResolverIdentityChangeAt = health.lastResolverIdentityChangeAt
+        self.lastFocusSwitch = lastFocusSwitch
     }
 
     public var selfReconnectCount: Int {
@@ -624,6 +633,10 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             || consecutiveRejectedSmokeResponseCount > 0
             || lastEncryptedFallbackSuccessAt != nil
             || resolverRuntimeResetCount > 0
+            // A closed-app Focus switch can be the ONLY evidence in a report (e.g. it failed/deferred with no
+            // DNS failures or self-reconnects). Count it so `has_incident_summary` is honest and backend triage
+            // keyed off that flag doesn't skip the very diagnostic this surfaces (Codex round 7).
+            || lastFocusSwitch != nil
     }
 
     public var dictionary: [String: Any] {
@@ -658,6 +671,20 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
         }
         Self.set(&body, "last_resolver_identity_change_at", lastResolverIdentityChangeAt)
 
+        if let lastFocusSwitch {
+            var focus: [String: Any] = [
+                "outcome": lastFocusSwitch.outcome,
+                "target_filter_id": lastFocusSwitch.targetFilterID,
+                "at": SharedDateFormatting.iso8601.string(from: lastFocusSwitch.at)
+            ]
+            // The specific branch reason (e.g. "deferred-no-warm-artifact", "committed") — the key signal for
+            // diagnosing a closed-app switch on Release. Omit when empty (a record from an older build).
+            if !lastFocusSwitch.reason.isEmpty {
+                focus["reason"] = lastFocusSwitch.reason
+            }
+            body["focus_last_switch"] = focus
+        }
+
         return body
     }
 
@@ -689,6 +716,9 @@ public struct BugReportBundle: Sendable {
     /// Recent self-reconnect attempt timestamps the tunnel persisted to the shared app group
     /// (read app-side — never touches the tunnel's frozen recovery path). Folded into `incident`.
     public let selfReconnectTimes: [Date]
+    /// The last Focus-driven switch attempt (LAV-100 Phase 4), read app-side from the shared app group.
+    /// Diagnostic-only; folded into `incident`.
+    public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
 
     public init(
         reportID: UUID = UUID(),
@@ -700,7 +730,8 @@ public struct BugReportBundle: Sendable {
         diagnostics: DiagnosticsStore,
         localHistoryEnabled: Bool,
         debugLogEntries: [BugReportDebugLogEntry],
-        selfReconnectTimes: [Date] = []
+        selfReconnectTimes: [Date] = [],
+        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil
     ) {
         self.reportID = reportID
         self.context = context
@@ -712,11 +743,12 @@ public struct BugReportBundle: Sendable {
         self.localHistoryEnabled = localHistoryEnabled
         self.debugLogEntries = debugLogEntries
         self.selfReconnectTimes = selfReconnectTimes
+        self.lastFocusSwitch = lastFocusSwitch
     }
 
     /// The redacted recovery/escalation envelope surfaced in the report (LAV-94 B).
     public var incident: BugReportIncidentSummary {
-        BugReportIncidentSummary(health: vpn.health, selfReconnectTimes: selfReconnectTimes)
+        BugReportIncidentSummary(health: vpn.health, selfReconnectTimes: selfReconnectTimes, lastFocusSwitch: lastFocusSwitch)
     }
 
     public var previewSections: [BugReportPreviewSection] {

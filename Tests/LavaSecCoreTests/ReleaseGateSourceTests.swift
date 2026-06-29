@@ -89,18 +89,20 @@ final class ReleaseGateSourceTests: XCTestCase {
             "1A000001000000000000B102 /* Release */",
             "1A000001000000000000B202 /* Release */",
             "1A000003000000000000B302 /* Release */",
+            "1A0000080000000000B002 /* Release */",
         ]
         let productionDebugConfigurationIDs = [
             "1A000001000000000000B001 /* Debug */",
             "1A000001000000000000B101 /* Debug */",
             "1A000001000000000000B201 /* Debug */",
             "1A000003000000000000B301 /* Debug */",
+            "1A0000080000000000B001 /* Debug */",
         ]
 
         XCTAssertEqual(
             project.components(separatedBy: "SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;").count - 1,
-            4,
-            "Project, app, tunnel, and widget Release configurations should explicitly define RELEASE."
+            5,
+            "Project, app, tunnel, widget, and App Intents extension Release configurations should explicitly define RELEASE."
         )
         XCTAssertTrue(project.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS = \"DEBUG LAVA_QA_TOOLS\";"))
         XCTAssertTrue(project.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;"))

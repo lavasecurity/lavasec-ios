@@ -64,6 +64,7 @@ public actor FilterSnapshotPreparationService {
         customSources: [CustomBlocklistSource],
         catalogFreshnessMaxAge: TimeInterval,
         customListPolicy: CustomBlocklistSyncPolicy = .networkFirst,
+        catalogCacheOnly: Bool = false,
         maxDeviceRuleCount: Int = FilterSnapshotMemoryBudget.maxFilterRuleCount,
         tierRuleLimit: FilterRuleTierLimit? = nil,
         reportProgress: ProgressHandler? = nil,
@@ -91,7 +92,13 @@ public actor FilterSnapshotPreparationService {
         // back to the network; a stale cache prefers the network and falls
         // back to cached payloads.
         let catalogResult: BlocklistCatalogSyncResult
-        if hasFreshCache {
+        if catalogCacheOnly {
+            // Strictly cache-only: NEVER sync. A sync advances latest.json / moves the catalog
+            // cache underneath a concurrent switch's warm-reuse guard (which only skips reuse on
+            // isCatalogSyncInFlight), reintroducing the stale-cache race. A cache miss propagates
+            // so the (best-effort, background) warm caller simply skips this filter.
+            catalogResult = try await synchronizer.loadCached(enabledSourceIDs: enabledIDs)
+        } else if hasFreshCache {
             do {
                 catalogResult = try await synchronizer.loadCached(enabledSourceIDs: enabledIDs)
             } catch {
@@ -217,7 +224,10 @@ public actor FilterSnapshotPreparationService {
                 blocklistSourceRuleCounts: Self.blocklistSourceRuleCounts(
                     enabledSourceIDs: snapshotConfiguration.enabledBlocklistIDs,
                     sourceRuleSets: combinedResult.sourceRuleSets
-                )
+                ),
+                // Persist the exact budget total this gate just evaluated, so a later warm reuse can
+                // apply the identical tier rule-limit check without recompiling (Codex #133 r1).
+                tierBudgetRuleCount: totalRuleCount
             )
         )
         buildSpan?.end(details: ["blockRuleCount": "\(preparedSnapshot.summary.blockRuleCount)"])
@@ -345,6 +355,15 @@ public actor FilterSnapshotPreparationService {
                 // window) by the next successful publish.
                 return .abortedSuperseded
             }
+            // Re-stage UNDER the lock so the pointer never flips to a missing directory. Idempotent:
+            // a no-op when the token dir is present (the common case — a fresh compile staged it
+            // off-lock above, or a warm reuse's dir is still there), but RE-MATERIALIZES it from the
+            // in-memory snapshot if it was reaped while we waited for the lock. This matters for a
+            // warm-artifact REUSE: it points at an OLD directory whose mtime the GC grace window no
+            // longer protects, so a concurrent publisher (not retaining this token) could reap it
+            // between the off-lock stage and this flip. A fresh compile's directory is recent and
+            // grace-protected, so it is never exposed — for it this stays a pure no-op.
+            _ = try artifactStore.stageVersionedArtifacts(preparedSnapshot: preparedSnapshot, writtenAt: writtenAt)
             // Commit any caller-supplied side state (e.g. the background catalog cache's
             // latest.json) ATOMICALLY with the flip: it runs inside the same held lock, only
             // once the supersession check has passed, and BEFORE the pointer moves. A throw
@@ -369,6 +388,63 @@ public actor FilterSnapshotPreparationService {
         case .tryOrAbort:
             return try FilterPublishLock.withTryExclusiveLock(at: publishLockURL, flipUnderLock) ?? .abortedContended
         }
+    }
+
+    /// Compile output for a NON-active filter: write its versioned artifact directory
+    /// (prepared + compact + manifest) WITHOUT flipping the live pointer, taking the
+    /// publish lock, or running GC. The directory is content-addressed and invisible to
+    /// readers until some future publish (a switch) flips to it, so this safely warms a
+    /// filter the tunnel is not currently serving. Returns the staged pointer; its
+    /// `.token` is the filter's `lastCompiledToken`. Off-lock by design — distinct
+    /// filters stage into distinct content-addressed token dirs, and staging never moves
+    /// the pointer or reaps anything; GC is deferred to the next real publish, which
+    /// retains every hosted filter's token. Idempotent: re-staging a complete token
+    /// directory is a no-op that returns the same pointer.
+    @discardableResult
+    public func stageArtifacts(
+        _ preparedSnapshot: PreparedFilterSnapshot,
+        containerURL: URL,
+        snapshotFilename: String,
+        compactSnapshotFilename: String
+    ) throws -> FilterArtifactPointer {
+        // FilterArtifactStore is the single owner of artifact paths, atomic writes, and
+        // the manifest-last ordering — constructed identically to persistArtifacts.
+        let artifactStore = FilterArtifactStore(
+            directoryURL: containerURL,
+            preparedSnapshotFilename: snapshotFilename,
+            compactSnapshotFilename: compactSnapshotFilename
+        )
+        return try artifactStore.stageVersionedArtifacts(
+            preparedSnapshot: preparedSnapshot,
+            writtenAt: Date()
+        )
+    }
+
+    /// Reclaim orphaned versioned artifact directories left by repeated NON-active warms. Each warm
+    /// mints a fresh (`generatedAt`-stamped) token and overwrites the filter's `lastCompiledToken`,
+    /// but `stageArtifacts` never GCs — so without this, repeatedly warming the same filter (e.g.
+    /// several draft saves without ever switching) leaks a full artifact directory apiece until an
+    /// unrelated active publish happens to collect it, breaking the "disk bounded by the filter cap"
+    /// invariant. Retains the supplied hosted-filter tokens PLUS the live pointer's token (the
+    /// tunnel-facing directory, which can differ from any hosted token mid-switch). Grace-window
+    /// protected: a directory staged within the grace interval (e.g. by a concurrent publish about to
+    /// flip to it) is never reaped. Off-lock and best-effort, matching `collectVersionedGarbage`'s
+    /// documented multi-writer model.
+    public func collectWarmArtifactGarbage(
+        containerURL: URL,
+        snapshotFilename: String,
+        compactSnapshotFilename: String,
+        retaining retainedTokens: [String]
+    ) {
+        let artifactStore = FilterArtifactStore(
+            directoryURL: containerURL,
+            preparedSnapshotFilename: snapshotFilename,
+            compactSnapshotFilename: compactSnapshotFilename
+        )
+        let livePointerToken = artifactStore.loadArtifactPointer()?.token
+        artifactStore.collectVersionedGarbage(
+            retaining: ([livePointerToken].compactMap { $0 }) + retainedTokens
+        )
     }
 
     // MARK: - Pure helpers (moved verbatim from AppViewModel)
@@ -454,12 +530,32 @@ public actor FilterSnapshotPreparationService {
         }
 
         var updatedConfiguration = configuration
-        for index in updatedConfiguration.customBlocklists.indices {
-            let sourceID = updatedConfiguration.customBlocklists[index].id
-            if let hash = hashes[sourceID] {
-                updatedConfiguration.customBlocklists[index].lastAcceptedHash = hash
+        updatedConfiguration.customBlocklists = customBlocklists(
+            updatedConfiguration.customBlocklists,
+            applyingHashes: hashes
+        )
+        return updatedConfiguration
+    }
+
+    /// Stamp each custom source's freshly-fetched content hash onto its `lastAcceptedHash`,
+    /// matching by source id. The per-source primitive behind
+    /// ``configuration(_:applyingCustomBlocklistHashes:)``; the warm path applies it to a
+    /// NON-active filter's stored `customBlocklists` so a later switch's warm-reuse gate
+    /// (`customBlocklistFingerprints`) matches the staged artifact instead of cold-compiling.
+    public static func customBlocklists(
+        _ customBlocklists: [CustomBlocklistSource],
+        applyingHashes hashes: [String: String]
+    ) -> [CustomBlocklistSource] {
+        guard !hashes.isEmpty else {
+            return customBlocklists
+        }
+
+        var updated = customBlocklists
+        for index in updated.indices {
+            if let hash = hashes[updated[index].id] {
+                updated[index].lastAcceptedHash = hash
             }
         }
-        return updatedConfiguration
+        return updated
     }
 }
