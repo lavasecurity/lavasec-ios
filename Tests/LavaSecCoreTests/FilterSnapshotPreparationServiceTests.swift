@@ -398,6 +398,62 @@ final class FilterSnapshotPreparationServiceTests: XCTestCase {
         XCTAssertEqual(store.readableStore().directoryURL, versioned.directoryURL)
     }
 
+    func testPersistArtifactsAbortsFlipWhenSupersededWhileLocked() async throws {
+        // Kilo #29 (warm-flip rollback arm): when the in-lock supersession check fires, persistArtifacts must
+        // NOT flip the pointer and must return .abortedSuperseded — nothing is published, so the tunnel is
+        // never pointed at a snapshot built from a superseded basis.
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration, customSources: [], catalogFreshnessMaxAge: 3_600)
+        let container = try Fixture.makeTemporaryDirectory()
+
+        let outcome = try await service.persistArtifacts(
+            result.snapshot,
+            containerURL: container,
+            snapshotFilename: "filter-snapshot.json",
+            compactSnapshotFilename: "filter-snapshot.compact",
+            supersededWhileLocked: { _ in true }
+        )
+
+        guard case .abortedSuperseded = outcome else {
+            return XCTFail("Expected .abortedSuperseded, got \(outcome)")
+        }
+        XCTAssertNil(
+            FilterArtifactStore(directoryURL: container).loadArtifactPointer(),
+            "An aborted (superseded) flip must publish no pointer."
+        )
+    }
+
+    func testPersistArtifactsDoesNotFlipWhenCommitBeforeFlipVetoes() async throws {
+        // Kilo #29 (warm-flip rollback arm): a commitBeforeFlip veto (e.g. the caller detects its catalog
+        // basis moved) throws BEFORE the pointer moves, so the publish leaves no pointer — config-leads-pointer
+        // stays fail-closed.
+        struct VetoError: Error {}
+        let fixture = try Fixture(payloadText: payloadText)
+        let service = fixture.fetchingService()
+        let result = try await service.prepare(
+            configuration: fixture.configuration, customSources: [], catalogFreshnessMaxAge: 3_600)
+        let container = try Fixture.makeTemporaryDirectory()
+
+        do {
+            _ = try await service.persistArtifacts(
+                result.snapshot,
+                containerURL: container,
+                snapshotFilename: "filter-snapshot.json",
+                compactSnapshotFilename: "filter-snapshot.compact",
+                commitBeforeFlip: { throw VetoError() }
+            )
+            XCTFail("A commitBeforeFlip veto must propagate as a throw.")
+        } catch is VetoError {
+            // expected
+        }
+        XCTAssertNil(
+            FilterArtifactStore(directoryURL: container).loadArtifactPointer(),
+            "A vetoed commitBeforeFlip must publish no pointer."
+        )
+    }
+
     func testPersistArtifactsPreservesPreExistingLegacyRootAsPassiveFallback() async throws {
         let fixture = try Fixture(payloadText: payloadText)
         let service = fixture.fetchingService()

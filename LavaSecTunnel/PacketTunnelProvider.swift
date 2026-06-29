@@ -2287,7 +2287,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// foreground/app-message reload advances it too, so the poll never redundantly reloads after one. (P4d.)
     private func advanceFocusConfigurationWatermark(toAdoptedGeneration adoptedGeneration: Int, ifCurrentReloadGeneration generation: UInt64) {
         dnsStateQueue.async { [weak self] in
-            guard let self, self.isCurrentSnapshotReloadGeneration(generation) else { return }
+            guard let self else { return }
+            // dnsStateQueue-confined invariant (Kilo #29): the watermark advance and the in-flight-marker
+            // clear are both enqueued on dnsStateQueue so they stay strictly FIFO-ordered (the snapshot-reload
+            // correctness relies on it). Assert here so a future refactor that moves this mutation off the
+            // queue trips instead of silently breaking the ordering.
+            dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
+            guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
             self.lastObservedConfigurationGeneration = max(self.lastObservedConfigurationGeneration, adoptedGeneration)
         }
     }
@@ -4922,7 +4928,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// dnsStateQueue-confined, mirroring the other reload-generation bookkeeping.
     private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64) {
         dnsStateQueue.async { [weak self] in
-            guard let self, self.isCurrentSnapshotReloadGeneration(generation) else { return }
+            guard let self else { return }
+            // dnsStateQueue-confined invariant (Kilo #29): see advanceFocusConfigurationWatermark — the clear
+            // is FIFO-after the watermark advance only because both run on this queue. Assert so an off-queue
+            // refactor trips.
+            dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
+            guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
             self.snapshotReloadInFlight = false
         }
     }

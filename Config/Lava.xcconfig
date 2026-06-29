@@ -28,6 +28,7 @@ DEVELOPMENT_TEAM =
 LAVASEC_APP_PROFILE =
 LAVASEC_TUNNEL_PROFILE =
 LAVASEC_WIDGET_PROFILE =
+LAVASEC_INTENTS_PROFILE =
 
 // ---- Supabase (optional: account login / encrypted backup) ----
 LAVA_SUPABASE_URL =

@@ -7911,7 +7911,7 @@ final class AppViewModel: ObservableObject {
                     configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus)
                     // Rule artifacts were already persisted (or validly reused)
                     // above; only the configuration state changed here.
-                    try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
+                    _ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
                     #if DEBUG || LAVA_QA_TOOLS
                     logVPNDebugEvent("enable-start-wait-timeout", details: [
                         "vpnStatus": vpnStatusDebugDescription(vpnStatus)
@@ -7951,7 +7951,7 @@ final class AppViewModel: ObservableObject {
             // for notifications as a side effect — doing so surfaced the system
             // dialog at the wrong moment (e.g. during onboarding before the
             // notifications step, or on auto-restore at launch).
-            try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
+            _ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
             vpnMessage = nil
             vpnMessageIsError = false
             scheduleBackgroundCustomBlocklistRefresh()

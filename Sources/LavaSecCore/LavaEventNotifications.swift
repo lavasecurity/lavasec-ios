@@ -78,7 +78,10 @@ public enum LavaEventNotificationPoster {
         case .authorized, .provisional, .ephemeral:
             break
         case .notDetermined, .denied:
-            // Never request from a background event post; the app's contextual flow owns the prompt.
+            // Never request authorization from a background event post — the app's contextual foreground
+            // flow (onboarding) owns the prompt. This keeps the poster safe to call from the App Intents
+            // extension / tunnel and resilient to Apple tightening background-extension notification policy
+            // (Kilo #29): we only ADD a request when already authorized/provisional/ephemeral, never prompt.
             return false
         @unknown default:
             return false

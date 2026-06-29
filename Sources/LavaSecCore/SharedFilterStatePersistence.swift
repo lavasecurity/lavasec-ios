@@ -27,6 +27,15 @@ import Foundation
 /// the "no two writers read the same generation, no interleave" guarantee. `nil` (tests / a caller with no
 /// container) degrades to the in-process-only behavior. The tunnel only READS the pair. The lock now adds
 /// mutual exclusion; RECENCY still comes from the monotonic generation bump (read under the same lock).
+///
+/// LOCK ORDERING (Kilo #29): a Focus/App Intents commit acquires locks in this strict order —
+/// `focusSwitchLock` (HeadlessFocusFilterSwitchEngine.withFocusSwitchLock) → the cross-process
+/// configuration-write flock (`crossProcessLockURL`, taken here in `writeConfigurationAndLibrary`) →
+/// the artifact `publishLock` (FilterPublishLock, taken in `FilterSnapshotPreparationService.persistArtifacts`).
+/// The FOREGROUND publisher takes only the latter two and NEVER `focusSwitchLock`, so the two contexts
+/// can't form a cycle and there is no deadlock today. Any future change that makes a holder of a LATER
+/// lock acquire an EARLIER one (e.g. taking `focusSwitchLock` while holding the write flock or publish
+/// lock) would introduce a lock-order inversion — preserve the order above.
 public enum SharedFilterStatePersistence {
     /// Bump `configuration.configurationGeneration` to one past the max of its current value and the
     /// on-disk value (monotonic across an in-memory reset / a backup restore — see
