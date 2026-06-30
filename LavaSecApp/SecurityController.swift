@@ -187,10 +187,10 @@ final class SecurityController: ObservableObject {
         if isPasscodeEnabled {
             return isBiometricEnabled
                 ? "Passcode and %@".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
-                : "Passcode on"
+                : "Passcode on".lavaLocalized
         }
 
-        return "Passcode off"
+        return "Passcode off".lavaLocalized
     }
 
     func isProtected(_ surface: SecurityProtectedSurface) -> Bool {
