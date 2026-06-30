@@ -78,7 +78,7 @@ const sitePatterns = [
 // AppIntents metadata resolves from the registering app target -> validate against the app catalog.
 const appIntentsPatterns = [
   `\\bLocalizedStringResource\\(\\s*${L}`, `\\bLocalizedStringResource\\s*=\\s*${L}`,
-  `\\bIntentDescription\\(\\s*${L}`,
+  `\\bIntentDescription\\(\\s*${L}`, `\\bDisplayRepresentation\\(\\s*title:\\s*${L}`,
 ].map((p) => new RegExp(p, "g"));
 // `Summary("…")` (AppIntents ParameterSummary) is bundle-scoped to LavaSecIntents and carries a
 // parameter KeyPath interpolation `\(\.$name)`, which appintentsmetadataprocessor lowers to the
