@@ -388,7 +388,12 @@ public struct DiagnosticsStore: Codable, Sendable {
         //
         // Still prune expired fine-grained history before returning, so the 7-day retention
         // holds even during a fail-closed-only stretch (the early return must NOT bypass the
-        // prune below), and report whether the prune actually removed anything.
+        // prune below). The returned Bool reports only THIS call's mutation — the prune.
+        // A day-rollover is NOT performed here: callers run `resetForCurrentDayIfNeeded`
+        // (which returns its own rollover flag) before `record`, so the caller already
+        // OR-combines rollover + this prune result when deciding to persist. Hence returning
+        // just the prune result (false when nothing expired) is the correct signal for "no
+        // real block was recorded" without double-counting the rollover.
         if decision.reason == .protectionUnavailable {
             return keepDomainHistory ? pruneExpiredEvents(now: Date()) : false
         }
