@@ -19,3 +19,46 @@
 "widget.action.restart" = "Restart";
 "widget.action.pauseForMinutes" = "Pause for %d min";
 "a11y.shieldGuardian" = "Lava shield guardian";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ is already in your blocked domains.";
+"core.domainError.alreadyAllowed" = "%@ is already in your allowed exceptions.";
+"core.domainError.blockedLimit" = "You can keep up to %lld additional blocked domains.";
+"core.domainError.allowedLimit" = "You can keep up to %lld allowed exceptions.";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "Enter one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or DNS stamp.";
+"core.resolver.unsupported" = "Use one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or sdns:// DNS stamp.";
+"core.resolver.doqUnsupported" = "DNS over QUIC is not supported on this device.";
+"core.resolver.badStamp" = "DNS stamp could not be read. Check the stamp and try again.";
+"core.resolver.missingDoHPath" = "DNS-over-HTTPS URLs must include a path, such as /dns-query.";
+"core.resolver.credentialsNotAllowed" = "Custom DNS URLs cannot include usernames or passwords.";
+"core.resolver.secondaryTransportMismatch" = "Secondary DNS must use the same transport as Primary DNS.";
+"core.endpoint.credentialsNotAllowed" = "URLs with usernames or passwords are not supported.";
+"core.endpoint.localhostNotAllowed" = "Localhost cannot be used as a DNS resolver here.";
+"core.endpoint.privateNetworkNotAllowed" = "Custom blocklist URLs must use a public host.";
+"core.endpoint.unusableResolverAddress" = "Enter a usable DNS resolver address, not a loopback, multicast, or unspecified address.";
+"core.endpoint.invalidResolverHost" = "Enter a valid DNS resolver host.";
+"core.customBlocklist.invalidURL" = "Enter a valid blocklist URL.";
+"core.customBlocklist.unsupportedScheme" = "Custom blocklists must use HTTPS.";
+"core.customBlocklist.missingHost" = "Custom blocklist URL must include a host.";
+"core.customBlocklist.privateNetworkHost" = "Custom blocklist URLs must use a public host.";
+"core.customBlocklist.credentialsNotAllowed" = "Custom blocklist URLs cannot include usernames or passwords.";
+"core.domain.empty" = "Domain is empty.";
+"core.domain.tooLong" = "Domain is too long.";
+"core.domain.needsTwoLabels" = "Enter a full domain, such as example.com.";
+"core.domain.invalidLabel" = "Invalid domain label: %@";
+"core.domain.ipNotAllowed" = "IP addresses are not supported here.";
+"core.filterBudget.exceedsDeviceMemory" = "This selection needs about %1$@ filter rules, more than your device can hold (%2$@). Remove a list to turn on protection.";
+"core.filterBudget.exceedsTierLimit" = "Your blocklists use about %1$@ of %2$@ filter rules. %3$@";
+"core.filterBudget.action.remove" = "Remove a list to turn on protection.";
+"core.filterBudget.action.removeOrUpgrade" = "Remove a list or upgrade to Plus.";
+"core.filterBudget.largestSuffix" = " Largest: %@.";
+"core.catalogSync.invalidBlocklistEncoding" = "The downloaded blocklist for %@ is not valid UTF-8.";
+"core.catalogSync.blocklistTooLarge" = "The downloaded blocklist for %1$@ is too large (%2$lld bytes).";
+"core.catalogSync.blocklistExceedsRuleLimit" = "The blocklist for %1$@ has more than %2$lld rules. Reduce its size or remove it.";
+"core.catalogSync.noRulesAvailable" = "No enabled downloaded filters are available yet.";
+"core.catalogSync.customBlocklistUnavailable" = "Couldn’t load the custom blocklist “%1$@”. %2$@";
+"core.domainError.freeBlockedLimit" = "Free protection includes %lld additional blocked domains.";
+"core.domainError.freeAllowedLimit" = "Free protection includes %lld allowed exceptions.";
+"core.backup.lastUploaded" = "Last uploaded %@";

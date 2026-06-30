@@ -19,3 +19,46 @@
 "widget.action.restart" = "重新啟動";
 "widget.action.pauseForMinutes" = "暫停 %d 分鐘";
 "a11y.shieldGuardian" = "Lava 護盾守衛";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ 已在你的封鎖網域中。";
+"core.domainError.alreadyAllowed" = "%@ 已在你的允許例外中。";
+"core.domainError.blockedLimit" = "你最多可以再保留 %lld 個封鎖網域。";
+"core.domainError.allowedLimit" = "你最多可以保留 %lld 個允許例外。";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "輸入一個 IPv4/6 DNS 伺服器、DoH 網址、DoT 網址、DoQ 網址或 DNS stamp。";
+"core.resolver.unsupported" = "使用一個 IPv4/6 DNS 伺服器、DoH 網址、DoT 網址、DoQ 網址或 sdns:// DNS stamp。";
+"core.resolver.doqUnsupported" = "此裝置不支援 DNS over QUIC。";
+"core.resolver.badStamp" = "無法讀取 DNS stamp。請檢查 stamp 後再試一次。";
+"core.resolver.missingDoHPath" = "DNS-over-HTTPS 網址必須包含路徑，例如 /dns-query。";
+"core.resolver.credentialsNotAllowed" = "自訂 DNS 網址不可包含使用者名稱或密碼。";
+"core.resolver.secondaryTransportMismatch" = "次要 DNS 必須與主要 DNS 使用相同的傳輸方式。";
+"core.endpoint.credentialsNotAllowed" = "不支援含使用者名稱或密碼的網址。";
+"core.endpoint.localhostNotAllowed" = "此處無法使用 localhost 作為 DNS 解析器。";
+"core.endpoint.privateNetworkNotAllowed" = "自訂封鎖清單網址必須使用公開主機。";
+"core.endpoint.unusableResolverAddress" = "請輸入可用的 DNS 解析器位址，不可為迴路、多點傳送或未指定位址。";
+"core.endpoint.invalidResolverHost" = "請輸入有效的 DNS 解析器主機。";
+"core.customBlocklist.invalidURL" = "請輸入有效的封鎖清單網址。";
+"core.customBlocklist.unsupportedScheme" = "自訂封鎖清單必須使用 HTTPS。";
+"core.customBlocklist.missingHost" = "自訂封鎖清單網址必須包含主機。";
+"core.customBlocklist.privateNetworkHost" = "自訂封鎖清單網址必須使用公開主機。";
+"core.customBlocklist.credentialsNotAllowed" = "自訂封鎖清單網址不可包含使用者名稱或密碼。";
+"core.domain.empty" = "網域是空白的。";
+"core.domain.tooLong" = "網域太長。";
+"core.domain.needsTwoLabels" = "請輸入完整網域，例如 example.com。";
+"core.domain.invalidLabel" = "無效的網域標籤：%@";
+"core.domain.ipNotAllowed" = "此處不支援 IP 位址。";
+"core.filterBudget.exceedsDeviceMemory" = "此選項約需 %1$@ 條過濾規則，超過你裝置可容納的數量（%2$@）。請移除一份清單以開啟保護。";
+"core.filterBudget.exceedsTierLimit" = "你的封鎖清單已使用約 %1$@／%2$@ 條過濾規則。%3$@";
+"core.filterBudget.action.remove" = "請移除一份清單以開啟保護。";
+"core.filterBudget.action.removeOrUpgrade" = "請移除一份清單，或升級至 Plus。";
+"core.filterBudget.largestSuffix" = " 最大：%@。";
+"core.catalogSync.invalidBlocklistEncoding" = "為 %@ 下載的封鎖清單不是有效的 UTF-8。";
+"core.catalogSync.blocklistTooLarge" = "為 %1$@ 下載的封鎖清單太大（%2$lld 個位元組）。";
+"core.catalogSync.blocklistExceedsRuleLimit" = "%1$@ 的封鎖清單超過 %2$lld 條規則。請縮減其大小或將其移除。";
+"core.catalogSync.noRulesAvailable" = "目前尚無已啟用的已下載過濾器可用。";
+"core.catalogSync.customBlocklistUnavailable" = "無法載入自訂封鎖清單「%1$@」。%2$@";
+"core.domainError.freeBlockedLimit" = "免費保護包含 %lld 個額外封鎖的網域。";
+"core.domainError.freeAllowedLimit" = "免費保護包含 %lld 個允許的例外。";
+"core.backup.lastUploaded" = "上次上傳於 %@";

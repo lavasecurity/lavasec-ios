@@ -19,3 +19,46 @@
 "widget.action.restart" = "再起動";
 "widget.action.pauseForMinutes" = "%d 分間一時停止";
 "a11y.shieldGuardian" = "Lava シールドガーディアン";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ はすでにブロック中のドメインにあります。";
+"core.domainError.alreadyAllowed" = "%@ はすでに許可された例外にあります。";
+"core.domainError.blockedLimit" = "ブロックするドメインは追加で最大 %lld 件まで保持できます。";
+"core.domainError.allowedLimit" = "許可する例外は最大 %lld 件まで保持できます。";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "IPv4/6のDNSサーバー、DoH URL、DoT URL、DoQ URL、またはDNSスタンプを1つ入力してください。";
+"core.resolver.unsupported" = "IPv4/6のDNSサーバー、DoH URL、DoT URL、DoQ URL、またはsdns://のDNSスタンプを1つ使用してください。";
+"core.resolver.doqUnsupported" = "このデバイスではDNS over QUICはサポートされていません。";
+"core.resolver.badStamp" = "DNSスタンプを読み込めませんでした。スタンプを確認してもう一度お試しください。";
+"core.resolver.missingDoHPath" = "DNS-over-HTTPSのURLには/dns-queryなどのパスを含める必要があります。";
+"core.resolver.credentialsNotAllowed" = "カスタムDNSのURLにユーザー名やパスワードを含めることはできません。";
+"core.resolver.secondaryTransportMismatch" = "セカンダリDNSはプライマリDNSと同じトランスポートを使用する必要があります。";
+"core.endpoint.credentialsNotAllowed" = "ユーザー名やパスワードを含むURLはサポートされていません。";
+"core.endpoint.localhostNotAllowed" = "ここではlocalhostをDNSリゾルバとして使用できません。";
+"core.endpoint.privateNetworkNotAllowed" = "カスタムブロックリストのURLには公開ホストを使用する必要があります。";
+"core.endpoint.unusableResolverAddress" = "ループバック、マルチキャスト、または不特定のアドレスではなく、使用可能なDNSリゾルバのアドレスを入力してください。";
+"core.endpoint.invalidResolverHost" = "有効なDNSリゾルバのホストを入力してください。";
+"core.customBlocklist.invalidURL" = "有効なブロックリストのURLを入力してください。";
+"core.customBlocklist.unsupportedScheme" = "カスタムブロックリストにはHTTPSを使用する必要があります。";
+"core.customBlocklist.missingHost" = "カスタムブロックリストのURLにはホストを含める必要があります。";
+"core.customBlocklist.privateNetworkHost" = "カスタムブロックリストのURLには公開ホストを使用する必要があります。";
+"core.customBlocklist.credentialsNotAllowed" = "カスタムブロックリストのURLにユーザー名やパスワードを含めることはできません。";
+"core.domain.empty" = "ドメインが空です。";
+"core.domain.tooLong" = "ドメインが長すぎます。";
+"core.domain.needsTwoLabels" = "example.comのような完全なドメインを入力してください。";
+"core.domain.invalidLabel" = "無効なドメインラベル：%@";
+"core.domain.ipNotAllowed" = "ここではIPアドレスはサポートされていません。";
+"core.filterBudget.exceedsDeviceMemory" = "この選択には約%1$@件のフィルタルールが必要で、デバイスが保持できる上限（%2$@）を超えています。リストを削除して保護をオンにしてください。";
+"core.filterBudget.exceedsTierLimit" = "ブロックリストはフィルタルール%2$@件のうち約%1$@件を使用しています。%3$@";
+"core.filterBudget.action.remove" = "リストを削除して保護をオンにしてください。";
+"core.filterBudget.action.removeOrUpgrade" = "リストを削除するか、Plusにアップグレードしてください。";
+"core.filterBudget.largestSuffix" = " 最大：%@。";
+"core.catalogSync.invalidBlocklistEncoding" = "ダウンロードした%@のブロックリストは有効なUTF-8ではありません。";
+"core.catalogSync.blocklistTooLarge" = "ダウンロードした%1$@のブロックリストが大きすぎます（%2$lldバイト）。";
+"core.catalogSync.blocklistExceedsRuleLimit" = "%1$@のブロックリストに%2$lld件を超えるルールがあります。サイズを減らすか、削除してください。";
+"core.catalogSync.noRulesAvailable" = "有効なダウンロード済みフィルタはまだありません。";
+"core.catalogSync.customBlocklistUnavailable" = "カスタムブロックリスト「%1$@」を読み込めませんでした。%2$@";
+"core.domainError.freeBlockedLimit" = "無料の保護には、追加でブロックできるドメインが%lld件含まれています。";
+"core.domainError.freeAllowedLimit" = "無料の保護には、許可する例外が%lld件含まれています。";
+"core.backup.lastUploaded" = "最終アップロード：%@";

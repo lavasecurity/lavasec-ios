@@ -129,7 +129,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(rootBlock.contains("route: .customization"))
         XCTAssertTrue(rootBlock.contains("systemImage: \"slider.horizontal.3\""))
         XCTAssertTrue(rootBlock.contains("title: \"Customization\""))
-        XCTAssertTrue(rootBlock.contains("summary: viewModel.customizationSummaryText"))
+        XCTAssertTrue(rootBlock.contains("summary: \"Make Lava Security yours\""))
 
         let upgradeIndex = try XCTUnwrap(rootBlock.range(of: "title: \"Upgrade\"")?.lowerBound)
         let customizationIndex = try XCTUnwrap(rootBlock.range(of: "title: \"Customization\"")?.lowerBound)
@@ -216,7 +216,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("showsDescription: !availability.isRevealed"))
         XCTAssertTrue(customizationBlock.contains("\"Progress is off in Privacy & Data\""))
         XCTAssertTrue(customizationBlock.contains("guard showsProgressDetail else"))
-        XCTAssertTrue(customizationBlock.contains("\"Currently at: \\(currentDays) days\""))
+        XCTAssertTrue(customizationBlock.contains("\"Currently at: %d days\""))
         XCTAssertFalse(customizationBlock.contains("\"Current progress: \\(currentDays) days\""))
         XCTAssertFalse(customizationBlock.contains("\"\\(currentDays)/\\(progress.requiredUsageDays) days - \\(remainingText) to unlock\""))
         XCTAssertTrue(customizationBlock.contains("MaskedLavaGuardIcon(size: LavaGuardLookRowMetrics.mascotSize)"))

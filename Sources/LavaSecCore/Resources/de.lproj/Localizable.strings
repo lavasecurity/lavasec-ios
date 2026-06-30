@@ -19,3 +19,46 @@
 "widget.action.restart" = "Neu starten";
 "widget.action.pauseForMinutes" = "Für %d Min. pausieren";
 "a11y.shieldGuardian" = "Lava-Schildwächter";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ ist bereits in deinen blockierten Domains.";
+"core.domainError.alreadyAllowed" = "%@ ist bereits in deinen erlaubten Ausnahmen.";
+"core.domainError.blockedLimit" = "Du kannst bis zu %lld weitere blockierte Domains behalten.";
+"core.domainError.allowedLimit" = "Du kannst bis zu %lld erlaubte Ausnahmen behalten.";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "Gib einen IPv4/6-DNS-Server, eine DoH-URL, DoT-URL, DoQ-URL oder einen DNS-Stamp ein.";
+"core.resolver.unsupported" = "Verwende einen IPv4/6-DNS-Server, eine DoH-URL, DoT-URL, DoQ-URL oder einen sdns://-DNS-Stamp.";
+"core.resolver.doqUnsupported" = "DNS over QUIC wird auf diesem Gerät nicht unterstützt.";
+"core.resolver.badStamp" = "Der DNS-Stamp konnte nicht gelesen werden. Überprüfe den Stamp und versuche es erneut.";
+"core.resolver.missingDoHPath" = "DNS-over-HTTPS-URLs müssen einen Pfad enthalten, z. B. /dns-query.";
+"core.resolver.credentialsNotAllowed" = "Eigene DNS-URLs dürfen keine Benutzernamen oder Passwörter enthalten.";
+"core.resolver.secondaryTransportMismatch" = "Das sekundäre DNS muss denselben Transport wie das primäre DNS verwenden.";
+"core.endpoint.credentialsNotAllowed" = "URLs mit Benutzernamen oder Passwörtern werden nicht unterstützt.";
+"core.endpoint.localhostNotAllowed" = "Localhost kann hier nicht als DNS-Resolver verwendet werden.";
+"core.endpoint.privateNetworkNotAllowed" = "Eigene Sperrlisten-URLs müssen einen öffentlichen Host verwenden.";
+"core.endpoint.unusableResolverAddress" = "Gib eine nutzbare DNS-Resolver-Adresse ein, keine Loopback-, Multicast- oder nicht spezifizierte Adresse.";
+"core.endpoint.invalidResolverHost" = "Gib einen gültigen DNS-Resolver-Host ein.";
+"core.customBlocklist.invalidURL" = "Gib eine gültige Sperrlisten-URL ein.";
+"core.customBlocklist.unsupportedScheme" = "Eigene Sperrlisten müssen HTTPS verwenden.";
+"core.customBlocklist.missingHost" = "Die eigene Sperrlisten-URL muss einen Host enthalten.";
+"core.customBlocklist.privateNetworkHost" = "Eigene Sperrlisten-URLs müssen einen öffentlichen Host verwenden.";
+"core.customBlocklist.credentialsNotAllowed" = "Eigene Sperrlisten-URLs dürfen keine Benutzernamen oder Passwörter enthalten.";
+"core.domain.empty" = "Die Domain ist leer.";
+"core.domain.tooLong" = "Die Domain ist zu lang.";
+"core.domain.needsTwoLabels" = "Gib eine vollständige Domain ein, z. B. example.com.";
+"core.domain.invalidLabel" = "Ungültiges Domain-Label: %@";
+"core.domain.ipNotAllowed" = "IP-Adressen werden hier nicht unterstützt.";
+"core.filterBudget.exceedsDeviceMemory" = "Diese Auswahl benötigt etwa %1$@ Filterregeln, mehr als dein Gerät aufnehmen kann (%2$@). Entferne eine Liste, um den Schutz zu aktivieren.";
+"core.filterBudget.exceedsTierLimit" = "Deine Sperrlisten verwenden etwa %1$@ von %2$@ Filterregeln. %3$@";
+"core.filterBudget.action.remove" = "Entferne eine Liste, um den Schutz zu aktivieren.";
+"core.filterBudget.action.removeOrUpgrade" = "Entferne eine Liste oder steige auf Plus um.";
+"core.filterBudget.largestSuffix" = " Größte: %@.";
+"core.catalogSync.invalidBlocklistEncoding" = "Die heruntergeladene Sperrliste für %@ ist kein gültiges UTF-8.";
+"core.catalogSync.blocklistTooLarge" = "Die heruntergeladene Sperrliste für %1$@ ist zu groß (%2$lld Byte).";
+"core.catalogSync.blocklistExceedsRuleLimit" = "Die Sperrliste für %1$@ hat mehr als %2$lld Regeln. Verringere ihre Größe oder entferne sie.";
+"core.catalogSync.noRulesAvailable" = "Es sind noch keine aktivierten, heruntergeladenen Filter verfügbar.";
+"core.catalogSync.customBlocklistUnavailable" = "Die eigene Sperrliste „%1$@“ konnte nicht geladen werden. %2$@";
+"core.domainError.freeBlockedLimit" = "Der kostenlose Schutz umfasst %lld zusätzliche blockierte Domains.";
+"core.domainError.freeAllowedLimit" = "Der kostenlose Schutz umfasst %lld erlaubte Ausnahmen.";
+"core.backup.lastUploaded" = "Zuletzt hochgeladen %@";

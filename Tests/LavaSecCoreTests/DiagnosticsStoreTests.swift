@@ -27,6 +27,67 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertEqual(store.recentEvents.map(\.domain), ["ads.example.com"])
     }
 
+    func testFailClosedBlocksAreNotRecordedInHistoryOrCounts() {
+        var store = DiagnosticsStore()
+
+        // A fail-closed block (every domain blocked while no usable snapshot is resident)
+        // must not appear in Domain History nor bump the aggregate block count, even with
+        // both local-history toggles on.
+        store.record(
+            domain: "www.google.com",
+            decision: FilterDecision(action: .block, reason: .protectionUnavailable),
+            keepFilteringCounts: true,
+            keepDomainHistory: true
+        )
+
+        XCTAssertEqual(store.summary.blockedCount, 0)
+        XCTAssertEqual(store.summary.allowedCount, 0)
+        XCTAssertTrue(store.recentEvents.isEmpty)
+        XCTAssertTrue(store.recentEvents(action: .block).isEmpty)
+        XCTAssertTrue(store.topDomains(action: .block).isEmpty)
+    }
+
+    func testRecordReportsWhetherStoreChanged() {
+        var store = DiagnosticsStore()
+
+        // A suppressed fail-closed query with nothing to prune leaves the store unchanged —
+        // record must report that so the tunnel can skip re-persisting an identical file on
+        // every query during an outage.
+        XCTAssertFalse(store.record(domain: "www.google.com", decision: FilterDecision(action: .block, reason: .protectionUnavailable), keepDomainHistory: true))
+        // Nothing recorded even with counts on.
+        XCTAssertFalse(store.record(domain: "www.google.com", decision: FilterDecision(action: .block, reason: .protectionUnavailable), keepFilteringCounts: true, keepDomainHistory: true))
+
+        // Real records mutate the store.
+        XCTAssertTrue(store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true))
+        XCTAssertTrue(store.record(domain: "apple.com", decision: .defaultAllow, keepFilteringCounts: true, keepDomainHistory: false))
+        // Both toggles off → no mutation.
+        XCTAssertFalse(store.record(domain: "apple.com", decision: .defaultAllow, keepFilteringCounts: false, keepDomainHistory: false))
+    }
+
+    func testResetForCurrentDayReportsRollover() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let day1 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18, hour: 9)))
+        let day1Later = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18, hour: 18)))
+        let day2 = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 19, hour: 8)))
+        var store = DiagnosticsStore(startedAt: day1)
+
+        XCTAssertFalse(store.resetForCurrentDayIfNeeded(now: day1Later, calendar: calendar))
+        XCTAssertTrue(store.resetForCurrentDayIfNeeded(now: day2, calendar: calendar))
+    }
+
+    func testFailClosedSuppressionDoesNotDropRealBlocklistBlocks() {
+        var store = DiagnosticsStore()
+
+        // Interleave a real curated-blocklist block with fail-closed blocks for legitimate
+        // domains. Only the real match should survive in the count and the Blocked tab.
+        store.record(domain: "www.google.com", decision: FilterDecision(action: .block, reason: .protectionUnavailable), keepDomainHistory: true)
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        store.record(domain: "gateway.icloud.com", decision: FilterDecision(action: .block, reason: .protectionUnavailable), keepDomainHistory: true)
+
+        XCTAssertEqual(store.summary.blockedCount, 1)
+        XCTAssertEqual(store.recentEvents(action: .block).map(\.domain), ["ads.example.com"])
+    }
+
     func testClearingFilteringCountsDoesNotClearDomainHistory() throws {
         let calendar = Calendar(identifier: .gregorian)
         let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18, hour: 9)))

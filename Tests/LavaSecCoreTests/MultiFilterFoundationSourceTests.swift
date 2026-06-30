@@ -14,8 +14,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     func testMultiFilterIsPlusGatedAtTheLimitsLayer() {
         XCTAssertEqual(FeatureLimits.free.maxFilters, 3, "Free tier hosts up to three filters (Core / Balanced / Extra).")
         XCTAssertFalse(FeatureLimits.free.hasUnlimitedFilters, "Free tier is capped, not unlimited.")
-        XCTAssertEqual(FeatureLimits.paid.maxFilters, 10, "Plus hosts up to ten filters.")
-        XCTAssertFalse(FeatureLimits.paid.hasUnlimitedFilters, "Plus is capped at 10, not unlimited.")
+        XCTAssertEqual(FeatureLimits.paid.maxFilters, 50, "Plus hosts up to fifty filters.")
+        XCTAssertFalse(FeatureLimits.paid.hasUnlimitedFilters, "Plus is capped at 50, not unlimited.")
     }
 
     func testSeededDefaultsBuildThreeNamedFiltersWithChosenActive() {

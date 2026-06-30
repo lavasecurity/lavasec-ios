@@ -605,7 +605,7 @@ private struct NetworkActivityThemePill: View {
             Image(systemName: theme.systemImage)
                 .font(.caption2.weight(.bold))
 
-            Text(theme.title)
+            Text(theme.title.lavaLocalized)
                 .font(.caption.weight(.semibold))
         }
         .foregroundStyle(theme.tint)
@@ -814,7 +814,7 @@ private struct ActivityDateScopePill: View {
             Image(systemName: "calendar")
                 .font(.caption.weight(.bold))
 
-            Text(range.pillText())
+            Text(range.pillText().lavaLocalized)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
@@ -1187,7 +1187,7 @@ private struct DomainHistoryView: View {
                 LavaCondensedList {
                     Picker("History Type", selection: $selectedFilter) {
                         ForEach(DomainHistoryFilter.allCases) { filter in
-                            Text(filter.rawValue).tag(filter)
+                            Text(filter.rawValue.lavaLocalized).tag(filter)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -1245,8 +1245,8 @@ private struct DomainHistoryView: View {
         }
         .alert(item: $domainActionAlert) { alert in
             Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
+                title: Text(alert.title.lavaLocalized),
+                message: Text(alert.message.lavaLocalized),
                 dismissButton: .default(Text("OK"))
             )
         }
@@ -1380,7 +1380,7 @@ private struct DomainHistoryRow: View {
     }
 
     private var rowDetailText: String {
-        "\(event.decision.reason.rawValue.capitalized) · \(event.timestampLine)"
+        "\(event.decision.reason.domainHistoryLabel.lavaLocalized) · \(event.timestampLine)"
     }
 }
 
@@ -1412,7 +1412,7 @@ private struct TopDomainsView: View {
                 LavaCondensedList {
                     Picker("History Type", selection: $selectedFilter) {
                         ForEach(DomainHistoryFilter.allCases) { filter in
-                            Text(filter.rawValue).tag(filter)
+                            Text(filter.rawValue.lavaLocalized).tag(filter)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -1470,8 +1470,8 @@ private struct TopDomainsView: View {
         }
         .alert(item: $domainActionAlert) { alert in
             Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
+                title: Text(alert.title.lavaLocalized),
+                message: Text(alert.message.lavaLocalized),
                 dismissButton: .default(Text("OK"))
             )
         }
@@ -1575,6 +1575,23 @@ private struct TopDomainRow: View {
             Button(action: addToAllowed) {
                 Label("Allow", systemImage: "arrow.right.circle.fill")
             }
+        }
+    }
+}
+
+private extension FilterDecisionReason {
+    /// Clean, localizable source label for the Domain History / Top Domains row
+    /// (rawValue.capitalized produced ugly camelCase like "Localallowlist").
+    var domainHistoryLabel: String {
+        switch self {
+        case .defaultAllow: return "Default"
+        case .localAllowlist: return "Allowlist"
+        case .blocklist: return "Blocklist"
+        case .threatGuardrail: return "Threat Guardrail"
+        case .invalidDomain: return "Invalid domain"
+        // Fail-closed blocks are dropped from Domain History, so this is reached only via
+        // historical/exported/bug-report rendering — keep it honest rather than "Blocklist".
+        case .protectionUnavailable: return "Failed safe"
         }
     }
 }

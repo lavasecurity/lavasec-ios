@@ -11,6 +11,14 @@ public enum FilterDecisionReason: String, Codable, Sendable {
     case blocklist
     case threatGuardrail
     case invalidDomain
+    /// The query was blocked because protection could not serve it safely — the runtime
+    /// is fail-closed (no usable rule snapshot is resident: over budget, a build failure,
+    /// an upstream that rotated past the catalog's pinned hash, or the brief cold-start
+    /// window during a (re)start). This is NOT a curated blocklist match: while fail-closed
+    /// EVERY domain is blocked, so these decisions must never be presented or counted as
+    /// real blocklist hits. The diagnostics store self-gates on this reason to keep them out
+    /// of Domain History and the aggregate block count; the UI labels it "Failed safe".
+    case protectionUnavailable
 }
 
 public struct FilterDecision: Hashable, Codable, Sendable {

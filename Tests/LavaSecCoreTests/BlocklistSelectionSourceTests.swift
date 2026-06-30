@@ -587,7 +587,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
         XCTAssertTrue(toolbarTemplateBlock.contains("static let buttonSize: CGFloat = 44"))
         XCTAssertTrue(toolbarTemplateBlock.contains("static let iconFrameSize: CGFloat = 24"))
-        XCTAssertTrue(toolbarTemplateBlock.contains("static let chevronIconPointSize: CGFloat = 22"))
+        XCTAssertTrue(toolbarTemplateBlock.contains("static let chevronIconPointSize: CGFloat = 17"))
         XCTAssertTrue(toolbarTemplateBlock.contains("static let xmarkIconPointSize: CGFloat = 15"))
         XCTAssertTrue(toolbarTemplateBlock.contains("static let plusIconPointSize: CGFloat = 18"))
         XCTAssertTrue(toolbarTemplateBlock.contains("static let checkmarkIconPointSize: CGFloat = 17"))

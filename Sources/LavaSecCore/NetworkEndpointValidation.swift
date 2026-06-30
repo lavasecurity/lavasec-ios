@@ -13,15 +13,15 @@ enum NetworkEndpointValidationError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .credentialsNotAllowed:
-            return "URLs with usernames or passwords are not supported."
+            return LavaCoreStrings.localized("core.endpoint.credentialsNotAllowed")
         case .localhostNotAllowed:
-            return "Localhost cannot be used as a DNS resolver here."
+            return LavaCoreStrings.localized("core.endpoint.localhostNotAllowed")
         case .privateNetworkNotAllowed:
-            return "Custom blocklist URLs must use a public host."
+            return LavaCoreStrings.localized("core.endpoint.privateNetworkNotAllowed")
         case .unusableResolverAddress:
-            return "Enter a usable DNS resolver address, not a loopback, multicast, or unspecified address."
+            return LavaCoreStrings.localized("core.endpoint.unusableResolverAddress")
         case .invalidResolverHost:
-            return "Enter a valid DNS resolver host."
+            return LavaCoreStrings.localized("core.endpoint.invalidResolverHost")
         }
     }
 }

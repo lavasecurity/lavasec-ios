@@ -129,15 +129,18 @@ extension FilterSnapshotPreparationError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .exceedsDeviceMemoryBudget(ruleCount, maxRuleCount, perSourceRuleCounts):
-            return "This selection needs about \(Self.formatted(ruleCount)) filter rules, "
-                + "more than your device can hold (\(Self.formatted(maxRuleCount))). "
-                + "Remove a list to turn on protection."
-                + Self.largestSuffix(perSourceRuleCounts)
+            return LavaCoreStrings.localizedFormat(
+                "core.filterBudget.exceedsDeviceMemory",
+                Self.formatted(ruleCount), Self.formatted(maxRuleCount)
+            ) + Self.largestSuffix(perSourceRuleCounts)
         case let .exceedsTierFilterRuleLimit(ruleCount, limitRuleCount, isPaid, perSourceRuleCounts):
-            let action = isPaid ? "Remove a list to turn on protection." : "Remove a list or upgrade to Plus."
-            return "Your blocklists use about \(Self.formatted(ruleCount)) of "
-                + "\(Self.formatted(limitRuleCount)) filter rules. \(action)"
-                + Self.largestSuffix(perSourceRuleCounts)
+            let action = isPaid
+                ? LavaCoreStrings.localized("core.filterBudget.action.remove")
+                : LavaCoreStrings.localized("core.filterBudget.action.removeOrUpgrade")
+            return LavaCoreStrings.localizedFormat(
+                "core.filterBudget.exceedsTierLimit",
+                Self.formatted(ruleCount), Self.formatted(limitRuleCount), action
+            ) + Self.largestSuffix(perSourceRuleCounts)
         }
     }
 
@@ -154,6 +157,6 @@ extension FilterSnapshotPreparationError: LocalizedError {
             .sorted { $0.value > $1.value }
             .prefix(2)
             .map { "\($0.key) (\(formatted($0.value)))" }
-        return largest.isEmpty ? "" : " Largest: \(largest.joined(separator: ", "))."
+        return largest.isEmpty ? "" : LavaCoreStrings.localizedFormat("core.filterBudget.largestSuffix", largest.joined(separator: ", "))
     }
 }

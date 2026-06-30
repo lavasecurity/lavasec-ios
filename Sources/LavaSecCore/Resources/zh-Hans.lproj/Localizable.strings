@@ -19,3 +19,46 @@
 "widget.action.restart" = "重新启动";
 "widget.action.pauseForMinutes" = "暂停 %d 分钟";
 "a11y.shieldGuardian" = "Lava 护盾守卫";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ 已在你的屏蔽域名中。";
+"core.domainError.alreadyAllowed" = "%@ 已在你的允许例外中。";
+"core.domainError.blockedLimit" = "你最多可以再保留 %lld 个屏蔽域名。";
+"core.domainError.allowedLimit" = "你最多可以保留 %lld 个允许例外。";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "请输入一个 IPv4/6 DNS 服务器、DoH URL、DoT URL、DoQ URL 或 DNS stamp。";
+"core.resolver.unsupported" = "请使用一个 IPv4/6 DNS 服务器、DoH URL、DoT URL、DoQ URL 或 sdns:// DNS stamp。";
+"core.resolver.doqUnsupported" = "此设备不支持 DNS over QUIC。";
+"core.resolver.badStamp" = "无法读取 DNS stamp。请检查后重试。";
+"core.resolver.missingDoHPath" = "DNS-over-HTTPS URL 必须包含路径，例如 /dns-query。";
+"core.resolver.credentialsNotAllowed" = "自定义 DNS URL 不能包含用户名或密码。";
+"core.resolver.secondaryTransportMismatch" = "备用 DNS 必须使用与主 DNS 相同的传输方式。";
+"core.endpoint.credentialsNotAllowed" = "不支持包含用户名或密码的 URL。";
+"core.endpoint.localhostNotAllowed" = "此处不能使用 localhost 作为 DNS 解析器。";
+"core.endpoint.privateNetworkNotAllowed" = "自定义屏蔽列表 URL 必须使用公开主机。";
+"core.endpoint.unusableResolverAddress" = "请输入可用的 DNS 解析器地址，不能是回环、多播或未指定地址。";
+"core.endpoint.invalidResolverHost" = "请输入有效的 DNS 解析器主机。";
+"core.customBlocklist.invalidURL" = "请输入有效的屏蔽列表 URL。";
+"core.customBlocklist.unsupportedScheme" = "自定义屏蔽列表必须使用 HTTPS。";
+"core.customBlocklist.missingHost" = "自定义屏蔽列表 URL 必须包含主机。";
+"core.customBlocklist.privateNetworkHost" = "自定义屏蔽列表 URL 必须使用公开主机。";
+"core.customBlocklist.credentialsNotAllowed" = "自定义屏蔽列表 URL 不能包含用户名或密码。";
+"core.domain.empty" = "域名为空。";
+"core.domain.tooLong" = "域名过长。";
+"core.domain.needsTwoLabels" = "请输入完整域名，例如 example.com。";
+"core.domain.invalidLabel" = "无效的域名标签：%@";
+"core.domain.ipNotAllowed" = "此处不支持 IP 地址。";
+"core.filterBudget.exceedsDeviceMemory" = "此选择约需 %1$@ 条过滤规则，超出你设备的承载上限（%2$@）。请移除一个列表以开启保护。";
+"core.filterBudget.exceedsTierLimit" = "你的屏蔽列表已使用约 %1$@ 条过滤规则，共 %2$@ 条。%3$@";
+"core.filterBudget.action.remove" = "请移除一个列表以开启保护。";
+"core.filterBudget.action.removeOrUpgrade" = "请移除一个列表或升级到 Plus。";
+"core.filterBudget.largestSuffix" = " 最大：%@。";
+"core.catalogSync.invalidBlocklistEncoding" = "为 %@ 下载的屏蔽列表不是有效的 UTF-8。";
+"core.catalogSync.blocklistTooLarge" = "为 %1$@ 下载的屏蔽列表过大（%2$lld 字节）。";
+"core.catalogSync.blocklistExceedsRuleLimit" = "%1$@ 的屏蔽列表超过 %2$lld 条规则。请缩减其大小或将其移除。";
+"core.catalogSync.noRulesAvailable" = "目前没有已启用的已下载过滤器。";
+"core.catalogSync.customBlocklistUnavailable" = "无法加载自定义屏蔽列表“%1$@”。%2$@";
+"core.domainError.freeBlockedLimit" = "免费保护包含 %lld 个额外的屏蔽域名。";
+"core.domainError.freeAllowedLimit" = "免费保护包含 %lld 个允许的例外项。";
+"core.backup.lastUploaded" = "上次上传于 %@";

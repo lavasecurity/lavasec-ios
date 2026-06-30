@@ -596,7 +596,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
 
         XCTAssertTrue(appViewModelSource.contains("return \"Paused\""))
-        XCTAssertTrue(appViewModelSource.contains("return \"Lava will try to resume at \\(formattedTemporaryProtectionResumeTime)\""))
+        XCTAssertTrue(appViewModelSource.contains("return \"Lava will try to resume at %@\".lavaLocalizedFormat(formattedTemporaryProtectionResumeTime)"))
         XCTAssertTrue(appViewModelSource.contains("return \"Resume Now\""))
         XCTAssertFalse(appViewModelSource.contains("return \"Protection paused\""))
         XCTAssertFalse(appViewModelSource.contains("Lava will try to resume at \\(formattedTemporaryProtectionResumeTime)."))

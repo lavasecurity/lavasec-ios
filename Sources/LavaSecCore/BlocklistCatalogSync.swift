@@ -482,11 +482,11 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
         case .invalidCatalog:
             "The Lava Security catalog could not be read."
         case .invalidBlocklistEncoding(let sourceID):
-            "The downloaded blocklist for \(sourceID) is not valid UTF-8."
+            LavaCoreStrings.localizedFormat("core.catalogSync.invalidBlocklistEncoding", sourceID)
         case .blocklistTooLarge(let sourceID, let byteSize):
-            "The downloaded blocklist for \(sourceID) is too large (\(byteSize) bytes)."
+            LavaCoreStrings.localizedFormat("core.catalogSync.blocklistTooLarge", sourceID, byteSize)
         case .blocklistExceedsRuleLimit(let sourceID, let ruleLimit):
-            "The blocklist for \(sourceID) has more than \(ruleLimit) rules. Reduce its size or remove it."
+            LavaCoreStrings.localizedFormat("core.catalogSync.blocklistExceedsRuleLimit", sourceID, ruleLimit)
         case .checksumMismatch(let sourceID):
             "The downloaded blocklist checksum did not match for \(sourceID)."
         case .noAcceptedSourceHashes(let sourceID):
@@ -496,9 +496,9 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
         case .noCachedCatalog:
             "No saved Lava Security catalog is available yet."
         case .noRulesAvailable:
-            "No enabled downloaded filters are available yet."
+            LavaCoreStrings.localized("core.catalogSync.noRulesAvailable")
         case .customBlocklistUnavailable(let displayName, let reason):
-            "Couldn’t load the custom blocklist “\(displayName)”. \(reason)"
+            LavaCoreStrings.localizedFormat("core.catalogSync.customBlocklistUnavailable", displayName, reason)
         }
     }
 }

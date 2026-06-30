@@ -45,7 +45,7 @@ public enum EncryptedBackupState: Equatable, Sendable {
             }
             return ("Ready after sign-in", "Encrypted locally. Sign in to upload.")
         case .synced(_, let uploadedAt):
-            return ("Last uploaded \(Self.formattedUploadDate(uploadedAt))", syncedDetailText)
+            return (LavaCoreStrings.localizedFormat("core.backup.lastUploaded", Self.formattedUploadDate(uploadedAt)), syncedDetailText)
         case .failed(let message):
             return ("Needs attention", message)
         }
