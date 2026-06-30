@@ -8,6 +8,9 @@ const catalogs = [
   path.join(iosRoot, "LavaSecApp", "Localizable.xcstrings"),
   path.join(iosRoot, "LavaSecApp", "InfoPlist.xcstrings")
 ];
+// NOTE: LavaSecIntents/Localizable.xcstrings (the Focus App Intents extension catalog) is
+// intentionally NOT in this list — this gate also enforces app-only requiredReleaseKeys.
+// Its completeness (all locales) is guaranteed by construction + the string-coverage gate.
 const requiredLocales = ["en", "ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"];
 const allowedUntranslatedValues = new Set([
   "Account",
@@ -25,6 +28,24 @@ const allowedUntranslatedValues = new Set([
   "TCP",
   "VPN",
   "LavaSec",
+  "Lava Guard",
+  "Feedback",
+  "Provider",
+  "Social media",
+  "Version",
+  "Build",
+  "App",
+  "Passkey",
+  "Tunnel",
+  "Support",
+  "Notifications",
+  "Start",
+  "Name",
+  "Name (optional)",
+  "Email",
+  "Domain",
+  "Details",
+  "LF1-…",
   "%@",
   " %@",
   " (%@)",

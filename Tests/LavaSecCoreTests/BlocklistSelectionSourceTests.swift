@@ -353,7 +353,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(byolBlock.contains("LavaTextInputRow(title: \"Name (optional)\")"))
         XCTAssertTrue(byolBlock.contains("LavaTextInputRow(title: \"Blocklist URL\")"))
         XCTAssertTrue(byolBlock.contains("TextField(\"My blocklist\".lavaLocalized, text: $customDisplayName)"))
-        XCTAssertTrue(byolBlock.contains("TextField(\"https://example.com/pi-hole-style-list.txt\".lavaLocalized, text: $customURL)"))
+        XCTAssertTrue(byolBlock.contains("TextField(\"https://example.com/pi-hole-style-list.txt\", text: $customURL)"))
         XCTAssertTrue(byolBlock.contains("FilterActionLabel(title: \"Add Blocklist\", systemImage: \"plus\")"))
         XCTAssertTrue(byolBlock.contains("Text(\"Upgrade\".lavaLocalized)"))
         XCTAssertTrue(byolBlock.contains(".font(.footnote.weight(.bold))"))

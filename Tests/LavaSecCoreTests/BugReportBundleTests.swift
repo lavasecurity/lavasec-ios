@@ -7,6 +7,7 @@ final class BugReportBundleTests: XCTestCase {
             "I can't visit a website",
             "VPN or filter doesn't work",
             "A Lava feature doesn't work",
+            "Translation is not quite right",
             "I have a suggestion",
             "Something else"
         ])

@@ -59,11 +59,11 @@ private struct LavaLiveActivityCompactGuardianView: View {
     private static func accessibilityLabel(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
         switch protectionState {
         case .on:
-            "Lava Security is on"
+            LavaCoreStrings.localized("widget.state.on")
         case .paused:
-            "Lava Security is paused"
+            LavaCoreStrings.localized("widget.state.paused")
         case .restarting:
-            "Lava Security is restarting"
+            LavaCoreStrings.localized("widget.a11y.restarting")
         }
     }
 }
@@ -96,11 +96,11 @@ private struct LavaLiveActivityStatusGlyphView: View {
     private func statusAccessibilityLabel(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
         switch protectionState {
         case .on:
-            "On"
+            LavaCoreStrings.localized("widget.status.on")
         case .paused:
-            "Paused"
+            LavaCoreStrings.localized("widget.status.paused")
         case .restarting:
-            "Restarting"
+            LavaCoreStrings.localized("widget.status.restarting")
         }
     }
 }
@@ -173,7 +173,7 @@ private struct LavaLiveActivityExpandedView: View {
     }
 
     private func pauseButtonTitle(forMinutes minutes: Int) -> String {
-        "Pause for \(minutes) min"
+        LavaCoreStrings.localizedFormat("widget.action.pauseForMinutes", minutes)
     }
 
     @ViewBuilder
@@ -189,7 +189,7 @@ private struct LavaLiveActivityExpandedView: View {
     @ViewBuilder
     private var resumeButton: some View {
         Button(intent: ResumeLavaProtectionIntent()) {
-            liveActivityActionLabel("Resume")
+            liveActivityActionLabel(LavaCoreStrings.localized("widget.action.resume"))
         }
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaGreen)
@@ -211,7 +211,7 @@ private struct LavaLiveActivityExpandedView: View {
                 ))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .accessibilityLabel("Restart")
+                .accessibilityLabel(LavaCoreStrings.localized("widget.action.restart"))
         }
         .controlSize(.small)
         .tint(LavaLiveActivityStyle.lavaSecondaryGray)
@@ -224,7 +224,7 @@ private struct LavaLiveActivityExpandedView: View {
     @ViewBuilder
     private var restartLabeledButton: some View {
         Button(intent: ReconnectLavaProtectionIntent()) {
-            restartActivityActionLabel("Restart")
+            restartActivityActionLabel(LavaCoreStrings.localized("widget.action.restart"))
         }
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaSecondaryGray)
@@ -294,11 +294,11 @@ private struct LavaLiveActivityExpandedView: View {
     private func expandedTitle(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
         switch protectionState {
         case .on:
-            "Lava Security is On"
+            LavaCoreStrings.localized("widget.state.on")
         case .paused:
-            "Lava Security is Paused"
+            LavaCoreStrings.localized("widget.state.paused")
         case .restarting:
-            "Restarting…"
+            LavaCoreStrings.localized("widget.state.restartingTitle")
         }
     }
 }

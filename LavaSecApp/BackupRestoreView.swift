@@ -298,7 +298,7 @@ private struct BackupRecoveryWordField: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 18, alignment: .trailing)
 
-            TextField("Word \(number)".lavaLocalized, text: $word)
+            TextField("Word %lld".lavaLocalizedFormat(number), text: $word)
                 .focused($focusedField, equals: fieldIndex)
                 .lavaTextInputBody(submitLabel: .next)
                 .onChange(of: word) { _, newValue in

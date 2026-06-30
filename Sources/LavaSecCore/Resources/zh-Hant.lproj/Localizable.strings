@@ -6,3 +6,16 @@
 "notif.body.reconnectMessage" = "DNS 在此網路上無法解析。點一下即可重新連線保護。";
 "notif.body.dnsSlowTitle" = "Lava DNS 反應緩慢";
 "notif.body.dnsSlowMessage" = "所選的 DNS 解析器回應緩慢。點一下即可重新連線保護。";
+
+/* Live Activity / widget UI (shared via Bundle.module). */
+"widget.state.on" = "Lava Security 已開啟";
+"widget.state.paused" = "Lava Security 已暫停";
+"widget.state.restartingTitle" = "正在重新啟動…";
+"widget.a11y.restarting" = "Lava Security 正在重新啟動";
+"widget.status.on" = "開啟";
+"widget.status.paused" = "已暫停";
+"widget.status.restarting" = "正在重新啟動";
+"widget.action.resume" = "繼續";
+"widget.action.restart" = "重新啟動";
+"widget.action.pauseForMinutes" = "暫停 %d 分鐘";
+"a11y.shieldGuardian" = "Lava 護盾守衛";

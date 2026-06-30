@@ -6,3 +6,16 @@
 "notif.body.reconnectMessage" = "이 네트워크에서 DNS가 확인되지 않습니다. 탭하여 보호 기능을 다시 연결하세요.";
 "notif.body.dnsSlowTitle" = "Lava DNS 응답이 느림";
 "notif.body.dnsSlowMessage" = "선택한 DNS 확인 서버의 응답이 느립니다. 탭하여 보호 기능을 다시 연결하세요.";
+
+/* Live Activity / widget UI (shared via Bundle.module). */
+"widget.state.on" = "Lava Security이 켜져 있어요";
+"widget.state.paused" = "Lava Security이 일시 중지됐어요";
+"widget.state.restartingTitle" = "다시 시작하는 중…";
+"widget.a11y.restarting" = "Lava Security을 다시 시작하고 있어요";
+"widget.status.on" = "켜짐";
+"widget.status.paused" = "일시 중지됨";
+"widget.status.restarting" = "다시 시작하는 중";
+"widget.action.resume" = "다시 시작";
+"widget.action.restart" = "다시 시작";
+"widget.action.pauseForMinutes" = "%d분 동안 일시 중지";
+"a11y.shieldGuardian" = "Lava 실드 가디언";

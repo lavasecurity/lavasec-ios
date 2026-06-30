@@ -43,7 +43,7 @@ struct LavaFocusFilterIntent: SetFocusFilterIntent {
     init() {}
 
     var displayRepresentation: DisplayRepresentation {
-        filter?.displayRepresentation ?? DisplayRepresentation(stringLiteral: "No filter")
+        filter?.displayRepresentation ?? DisplayRepresentation(title: "No filter")
     }
 
     static var parameterSummary: some ParameterSummary {

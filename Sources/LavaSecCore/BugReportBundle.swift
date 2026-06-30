@@ -15,6 +15,7 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
     case websiteAccess
     case vpnOrFilterIssue
     case featureIssue
+    case translationIssue
     case suggestion
     case other
 
@@ -30,6 +31,8 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
             "VPN or filter doesn't work"
         case .featureIssue:
             "A Lava feature doesn't work"
+        case .translationIssue:
+            "Translation is not quite right"
         case .suggestion:
             "I have a suggestion"
         case .other:
@@ -39,7 +42,7 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
 
     public var kind: BugReportIssueKind {
         switch self {
-        case .websiteAccess, .vpnOrFilterIssue, .featureIssue:
+        case .websiteAccess, .vpnOrFilterIssue, .featureIssue, .translationIssue:
             .bug
         case .suggestion:
             .suggestion

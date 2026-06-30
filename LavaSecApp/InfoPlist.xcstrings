@@ -209,7 +209,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lava uses Face ID to unlock protected app surfaces you choose"
+            "value" : "Lava uses Face ID to unlock the screens you choose to protect"
           }
         },
         "fr" : {
