@@ -44,11 +44,11 @@ enum SecurityPasscodeKeychainStoreError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .randomGenerationFailed(let status):
-            "Could not prepare a passcode verifier. Security returned status \(status)."
+            "Could not prepare a passcode verifier. Security returned status %@.".lavaLocalizedFormat(String(status))
         case .unexpectedItemData:
-            "The saved passcode verifier could not be read."
+            "The saved passcode verifier could not be read.".lavaLocalized
         case .unhandledStatus(let status):
-            "Keychain returned status \(status)."
+            "Keychain returned status %@.".lavaLocalizedFormat(String(status))
         }
     }
 }
@@ -185,7 +185,9 @@ final class SecurityController: ObservableObject {
 
     var securityStatusSummary: String {
         if isPasscodeEnabled {
-            return isBiometricEnabled ? "Passcode and \(biometricToggleTitle)" : "Passcode on"
+            return isBiometricEnabled
+                ? "Passcode and %@".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
+                : "Passcode on"
         }
 
         return "Passcode off"
@@ -255,12 +257,12 @@ final class SecurityController: ObservableObject {
             guard faceIDUsageDescriptionIsPresent else {
                 isBiometricEnabled = false
                 defaults.set(false, forKey: biometricEnabledDefaultsKey)
-                statusMessage = "\(biometricToggleTitle) is not available in this build"
+                statusMessage = "%@ is not available in this build".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
                 return
             }
 
-            guard await evaluateBiometrics(reason: "Enable \(biometricToggleTitle) for Lava") else {
-                statusMessage = "\(biometricToggleTitle) was not enabled."
+            guard await evaluateBiometrics(reason: "Enable %@ for Lava".lavaLocalizedFormat(biometricToggleTitle)) else {
+                statusMessage = "%@ was not enabled.".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
                 return
             }
         }
@@ -317,13 +319,13 @@ final class SecurityController: ObservableObject {
 
         refreshBiometricKind()
         guard canEnableBiometrics else {
-            statusMessage = "\(biometricToggleTitle) is not available."
+            statusMessage = "%@ is not available.".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
             return false
         }
 
         let didAuthenticate = await evaluateBiometrics(reason: reason)
         if !didAuthenticate {
-            statusMessage = "\(biometricToggleTitle) authentication failed"
+            statusMessage = "%@ authentication failed".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
         } else {
             statusMessage = nil
         }
@@ -478,7 +480,7 @@ final class SecurityController: ObservableObject {
         }
 
         return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in
                 continuation.resume(returning: success)
             }
         }

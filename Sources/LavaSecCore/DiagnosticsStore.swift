@@ -368,12 +368,31 @@ public struct DiagnosticsStore: Codable, Sendable {
             .map { $0 }
     }
 
+    /// Records a query into diagnostics. Returns whether the store actually changed, so the
+    /// caller can skip re-persisting an unchanged store (e.g. on every suppressed fail-closed
+    /// query during an outage).
+    @discardableResult
     public mutating func record(
         domain: String,
         decision: FilterDecision,
         keepFilteringCounts: Bool = true,
         keepDomainHistory: Bool
-    ) {
+    ) -> Bool {
+        // Fail-closed blocks ("protection could not resolve this safely" — every domain is
+        // blocked while no usable snapshot is resident) are NOT curated matches and are not
+        // actionable by the user. Drop them from BOTH the per-query history (otherwise the
+        // Blocked tab fills with the user's entire browsing set during an outage — the
+        // reported false positives) AND the aggregate block count (so "domains blocked"
+        // reflects real matches, not outage windows). Self-gated on the reason the tunnel
+        // already stamps, so no fail-closed-state coupling is needed here.
+        //
+        // Still prune expired fine-grained history before returning, so the 7-day retention
+        // holds even during a fail-closed-only stretch (the early return must NOT bypass the
+        // prune below), and report whether the prune actually removed anything.
+        if decision.reason == .protectionUnavailable {
+            return keepDomainHistory ? pruneExpiredEvents(now: Date()) : false
+        }
+
         if keepFilteringCounts {
             recordDayCount(decision.action, calendar: .current)
 
@@ -386,7 +405,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         }
 
         guard keepDomainHistory else {
-            return
+            return keepFilteringCounts
         }
 
         events.append(DNSQueryEvent(domain: domain, decision: decision))
@@ -396,6 +415,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         }
 
         pruneExpiredEvents(now: Date())
+        return true
     }
 
     public mutating func clearDomainHistory() {
@@ -433,11 +453,14 @@ public struct DiagnosticsStore: Codable, Sendable {
         self.activeLocalProtectionStartedAt = nil
     }
 
-    public mutating func resetForCurrentDayIfNeeded(now: Date = Date(), calendar: Calendar = .current) {
+    /// Returns whether the day rolled over (i.e. the running counters were reset), so the
+    /// caller can persist the change even when the triggering query itself is suppressed.
+    @discardableResult
+    public mutating func resetForCurrentDayIfNeeded(now: Date = Date(), calendar: Calendar = .current) -> Bool {
         seedCurrentDayCountIfNeeded(calendar: calendar)
 
         guard !calendar.isDate(startedAt, inSameDayAs: now) else {
-            return
+            return false
         }
 
         // The day rolled over. The prior day's aggregate counts already live in
@@ -450,6 +473,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         startedAt = now
         pruneExpiredEvents(now: now)
         seedCurrentDayCountIfNeeded(calendar: calendar)
+        return true
     }
 
     /// Drops domain-history events older than the fine-grained retention window

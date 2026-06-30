@@ -241,7 +241,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(preview.contains("plan.applied.blockedDomains"))
         // Long domain lists collapse into a "+N more" note.
         XCTAssertTrue(preview.contains("blockedDomainPreviewLimit"))
-        XCTAssertTrue(preview.contains("+\\(hiddenDomainCount) more"))
+        XCTAssertTrue(preview.contains("+%lld more"))
         // Unsupported entries get an alert row treatment.
         XCTAssertTrue(preview.contains("if plan.hasUnsupportedEntries"))
         XCTAssertTrue(preview.contains("unsupportedSection(for: plan)"))

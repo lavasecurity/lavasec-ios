@@ -53,7 +53,7 @@ public struct FeatureLimits: Equatable, Codable, Sendable {
         maxFilterRules: 2_000_000,
         allowsCustomBlocklists: true,
         allowsCustomDNS: true,
-        maxFilters: 10
+        maxFilters: 50
     )
 
     public static let plus = paid

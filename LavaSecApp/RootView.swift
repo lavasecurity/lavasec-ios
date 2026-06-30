@@ -274,7 +274,7 @@ struct RootView: View {
     }
 
     private func selectRootTab(_ tab: LavaRootTab) async {
-        guard await canAccess(tab.securityPolicy, reason: "Open \(tab.title)") else {
+        guard await canAccess(tab.securityPolicy, reason: "Open %@".lavaLocalizedFormat(tab.title.lavaLocalized)) else {
             return
         }
 

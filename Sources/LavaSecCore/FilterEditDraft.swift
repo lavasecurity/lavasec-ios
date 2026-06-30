@@ -87,13 +87,13 @@ public enum FilterEditDraftEditor {
         }
 
         guard !draft.blockedDomains.contains(normalized) else {
-            return (draft, .rejected(title: "Already blocked", message: "\(normalized) is already in your blocked domains."))
+            return (draft, .rejected(title: "Already blocked", message: LavaCoreStrings.localizedFormat("core.domainError.alreadyBlocked", normalized)))
         }
 
         guard draft.blockedDomains.count < maxBlockedDomains else {
             return (draft, .rejected(
                 title: "Blocked domain limit reached",
-                message: "Free protection includes \(maxBlockedDomains) additional blocked domains."
+                message: LavaCoreStrings.localizedFormat("core.domainError.freeBlockedLimit", maxBlockedDomains)
             ))
         }
 
@@ -135,13 +135,13 @@ public enum FilterEditDraftEditor {
         }
 
         guard !draft.allowedDomains.contains(domain) else {
-            return (draft, .rejected(title: "Already allowed", message: "\(domain) is already in your allowed exceptions."))
+            return (draft, .rejected(title: "Already allowed", message: LavaCoreStrings.localizedFormat("core.domainError.alreadyAllowed", domain)))
         }
 
         guard draft.allowedDomains.count < maxAllowedDomains else {
             return (draft, .rejected(
                 title: "Allowed exception limit reached",
-                message: "Free protection includes \(maxAllowedDomains) allowed exceptions."
+                message: LavaCoreStrings.localizedFormat("core.domainError.freeAllowedLimit", maxAllowedDomains)
             ))
         }
 

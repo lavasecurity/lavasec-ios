@@ -63,9 +63,9 @@ enum LavaSecurityPlusStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .productUnavailable:
-            "Lava Security Plus is not available from the App Store yet. Try again later."
+            "Lava Security Plus is not available from the App Store yet. Try again later.".lavaLocalized
         case .unverifiedPurchase:
-            "The App Store purchase could not be verified."
+            "The App Store purchase could not be verified.".lavaLocalized
         }
     }
 }

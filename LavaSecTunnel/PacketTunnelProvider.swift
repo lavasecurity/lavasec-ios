@@ -119,12 +119,19 @@ private struct FailClosedRuntimeSnapshot: FilterRuntimeSnapshot {
     var allowRuleCount: Int { 0 }
     var guardrailRuleCount: Int { 0 }
 
+    // Blocks EVERY domain because no usable rule snapshot is resident. The reason is
+    // `.protectionUnavailable` (NOT `.blocklist`): these are precautionary fail-closed
+    // blocks, not curated matches, so labelling them `.blocklist` would forge a blocklist
+    // verdict for legitimate domains (the false positives that filled the Blocked tab with
+    // google.com / icloud / apple endpoints during fail-closed windows). The honest reason
+    // propagates to Domain History (where DiagnosticsStore drops it), bug reports, and CSV
+    // export.
     func decision(for rawDomain: String) -> FilterDecision {
-        FilterDecision(action: .block, reason: .blocklist)
+        FilterDecision(action: .block, reason: .protectionUnavailable)
     }
 
     func decision(forNormalizedDomain normalizedDomain: String) -> FilterDecision {
-        FilterDecision(action: .block, reason: .blocklist)
+        FilterDecision(action: .block, reason: .protectionUnavailable)
     }
 }
 
@@ -3503,14 +3510,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
-            self.diagnostics.resetForCurrentDayIfNeeded()
-            self.diagnostics.record(
+            let rolledOver = self.diagnostics.resetForCurrentDayIfNeeded()
+            let recordMutated = self.diagnostics.record(
                 domain: domain,
                 decision: decision,
                 keepFilteringCounts: configuration.keepFilteringCounts,
                 keepDomainHistory: configuration.keepDomainDiagnostics
             )
-            self.markDiagnosticsUpdated()
+            // Suppressed fail-closed queries leave the store unchanged (record drops them from
+            // history + counts), so don't re-dirty/re-persist the same diagnostics file ~every
+            // 30s during a fail-closed outage. Still persist when the day rolled over or expired
+            // history was pruned — consume the prune flag so it doesn't dangle for the load path.
+            let prunePending = self.diagnostics.consumePendingFineGrainedPrunePersist()
+            if rolledOver || recordMutated || prunePending {
+                self.markDiagnosticsUpdated()
+            }
         }
     }
 

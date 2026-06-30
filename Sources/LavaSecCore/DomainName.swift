@@ -10,15 +10,15 @@ public enum DomainValidationError: Error, Equatable, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .empty:
-            "Domain is empty."
+            LavaCoreStrings.localized("core.domain.empty")
         case .tooLong:
-            "Domain is too long."
+            LavaCoreStrings.localized("core.domain.tooLong")
         case .needsAtLeastTwoLabels:
-            "Enter a full domain, such as example.com."
+            LavaCoreStrings.localized("core.domain.needsTwoLabels")
         case .invalidLabel(let label):
-            "Invalid domain label: \(label)"
+            LavaCoreStrings.localizedFormat("core.domain.invalidLabel", label)
         case .ipAddressNotAllowed:
-            "IP addresses are not supported here."
+            LavaCoreStrings.localized("core.domain.ipNotAllowed")
         }
     }
 }

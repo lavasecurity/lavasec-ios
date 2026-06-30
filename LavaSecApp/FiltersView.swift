@@ -1055,20 +1055,116 @@ private struct FocusFilterHowToSheet: View {
     }
 }
 
+/// The two connection states the overview card lets the user preview to learn how
+/// Lava behaves. Purely educational (user-driven) — NOT wired to live tunnel health.
+/// "Poor" teaches the fail-closed behavior: when Lava can't reach its filter it blocks
+/// sites to stay safe (the same precautionary block that, mislabelled, used to fill the
+/// Blocked tab with false positives).
+private enum FilterConnectionPreview: CaseIterable {
+    case normal
+    case poor
+
+    var label: String {
+        switch self {
+        case .normal: return "Normal"
+        case .poor: return "Poor"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .normal:
+            return "Lava uses a local filter to block your phone's access to unwanted sites."
+        case .poor:
+            return "If Lava can't reach its filter, it blocks sites to stay safe — they load again once the connection recovers."
+        }
+    }
+}
+
 private struct FiltersOverviewPanel: View {
+    @State private var preview: FilterConnectionPreview = .normal
+    @State private var showingPicker = false
+
     var body: some View {
         // Diagram + explainer back together inside the card (the "below the panel"
         // placement read too faint); the card stays content-sized.
         LavaInfoCard {
             VStack(spacing: 14) {
-                FiltersFlowDiagram()
+                connectionSelector
 
-                Text("Lava uses a local filter to block your phone's access to unwanted sites.".lavaLocalized)
+                FiltersFlowDiagram(blockedSecondHop: preview == .poor)
+
+                Text(preview.caption.lavaLocalized)
                     .lavaBodySupportingText()
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                    // Keep the card height stable across the shorter/longer captions so the
+                    // diagram doesn't jump when the user toggles states.
+                    .animation(.default, value: preview)
             }
         }
+    }
+
+    // "Connection [Normal ▾]" — a lead-in label plus a tappable state chip. Tapping opens an
+    // in-place popover (comic-dialog bubble on iPhone via compact adaptation) to pick the state.
+    private var connectionSelector: some View {
+        HStack(spacing: 8) {
+            Text("When the connection is".lavaLocalized)
+                .font(.subheadline)
+                .foregroundStyle(LavaStyle.secondaryText)
+
+            Button {
+                showingPicker = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text(preview.label.lavaLocalized)
+                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(LavaStyle.lavaOrange)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(LavaStyle.lavaOrangeSoft))
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingPicker) {
+                connectionPickerPopover
+                    .presentationCompactAdaptation(.popover)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var connectionPickerPopover: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(FilterConnectionPreview.allCases.enumerated()), id: \.offset) { index, option in
+                Button {
+                    preview = option
+                    showingPicker = false
+                } label: {
+                    HStack(spacing: 16) {
+                        Text(option.label.lavaLocalized)
+                            .font(.subheadline)
+                            .foregroundStyle(LavaStyle.primaryText)
+                        Spacer(minLength: 0)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(LavaStyle.lavaOrange)
+                            .opacity(option == preview ? 1 : 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if index < FilterConnectionPreview.allCases.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .frame(minWidth: 168)
     }
 }
 
@@ -1076,6 +1172,10 @@ private struct FiltersOverviewPanel: View {
 /// through Lava acting as a local filter. Laid out with fixed object:arrow width
 /// ratios (≈3.5:1) so the nodes stay large and the spacing scales with the card.
 private struct FiltersFlowDiagram: View {
+    /// When true the Lava→Internet hop is shown blocked (a small X on the arrow) — the
+    /// "Poor connection" fail-closed preview. Phone→Lava always stays open.
+    var blockedSecondHop: Bool = false
+
     private let iconBoxHeight: CGFloat = 62
     private let nodeRatio: CGFloat = 0.28
     private let arrowRatio: CGFloat = 0.08
@@ -1091,19 +1191,19 @@ private struct FiltersFlowDiagram: View {
                 }
                 .frame(width: width * nodeRatio)
 
-                connector.frame(width: width * arrowRatio)
+                connector(blocked: false).frame(width: width * arrowRatio)
 
                 node(label: "Lava") {
                     SoftShieldGuardian(size: 62, state: .awake, animates: false)
                 }
                 .frame(width: width * nodeRatio)
 
-                connector.frame(width: width * arrowRatio)
+                connector(blocked: blockedSecondHop).frame(width: width * arrowRatio)
 
                 node(label: "Internet".lavaLocalized) {
                     Image(systemName: "globe")
                         .font(.system(size: LavaIconSize.node, weight: .regular))
-                        .foregroundStyle(LavaStyle.secondaryText)
+                        .foregroundStyle(LavaStyle.secondaryText.opacity(blockedSecondHop ? 0.35 : 1))
                 }
                 .frame(width: width * nodeRatio)
             }
@@ -1125,11 +1225,20 @@ private struct FiltersFlowDiagram: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var connector: some View {
-        Image(systemName: "arrow.right")
-            .font(.system(size: LavaIconSize.small, weight: .semibold))
-            .foregroundStyle(LavaStyle.secondaryText.opacity(0.6))
-            .frame(height: iconBoxHeight)
+    private func connector(blocked: Bool) -> some View {
+        ZStack {
+            Image(systemName: "arrow.right")
+                .font(.system(size: LavaIconSize.small, weight: .semibold))
+                .foregroundStyle(LavaStyle.secondaryText.opacity(blocked ? 0.3 : 0.6))
+
+            if blocked {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(LavaStyle.dangerRed)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(height: iconBoxHeight)
     }
 }
 
@@ -1320,7 +1429,7 @@ private struct MyListCover: View {
         ) { _ in
             Button("OK", role: .cancel) { nonActiveSaveError = nil }
         } message: { message in
-            Text(message)
+            Text(message.lavaLocalized)
         }
     }
 
@@ -1976,7 +2085,9 @@ struct AddBlocklistSheet: View {
                     }
             } footer: {
                 VStack(spacing: 9) {
-                    Button(actionButtonTitle, action: primaryAction)
+                    Button(action: primaryAction) {
+                        Text(actionButtonTitle.lavaLocalized)
+                    }
                         .buttonStyle(LavaStandaloneActionButtonStyle())
                         .disabled(!canUsePrimaryAction)
 
@@ -1989,7 +2100,7 @@ struct AddBlocklistSheet: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .navigationTitle(navigationTitle)
+            .navigationTitle(navigationTitle.lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

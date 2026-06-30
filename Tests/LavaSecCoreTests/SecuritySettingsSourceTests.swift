@@ -90,7 +90,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertLessThan(privacyTitleIndex, securityTitleIndex)
         XCTAssertFalse(privacyBlock.contains("title: \"Security\""))
         XCTAssertFalse(privacyBlock.contains("route: .security"))
-        XCTAssertTrue(securityBlock.contains("LavaSectionGroup(\"Authentication\")"))
+        XCTAssertTrue(securityBlock.contains("LavaSectionGroup(\"Authentication method\")"))
         XCTAssertFalse(securityBlock.contains("authenticationFooterText"))
         XCTAssertFalse(securityBlock.contains("With authentication on"))
         XCTAssertTrue(securityBlock.contains("Toggle(\"Passcode\""))
@@ -148,7 +148,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("func requirePasscodeAuthentication(reason: String) async -> Bool"))
         XCTAssertTrue(controller.contains("func requireBiometricAuthentication(reason: String) async -> Bool"))
         XCTAssertTrue(securityBlock.contains("security.requirePasscodeAuthentication(reason: \"Turn off Security passcode\")"))
-        XCTAssertTrue(securityBlock.contains("security.requireBiometricAuthentication(reason: \"Turn off \\(security.biometricToggleTitle)\")"))
+        XCTAssertTrue(securityBlock.contains("security.requireBiometricAuthentication(reason: \"Turn off %@\".lavaLocalizedFormat(security.biometricToggleTitle))"))
         XCTAssertFalse(securityBlock.contains("requireCredentialAuthentication(reason: \"Turn off Security passcode\")"))
     }
 

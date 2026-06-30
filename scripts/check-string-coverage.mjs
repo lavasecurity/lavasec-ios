@@ -33,10 +33,10 @@ const coreStringsFile = path.join(
 );
 
 const ALLOWED = new Set([
-  "Account", "Password", "Apple", "Cloudflare", "Filter", "Filters", "DNS", "DoH",
+  "Account", "Password", "Apple", "Cloudflare", "Filter", "DNS", "DoH",
   "Google", "Guard", "Internet", "Lava", "Lava Security", "Lava Security Plus",
   "Lava Guard", "Lava Plus", "Plus", "Core", "Balanced", "Extra", "Quad9", "TCP",
-  "VPN", "LavaSec", "OK", "iOS",
+  "VPN", "LavaSec", "OK", "iOS", "Face ID", "Touch ID",
 ]);
 
 const catalogKeys = new Set();
@@ -65,7 +65,7 @@ const unesc = (s) =>
 
 const L = `"((?:[^"\\\\]|\\\\.)*)"`;
 const labels =
-  "(?:title|summary|subtitle|footer|label|description|placeholder|actionTitle|disableTitle|disableActionTitle|clearTitle|clearActionTitle)";
+  "(?:title|summary|subtitle|footer|label|description|placeholder|actionTitle|disableTitle|disableActionTitle|clearTitle|clearActionTitle|detail|text|reason)";
 const sitePatterns = [
   `\\bText\\(\\s*${L}`, `\\bLabel\\(\\s*${L}`, `\\bButton\\(\\s*${L}\\s*[\\),]`,
   `\\.navigation(?:Bar)?Title\\(\\s*${L}`, `\\bToggle\\(\\s*${L}`, `\\bSection\\(\\s*${L}`,
@@ -92,6 +92,49 @@ const presReturn = new RegExp(`\\breturn\\s+${L}`, "g");
 const coreRef = new RegExp(`LavaCoreStrings\\.(?:localized|localizedFormat)\\(\\s*${L}`, "g");
 const lavaCall = /\.lavaLocalized(?:Format)?/g;
 const LITRE = /"((?:[^"\\]|\\.)*)"/g;
+// Harvest string literals from a label arg that is NOT a bare literal (a ternary/computed
+// `title: cond ? "A" : "B"`). The named-label site only matches a literal immediately after the
+// label, so these branch strings were invisible (this missed "Back Up Now"/"Backing Up"). String-
+// aware + bracket-balanced; stops at the arg's terminating comma or its closing paren/bracket.
+function litsInArg(txt, start) {
+  let depth = 0, end = txt.length;
+  for (let j = start; j < txt.length; j++) {
+    const c = txt[j];
+    if (c === '"') { j++; while (j < txt.length && !(txt[j] === '"' && txt[j - 1] !== "\\")) j++; continue; }
+    if (c === "\n") { end = j; break; } // single-line only — avoids over-scanning multi-line closures/exprs
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") { if (depth === 0) { end = j; break; } depth--; }
+    else if (c === "," && depth === 0) { end = j; break; }
+  }
+  LITRE.lastIndex = 0;
+  return [...txt.slice(start, end).matchAll(LITRE)].map((m) => m[1]);
+}
+// Negative lookbehind excludes Swift type annotations (`var title: LocalizedStringResource = …`,
+// `let detail: String`), which are declarations — not labeled call args — and are already covered
+// by the AppIntents patterns where relevant.
+const labelTernary = new RegExp(`(?<!\\b(?:var|let)\\s)\\b${labels}:\\s*(?![",\\s])`, "g");
+
+// Release-localization gate: strings compiled ONLY into DEBUG / LAVA_QA_TOOLS builds never ship,
+// so drop those branches before scanning (otherwise dev tooling — the live-DNS-smoke harness,
+// Protection-States simulator, raw counters — shows up as bogus "untranslated" misses). Keeps the
+// `#else` branch (which DOES ship) and handles nesting. Non-debug directives keep both branches.
+function stripDebugOnly(src) {
+  const out = [];
+  const stack = []; // { debugOnly, inElse }
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (/^#if\b/.test(t)) {
+      const cond = t.slice(3);
+      const debugOnly = (/\bDEBUG\b/.test(cond) && !/!\s*DEBUG\b/.test(cond)) || /\bLAVA_QA_TOOLS\b/.test(cond);
+      stack.push({ debugOnly, inElse: false });
+      continue;
+    }
+    if (/^#elseif\b/.test(t) || /^#else\b/.test(t)) { if (stack.length) stack[stack.length - 1].inElse = true; continue; }
+    if (/^#endif\b/.test(t)) { stack.pop(); continue; }
+    if (!stack.some((s) => s.debugOnly && !s.inElse)) out.push(line);
+  }
+  return out.join("\n");
+}
 
 // Structural filter only — membership is checked per-context by the caller.
 function clean(raw) {
@@ -100,7 +143,7 @@ function clean(raw) {
   if (/^[a-z0-9_.\-/]+$/.test(s)) return null;
   if (!/[A-Za-z]/.test(s)) return null;
   if (/^(https?:|com\.|group\.)/.test(s)) return null;
-  if (/(sslip\.io|QA|Smoke|Probe|systemName)/.test(s)) return null;
+  if (/(sslip\.io|QA|systemName)/.test(s)) return null; // Smoke/Probe dropped: dev tooling is excluded by stripDebugOnly; shipped "Smoke Test"/"DNS smoke probes" labels must be catalogued
   return s;
 }
 
@@ -150,7 +193,7 @@ const flag = (map, key, note) => {
 };
 
 for (const file of scanDirs.flatMap(walk)) {
-  const txt = fs.readFileSync(file, "utf8");
+  const txt = stripDebugOnly(fs.readFileSync(file, "utf8"));
   const rel = path.relative(iosRoot, file);
   const isIntents = rel.startsWith("LavaSecIntents");
   const isExt = rel.startsWith("LavaSecWidget") || rel.startsWith("Shared");
@@ -168,6 +211,16 @@ for (const file of scanDirs.flatMap(walk)) {
     let m;
     while ((m = re.exec(txt)) !== null) {
       const s = clean(m[1]);
+      if (s && !general.has(s)) flag(missing, s, `${rel} [needs: ${generalLabel}]`);
+    }
+  }
+  // Ternary/computed args at a localizing label (e.g. `title: cond ? "A" : "B"`) — harvest each
+  // branch literal so a non-bare-literal arg can't smuggle an uncatalogued user-facing string.
+  labelTernary.lastIndex = 0;
+  let tm;
+  while ((tm = labelTernary.exec(txt)) !== null) {
+    for (const raw of litsInArg(txt, tm.index + tm[0].length)) {
+      const s = clean(raw);
       if (s && !general.has(s)) flag(missing, s, `${rel} [needs: ${generalLabel}]`);
     }
   }

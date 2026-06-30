@@ -54,7 +54,16 @@ const allowedUntranslatedValues = new Set([
   "OK",
   "→",
   "iOS",
-  "?"
+  "?",
+  "Protection",
+  "%@ + Fallback",
+  "System",
+  "Original",
+  "Amethyst",
+  "Obsidian",
+  "Kiwi Crème",
+  "Nerd Stats",
+  "Normal"
 ]);
 const requiredReleaseKeys = [
   "Guard",

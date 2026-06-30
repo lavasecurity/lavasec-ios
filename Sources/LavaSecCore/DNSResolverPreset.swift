@@ -613,7 +613,7 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
               let secondaryPreset = custom(rawValue: secondaryValue),
               primaryPreset.transport == secondaryPreset.transport
         else {
-            return "Secondary DNS must use the same transport as Primary DNS."
+            return LavaCoreStrings.localized("core.resolver.secondaryTransportMismatch")
         }
 
         return nil
@@ -790,7 +790,7 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         }
 
         if lowercasedValue.hasPrefix("sdns://") {
-            return "DNS stamp could not be read. Check the stamp and try again."
+            return LavaCoreStrings.localized("core.resolver.badStamp")
         }
 
         if (try? NetworkEndpointValidator.validateDNSResolverHost(value)) == nil,
@@ -812,9 +812,9 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
     private static func customResolverValidationMessage(for error: Error) -> String {
         switch error {
         case CustomDNSResolverValidationError.missingDoHPath:
-            return "DNS-over-HTTPS URLs must include a path, such as /dns-query."
+            return LavaCoreStrings.localized("core.resolver.missingDoHPath")
         case CustomDNSResolverValidationError.credentialsNotAllowed:
-            return "Custom DNS URLs cannot include usernames or passwords."
+            return LavaCoreStrings.localized("core.resolver.credentialsNotAllowed")
         case NetworkEndpointValidationError.localhostNotAllowed:
             return NetworkEndpointValidationError.localhostNotAllowed.localizedDescription
         case NetworkEndpointValidationError.unusableResolverAddress:
@@ -826,14 +826,17 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         }
     }
 
-    private static let customResolverEmptyValidationMessage =
-        "Enter one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or DNS stamp."
+    private static var customResolverEmptyValidationMessage: String {
+        LavaCoreStrings.localized("core.resolver.empty")
+    }
 
-    private static let customResolverUnsupportedValidationMessage =
-        "Use one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or sdns:// DNS stamp."
+    private static var customResolverUnsupportedValidationMessage: String {
+        LavaCoreStrings.localized("core.resolver.unsupported")
+    }
 
-    private static let customResolverDoQUnsupportedValidationMessage =
-        "DNS over QUIC is not supported on this device."
+    private static var customResolverDoQUnsupportedValidationMessage: String {
+        LavaCoreStrings.localized("core.resolver.doqUnsupported")
+    }
 
     fileprivate static func customResolverAddresses(from value: String) -> (ipv4: [String], ipv6: [String])? {
         NetworkEndpointValidator.dnsResolverAddresses(from: value)

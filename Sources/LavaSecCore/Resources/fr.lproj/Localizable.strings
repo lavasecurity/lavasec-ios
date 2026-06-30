@@ -19,3 +19,46 @@
 "widget.action.restart" = "Redémarrer";
 "widget.action.pauseForMinutes" = "Mettre en pause %d min";
 "a11y.shieldGuardian" = "Gardien bouclier Lava";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ est déjà dans tes domaines bloqués.";
+"core.domainError.alreadyAllowed" = "%@ est déjà dans tes exceptions autorisées.";
+"core.domainError.blockedLimit" = "Tu peux conserver jusqu’à %lld domaines bloqués supplémentaires.";
+"core.domainError.allowedLimit" = "Tu peux conserver jusqu’à %lld exceptions autorisées.";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "Saisis un serveur DNS IPv4/6, une URL DoH, DoT ou DoQ, ou un DNS stamp.";
+"core.resolver.unsupported" = "Utilise un serveur DNS IPv4/6, une URL DoH, DoT ou DoQ, ou un DNS stamp sdns://.";
+"core.resolver.doqUnsupported" = "DNS over QUIC n'est pas pris en charge sur cet appareil.";
+"core.resolver.badStamp" = "Impossible de lire le DNS stamp. Vérifie le stamp et réessaie.";
+"core.resolver.missingDoHPath" = "Les URL DNS-over-HTTPS doivent inclure un chemin, comme /dns-query.";
+"core.resolver.credentialsNotAllowed" = "Les URL DNS personnalisées ne peuvent pas contenir de nom d'utilisateur ni de mot de passe.";
+"core.resolver.secondaryTransportMismatch" = "Le DNS secondaire doit utiliser le même transport que le DNS principal.";
+"core.endpoint.credentialsNotAllowed" = "Les URL contenant un nom d'utilisateur ou un mot de passe ne sont pas prises en charge.";
+"core.endpoint.localhostNotAllowed" = "Localhost ne peut pas être utilisé comme résolveur DNS ici.";
+"core.endpoint.privateNetworkNotAllowed" = "Les URL de liste de blocage personnalisées doivent utiliser un hôte public.";
+"core.endpoint.unusableResolverAddress" = "Saisis une adresse de résolveur DNS utilisable, pas une adresse de bouclage, multicast ou non spécifiée.";
+"core.endpoint.invalidResolverHost" = "Saisis un hôte de résolveur DNS valide.";
+"core.customBlocklist.invalidURL" = "Saisis une URL de liste de blocage valide.";
+"core.customBlocklist.unsupportedScheme" = "Les listes de blocage personnalisées doivent utiliser HTTPS.";
+"core.customBlocklist.missingHost" = "L'URL de liste de blocage personnalisée doit inclure un hôte.";
+"core.customBlocklist.privateNetworkHost" = "Les URL de liste de blocage personnalisées doivent utiliser un hôte public.";
+"core.customBlocklist.credentialsNotAllowed" = "Les URL de liste de blocage personnalisées ne peuvent pas contenir de nom d'utilisateur ni de mot de passe.";
+"core.domain.empty" = "Le domaine est vide.";
+"core.domain.tooLong" = "Le domaine est trop long.";
+"core.domain.needsTwoLabels" = "Saisis un domaine complet, comme example.com.";
+"core.domain.invalidLabel" = "Étiquette de domaine invalide : %@";
+"core.domain.ipNotAllowed" = "Les adresses IP ne sont pas prises en charge ici.";
+"core.filterBudget.exceedsDeviceMemory" = "Cette sélection nécessite environ %1$@ règles de filtrage, plus que ce que ton appareil peut contenir (%2$@). Supprime une liste pour activer la protection.";
+"core.filterBudget.exceedsTierLimit" = "Tes listes de blocage utilisent environ %1$@ règles de filtrage sur %2$@. %3$@";
+"core.filterBudget.action.remove" = "Supprime une liste pour activer la protection.";
+"core.filterBudget.action.removeOrUpgrade" = "Supprime une liste ou passe à Plus.";
+"core.filterBudget.largestSuffix" = " Plus grande : %@.";
+"core.catalogSync.invalidBlocklistEncoding" = "La liste de blocage téléchargée pour %@ n'est pas un UTF-8 valide.";
+"core.catalogSync.blocklistTooLarge" = "La liste de blocage téléchargée pour %1$@ est trop volumineuse (%2$lld octets).";
+"core.catalogSync.blocklistExceedsRuleLimit" = "La liste de blocage pour %1$@ compte plus de %2$lld règles. Réduis sa taille ou supprime-la.";
+"core.catalogSync.noRulesAvailable" = "Aucun filtre téléchargé activé n'est encore disponible.";
+"core.catalogSync.customBlocklistUnavailable" = "Impossible de charger la liste de blocage personnalisée « %1$@ ». %2$@";
+"core.domainError.freeBlockedLimit" = "La protection gratuite inclut %lld domaines bloqués supplémentaires.";
+"core.domainError.freeAllowedLimit" = "La protection gratuite inclut %lld exceptions autorisées.";
+"core.backup.lastUploaded" = "Dernier envoi %@";

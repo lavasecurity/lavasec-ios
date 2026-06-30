@@ -595,7 +595,10 @@ struct LavaSectionGroup<Content: View>: View {
 enum LavaToolbarMetrics {
     static let buttonSize: CGFloat = 44
     static let iconFrameSize: CGFloat = 24
-    static let chevronIconPointSize: CGFloat = 22
+    // Matches the system navigation back chevron so custom flow-back buttons (import flow,
+    // backup, custom resolver, bug report) are visually consistent with screens that use the
+    // native back button — was 22pt, which read noticeably larger than the system chevron.
+    static let chevronIconPointSize: CGFloat = 17
     static let xmarkIconPointSize: CGFloat = 15
     static let plusIconPointSize: CGFloat = 18
     static let checkmarkIconPointSize: CGFloat = 17

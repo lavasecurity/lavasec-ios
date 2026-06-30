@@ -19,3 +19,46 @@
 "widget.action.restart" = "Riavvia";
 "widget.action.pauseForMinutes" = "Metti in pausa %d min";
 "a11y.shieldGuardian" = "Guardiano scudo Lava";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ è già nei tuoi domini bloccati.";
+"core.domainError.alreadyAllowed" = "%@ è già nelle tue eccezioni consentite.";
+"core.domainError.blockedLimit" = "Puoi avere fino a %lld domini bloccati aggiuntivi.";
+"core.domainError.allowedLimit" = "Puoi avere fino a %lld eccezioni consentite.";
+
+/* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
+"core.resolver.empty" = "Inserisci un server DNS IPv4/6, un URL DoH, DoT, DoQ o un DNS stamp.";
+"core.resolver.unsupported" = "Usa un server DNS IPv4/6, un URL DoH, DoT, DoQ o un DNS stamp sdns://.";
+"core.resolver.doqUnsupported" = "DNS over QUIC non è supportato su questo dispositivo.";
+"core.resolver.badStamp" = "Impossibile leggere il DNS stamp. Controllalo e riprova.";
+"core.resolver.missingDoHPath" = "Gli URL DNS-over-HTTPS devono includere un percorso, ad esempio /dns-query.";
+"core.resolver.credentialsNotAllowed" = "Gli URL DNS personalizzati non possono includere nomi utente o password.";
+"core.resolver.secondaryTransportMismatch" = "Il DNS secondario deve usare lo stesso transport del DNS primario.";
+"core.endpoint.credentialsNotAllowed" = "Gli URL con nomi utente o password non sono supportati.";
+"core.endpoint.localhostNotAllowed" = "Qui non puoi usare localhost come resolver DNS.";
+"core.endpoint.privateNetworkNotAllowed" = "Gli URL di blocklist personalizzate devono usare un host pubblico.";
+"core.endpoint.unusableResolverAddress" = "Inserisci un indirizzo di resolver DNS utilizzabile, non un indirizzo di loopback, multicast o non specificato.";
+"core.endpoint.invalidResolverHost" = "Inserisci un host di resolver DNS valido.";
+"core.customBlocklist.invalidURL" = "Inserisci un URL di blocklist valido.";
+"core.customBlocklist.unsupportedScheme" = "Le blocklist personalizzate devono usare HTTPS.";
+"core.customBlocklist.missingHost" = "L'URL della blocklist personalizzata deve includere un host.";
+"core.customBlocklist.privateNetworkHost" = "Gli URL di blocklist personalizzate devono usare un host pubblico.";
+"core.customBlocklist.credentialsNotAllowed" = "Gli URL di blocklist personalizzate non possono includere nomi utente o password.";
+"core.domain.empty" = "Il dominio è vuoto.";
+"core.domain.tooLong" = "Il dominio è troppo lungo.";
+"core.domain.needsTwoLabels" = "Inserisci un dominio completo, ad esempio example.com.";
+"core.domain.invalidLabel" = "Etichetta di dominio non valida: %@";
+"core.domain.ipNotAllowed" = "Qui gli indirizzi IP non sono supportati.";
+"core.filterBudget.exceedsDeviceMemory" = "Questa selezione richiede circa %1$@ regole di filtro, più di quante il dispositivo possa contenere (%2$@). Rimuovi un elenco per attivare la protezione.";
+"core.filterBudget.exceedsTierLimit" = "Le tue blocklist usano circa %1$@ di %2$@ regole di filtro. %3$@";
+"core.filterBudget.action.remove" = "Rimuovi un elenco per attivare la protezione.";
+"core.filterBudget.action.removeOrUpgrade" = "Rimuovi un elenco o passa a Plus.";
+"core.filterBudget.largestSuffix" = " Più grande: %@.";
+"core.catalogSync.invalidBlocklistEncoding" = "La blocklist scaricata per %@ non è in formato UTF-8 valido.";
+"core.catalogSync.blocklistTooLarge" = "La blocklist scaricata per %1$@ è troppo grande (%2$lld byte).";
+"core.catalogSync.blocklistExceedsRuleLimit" = "La blocklist per %1$@ contiene più di %2$lld regole. Riducine le dimensioni o rimuovila.";
+"core.catalogSync.noRulesAvailable" = "Non è ancora disponibile alcun filtro scaricato e attivo.";
+"core.catalogSync.customBlocklistUnavailable" = "Impossibile caricare la blocklist personalizzata “%1$@”. %2$@";
+"core.domainError.freeBlockedLimit" = "La protezione gratuita include %lld domini bloccati aggiuntivi.";
+"core.domainError.freeAllowedLimit" = "La protezione gratuita include %lld eccezioni consentite.";
+"core.backup.lastUploaded" = "Ultimo caricamento %@";

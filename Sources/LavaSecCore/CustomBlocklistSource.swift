@@ -10,15 +10,15 @@ public enum CustomBlocklistSourceError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidURL:
-            "Enter a valid blocklist URL."
+            LavaCoreStrings.localized("core.customBlocklist.invalidURL")
         case .unsupportedScheme:
-            "Custom blocklists must use HTTPS."
+            LavaCoreStrings.localized("core.customBlocklist.unsupportedScheme")
         case .missingHost:
-            "Custom blocklist URL must include a host."
+            LavaCoreStrings.localized("core.customBlocklist.missingHost")
         case .privateNetworkHost:
-            "Custom blocklist URLs must use a public host."
+            LavaCoreStrings.localized("core.customBlocklist.privateNetworkHost")
         case .credentialsNotAllowed:
-            "Custom blocklist URLs cannot include usernames or passwords."
+            LavaCoreStrings.localized("core.customBlocklist.credentialsNotAllowed")
         }
     }
 }
