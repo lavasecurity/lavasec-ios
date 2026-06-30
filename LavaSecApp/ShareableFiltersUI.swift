@@ -1150,27 +1150,27 @@ private struct ImportPreviewView: View {
             VStack(spacing: 10) {
                 if unavailable > 0 {
                     ImportAlertRow(
-                        title: "\(unavailable) blocklist\(unavailable == 1 ? "" : "s") aren't available here"
+                        title: (unavailable == 1 ? "%@ blocklist isn't available here" : "%@ blocklists aren't available here").lavaLocalizedFormat(unavailable.formatted())
                     )
                 }
                 if upgrade > 0 {
                     ImportAlertRow(
-                        title: "\(upgrade) custom blocklist\(upgrade == 1 ? "" : "s") need Lava Security+"
+                        title: (upgrade == 1 ? "%@ custom blocklist needs Lava Security+" : "%@ custom blocklists need Lava Security+").lavaLocalizedFormat(upgrade.formatted())
                     )
                 }
                 if overLimit > 0 {
                     ImportAlertRow(
-                        title: "\(overLimit) blocked domain\(overLimit == 1 ? "" : "s") over your plan's limit"
+                        title: (overLimit == 1 ? "%@ blocked domain is over your plan's limit" : "%@ blocked domains are over your plan's limit").lavaLocalizedFormat(overLimit.formatted())
                     )
                 }
                 if unsafe > 0 {
                     ImportAlertRow(
-                        title: "\(unsafe) custom blocklist\(unsafe == 1 ? "" : "s") were skipped for safety"
+                        title: (unsafe == 1 ? "%@ custom blocklist was skipped for safety" : "%@ custom blocklists were skipped for safety").lavaLocalizedFormat(unsafe.formatted())
                     )
                 }
                 if overBudget > 0 {
                     ImportAlertRow(
-                        title: "\(overBudget) blocklist\(overBudget == 1 ? "" : "s") didn't fit your plan's rule limit"
+                        title: (overBudget == 1 ? "%@ blocklist didn't fit your plan's rule limit" : "%@ blocklists didn't fit your plan's rule limit").lavaLocalizedFormat(overBudget.formatted())
                     )
                 }
             }

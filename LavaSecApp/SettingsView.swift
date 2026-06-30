@@ -4286,7 +4286,7 @@ struct BugReportSettingsView: View {
                     // a single card) so the review reads as a read-only echo of what was typed,
                     // instead of every field claiming its own fixed-width header column (UR-26).
                     LavaTextInputPanel {
-                        BugReportReviewRow(label: "Topic", value: selectedIssueType?.title ?? "Not selected")
+                        BugReportReviewRow(label: "Topic", value: selectedIssueType.map { $0.title.lavaLocalized } ?? "Not selected".lavaLocalized)
 
                         if selectedIssueType == .websiteAccess {
                             Divider()

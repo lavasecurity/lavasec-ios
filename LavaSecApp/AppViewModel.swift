@@ -807,25 +807,18 @@ final class AppViewModel: ObservableObject {
         let age = max(0, age)
 
         guard age < maxFreshnessAge else {
-            return "more than a week"
+            return "more than a week".lavaLocalized
         }
 
         if age < 60 {
-            return "Now"
+            return "Now".lavaLocalized
         }
 
-        let minutes = Int(age / 60)
-        if minutes < 60 {
-            return "\(minutes) \(minutes == 1 ? "minute" : "minutes") ago"
-        }
-
-        let hours = Int(age / (60 * 60))
-        if hours < 24 {
-            return "\(hours) \(hours == 1 ? "hour" : "hours") ago"
-        }
-
-        let days = Int(age / (24 * 60 * 60))
-        return "\(days) \(days == 1 ? "day" : "days") ago"
+        // Locale-correct relative time (handles each locale's unit + plural rules,
+        // instead of hardcoded English "minute(s)/hour(s)/day(s) ago").
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(fromTimeInterval: -age)
     }
 
     @Published var configuration = AppConfiguration()
@@ -2009,8 +2002,7 @@ final class AppViewModel: ObservableObject {
             return "Nothing blocked yet today"
         }
 
-        let noun = blocked == 1 ? "domain" : "domains"
-        return "Lava blocked \(blocked.formatted()) \(noun) today"
+        return (blocked == 1 ? "Lava blocked %@ domain today" : "Lava blocked %@ domains today").lavaLocalizedFormat(blocked.formatted())
     }
 
     var activityDigestSubtitle: String {
@@ -3135,8 +3127,7 @@ final class AppViewModel: ObservableObject {
             await notifyTunnelSnapshotUpdated()
             await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
 
-            let ruleLabel = protectedRuleCount == 1 ? "rule" : "rules"
-            catalogStatusMessage = "Prepared \(protectedRuleCount.formatted()) \(ruleLabel) for local protection."
+            catalogStatusMessage = (protectedRuleCount == 1 ? "Prepared %@ rule for local protection." : "Prepared %@ rules for local protection.").lavaLocalizedFormat(protectedRuleCount.formatted())
             catalogStatusIsError = false
             self.activeFilterDraft = nil
             filterPreparationState = .preparing(progress: 1, message: "Success")
@@ -3981,8 +3972,7 @@ final class AppViewModel: ObservableObject {
             await notifyTunnelSnapshotUpdated()
             await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
 
-            let ruleLabel = protectedRuleCount == 1 ? "rule" : "rules"
-            catalogStatusMessage = "Imported \(protectedRuleCount.formatted()) \(ruleLabel) for local protection."
+            catalogStatusMessage = (protectedRuleCount == 1 ? "Imported %@ rule for local protection." : "Imported %@ rules for local protection.").lavaLocalizedFormat(protectedRuleCount.formatted())
             catalogStatusIsError = false
             return .success(ruleCount: protectedRuleCount)
         } catch {

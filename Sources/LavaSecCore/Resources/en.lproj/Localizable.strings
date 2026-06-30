@@ -5,4 +5,17 @@
 "notif.body.reconnectTitle" = "Reconnect Lava";
 "notif.body.reconnectMessage" = "DNS is not resolving on this network. Tap to reconnect protection.";
 "notif.body.dnsSlowTitle" = "Lava DNS is slow";
-"notif.body.dnsSlowMessage" = "The selected DNS resolver is responding slowly. Tap to reconnect protection.";
+"notif.body.dnsSlowMessage" = "Your DNS provider is responding slowly. Tap to reconnect protection.";
+
+/* Live Activity / widget UI (shared via Bundle.module so the widget extension localizes). */
+"widget.state.on" = "Lava Security is on";
+"widget.state.paused" = "Lava Security is paused";
+"widget.state.restartingTitle" = "Restarting…";
+"widget.a11y.restarting" = "Lava Security is restarting";
+"widget.status.on" = "On";
+"widget.status.paused" = "Paused";
+"widget.status.restarting" = "Restarting";
+"widget.action.resume" = "Resume";
+"widget.action.restart" = "Restart";
+"widget.action.pauseForMinutes" = "Pause for %d min";
+"a11y.shieldGuardian" = "Lava shield guardian";

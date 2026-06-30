@@ -51,7 +51,7 @@ struct SoftShieldGuardian: View {
             shieldStyle: shieldStyle
         )
         .frame(width: size, height: size)
-        .accessibilityLabel("Lava shield guardian")
+        .accessibilityLabel(LavaCoreStrings.localized("a11y.shieldGuardian"))
         .onAppear {
             if state == .waking {
                 startTransition(from: .sleeping, to: .waking, animated: animates)

@@ -6,3 +6,16 @@
 "notif.body.reconnectMessage" = "In diesem Netzwerk werden DNS-Anfragen nicht aufgelöst. Tippe, um den Schutz neu zu verbinden.";
 "notif.body.dnsSlowTitle" = "Lava DNS ist langsam";
 "notif.body.dnsSlowMessage" = "Der ausgewählte DNS-Resolver antwortet langsam. Tippe, um den Schutz neu zu verbinden.";
+
+/* Live Activity / widget UI (shared via Bundle.module). */
+"widget.state.on" = "Lava Security ist aktiviert";
+"widget.state.paused" = "Lava Security ist pausiert";
+"widget.state.restartingTitle" = "Neustart …";
+"widget.a11y.restarting" = "Lava Security wird neu gestartet";
+"widget.status.on" = "Ein";
+"widget.status.paused" = "Pausiert";
+"widget.status.restarting" = "Neustart";
+"widget.action.resume" = "Fortsetzen";
+"widget.action.restart" = "Neu starten";
+"widget.action.pauseForMinutes" = "Für %d Min. pausieren";
+"a11y.shieldGuardian" = "Lava-Schildwächter";

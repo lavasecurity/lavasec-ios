@@ -6,3 +6,16 @@
 "notif.body.reconnectMessage" = "このネットワークでDNSを解決できません。タップして保護を再接続してください。";
 "notif.body.dnsSlowTitle" = "LavaのDNSが遅くなっています";
 "notif.body.dnsSlowMessage" = "選択中のDNSリゾルバの応答が遅くなっています。タップして保護を再接続してください。";
+
+/* Live Activity / widget UI (shared via Bundle.module). */
+"widget.state.on" = "Lava Security はオンです";
+"widget.state.paused" = "Lava Security は一時停止中です";
+"widget.state.restartingTitle" = "再起動中…";
+"widget.a11y.restarting" = "Lava Security を再起動しています";
+"widget.status.on" = "オン";
+"widget.status.paused" = "一時停止中";
+"widget.status.restarting" = "再起動中";
+"widget.action.resume" = "再開";
+"widget.action.restart" = "再起動";
+"widget.action.pauseForMinutes" = "%d 分間一時停止";
+"a11y.shieldGuardian" = "Lava シールドガーディアン";

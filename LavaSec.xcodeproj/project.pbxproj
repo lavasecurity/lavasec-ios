@@ -82,6 +82,7 @@
 		1A000003000000000000000C /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002005 /* LavaLiveActivityIntents.swift */; };
 		1A0000040000000000000002 /* LavaProtectionCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000040000000000002001 /* LavaProtectionCommandService.swift */; };
 			1A0000010000000000000019 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001018 /* Localizable.xcstrings */; };
+		1A0000080000000000000019 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000001018 /* Localizable.xcstrings */; };
 			1A000001000000000000001A /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001019 /* InfoPlist.xcstrings */; };
 			1A0000020000000000000001 /* SecuritySettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000001001 /* SecuritySettingsUITests.swift */; };
 			1A0000020000000000000002 /* CoreFlowDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000001002 /* CoreFlowDeviceTests.swift */; };
@@ -193,6 +194,7 @@
 		1A0000060000000000001006 /* AppIconEmerald.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconEmerald.icon; sourceTree = "<group>"; };
 		1A0000060000000000001007 /* AppIconKiwiCreme.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconKiwiCreme.icon; sourceTree = "<group>"; };
 		1A0000010000000000001018 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		1A0000080000000000001018 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		1A0000010000000000001019 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		1A0000010000000000001009 /* AdminQAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminQAView.swift; sourceTree = "<group>"; };
 		1A000001000000000000100A /* RageShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RageShakeDetector.swift; sourceTree = "<group>"; };
@@ -404,6 +406,7 @@
 			children = (
 				1A0000080000000000001001 /* LavaSecIntentsExtension.swift */,
 				1A0000010000000000001FFF /* FocusFilterIntent.swift */,
+				1A0000080000000000001018 /* Localizable.xcstrings */,
 				1A0000080000000000002002 /* Info.plist */,
 				1A0000080000000000002003 /* LavaSecIntents.entitlements */,
 			);
@@ -627,6 +630,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000080000000000000019 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

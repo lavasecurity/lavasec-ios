@@ -56,6 +56,12 @@ jobs:
       - name: Check blocklist catalog codegen is in sync with the canonical spec
         run: node scripts/generate-blocklist-catalog.mjs --check
 
+      - name: Check localization completeness (all locales present + nothing left untranslated)
+        run: node scripts/check-localization.mjs
+
+      - name: Check UI string catalog coverage (no hardcoded user-facing strings outside the catalog)
+        run: node scripts/check-string-coverage.mjs
+
       - name: Merge-up contamination guard
         if: ${{ github.event_name == 'pull_request' }}
         env:

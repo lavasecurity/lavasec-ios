@@ -2110,22 +2110,21 @@ struct AddBlocklistSheet: View {
         // Nothing counted yet but lists are still resolving — don't imply "0 of
         // budget" headroom we can't vouch for.
         if status.isIndeterminate {
-            let lists = status.pendingLists == 1 ? "list" : "lists"
-            return "Calculating rule usage… (\(status.pendingLists) \(lists) pending)"
+            return (status.pendingLists == 1 ? "Calculating rule usage… (%@ list pending)" : "Calculating rule usage… (%@ lists pending)").lavaLocalizedFormat(status.pendingLists.formatted())
         }
 
         let used = AppViewModel.abbreviatedRuleCount(status.displayedRuleCount)
         let budget = AppViewModel.abbreviatedRuleCount(status.budget)
         var text: String
         if isFreeOverLimit {
-            text = "About \(used) of \(budget) rules · Upgrade or remove a list"
+            text = "About %1$@ of %2$@ rules · Upgrade or remove a list".lavaLocalizedFormat(used, budget)
         } else if selectionStatusIsError {
-            text = "About \(used) of \(budget) rules · Remove a list to continue"
+            text = "About %1$@ of %2$@ rules · Remove a list to continue".lavaLocalizedFormat(used, budget)
         } else {
-            text = "About \(used) of \(budget) rules"
+            text = "About %1$@ of %2$@ rules".lavaLocalizedFormat(used, budget)
         }
         if status.pendingLists > 0 {
-            text += " (+\(status.pendingLists) pending)"
+            text += " " + "(+%@ pending)".lavaLocalizedFormat(status.pendingLists.formatted())
         }
         return text
     }
@@ -2675,7 +2674,7 @@ private struct BringYourOwnListView: View {
                 Divider()
 
                 LavaTextInputRow(title: "Blocklist URL") {
-                    TextField("https://example.com/pi-hole-style-list.txt".lavaLocalized, text: $customURL)
+                    TextField("https://example.com/pi-hole-style-list.txt", text: $customURL)
                         .lavaTextInputBody(keyboardType: .URL)
                         .focused($focusedField, equals: .url)
                 }
