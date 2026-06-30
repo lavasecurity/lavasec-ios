@@ -259,7 +259,7 @@ final class SecurityController: ObservableObject {
                 return
             }
 
-            guard await evaluateBiometrics(reason: "Enable \(biometricToggleTitle) for Lava") else {
+            guard await evaluateBiometrics(reason: "Enable %@ for Lava".lavaLocalizedFormat(biometricToggleTitle)) else {
                 statusMessage = "\(biometricToggleTitle) was not enabled."
                 return
             }
@@ -478,7 +478,7 @@ final class SecurityController: ObservableObject {
         }
 
         return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in
                 continuation.resume(returning: success)
             }
         }

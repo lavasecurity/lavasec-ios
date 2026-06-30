@@ -19,3 +19,9 @@
 "widget.action.restart" = "다시 시작";
 "widget.action.pauseForMinutes" = "%d분 동안 일시 중지";
 "a11y.shieldGuardian" = "Lava 실드 가디언";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@은(는) 이미 차단된 도메인에 있어요.";
+"core.domainError.alreadyAllowed" = "%@은(는) 이미 허용된 예외에 있어요.";
+"core.domainError.blockedLimit" = "차단 도메인은 최대 %lld개까지 추가로 보관할 수 있어요.";
+"core.domainError.allowedLimit" = "허용 예외는 최대 %lld개까지 보관할 수 있어요.";

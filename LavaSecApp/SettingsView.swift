@@ -899,12 +899,12 @@ private struct BackupOptionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle(title, isOn: isOn)
+            Toggle(title.lavaLocalized, isOn: isOn)
                 .font(.headline)
                 .tint(LavaStyle.safeGreen)
                 .lavaControlRowCard()
 
-            Text(detail)
+            Text(detail.lavaLocalized)
                 .lavaQuietNoteText()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1523,7 +1523,7 @@ private struct UpgradePlanComparisonView: View {
     }
 
     private func comparisonTitle(_ title: String) -> some View {
-        Text(title)
+        Text(title.lavaLocalized)
             .foregroundStyle(LavaStyle.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.82)
@@ -1566,7 +1566,7 @@ private struct UpgradePlanOfferRow: View {
         LavaPlainCard {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(offer.title)
+                    Text(offer.title.lavaLocalized)
                         .font(.headline)
                         .foregroundStyle(LavaStyle.ink)
 
@@ -3277,7 +3277,7 @@ private struct ResolverTransportControl: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .lavaControlRowCard()
 
-            Text(detail)
+            Text(detail.lavaLocalized)
                 .lavaQuietNoteText()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3289,7 +3289,7 @@ private struct ResolverToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(title, isOn: $isOn)
+        Toggle(title.lavaLocalized, isOn: $isOn)
             .font(.headline)
             .tint(LavaStyle.safeGreen)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -3306,7 +3306,7 @@ private struct ResolverOptionControl: View {
             ResolverToggleRow(title: title, isOn: $isOn)
                 .lavaControlRowCard()
 
-            Text(detail)
+            Text(detail.lavaLocalized)
                 .lavaQuietNoteText()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3527,7 +3527,7 @@ struct PrivacyDataSettingsView: View {
     }
 
     private func localLogToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-        Toggle(title, isOn: isOn)
+        Toggle(title.lavaLocalized, isOn: isOn)
             .lavaRow()
     }
 
@@ -3626,7 +3626,7 @@ private struct SecuritySettingsView: View {
                     if security.shouldShowBiometricToggle {
                         LavaCondensedDivider()
 
-                        Toggle(security.biometricToggleTitle, isOn: biometricBinding)
+                        Toggle(security.biometricToggleTitle.lavaLocalized, isOn: biometricBinding)
                             .lavaRow()
                             .disabled(!security.canEnableBiometrics)
                     }
@@ -3691,7 +3691,7 @@ private struct SecuritySettingsView: View {
                     return
                 }
 
-                guard await security.requireBiometricAuthentication(reason: "Turn off \(security.biometricToggleTitle)") else {
+                guard await security.requireBiometricAuthentication(reason: "Turn off %@".lavaLocalizedFormat(security.biometricToggleTitle)) else {
                     return
                 }
 
@@ -3712,7 +3712,7 @@ private struct SecuritySettingsView: View {
     }
 
     private func securitySurfaceToggle(_ title: String, surface: SecurityProtectedSurface) -> some View {
-        Toggle(title, isOn: Binding {
+        Toggle(title.lavaLocalized, isOn: Binding {
             security.hasAuthenticationMethod && security.isProtected(surface)
         } set: { isEnabled in
             guard security.hasAuthenticationMethod else {
@@ -4879,12 +4879,12 @@ private struct BugReportPreviewSectionCard: View {
         LavaPlainCard {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(section.title)
+                    Text(section.title.lavaLocalized)
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(section.purpose)
+                    Text(section.purpose.lavaLocalized)
                         .lavaRowSubtitleText()
                 }
 
@@ -4893,7 +4893,7 @@ private struct BugReportPreviewSectionCard: View {
                 VStack(spacing: 8) {
                     ForEach(section.items) { item in
                         HStack(alignment: .top, spacing: 12) {
-                            Text(item.label)
+                            Text(item.label.lavaLocalized)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(LavaStyle.secondaryText)
                                 .frame(width: 110, alignment: .leading)
@@ -5078,7 +5078,7 @@ private struct VersionNerdStatsView: View {
                                         .font(.subheadline.weight(.semibold))
                                 }
 
-                                Text(isSamplingTunnelHealth ? "Sampling" : "Refresh sample")
+                                Text((isSamplingTunnelHealth ? "Sampling" : "Refresh sample").lavaLocalized)
                                     .font(.subheadline.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)

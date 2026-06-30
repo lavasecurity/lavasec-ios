@@ -605,7 +605,7 @@ private struct NetworkActivityThemePill: View {
             Image(systemName: theme.systemImage)
                 .font(.caption2.weight(.bold))
 
-            Text(theme.title)
+            Text(theme.title.lavaLocalized)
                 .font(.caption.weight(.semibold))
         }
         .foregroundStyle(theme.tint)
@@ -1245,8 +1245,8 @@ private struct DomainHistoryView: View {
         }
         .alert(item: $domainActionAlert) { alert in
             Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
+                title: Text(alert.title.lavaLocalized),
+                message: Text(alert.message.lavaLocalized),
                 dismissButton: .default(Text("OK"))
             )
         }
@@ -1470,8 +1470,8 @@ private struct TopDomainsView: View {
         }
         .alert(item: $domainActionAlert) { alert in
             Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
+                title: Text(alert.title.lavaLocalized),
+                message: Text(alert.message.lavaLocalized),
                 dismissButton: .default(Text("OK"))
             )
         }

@@ -19,3 +19,9 @@
 "widget.action.restart" = "Reiniciar";
 "widget.action.pauseForMinutes" = "Pausar durante %d min";
 "a11y.shieldGuardian" = "Guardián escudo de Lava";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ ya está en tus dominios bloqueados.";
+"core.domainError.alreadyAllowed" = "%@ ya está en tus excepciones permitidas.";
+"core.domainError.blockedLimit" = "Puedes tener hasta %lld dominios bloqueados adicionales.";
+"core.domainError.allowedLimit" = "Puedes tener hasta %lld excepciones permitidas.";

@@ -148,7 +148,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("func requirePasscodeAuthentication(reason: String) async -> Bool"))
         XCTAssertTrue(controller.contains("func requireBiometricAuthentication(reason: String) async -> Bool"))
         XCTAssertTrue(securityBlock.contains("security.requirePasscodeAuthentication(reason: \"Turn off Security passcode\")"))
-        XCTAssertTrue(securityBlock.contains("security.requireBiometricAuthentication(reason: \"Turn off \\(security.biometricToggleTitle)\")"))
+        XCTAssertTrue(securityBlock.contains("security.requireBiometricAuthentication(reason: \"Turn off %@\".lavaLocalizedFormat(security.biometricToggleTitle))"))
         XCTAssertFalse(securityBlock.contains("requireCredentialAuthentication(reason: \"Turn off Security passcode\")"))
     }
 

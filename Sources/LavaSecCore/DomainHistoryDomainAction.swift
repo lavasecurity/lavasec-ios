@@ -24,13 +24,13 @@ public enum DomainHistoryDomainActionError: LocalizedError, Equatable, Sendable 
         case .invalidDomain(let message):
             return message
         case .alreadyBlocked(let domain):
-            return "\(domain) is already in your blocked domains."
+            return LavaCoreStrings.localizedFormat("core.domainError.alreadyBlocked", domain)
         case .alreadyAllowed(let domain):
-            return "\(domain) is already in your allowed exceptions."
+            return LavaCoreStrings.localizedFormat("core.domainError.alreadyAllowed", domain)
         case .blockedDomainLimitReached(let limit):
-            return "You can keep up to \(limit) additional blocked domains."
+            return LavaCoreStrings.localizedFormat("core.domainError.blockedLimit", limit)
         case .allowedDomainLimitReached(let limit):
-            return "You can keep up to \(limit) allowed exceptions."
+            return LavaCoreStrings.localizedFormat("core.domainError.allowedLimit", limit)
         case .allowedDomainRejected(let message):
             return message
         }

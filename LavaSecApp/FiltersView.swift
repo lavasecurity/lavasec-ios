@@ -1320,7 +1320,7 @@ private struct MyListCover: View {
         ) { _ in
             Button("OK", role: .cancel) { nonActiveSaveError = nil }
         } message: { message in
-            Text(message)
+            Text(message.lavaLocalized)
         }
     }
 
@@ -1976,7 +1976,9 @@ struct AddBlocklistSheet: View {
                     }
             } footer: {
                 VStack(spacing: 9) {
-                    Button(actionButtonTitle, action: primaryAction)
+                    Button(action: primaryAction) {
+                        Text(actionButtonTitle.lavaLocalized)
+                    }
                         .buttonStyle(LavaStandaloneActionButtonStyle())
                         .disabled(!canUsePrimaryAction)
 
@@ -1989,7 +1991,7 @@ struct AddBlocklistSheet: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .navigationTitle(navigationTitle)
+            .navigationTitle(navigationTitle.lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -19,3 +19,9 @@
 "widget.action.restart" = "Restart";
 "widget.action.pauseForMinutes" = "Pause for %d min";
 "a11y.shieldGuardian" = "Lava shield guardian";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ is already in your blocked domains.";
+"core.domainError.alreadyAllowed" = "%@ is already in your allowed exceptions.";
+"core.domainError.blockedLimit" = "You can keep up to %lld additional blocked domains.";
+"core.domainError.allowedLimit" = "You can keep up to %lld allowed exceptions.";

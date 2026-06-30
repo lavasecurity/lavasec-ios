@@ -54,7 +54,9 @@ const allowedUntranslatedValues = new Set([
   "OK",
   "→",
   "iOS",
-  "?"
+  "?",
+  "Protection",
+  "%@ + Fallback"
 ]);
 const requiredReleaseKeys = [
   "Guard",

@@ -1591,7 +1591,7 @@ final class AppViewModel: ObservableObject {
 
     var protectionSubtitle: String {
         if isProtectionTemporarilyPaused {
-            return "Lava will try to resume at \(formattedTemporaryProtectionResumeTime)"
+            return "Lava will try to resume at %@".lavaLocalizedFormat(formattedTemporaryProtectionResumeTime)
         }
 
         switch vpnStatus {
@@ -2206,7 +2206,7 @@ final class AppViewModel: ObservableObject {
             return configuration.resolverPreset.shortDisplayName
         }
 
-        return "\(configuration.resolverPreset.shortDisplayName) + Fallback"
+        return "%@ + Fallback".lavaLocalizedFormat(configuration.resolverPreset.shortDisplayName)
     }
 
     var supportsDNSOverQUIC: Bool {
@@ -2530,9 +2530,9 @@ final class AppViewModel: ObservableObject {
     private func filterRuleBudgetMessage() -> String {
         let budgetText = AppViewModel.abbreviatedRuleCount(filterRuleBudget)
         if configuration.hasLavaSecurityPlus {
-            return "Lava Plus includes up to \(budgetText) filter rules. Remove a list to add more."
+            return "Lava Plus includes up to %@ filter rules. Remove a list to add more.".lavaLocalizedFormat(budgetText)
         }
-        return "Free protection includes up to \(budgetText) filter rules. Remove a list or upgrade to Plus."
+        return "Free protection includes up to %@ filter rules. Remove a list or upgrade to Plus.".lavaLocalizedFormat(budgetText)
     }
 
     /// Compact filter-rule count for tight UI: 500K, 1.2M, 2M.

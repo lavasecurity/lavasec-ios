@@ -593,19 +593,19 @@ private struct OnboardingStepHeading: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(step.uppercased())
+            Text(step.lavaLocalized)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(LavaStyle.safeGreen)
                 .textCase(.uppercase)
 
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.largeTitle.bold())
                 .foregroundStyle(LavaStyle.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.68)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(description)
+            Text(description.lavaLocalized)
                 .font(.title3)
                 .foregroundStyle(LavaStyle.secondaryText)
                 .lineLimit(3)
@@ -846,7 +846,7 @@ private struct OnboardingFeatureRow: View {
                 .frame(width: 38, height: 38)
                 .background(LavaStyle.softGreen, in: Circle())
 
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.ink)
                 .fixedSize(horizontal: false, vertical: true)
@@ -937,7 +937,7 @@ private struct OnboardingNotificationPromptCard: View {
                     .font(.subheadline.weight(.bold))
             }
 
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.headline)
         }
         .foregroundStyle(isPrimary ? .white : LavaStyle.ink)
@@ -1124,7 +1124,7 @@ private struct OnboardingAccountActionRow: View {
                     .frame(width: 28, height: 28)
             }
 
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(titleTint)
 
@@ -1150,7 +1150,7 @@ private struct OnboardingPrimaryButton: View {
                         .tint(.white)
                 }
 
-                Text(title)
+                Text(title.lavaLocalized)
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
@@ -1172,7 +1172,7 @@ private struct OnboardingSecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
+            Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.panelActionGreen)
                 .lineLimit(1)

@@ -19,3 +19,9 @@
 "widget.action.restart" = "重新啟動";
 "widget.action.pauseForMinutes" = "暫停 %d 分鐘";
 "a11y.shieldGuardian" = "Lava 護盾守衛";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ 已在你的封鎖網域中。";
+"core.domainError.alreadyAllowed" = "%@ 已在你的允許例外中。";
+"core.domainError.blockedLimit" = "你最多可以再保留 %lld 個封鎖網域。";
+"core.domainError.allowedLimit" = "你最多可以保留 %lld 個允許例外。";

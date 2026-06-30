@@ -19,3 +19,9 @@
 "widget.action.restart" = "再起動";
 "widget.action.pauseForMinutes" = "%d 分間一時停止";
 "a11y.shieldGuardian" = "Lava シールドガーディアン";
+
+/* Domain-action error messages (localized at the producer; interpolation-safe). */
+"core.domainError.alreadyBlocked" = "%@ はすでにブロック中のドメインにあります。";
+"core.domainError.alreadyAllowed" = "%@ はすでに許可された例外にあります。";
+"core.domainError.blockedLimit" = "ブロックするドメインは追加で最大 %lld 件まで保持できます。";
+"core.domainError.allowedLimit" = "許可する例外は最大 %lld 件まで保持できます。";

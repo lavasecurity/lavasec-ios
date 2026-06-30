@@ -317,7 +317,7 @@ struct ImportFiltersFlow: View {
             ) {
                 Button("OK", role: .cancel) { applyError = nil }
             } message: {
-                Text(applyError ?? "")
+                Text((applyError ?? "").lavaLocalized)
             }
             .sheet(isPresented: $showingPaywall) {
                 LavaPlusUpgradeSheet()
@@ -603,7 +603,7 @@ private struct ImportCodeEntryView: View {
                 }
 
                 if let errorMessage {
-                    Text(errorMessage)
+                    Text(errorMessage.lavaLocalized)
                         .lavaQuietNoteText()
                         .foregroundStyle(LavaStyle.errorText)
                 }
@@ -670,7 +670,7 @@ private struct ImportQRScannerView: View {
                         .lavaSupportingText()
 
                     if let errorMessage {
-                        Text(errorMessage)
+                        Text(errorMessage.lavaLocalized)
                             .lavaQuietNoteText()
                             .foregroundStyle(LavaStyle.errorText)
                     }
@@ -1109,7 +1109,7 @@ private struct ImportPreviewView: View {
         } footer: {
             VStack(spacing: 10) {
                 if allowsAddingNewFilter {
-                    Button(plan.applied.isEmpty ? "Nothing to import" : "Add as a new filter") {
+                    Button((plan.applied.isEmpty ? "Nothing to import" : "Add as a new filter").lavaLocalized) {
                         onAddNew()
                     }
                     .buttonStyle(LavaStandaloneActionButtonStyle())
@@ -1123,7 +1123,7 @@ private struct ImportPreviewView: View {
                     }
                 } else {
                     // Onboarding: the import becomes the active filter (no add/replace choice).
-                    Button(plan.applied.isEmpty ? "Nothing to import" : "Use this filter") {
+                    Button((plan.applied.isEmpty ? "Nothing to import" : "Use this filter").lavaLocalized) {
                         onUseAsActiveFilter()
                     }
                     .buttonStyle(LavaStandaloneActionButtonStyle())

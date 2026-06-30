@@ -117,7 +117,7 @@ struct DiffGroup: View {
             LavaSectionGroup(title) {
                 LavaCondensedList {
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        FilterReviewChangeRow(symbol: row.symbol, title: row.title, tint: row.tint)
+                        FilterReviewChangeRow(symbol: row.symbol, title: row.title, tint: row.tint, localizesTitle: false)
 
                         if index < rows.count - 1 {
                             LavaCondensedDivider(leadingInset: 52)
@@ -241,9 +241,11 @@ struct FilterPreparationScreen: View {
                         // A filter switch has no editor/review to go back to, so hide the
                         // "Back to Edit"/"Back to Review" affordance for it.
                         if viewModel.filterPreparationFailureOffersEditReturn {
-                            Button(origin.failureBackTitle) {
+                            Button {
                                 viewModel.returnToFilterEditAfterPrepareFailure()
                                 returnToReview?()
+                            } label: {
+                                Text(origin.failureBackTitle.lavaLocalized)
                             }
                             .buttonStyle(LavaSecondaryActionButtonStyle())
                         }

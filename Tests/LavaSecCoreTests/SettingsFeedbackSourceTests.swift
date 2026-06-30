@@ -684,9 +684,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             endingBefore: "private struct AppleSignInStatusIcon: View"
         )
         XCTAssertTrue(optionControlBlock.containsInOrder([
-            "Toggle(title, isOn: isOn)",
+            "Toggle(title.lavaLocalized, isOn: isOn)",
             ".lavaControlRowCard()",
-            "Text(detail)",
+            "Text(detail.lavaLocalized)",
             ".lavaQuietNoteText()"
         ]))
     }
@@ -1034,7 +1034,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(optionControlBlock.containsInOrder([
             "ResolverToggleRow",
             ".lavaControlRowCard()",
-            "Text(detail)",
+            "Text(detail.lavaLocalized)",
             ".lavaQuietNoteText()"
         ]))
 
@@ -1046,7 +1046,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(transportControlBlock.contains("Picker(\"DNS Transport\""))
         XCTAssertTrue(transportControlBlock.contains("Text(transport.menuTitle.lavaLocalized)"))
         XCTAssertTrue(transportControlBlock.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(transportControlBlock.contains("Text(detail)"))
+        XCTAssertTrue(transportControlBlock.contains("Text(detail.lavaLocalized)"))
         XCTAssertTrue(transportControlBlock.contains(".lavaQuietNoteText()"))
         XCTAssertFalse(transportControlBlock.contains("Text(title)"))
     }
