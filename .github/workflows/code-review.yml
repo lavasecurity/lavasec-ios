@@ -1,0 +1,20 @@
+name: Code Review
+
+# Delegates to the org-wide reusable AI code-review workflow (open-code-review over
+# z.ai) so the pipeline lives in one hardened place rather than being copied into every
+# repo. Public repo: the reusable self-disables on private repos. Requires the repo
+# secret OCR_LLM_AUTH_TOKEN (the z.ai API key).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  code-review:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lavasecurity/.github/.github/workflows/code-review.yml@main
+    secrets:
+      llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
