@@ -1057,9 +1057,10 @@ private struct FocusFilterHowToSheet: View {
 
 /// The two connection states the overview card lets the user preview to learn how
 /// Lava behaves. Purely educational (user-driven) — NOT wired to live tunnel health.
-/// "Poor" teaches the fail-closed behavior: when Lava can't reach its filter it blocks
-/// sites to stay safe (the same precautionary block that, mislabelled, used to fill the
-/// Blocked tab with false positives).
+/// "Poor" teaches the fail-closed behavior: when the PHONE can't reach the internet, Lava
+/// blocks sites to stay safe (the same precautionary block that, mislabelled, used to fill
+/// the Blocked tab with false positives). Framed as the phone's connectivity, NOT "Lava
+/// can't reach its filter" — the filter is local, so that framing is misleading.
 private enum FilterConnectionPreview: CaseIterable {
     case normal
     case poor
@@ -1076,7 +1077,7 @@ private enum FilterConnectionPreview: CaseIterable {
         case .normal:
             return "Lava uses a local filter to block your phone's access to unwanted sites."
         case .poor:
-            return "If Lava can't reach its filter, it blocks sites to stay safe — they load again once the connection recovers."
+            return "When your phone can't reach the internet, Lava blocks sites to stay safe — they load again once your connection is back."
         }
     }
 }

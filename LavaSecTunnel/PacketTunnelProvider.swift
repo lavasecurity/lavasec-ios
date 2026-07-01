@@ -3471,11 +3471,73 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         setAppConfiguration(configuration)
         lastConfigurationModifiedAt = modificationDate(for: configurationURL)
         lastConfigurationRefreshAt = Date()
-        let bootstrapSnapshot: any FilterRuntimeSnapshot = configuration.enabledBlocklistIDs.isEmpty
-            ? configuration.filterSnapshot()
-            : FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
-        snapshot = bootstrapSnapshot
-        protectionPolicySnapshot = bootstrapSnapshot
+        // Release any prior-lifecycle resident BEFORE the synchronous bootstrap decode. On a
+        // same-instance restart / setTunnelNetworkSettings-failure retry (NOT a fresh process),
+        // self.snapshot still holds the previous resident; decoding a fresh up-to-cap (1M-rule)
+        // snapshot while a near-budget old one is retained would stack into the 2x-resident peak
+        // the reload path explicitly avoids (freedResidentBeforeDecode) and could jetsam the
+        // extension. Dropping our reference lets the old tables free before the decode; a lingering
+        // prior-lifecycle task keeps its own captured reference, so this is not a use-after-free.
+        // readPackets has not started, so nothing serves queries against this transient placeholder.
+        snapshotQueue.sync {
+            snapshot = FilterSnapshot(blockRules: DomainRuleSet())
+            protectionPolicySnapshot = snapshot
+            residentSnapshotIdentity = nil
+            residentSnapshotHasEnabledFilters = false
+            residentFailClosedDueToUnavailableSnapshot = false
+        }
+
+        // Compute the bootstrap install off-queue (bootstrapResidentSnapshotFromDisk does disk
+        // reads that don't touch snapshotQueue), then publish all resident state in ONE
+        // snapshotQueue critical section below.
+        let bootstrapSnapshot: any FilterRuntimeSnapshot
+        let bootstrapIdentity: PreparedFilterSnapshotIdentity?
+        let bootstrapHasEnabledFilters: Bool
+        if configuration.enabledBlocklistIDs.isEmpty {
+            bootstrapSnapshot = configuration.filterSnapshot()
+            bootstrapIdentity = nil
+            bootstrapHasEnabledFilters = false
+        } else if let resumed = bootstrapResidentSnapshotFromDisk(configuration: configuration) {
+            // Fast-resume from the user's own on-disk artifact so a cold start (notably a
+            // self-reconnect that kills + relaunches the process) does NOT serve a block-all
+            // FailClosedRuntimeSnapshot window while the async load decodes — the transient
+            // false-positives behind LAV-92/93. Wrap + set the identity exactly like the async
+            // commit so the immediately-following loadSnapshotInBackground hits the no-op reload
+            // gate and SKIPS the redundant multi-MB decode (and its 2x-resident peak).
+            bootstrapSnapshot = ResolverAdjustedRuntimeSnapshot(
+                base: resumed.snapshot,
+                resolver: configuration.resolverPreset
+            )
+            bootstrapIdentity = resumed.identity
+            bootstrapHasEnabledFilters = true
+        } else {
+            // No serviceable in-budget on-disk artifact, or it exceeds the synchronous-decode
+            // cap → fail closed (NEVER fail open). The async loadSnapshotInBackground resumes
+            // from disk / recompiles and commits the real snapshot. This bootstrap fail-closed
+            // is TRANSIENT — the unavailable marker stays false (below) so it does not suppress
+            // a later self-reconnect the way a genuine unavailability does.
+            bootstrapSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
+            bootstrapIdentity = nil
+            bootstrapHasEnabledFilters = false
+        }
+        // Publish under snapshotQueue. startTunnel can RESTART the same provider instance while a
+        // detached snapshot load from the PRIOR lifecycle is still inside loadCompiledSnapshot
+        // (stop/cleanup invalidates the reload generation but neither cancels nor awaits that
+        // task), and it reads these queue-guarded markers via currentResidentSnapshotIdentity()/
+        // currentResidentSnapshotHasEnabledFilters(). So confine the writes to snapshotQueue like
+        // every other access (loadInitialSharedState is called from startTunnel, never on
+        // snapshotQueue, so .sync cannot deadlock). The bootstrap also FULLY OWNS all three
+        // markers, resetting them in EVERY branch: a startTunnel retry after a
+        // setTunnelNetworkSettings failure (whose cleanup clears neither) must not let a stale
+        // "healthy filtering resident" marker survive into a fail-closed bootstrap and trick the
+        // async keep-resident/no-op decisions.
+        snapshotQueue.sync {
+            snapshot = bootstrapSnapshot
+            protectionPolicySnapshot = bootstrapSnapshot
+            residentSnapshotIdentity = bootstrapIdentity
+            residentSnapshotHasEnabledFilters = bootstrapHasEnabledFilters
+            residentFailClosedDueToUnavailableSnapshot = false
+        }
 
         if let diagnosticsURL {
             diagnostics = DiagnosticsPersistence.load(from: diagnosticsURL)
@@ -5987,7 +6049,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func reusableCompactSnapshot(
         from store: FilterArtifactStore,
         configuration: AppConfiguration,
-        cachedCatalog: BlocklistCatalog?
+        cachedCatalog: BlocklistCatalog?,
+        syncDecodeRuleCap: Int? = nil
     ) -> CompactFilterSnapshot? {
         guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]),
               let summary = try? CompactFilterSnapshot.readSummary(from: data),
@@ -5997,6 +6060,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         let ruleCount = summary.blockRuleCount + summary.allowRuleCount + summary.guardrailRuleCount
+        // AUTHORITATIVE sync-cap check, on the SAME mmapped bytes that will be decoded
+        // (`.mappedIfSafe` pins the inode). Only the cold-start bootstrap passes a cap; the async
+        // path passes nil. The bootstrap's cheap pre-gate is best-effort — an atomic republish of
+        // the mutable root store between the pre-gate read and this read could otherwise slip an
+        // over-cap (but in-budget) artifact into a synchronous decode — so the cap is re-enforced
+        // here, against the decode bytes, to defer it off the ready path. The bootstrap excludes
+        // legacy artifacts, so the summary read above is the cheap skip path (no full decode).
+        if let syncDecodeRuleCap, ruleCount > syncDecodeRuleCap {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-over-sync-cap", details: [
+                "identity": summary.identity.fingerprint,
+                "ruleCount": "\(ruleCount)",
+                "syncCap": "\(syncDecodeRuleCap)"
+            ])
+            return nil
+        }
         guard !FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: ruleCount) else {
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-over-budget", details: [
                 "identity": summary.identity.fingerprint,
@@ -6041,6 +6119,96 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         return try? CompactFilterSnapshot.decode(from: data)
+    }
+
+    // Cold-start ONLY: the synchronous fast-resume decode is attempted up to this rule count.
+    // Measured CompactFilterSnapshot.decode (release) ≈ 0.18 ms / 1K rules — the O(rules)
+    // sorted-order verification dominates — so ~1M ≈ ~180 ms on a Mac / ~0.4–0.5 s on device.
+    // Above the cap, fail-closed bootstrap defers the decode to the async load (a brief window)
+    // rather than stalling tunnel-ready ~0.5 s+ on EVERY connect for a near-budget filter.
+    private static let maxSynchronousBootstrapRuleCount = 1_000_000
+
+    // Synchronous cold-start fast-resume: returns the user's own STRICT-reusable, in-budget,
+    // summary-schema on-disk snapshot (the current artifact) so a fresh process — notably one
+    // relaunched by a self-reconnect that killed the previous process — does NOT serve a block-all
+    // FailClosedRuntimeSnapshot window while the async load decodes. Reuses the SAME budget/header-
+    // gated reuseCompactSnapshot as the async path, capped to the synchronous-decode ceiling.
+    // Returns nil (→ fail-closed bootstrap, async load resumes) when no strict-reusable in-budget
+    // summary-schema artifact exists, it exceeds the cap, or it is legacy. NEVER fails open — and
+    // deliberately serves NO last-known-good here (that would risk under-blocking with stale rules;
+    // the async serveLastKnownGoodOrFailClosed provides LKG when the fresh compile genuinely fails).
+    private func bootstrapResidentSnapshotFromDisk(
+        configuration: AppConfiguration
+    ) -> (snapshot: any FilterRuntimeSnapshot, identity: PreparedFilterSnapshotIdentity)? {
+        let cachedCatalog = loadCachedCatalogMetadata()
+        let cap = Self.maxSynchronousBootstrapRuleCount
+
+        // Same [pointer-resolved, root] store order as loadCompiledSnapshot — a stale pointer
+        // must not shadow a fresh root copy.
+        var artifactStores: [FilterArtifactStore] = []
+        if let resolved = readableArtifactStore() {
+            artifactStores.append(resolved)
+        }
+        if let containerURL = LavaSecAppGroup.containerURL {
+            let rootStore = FilterArtifactStore(directoryURL: containerURL)
+            if artifactStores.first?.directoryURL != rootStore.directoryURL {
+                artifactStores.append(rootStore)
+            }
+        }
+
+        // Cheap, skip-only gate BEFORE any reuse/LKG read (which call readSummary). Two reasons
+        // it must happen here and not inside the helpers:
+        //  1. CAP — readSummary's cheap path only applies to summary-schema artifacts; for a
+        //     legacy artifact it FULL-DECODES the rule tables, so checking the cap after
+        //     readSummary would make a large legacy artifact pay a full decode just to be rejected.
+        //  2. LEGACY EXCLUSION — even UNDER the cap, a legacy artifact would be decoded twice
+        //     synchronously (readSummary's legacy recompute, then reusableCompactSnapshot's
+        //     decode), ~2x the sync budget. Legacy artifacts are transient (regenerated on the
+        //     next publish), so skip them and let the async load decode them once off the
+        //     critical path. readSyncBootstrapInfo reports both signals in one skip-only read.
+        // The same filter yields the same count across stores.
+        let eligibleStores = artifactStores.filter { store in
+            guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]),
+                  let info = try? CompactFilterSnapshot.readSyncBootstrapInfo(from: data)
+            else {
+                return false
+            }
+            guard info.hasStoredSummary else {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-skip-legacy-artifact", details: [
+                    "ruleCount": "\(info.totalRuleCount)"
+                ])
+                return false
+            }
+            if info.totalRuleCount > cap {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-over-sync-cap", details: [
+                    "ruleCount": "\(info.totalRuleCount)",
+                    "syncCap": "\(cap)"
+                ])
+                return false
+            }
+            return true
+        }
+
+        for store in eligibleStores {
+            if let compact = reusableCompactSnapshot(
+                from: store,
+                configuration: configuration,
+                cachedCatalog: cachedCatalog,
+                syncDecodeRuleCap: cap
+            ) {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-compact-resume", details: [
+                    "identity": compact.identity.fingerprint
+                ])
+                return (compact, compact.identity)
+            }
+        }
+        // No strict-reusable, sync-eligible CURRENT artifact → fail closed; the async load handles
+        // everything else off the critical path. Deliberately NO last-known-good resume here: a
+        // config-matched-but-stale artifact (e.g. a smaller preserved root copy while the current
+        // artifact is reusable-but-over-cap) would UNDER-BLOCK domains added since it was built,
+        // breaking the over-cap-→-fail-closed guarantee. The async serveLastKnownGoodOrFailClosed
+        // still provides last-known-good when the fresh (re)compile genuinely fails.
+        return nil
     }
 
     // Legacy fallback. The manifest and the prepared file are read SEPARATELY (prepared

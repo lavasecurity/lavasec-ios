@@ -1803,6 +1803,66 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(initialStateBlock.contains("persistDiagnosticsIfNeeded(force: true)"))
     }
 
+    func testLoadInitialSharedStateWarmResumesFromDiskBeforeFailingClosed() throws {
+        let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let initialStateBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadInitialSharedState()",
+            endingBefore: "private func refreshConfigurationIfNeeded"
+        )
+        let bootstrapBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func bootstrapResidentSnapshotFromDisk(",
+            endingBefore: "private func reusablePreparedSnapshot("
+        )
+
+        // A non-empty config attempts a synchronous on-disk fast-resume BEFORE installing the
+        // block-all FailClosedRuntimeSnapshot — eliminating the cold-start (post-self-reconnect)
+        // false-positive window whenever a serviceable in-budget artifact exists.
+        XCTAssertTrue(initialStateBlock.contains("bootstrapResidentSnapshotFromDisk(configuration: configuration)"))
+        // Resume installs a real resident: wrapped like the async commit, identity set so the
+        // immediately-following async load hits the no-op reload gate, and marked filtering.
+        XCTAssertTrue(initialStateBlock.contains("base: resumed.snapshot"))
+        XCTAssertTrue(initialStateBlock.contains("bootstrapIdentity = resumed.identity"))
+        XCTAssertTrue(initialStateBlock.contains("bootstrapHasEnabledFilters = true"))
+        // NEVER fail open: no serviceable / over-cap artifact still installs fail-closed.
+        XCTAssertTrue(initialStateBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
+        // The bootstrap FULLY OWNS the resident markers in EVERY branch (unconditional reset),
+        // so a same-instance startTunnel retry after a setTunnelNetworkSettings failure cannot
+        // carry a stale "healthy filtering resident" marker into a later fail-closed bootstrap
+        // (Codex P2 — would make the async loader keep the block-all snapshot unmarked).
+        XCTAssertTrue(initialStateBlock.contains("residentSnapshotIdentity = bootstrapIdentity"))
+        XCTAssertTrue(initialStateBlock.contains("residentSnapshotHasEnabledFilters = bootstrapHasEnabledFilters"))
+        XCTAssertTrue(initialStateBlock.contains("residentFailClosedDueToUnavailableSnapshot = false"))
+        // The resident-state install is confined to snapshotQueue: a detached snapshot load from
+        // a prior provider lifecycle (not cancelled on stop/restart) may read these queue-guarded
+        // markers concurrently with this new start. Two critical sections: release-before-decode
+        // then install — the release frees a same-instance restart's prior resident so the
+        // bootstrap decode doesn't stack into a 2x-resident jetsam peak.
+        XCTAssertEqual(initialStateBlock.components(separatedBy: "snapshotQueue.sync {").count - 1, 2)
+        XCTAssertTrue(initialStateBlock.contains("snapshot = FilterSnapshot(blockRules: DomainRuleSet())"))
+
+        // The bootstrap reuses the SAME budget/header-gated strict-reuse helper as the async path
+        // — and deliberately does NOT serve last-known-good (that would risk under-blocking with
+        // stale rules when the current artifact is reusable-but-over-cap).
+        XCTAssertTrue(bootstrapBlock.contains("reusableCompactSnapshot("))
+        XCTAssertFalse(bootstrapBlock.contains("lastKnownGoodCompactSnapshot("))
+        XCTAssertTrue(bootstrapBlock.contains("Self.maxSynchronousBootstrapRuleCount"))
+        XCTAssertTrue(source.contains("maxSynchronousBootstrapRuleCount = 1_000_000"))
+        // The gate MUST run via the skip-only readSyncBootstrapInfo BEFORE any reuse/LKG read
+        // (which call readSummary): it both caps the size AND excludes legacy (pre-summary-schema)
+        // artifacts, which readSummary would full-decode — and reusableCompactSnapshot would then
+        // decode again — doubling the synchronous decode on cold start.
+        XCTAssertTrue(bootstrapBlock.contains("CompactFilterSnapshot.readSyncBootstrapInfo(from: data)"))
+        XCTAssertTrue(bootstrapBlock.contains("info.hasStoredSummary"))
+        XCTAssertTrue(bootstrapBlock.contains("info.totalRuleCount > cap"))
+        // The pre-gate is best-effort; the cap is RE-ENFORCED authoritatively inside
+        // reusableCompactSnapshot on the same mmapped bytes it decodes, so an atomic republish
+        // between the two reads can't slip an over-cap artifact into a synchronous decode.
+        XCTAssertTrue(bootstrapBlock.contains("syncDecodeRuleCap: cap"))
+        XCTAssertTrue(source.contains("syncDecodeRuleCap: Int? = nil"))
+    }
+
     func testProtectionStateRefreshClearsInFlightQueriesEvenWhenResolverIsUnchanged() throws {
         let source = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
         let refreshBlock = try sourceBlock(
