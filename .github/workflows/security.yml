@@ -1,117 +1,26 @@
 name: Security
 
-# Self-contained secret scan. This repo is public, so it must NOT depend on a
-# reusable workflow in a private org repo (a public repo cannot call a private
-# reusable workflow, and forks could not run it either). Mirrors the canonical
-# job in lavasecurity/.github.
+# Delegates to the org-wide reusable security backstop (gitleaks secret scan +
+# mobsfscan mobile SAST). Replaces the self-contained inline copy this repo used to
+# carry: a public repo could not call a reusable workflow in the then-private
+# lavasecurity/.github, so the scan was vendored here and had drifted from the
+# canonical job. Now that lavasecurity/.github is public, a public repo can call it,
+# and the policy (gitleaks config trust, pinned image, mobsfscan SARIF upload) lives
+# in one hardened place again. The central mobsfscan job uploads findings to this
+# repo's code scanning (SARIF) — the capability the inline copy provided.
 on:
   push:
     branches: [main]
   pull_request:
 
-# Cancel a superseded scan when a newer commit lands on the same PR — a fast-moving PR
-# otherwise stacks redundant full-history scans. Mirrors the cancellation policy in the
-# canonical lavasecurity/.github backstop, kept inline here for the same reason the scan
-# itself is inline (see header). Push runs key the group on github.sha (unique per
-# commit) so no two merges share a group and none is dropped: with cancel-in-progress
-# false GitHub still keeps only one pending run per group and would otherwise cancel an
-# intermediate merge scan. cancel-in-progress therefore applies to pull_request runs only.
-concurrency:
-  group: security-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-permissions:
-  contents: read
-
 jobs:
-  gitleaks:
-    name: gitleaks (secret scan)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # Full history so we can read .gitleaks.toml from the PR's base commit.
-          fetch-depth: 0
-      - name: Resolve a trusted gitleaks config
-        id: glcfg
-        # gitleaks auto-loads `<source>/.gitleaks.toml`. On pull_request that working
-        # tree is attacker-controlled, so a fork PR could add a config that allowlists
-        # everything and pass the scan while leaking. We pin --config to a copy taken
-        # from the BASE ref (which the PR cannot change); fall back to the repo's own
-        # config only when the base has none yet, and to the gitleaks default ruleset
-        # when there is no repo config at all.
-        run: |
-          set -euo pipefail
-          dest="$RUNNER_TEMP/gitleaks-config"
-          mkdir -p "$dest"
-          out="$dest/.gitleaks.toml"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base='${{ github.event.pull_request.base.sha }}'
-            if git cat-file -e "$base:.gitleaks.toml" 2>/dev/null; then
-              git show "$base:.gitleaks.toml" > "$out"
-            elif [ -f .gitleaks.toml ]; then
-              cp .gitleaks.toml "$out"
-            fi
-          elif [ -f .gitleaks.toml ]; then
-            cp .gitleaks.toml "$out"
-          fi
-          if [ ! -f "$out" ]; then
-            printf '[extend]\nuseDefault = true\n' > "$out"
-          fi
-          echo "dir=$dest" >> "$GITHUB_OUTPUT"
-      - name: Scan git history for secrets
-        env:
-          # renovate: datasource=docker
-          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.21.2
-        # Scan the full commit HISTORY (git mode), not just the checked-out tree.
-        # A secret added in one commit and removed before the final tree still
-        # lives in history and is exposed once the repo is public, so --no-git
-        # (directory mode) would miss exactly the leak this backstop must catch.
-        # GIT_CONFIG safe.directory avoids git's "dubious ownership" error for the
-        # host-mounted repo inside the container.
-        run: |
-          docker run --rm \
-            -v "$PWD:/repo" \
-            -v "${{ steps.glcfg.outputs.dir }}:/gitleaks-config:ro" \
-            -e GIT_CONFIG_COUNT=1 \
-            -e GIT_CONFIG_KEY_0=safe.directory \
-            -e GIT_CONFIG_VALUE_0=/repo \
-            "$GITLEAKS_IMAGE" \
-            detect --source=/repo --config=/gitleaks-config/.gitleaks.toml \
-            --no-banner --redact --exit-code=1
-
-  mobsfscan:
-    name: mobsfscan (mobile SAST)
-    runs-on: ubuntu-latest
+  security:
+    # mobsfscan SARIF upload writes to code scanning; grant the scope here because a
+    # reusable workflow cannot elevate beyond the permissions the caller passes.
     permissions:
       contents: read
       security-events: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Run mobsfscan
-        # mobile-specific static analysis (insecure storage, weak crypto, ATS, etc.).
-        # Report to the Security tab rather than gate CI for now — `|| true` keeps a
-        # finding from failing the build while the ruleset beds in. Promote to a
-        # required check once the signal is trusted.
-        run: |
-          python -m pip install --upgrade pip
-          pip install mobsfscan
-          mobsfscan --sarif --output mobsfscan.sarif . || true
-
-      - name: Upload SARIF to code scanning
-        # Skip on fork pull requests: their read-only token cannot write security
-        # events, so the upload would error. Pushes and same-repo PRs upload fine.
-        # Also skip on private repos (e.g. the internal mirror): code scanning needs
-        # GitHub Advanced Security there, so upload-sarif 403s ("Resource not accessible
-        # by integration") and fails the job. Public repos get code scanning for free.
-        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && github.event.repository.visibility == 'public' }}
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: mobsfscan.sarif
-          category: mobsfscan
+    uses: lavasecurity/.github/.github/workflows/security.yml@main
+    with:
+      gitleaks: true
+      mobsfscan: true
