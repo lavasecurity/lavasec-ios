@@ -3,6 +3,37 @@ import XCTest
 @testable import LavaSecCore
 
 final class CompactFilterSnapshotTests: XCTestCase {
+    func testReadSyncBootstrapInfoMatchesSummaryWithoutDecoding() throws {
+        let snapshot = CompactFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(
+                configuration: AppConfiguration(enabledBlocklistIDs: []),
+                catalog: nil
+            ),
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            resolver: .google,
+            blockRules: CompactDomainRuleSet(
+                exactDomains: ["a.example.com", "b.example.com", "c.example.com"],
+                suffixDomains: ["ads.net", "tracker.io"]
+            ),
+            allowRules: CompactDomainRuleSet(exactDomains: ["allow.example.org"], suffixDomains: []),
+            nonAllowableThreatRules: CompactDomainRuleSet(exactDomains: ["threat.example.net"], suffixDomains: [])
+        )
+        let data = try snapshot.encodedData()
+
+        let summary = try CompactFilterSnapshot.readSummary(from: data)
+        let expected = summary.blockRuleCount + summary.allowRuleCount + summary.guardrailRuleCount
+
+        let info = try CompactFilterSnapshot.readSyncBootstrapInfo(from: data)
+        XCTAssertEqual(info.totalRuleCount, expected)
+        XCTAssertEqual(info.totalRuleCount, 7)
+        // A freshly-encoded artifact carries a stored summary (current schema) → eligible for the
+        // synchronous bootstrap fast-resume.
+        XCTAssertTrue(info.hasStoredSummary)
+        // Corrupt the magic → must throw (used as the cap/legacy pre-gate, so it fails safe at the
+        // call site rather than mis-gating).
+        XCTAssertThrowsError(try CompactFilterSnapshot.readSyncBootstrapInfo(from: Data([0, 1, 2, 3])))
+    }
+
     func testDecodeRejectsUnsortedRuleTable() throws {
         // Two subdomain (suffix) rules of equal length → blockRules has 0 exact + 2
         // suffix entries (6 bytes each), byte-sorted as a/b. The binary-search lookup

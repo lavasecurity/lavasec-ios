@@ -25790,71 +25790,6 @@
         }
       }
     },
-    "If Lava can't reach its filter, it blocks sites to stay safe — they load again once the connection recovers.": {
-      "comment": "Filters overview caption shown for the 'Poor' connection preview — explains fail-closed blocking in plain terms (one line).",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "If Lava can't reach its filter, it blocks sites to stay safe — they load again once the connection recovers."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wenn Lava seinen Filter nicht erreicht, blockiert es Websites zur Sicherheit – sie laden wieder, sobald die Verbindung zurück ist."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Si Lava no puede acceder a su filtro, bloquea los sitios para protegerte; vuelven a cargar cuando se recupera la conexión."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Si Lava ne peut pas joindre son filtre, il bloque les sites par sécurité — ils se rechargent dès que la connexion revient."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Se Lava non riesce a raggiungere il suo filtro, blocca i siti per sicurezza: si ricaricano quando la connessione torna."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava がフィルターに接続できないときは、安全のためサイトをブロックします。接続が戻れば再び読み込めます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava가 필터에 연결할 수 없으면 안전을 위해 사이트를 차단합니다. 연결이 복구되면 다시 열립니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Se o Lava não consegue acessar o filtro, ele bloqueia os sites por segurança — eles voltam a carregar quando a conexão se recupera."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "如果 Lava 无法连接到它的筛选器，就会拦截网站以保护你；连接恢复后会重新加载。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "如果 Lava 無法連接到它的篩選器，就會攔截網站以保護你；連線恢復後會重新載入。"
-          }
-        }
-      }
-    },
     "If iOS asks to add a VPN configuration, tap Allow.": {
       "comment": "vpnPermissionPromptMessage static let (AppViewModel:733), surfaced as vpnMessage -> guardPanelMessage -> Text(message.lavaLocalized) at GuardView:110. Catalog-only.",
       "extractionState": "manual",
@@ -59419,6 +59354,71 @@
           "stringUnit": {
             "state": "translated",
             "value": "當所選解析器一再出問題時，Lava 可暫時改用裝置 DNS 處理允許的查詢，並更頻繁地探測以便切回。在 iOS 17 至 25 上，這項功能盡力而為，並可能因網路狀況而不一定生效。"
+          }
+        }
+      }
+    },
+    "When your phone can't reach the internet, Lava blocks sites to stay safe — they load again once your connection is back.": {
+      "comment": "Filters overview caption shown for the 'Poor' connection preview — explains fail-closed blocking in plain terms. Framed as the PHONE's connectivity (can't reach the internet), NOT 'Lava can't reach its filter' (the filter is local).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When your phone can't reach the internet, Lava blocks sites to stay safe — they load again once your connection is back."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn dein Telefon das Internet nicht erreicht, blockiert Lava Websites zur Sicherheit – sie laden wieder, sobald deine Verbindung zurück ist."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuando tu teléfono no llega a internet, Lava bloquea los sitios para protegerte; vuelven a cargar cuando tu conexión regresa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand ton téléphone n'atteint pas Internet, Lava bloque les sites par sécurité — ils se rechargent dès que ta connexion revient."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando il telefono non raggiunge Internet, Lava blocca i siti per sicurezza: si ricaricano appena torna la connessione."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スマホがインターネットに接続できないときは、安全のため Lava がサイトをブロックします。接続が戻れば再び読み込めます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "휴대폰이 인터넷에 연결되지 않으면 Lava가 안전을 위해 사이트를 차단합니다. 연결이 복구되면 다시 열립니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando o seu telefone não alcança a internet, o Lava bloqueia os sites por segurança — eles voltam a carregar quando a conexão volta."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当手机无法连接互联网时，Lava 会拦截网站以保护你；网络恢复后会重新加载。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當手機無法連上網際網路時，Lava 會攔截網站以保護你；連線恢復後會重新載入。"
           }
         }
       }

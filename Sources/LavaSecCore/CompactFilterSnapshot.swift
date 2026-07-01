@@ -404,6 +404,35 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         )
     }
 
+    /// Cheap, SKIP-ONLY header read for the cold-start sync-bootstrap gate: total rule count
+    /// PLUS whether the artifact carries a stored summary (`summarySchema` present). No entry
+    /// decode — the table-count fields live at fixed offsets regardless of `summarySchema`.
+    ///
+    /// `hasStoredSummary` lets the bootstrap EXCLUDE legacy (pre-summary-schema) artifacts: for
+    /// those, `readSummary` full-decodes the rule tables (lines ~382) to recompute the summary,
+    /// and `reusableCompactSnapshot` then `decode`s them AGAIN — a DOUBLE synchronous decode on
+    /// cold start. Legacy artifacts are transient (regenerated on the next publish), so the
+    /// bootstrap skips them and lets the async path decode them once, off the critical path.
+    public static func readSyncBootstrapInfo(from data: Data) throws -> (totalRuleCount: Int, hasStoredSummary: Bool) {
+        var reader = CompactBinaryReader(data: data)
+        let magic = try reader.readData(count: Self.magic.count)
+        guard magic == Self.magic else {
+            throw CompactFilterSnapshotError.invalidMagic
+        }
+        let version = try reader.readUInt32()
+        guard version == Self.fileVersion else {
+            throw CompactFilterSnapshotError.unsupportedVersion(version)
+        }
+        let metadataLength = try reader.readUInt32()
+        let metadataData = try reader.readData(count: Int(metadataLength))
+        let metadata = try? JSONDecoder().decode(CompactFilterSnapshotMetadata.self, from: metadataData)
+        let hasStoredSummary = metadata?.summarySchema == Self.metadataSummarySchemaVersion && metadata?.summary != nil
+        let blockRuleCount = try CompactDomainRuleSet.readSummary(reader: &reader)
+        let allowRuleCount = try CompactDomainRuleSet.readSummary(reader: &reader)
+        let guardrailRuleCount = try CompactDomainRuleSet.readSummary(reader: &reader)
+        return (blockRuleCount + allowRuleCount + guardrailRuleCount, hasStoredSummary)
+    }
+
     private static func summary(
         metadata: CompactFilterSnapshotMetadata,
         blockRules: CompactDomainRuleSet,
