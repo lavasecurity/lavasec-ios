@@ -15,6 +15,11 @@ on:
 
 jobs:
   security:
+    # mobsfscan SARIF upload writes to code scanning; grant the scope here because a
+    # reusable workflow cannot elevate beyond the permissions the caller passes.
+    permissions:
+      contents: read
+      security-events: write
     uses: lavasecurity/.github/.github/workflows/security.yml@main
     with:
       gitleaks: true
