@@ -303,6 +303,24 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertNil(entries[0].details["privateDomain"])
     }
 
+    func testDebugLogParserKeepsCoalescedFallbackCount() throws {
+        // The log-coalescing throttles "dns-encrypted-fallback" markers and carries
+        // "carriedSinceLastLog" — how many events the emitted marker stands in for.
+        // That count must survive into Feedback/local exports (a bare integer, no
+        // queried domain); otherwise coalescing silently discards the "how often".
+        let jsonLines = """
+        {"component":"tunnel","event":"dns-encrypted-fallback","timestamp":"2026-05-18T01:06:00Z","transport":"doh","resolver":"Mullvad DoH","carriedSinceLastLog":"7","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].event, "dns-encrypted-fallback")
+        XCTAssertEqual(entries[0].details["carriedSinceLastLog"], "7")
+        XCTAssertEqual(entries[0].details["transport"], "doh")
+        XCTAssertNil(entries[0].details["privateDomain"])
+    }
+
     func testDebugLogParserKeepsNetworkRecoveryDiagnosticDetails() throws {
         // Mirrors what the tunnel now emits on release for the handoff/DNS-recovery
         // story — counts, reasons, and kinds only, never resolver addresses or

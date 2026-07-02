@@ -500,6 +500,10 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "bootstrapAllowRuleCount",
         "bootstrapBlockRuleCount",
         "bootstrapCount",
+        // Coalesced encrypted-fallback count: how many throttled "dns-encrypted-fallback"
+        // events the emitted marker stands in for. A bare integer, no queried domain —
+        // preserves the "how often" the log-coalescing keeps, so it survives into exports.
+        "carriedSinceLastLog",
         "dohHTTPVersion",
         "endpoint",
         "error",

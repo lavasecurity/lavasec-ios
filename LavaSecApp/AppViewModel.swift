@@ -1,4 +1,6 @@
 import Darwin
+import CryptoKit
+import DeviceCheck
 import Foundation
 import SwiftUI
 import UIKit
@@ -470,6 +472,68 @@ private struct BugReportSubmissionError: LocalizedError {
 
     var errorDescription: String? {
         message
+    }
+}
+
+// A 429 is terminal: it must NOT fail over to the fallback endpoint (both share
+// the same per-IP limiter, and failing over would either bypass the throttle if
+// they ever diverge or replace the friendly copy with the fallback's raw error).
+// Thrown inside the per-endpoint loop and rethrown by a dedicated catch.
+private struct BugReportRateLimitedError: Error {}
+
+// The Apple App Attest headers attached to a bug-report submit. `keyId` is the
+// base64 key identifier from DCAppAttestService (the server base64-decodes it to
+// the 32-byte SHA256 of the attested public key); `attestationBase64` is the
+// base64 CBOR attestation object; `challenge` is the one-time token we attested
+// over. Server side: backend/worker/src/app-attest.ts.
+private struct AppAttestHeaders {
+    let challenge: String
+    let keyId: String
+    let attestationBase64: String
+
+    func apply(to request: inout URLRequest) {
+        request.setValue(challenge, forHTTPHeaderField: "X-Lava-Attest-Challenge")
+        request.setValue(keyId, forHTTPHeaderField: "X-Lava-Attest-Key-Id")
+        request.setValue(attestationBase64, forHTTPHeaderField: "X-Lava-Attest-Object")
+    }
+}
+
+private enum AppAttestClient {
+    // False on the Simulator and on hardware without the Secure Enclave; callers
+    // must degrade gracefully (submit unattested) rather than block the user.
+    static var isSupported: Bool {
+        DCAppAttestService.shared.isSupported
+    }
+
+    // Generate a fresh hardware-backed key and attest it over the server
+    // challenge. We attest per submission (a new key each time) rather than
+    // registering a key and asserting against it, so nothing device-linked is
+    // stored server-side. Returns nil on any failure.
+    //
+    // Replay hardening: the attestation is bound to BOTH the one-time challenge and
+    // SHA256(the exact request body) via clientDataHash, so a captured attestation
+    // cannot be replayed against a different report body. The server recomputes the
+    // identical clientDataHash — keep the two in lockstep (backend/worker/src/app-attest.ts).
+    //   clientDataHash = SHA256( utf8(challenge) ‖ bodyHash ), bodyHash = SHA256(body)
+    static func attest(challenge: String, bodyHash: Data) async -> AppAttestHeaders? {
+        let service = DCAppAttestService.shared
+        guard service.isSupported else {
+            return nil
+        }
+        do {
+            let keyId = try await service.generateKey()
+            var clientData = Data(challenge.utf8)
+            clientData.append(bodyHash)
+            let clientDataHash = Data(SHA256.hash(data: clientData))
+            let attestation = try await service.attestKey(keyId, clientDataHash: clientDataHash)
+            return AppAttestHeaders(
+                challenge: challenge,
+                keyId: keyId,
+                attestationBase64: attestation.base64EncodedString()
+            )
+        } catch {
+            return nil
+        }
     }
 }
 
@@ -7077,6 +7141,13 @@ final class AppViewModel: ObservableObject {
     private func submitBugReport(_ bundle: BugReportBundle) async throws -> String {
         let body = bundle.makeRequestBody()
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        // Best-effort App Attest: prove this is a genuine build on real hardware.
+        // nil on unsupported devices/simulators or any failure — the server is
+        // fail-open during rollout, so we simply submit without the headers then.
+        // Bind the attestation to SHA256(this exact body) so a captured attestation can't be
+        // replayed against a different report; the server recomputes the same clientDataHash.
+        let bodyHash = Data(SHA256.hash(data: data))
+        let attestation = await Self.acquireAppAttestation(bodyHash: bodyHash)
         var lastError: Error?
 
         for endpoint in Self.bugReportEndpointURLs {
@@ -7084,6 +7155,7 @@ final class AppViewModel: ObservableObject {
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                attestation?.apply(to: &request)
                 request.httpBody = data
 
                 let (responseData, response) = try await URLSession.shared.data(for: request)
@@ -7092,6 +7164,11 @@ final class AppViewModel: ObservableObject {
                 }
 
                 guard 200..<300 ~= httpResponse.statusCode else {
+                    // A 429 is terminal — surface it now instead of retrying the
+                    // fallback (see BugReportRateLimitedError).
+                    if httpResponse.statusCode == 429 {
+                        throw BugReportRateLimitedError()
+                    }
                     let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body"
                     throw BugReportSubmissionError(
                         message: "The server returned HTTP \(httpResponse.statusCode): \(serverMessage)"
@@ -7100,12 +7177,77 @@ final class AppViewModel: ObservableObject {
 
                 let decoded = try JSONDecoder().decode(BugReportSubmitResponse.self, from: responseData)
                 return decoded.reportID
+            } catch is BugReportRateLimitedError {
+                // Give a rate-limited caller a friendly, actionable message and stop —
+                // do not fail over to the fallback endpoint.
+                throw BugReportSubmissionError(
+                    message: "Please wait a moment and try again."
+                )
             } catch {
                 lastError = error
             }
         }
 
         throw lastError ?? BugReportSubmissionError(message: "Could not send the bug report.")
+    }
+
+    // Fetch a one-time challenge from the API and produce an Apple App Attest
+    // attestation over it. Returns nil (submit proceeds unattested) when App
+    // Attest is unsupported, no challenge could be fetched, or attestation fails.
+    private static func acquireAppAttestation(bodyHash: Data) async -> AppAttestHeaders? {
+        guard AppAttestClient.isSupported else {
+            return nil
+        }
+        guard let challenge = await fetchAppAttestChallenge() else {
+            return nil
+        }
+        return await AppAttestClient.attest(challenge: challenge, bodyHash: bodyHash)
+    }
+
+    // Cap each challenge fetch so a slow or blackholed /v1/attest-challenge cannot
+    // hold the feedback sheet in "Submitting". Attestation is best-effort, so a
+    // timeout just falls through to the next endpoint and ultimately to nil (submit
+    // proceeds unattested) rather than waiting out URLSession's default ~60s.
+    private static let appAttestChallengeTimeout: TimeInterval = 3
+
+    // The App Attest challenge is a globally-shared, stateless HMAC token: the SAME worker
+    // (same signing secret) sits behind both the production and workers.dev-fallback base
+    // URLs, so a challenge issued by either host verifies at either submit endpoint. That lets
+    // us race both hosts concurrently and take production's result (or the fallback's if
+    // production yields nil) — capping the worst-case wait at one timeout (~3s) instead of two
+    // sequential ones when a host is slow or blackholed.
+    private static func fetchAppAttestChallenge() async -> String? {
+        async let production = fetchAppAttestChallenge(from: LavaSecAPI.productionBaseURL)
+        async let fallback = fetchAppAttestChallenge(from: LavaSecAPI.fallbackBaseURL)
+        if let challenge = await production {
+            return challenge
+        }
+        return await fallback
+    }
+
+    private static func fetchAppAttestChallenge(from base: URL) async -> String? {
+        let url = base
+            .appendingPathComponent("v1")
+            .appendingPathComponent("attest-challenge")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = appAttestChallengeTimeout
+        // Best-effort and intentionally silent on failure: attestation is fail-open (a nil
+        // challenge just submits the report unattested, never blocking the user), and the
+        // server already records the outcome (`app_attest_ok` / `app_attest_soft_fail`), so a
+        // client-side log of the fetch failure would be redundant.
+        do {
+            let (responseData, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+                return nil
+            }
+            if let object = try JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+               let challenge = object["challenge"] as? String, !challenge.isEmpty {
+                return challenge
+            }
+            return nil
+        } catch {
+            return nil
+        }
     }
 
     private func startLavaSecurityPlusStore() {

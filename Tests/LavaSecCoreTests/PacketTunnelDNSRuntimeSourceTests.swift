@@ -2657,6 +2657,54 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // the query, log it (privacy-safe) so field exports show the safety net.
         XCTAssertTrue(recordBlock.contains("if result.usedEncryptedFallback {"))
         XCTAssertTrue(recordBlock.contains("event: \"dns-encrypted-fallback\""))
+
+        // ...but the marker is COALESCED, not per-query: a wedged primary routes every
+        // organic query to the fallback, so a per-query log would flood the debug ring.
+        // Log the first carried query, then throttle to one marker per interval carrying
+        // the running count. Guard against a regression back to unconditional per-query.
+        XCTAssertTrue(recordBlock.contains("encryptedFallbackCarriedSinceLastLog += 1"))
+        XCTAssertTrue(recordBlock.contains("encryptedFallbackLogThrottleInterval"))
+        XCTAssertTrue(recordBlock.contains("\"carriedSinceLastLog\""))
+        // The episode ends — and the throttle resets so the next wedge logs fresh — when
+        // the primary serves a query again (here), the wedge recovers via the smoke probe
+        // (logConnectivityRecoveredIfWedged), or a fresh network/resolver context begins
+        // (resetFailureAndFallbackStateForRecovery). All route through the shared helper.
+        XCTAssertTrue(recordBlock.contains("} else if didResolve && !result.deviceDNSFallbackSucceeded {"))
+        XCTAssertTrue(recordBlock.contains("clearEncryptedFallbackLogThrottle()"))
+        // ...and the clear must sit INSIDE that primary-served branch, not merely appear
+        // somewhere in recordUpstreamResult — index-ordering mirrors
+        // testEncryptedFallbackSuccessDoesNotClearTheWedgeMarker so moving the call to the
+        // top level of recordUpstreamResult is caught.
+        let elseIfDidResolveIndex = try XCTUnwrap(recordBlock.range(of: "} else if didResolve && !result.deviceDNSFallbackSucceeded {")).lowerBound
+        let clearThrottleIndex = try XCTUnwrap(recordBlock.range(of: "clearEncryptedFallbackLogThrottle()")).lowerBound
+        XCTAssertLessThan(elseIfDidResolveIndex, clearThrottleIndex,
+                          "the throttle clear must be inside the `else if didResolve` primary-served branch")
+
+        // The episode-scoped throttle must also reset on a fresh network/resolver context,
+        // not just on primary success (else a marker <interval old carries across a
+        // network change and swallows the new context's first carry).
+        let contextResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetFailureAndFallbackStateForRecovery",
+            endingBefore: "private func clearEncryptedFallbackLogThrottle"
+        )
+        XCTAssertTrue(contextResetBlock.contains("clearEncryptedFallbackLogThrottle(phase: \"context-reset\")"))
+
+        // Clearing FLUSHES any pending carried count before zeroing, so a short/high-volume
+        // wedge that ends before the throttle interval still reports how many queries the
+        // fallback saved instead of discarding them. Scope the flush structure to the helper
+        // body (consistent with recordBlock / contextResetBlock above) rather than scanning the
+        // whole file. The flush labels the phase honestly: "episode-end" is the signature
+        // default (genuine recovery); "context-reset" is passed by the interrupt call sites and
+        // is already verified via contextResetBlock above.
+        let clearThrottleImplBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func clearEncryptedFallbackLogThrottle",
+            endingBefore: "// Cancels a scheduled fallback-recovery probe"
+        )
+        XCTAssertTrue(clearThrottleImplBlock.contains("if encryptedFallbackCarriedSinceLastLog > 0 {"))
+        XCTAssertTrue(clearThrottleImplBlock.contains("\"phase\": phase"))
+        XCTAssertTrue(clearThrottleImplBlock.contains("phase: String = \"episode-end\""))
     }
 
     func testEncryptedFallbackSuccessDoesNotClearTheWedgeMarker() throws {

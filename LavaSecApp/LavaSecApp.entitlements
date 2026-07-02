@@ -11,6 +11,8 @@
 		<string>webcredentials:lavasecurity.app</string>
 		<string>applinks:lavasecurity.app</string>
 	</array>
+	<key>com.apple.developer.devicecheck.appattest-environment</key>
+	<string>production</string>
 	<key>com.apple.developer.networking.networkextension</key>
 	<array>
 		<string>packet-tunnel-provider</string>

@@ -282,6 +282,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var deviceDNSResolverAddresses: [String] = []
     private var deviceDNSFallbackModeActive = false
     private var consecutiveQueryFallbackSuccessCount = 0
+    // Coalesce the per-query `dns-encrypted-fallback` debug marker. A wedged Device-DNS
+    // primary routes EVERY organic query to the encrypted (Mullvad DoH) fallback, so a
+    // per-query log floods the debug ring (~1.6k lines in a 6h flaky-network export,
+    // evicting more useful events) for zero added signal. Log the first carried query of
+    // an episode immediately, then throttle to one marker per interval carrying the count
+    // since the last marker — that count preserves "how often the safety net saved a
+    // wedge" without the spam. Reset on recovery so each new episode logs its first query.
+    private var encryptedFallbackCarriedSinceLastLog = 0
+    private var lastEncryptedFallbackLogAt: Date?
+    private let encryptedFallbackLogThrottleInterval: TimeInterval = 60
     // Consecutive REAL client-query total failures (primary AND every fallback leg
     // failed) since the last carried success. Deliberately separate from
     // health.consecutiveUpstreamFailureCount, which a failed PRIMARY smoke probe also
@@ -930,6 +940,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 if resolverChanged {
                     self.deviceDNSFallbackModeActive = false
                     self.consecutiveQueryFallbackSuccessCount = 0
+                    self.clearEncryptedFallbackLogThrottle(phase: "context-reset")
                     self.health.deviceDNSFallbackModeActive = false
                     self.health.lastDeviceDNSFallbackActivatedAt = nil
                     self.health.consecutiveUpstreamFailureCount = 0
@@ -3007,6 +3018,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         if primarySucceeded {
             consecutiveQueryFallbackSuccessCount = 0
             deviceDNSFallbackModeActive = false
+            // Primary smoke probe passed → the wedge is over even if no organic primary
+            // query has arrived yet, so end the coalesced fallback episode here (the
+            // recovers-via-smoke-probe case, incl. a sub-wedge blip that never set the
+            // wedge marker, so `logConnectivityRecoveredIfWedged` alone would miss it).
+            clearEncryptedFallbackLogThrottle()
             health.deviceDNSFallbackModeActive = false
             health.lastDeviceDNSFallbackActivatedAt = nil
             health.dnsSmokeProbeSuccessCount += 1
@@ -3239,6 +3255,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self.lastSelfReconnectSuppressionSignature = nil
             self.lastSelfReconnectSuppressionLogAt = nil
             self.lastSelfReconnectPathSkipLogAt = nil
+            // The coalesced encrypted-fallback marker is episode-scoped too: a reused
+            // provider instance starts a fresh session, so a marker logged <interval ago in
+            // the previous session must not suppress (or mis-count) the new session's first
+            // carried query.
+            self.clearEncryptedFallbackLogThrottle(phase: "context-reset")
             // A reused provider instance (manual stop/start without a process kill) starts a
             // fresh lifecycle that cold-recaptures Device DNS, so a recapture owed by the
             // previous session is moot. Clear it here as well as on recovery, or a later
@@ -3305,10 +3326,42 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // and tear down a freshly-serving encrypted fallback (the single-transient over-escalation
         // the streak gate exists to prevent).
         consecutiveCarriedQueryFailureCount = 0
+        // The coalesced encrypted-fallback log marker is episode-scoped exactly like the
+        // streaks above: a fresh network/resolver context is a fresh fallback episode, so
+        // clear it too, or a marker logged <interval ago on the previous context would
+        // suppress the first carried query of the new one.
+        clearEncryptedFallbackLogThrottle(phase: "context-reset")
         health.deviceDNSFallbackModeActive = false
         health.lastDeviceDNSFallbackActivatedAt = nil
         clearReconnectNeededActivitySuppression()
         invalidateInFlightSmokeProbes()
+    }
+
+    /// Clear the coalesced encrypted-fallback log throttle so the NEXT wedge episode logs
+    /// its first carried query immediately. The throttle is episode-scoped, so it must be
+    /// cleared wherever a fallback episode ends (primary recovery) or a fresh
+    /// resolver/network context begins — otherwise a marker logged <interval ago carries
+    /// over and swallows the new episode's first carry.
+    private func clearEncryptedFallbackLogThrottle(phase: String = "episode-end") {
+        // Flush any carried queries suppressed since the last marker before zeroing, so a
+        // short/high-volume wedge that ends before the throttle interval still reports how
+        // many queries the fallback saved (the whole point of the count) instead of
+        // discarding them. Only emits when there is a pending remainder, so it stays quiet
+        // when the throttle is already clear (the common no-op reset).
+        //
+        // `phase` labels the flush honestly: "episode-end" when the primary genuinely
+        // recovered (organic primary query / smoke-probe pass / logConnectivityRecoveredIfWedged),
+        // "context-reset" when the episode was instead interrupted by a fresh network/resolver
+        // context or a reused-instance session start — the count is still real, but the episode
+        // did not "end" via recovery.
+        if encryptedFallbackCarriedSinceLastLog > 0 {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-encrypted-fallback", details: [
+                "phase": phase,
+                "carriedSinceLastLog": "\(encryptedFallbackCarriedSinceLastLog)"
+            ])
+        }
+        lastEncryptedFallbackLogAt = nil
+        encryptedFallbackCarriedSinceLastLog = 0
     }
 
     // Cancels a scheduled fallback-recovery probe and bumps the smoke-probe
@@ -3892,11 +3945,34 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // The Device-DNS primary was wedged and the encrypted (Mullvad DoH)
             // fallback carried this query — un-gated + privacy-safe (resolver
             // endpoint, never a queried domain), so field exports show the safety
-            // net engaging and how often it saves a wedge.
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-encrypted-fallback", details: [
-                "transport": result.transport.rawValue,
-                "resolver": result.successfulResolverAddress ?? "nil"
-            ])
+            // net engaging and how often it saves a wedge. Coalesced: log the first
+            // carried query of an episode immediately, then throttle to one marker per
+            // `encryptedFallbackLogThrottleInterval` carrying `carriedSinceLastLog`, so a
+            // sustained wedge does not flood the debug ring. The throttle is reset when the
+            // episode ends — either the primary serves a query (the `else` below) or the
+            // wedge recovers via the smoke probe (`logConnectivityRecoveredIfWedged`).
+            encryptedFallbackCarriedSinceLastLog += 1
+            let dueForFallbackLog = lastEncryptedFallbackLogAt.map {
+                now.timeIntervalSince($0) >= encryptedFallbackLogThrottleInterval
+            } ?? true
+            if dueForFallbackLog {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-encrypted-fallback", details: [
+                    "transport": result.transport.rawValue,
+                    "resolver": result.successfulResolverAddress ?? "nil",
+                    "carriedSinceLastLog": "\(encryptedFallbackCarriedSinceLastLog)"
+                ])
+                lastEncryptedFallbackLogAt = now
+                encryptedFallbackCarriedSinceLastLog = 0
+            }
+        } else if didResolve && !result.deviceDNSFallbackSucceeded {
+            // The PRIMARY carried this query — not the Device-DNS fallback, which is a distinct
+            // fallback path (see usedEncryptedFallback vs deviceDNSFallbackSucceeded) and not a
+            // primary recovery — so the encrypted-fallback episode is genuinely over. Clear the
+            // throttle so the next wedge logs its first carried query. (Covers a brief blip that
+            // never set the wedge marker, so `logConnectivityRecoveredIfWedged` would not fire.)
+            // Excluding the Device-DNS fallback keeps a mixed-fallback interleave from
+            // prematurely resetting the encrypted-fallback throttle.
+            clearEncryptedFallbackLogThrottle()
         }
         #if LAVA_QA_TOOLS
         logQAConnectivityAssessmentIfNeeded(
@@ -4612,6 +4688,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         lastSelfReconnectSuppressionSignature = nil
         lastSelfReconnectSuppressionLogAt = nil
         lastSelfReconnectPathSkipLogAt = nil
+        // Close the coalesced encrypted-fallback episode here too: this is the single
+        // authoritative recovery point (both the organic-query and the smoke-probe
+        // recovery route through it), so a wedge that recovers via the smoke probe with
+        // no intervening primary query still lets the next wedge log its first carried
+        // query — the episode-level diagnostic contract.
+        clearEncryptedFallbackLogThrottle()
     }
 
     private func clearReconnectNeededActivitySuppression() {
@@ -5811,6 +5893,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // NOT cleared on a SAME-resolver reset — it is LAV-87 hijack evidence that must survive
             // network-flap churn — but IS cleared on a genuine identity change below.
             consecutiveCarriedQueryFailureCount = 0
+            // A resolver-runtime reset opens a fresh fallback episode (per the comment
+            // above), so the coalesced encrypted-fallback log marker is stale too — clear
+            // it so the new runtime's first carried query logs rather than being throttled
+            // by the previous runtime's marker.
+            clearEncryptedFallbackLogThrottle(phase: "context-reset")
             health.lastFailureReason = nil
             // Invalidate the encrypted-fallback COVERAGE timestamp on ANY runtime reset. It proves
             // "the CURRENT encrypted fallback served a query recently", but a reset may have changed
