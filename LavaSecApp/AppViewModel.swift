@@ -88,6 +88,94 @@ enum LavaAppearancePreference: String, CaseIterable, Identifiable {
     }
 }
 
+/// In-app Dynamic Type override for the Customization → Text Size control. Covers the seven
+/// standard content sizes (the same range as iOS Settings → Display & Brightness → Text Size).
+/// Larger accessibility sizes stay reachable through the system's Larger Text setting, which the
+/// app respects whenever "Match System" is on — so this control never has to reproduce them.
+enum LavaTextSize: String, CaseIterable, Identifiable {
+    case xSmall
+    case small
+    case medium
+    case large
+    case xLarge
+    case xxLarge
+    case xxxLarge
+
+    var id: Self {
+        self
+    }
+
+    /// Matches the system's out-of-the-box Dynamic Type size, so turning "Match System" off does
+    /// not jump the text until the user actually moves the slider.
+    static let systemDefault: LavaTextSize = .large
+
+    var dynamicTypeSize: DynamicTypeSize {
+        switch self {
+        case .xSmall:
+            .xSmall
+        case .small:
+            .small
+        case .medium:
+            .medium
+        case .large:
+            .large
+        case .xLarge:
+            .xLarge
+        case .xxLarge:
+            .xxLarge
+        case .xxxLarge:
+            .xxxLarge
+        }
+    }
+
+    /// A short, localized name for the size, announced to VoiceOver as the Text Size slider's value
+    /// so a non-sighted user knows which size they've chosen (the slider is otherwise just a 0–6
+    /// numeric position). Rendered via `.lavaLocalized` at the call site, like the appearance names.
+    var displayName: String {
+        switch self {
+        case .xSmall:
+            "Extra Small"
+        case .small:
+            "Small"
+        case .medium:
+            "Medium"
+        case .large:
+            "Large"
+        case .xLarge:
+            "Extra Large"
+        case .xxLarge:
+            "Extra Extra Large"
+        case .xxxLarge:
+            "Largest"
+        }
+    }
+
+    /// The in-app size closest to a system `DynamicTypeSize`, clamping the larger accessibility
+    /// sizes (which this control does not expose) down to the largest in-range size. Used to seed
+    /// the slider from the current system size the first time "Match System" is turned off, so
+    /// nothing jumps for users whose iOS text size isn't the default.
+    static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize {
+        switch dynamicTypeSize {
+        case .xSmall:
+            .xSmall
+        case .small:
+            .small
+        case .medium:
+            .medium
+        case .large:
+            .large
+        case .xLarge:
+            .xLarge
+        case .xxLarge:
+            .xxLarge
+        case .xxxLarge:
+            .xxxLarge
+        default:
+            .xxxLarge
+        }
+    }
+}
+
 struct LavaGuardAvailability: Equatable {
     let isSelectable: Bool
     let isRevealed: Bool
@@ -979,6 +1067,8 @@ final class AppViewModel: ObservableObject {
     @Published var vpnMessageIsError = false
     @Published private(set) var temporaryProtectionPauseUntil: Date?
     @Published private(set) var appearancePreference: LavaAppearancePreference = .system
+    @Published private(set) var textSizeMatchesSystem: Bool = true
+    @Published private(set) var textSize: LavaTextSize = .systemDefault
     @Published private(set) var lavaGuardLook: GuardianShieldStyle = .original
     @Published private(set) var lavaGuardProgress = LavaGuardProgress()
     @Published private(set) var updatesAppIconWithLavaGuard = true
@@ -1026,6 +1116,7 @@ final class AppViewModel: ObservableObject {
             plan: $0,
             displayPrice: $0.fallbackDisplayPrice,
             commitmentDisplayPrice: nil,
+            savingsPercent: nil,
             product: nil
         )
     }
@@ -1105,6 +1196,8 @@ final class AppViewModel: ObservableObject {
     private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
     private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
+    private let textSizeMatchesSystemDefaultsKey = "lavasec.customization.textSizeMatchesSystem"
+    private let textSizeDefaultsKey = "lavasec.customization.textSize"
     private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey
     private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
     private let updatesAppIconWithLavaGuardDefaultsKey = "lavasec.customization.updatesAppIconWithLavaGuard"
@@ -1510,6 +1603,40 @@ final class AppViewModel: ObservableObject {
 
         appearancePreference = preference
         defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)
+    }
+
+    /// The Dynamic Type size to force app-wide, or `nil` to follow the system (the default).
+    /// `RootView` applies this only when it is non-nil, so "Match System" leaves the system's
+    /// Larger Text setting fully in charge.
+    var textSizeOverride: DynamicTypeSize? {
+        textSizeMatchesSystem ? nil : textSize.dynamicTypeSize
+    }
+
+    /// Toggles "Match System". `systemTextSize` is the app's *current* system Dynamic Type size
+    /// (read from the environment at the call site): the first time Match System is turned off with
+    /// no saved Lava-specific size, the slider is seeded from it so the app doesn't jump before the
+    /// user has chosen a size. A previously-saved Lava size always wins over the seed.
+    func setTextSizeMatchesSystem(_ matchesSystem: Bool, seedingFrom systemTextSize: LavaTextSize) {
+        guard textSizeMatchesSystem != matchesSystem else {
+            return
+        }
+
+        if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil {
+            textSize = systemTextSize
+            defaults.set(systemTextSize.rawValue, forKey: textSizeDefaultsKey)
+        }
+
+        textSizeMatchesSystem = matchesSystem
+        defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKey)
+    }
+
+    func setTextSize(_ size: LavaTextSize) {
+        guard textSize != size else {
+            return
+        }
+
+        textSize = size
+        defaults.set(size.rawValue, forKey: textSizeDefaultsKey)
     }
 
     func setLavaGuardLook(_ look: GuardianShieldStyle) {
@@ -10603,6 +10730,19 @@ final class AppViewModel: ObservableObject {
             appearancePreference = preference
         } else {
             appearancePreference = .system
+        }
+
+        if defaults.object(forKey: textSizeMatchesSystemDefaultsKey) != nil {
+            textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKey)
+        } else {
+            textSizeMatchesSystem = true
+        }
+
+        if let rawValue = defaults.string(forKey: textSizeDefaultsKey),
+           let size = LavaTextSize(rawValue: rawValue) {
+            textSize = size
+        } else {
+            textSize = .systemDefault
         }
 
         if let rawValue = defaults.string(forKey: lavaGuardLookDefaultsKey)

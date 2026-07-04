@@ -263,16 +263,19 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLiveActivities(isEnabled)"))
         XCTAssertTrue(customizationBlock.contains("Shows Lava status on the Lock Screen and Dynamic Island when available."))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Language\")"))
-        // Section order: Lava Guard, Live Activities, Haptics, Appearance, Language.
+        // Section order (Customization reorder): Lava Guard, Appearance, Text Size, Notifications,
+        // Live Activities, Haptics, Language. The Display cluster (Appearance + Text Size) rises to
+        // the top; Live Activities drops below Notifications. Full order pinned in
+        // CustomizationTextSizeSourceTests; this keeps the Live-Activities-relative anchors current.
         let lavaGuardIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Lava Guard\")")?.lowerBound)
+        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
         let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
         let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
-        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
         let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        XCTAssertLessThan(lavaGuardIndex, liveActivitiesIndex)
+        XCTAssertLessThan(lavaGuardIndex, appearanceIndex)
+        XCTAssertLessThan(appearanceIndex, liveActivitiesIndex)
         XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
-        XCTAssertLessThan(hapticsIndex, appearanceIndex)
-        XCTAssertLessThan(appearanceIndex, languageIndex)
+        XCTAssertLessThan(hapticsIndex, languageIndex)
 
         let guardPickerIndex = try XCTUnwrap(customizationBlock.range(of: "LavaGuardLookPickerRow(")?.lowerBound)
         let unlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)

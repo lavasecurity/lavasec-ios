@@ -65,6 +65,10 @@ struct RootView: View {
         .tint(LavaStyle.safeGreen)
         .background(LavaStyle.groupedBackground)
         .preferredColorScheme(viewModel.preferredColorScheme)
+        // Customization → Text Size. Nil when "Match System" is on (the default), so the system's
+        // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
+        // so every screen — including sheets/covers presented from it — inherits it.
+        .lavaTextSizeOverride(viewModel.textSizeOverride)
         .overlay {
             RageShakeDetector {
                 viewModel.handleRageShake()
@@ -476,6 +480,20 @@ struct RootView: View {
 
         print("LAVA_RAGE_SHAKE_SHEET_VISIBLE \(destination)")
         #endif
+    }
+}
+
+private extension View {
+    /// Forces an app-wide Dynamic Type size when the Customization → Text Size control is set to a
+    /// fixed size; passes through untouched (letting the system's Larger Text setting flow) when
+    /// "Match System" is on and `size` is nil.
+    @ViewBuilder
+    func lavaTextSizeOverride(_ size: DynamicTypeSize?) -> some View {
+        if let size {
+            dynamicTypeSize(size)
+        } else {
+            self
+        }
     }
 }
 

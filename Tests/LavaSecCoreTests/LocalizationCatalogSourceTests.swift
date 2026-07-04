@@ -38,6 +38,8 @@ final class LocalizationCatalogSourceTests: XCTestCase {
             "Yearly, paid monthly",
             "Lower monthly payment",
             "\"If we commit for 12 months, each month is cheaper.\"",
+            "\"We are saving %d%%! This has the best value.\"",
+            "\"Paying by the year beats paying by the month.\"",
             "Family Sharing",
             "%@ total"
         ] {

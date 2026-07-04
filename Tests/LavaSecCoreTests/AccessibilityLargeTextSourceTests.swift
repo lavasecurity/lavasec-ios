@@ -38,16 +38,26 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
         XCTAssertFalse(titleBlock.contains(".minimumScaleFactor("),
                        "Guard protection title must not shrink-to-fit.")
 
-        // The only affordance hint on the primary button.
-        let hintBlock = try sourceBlock(
+        // The primary-action label (button title + the only affordance hint) must reflow at large
+        // text — no one-line clamp / shrink-to-fit ANYWHERE in `actionLabel`. `.lineLimit` /
+        // `.minimumScaleFactor` propagate down from any ancestor, so a clamp on the HStack/VStack
+        // container — even one placed AFTER the size frames — would still clamp the descendant hint
+        // Text. Any end-marker inside the modifier chain leaves a vacuous-pass gap (first `}` shifts
+        // on an inserted `.onAppear {}`; `.frame(maxWidth: .infinity)` is a plausible hint-level wrap;
+        // the min-height frame misses a container clamp after it). So extract the WHOLE `actionLabel`
+        // view up to the next declaration, and guard that the block still covers the hint so it can
+        // never pass vacuously on an empty/shifted region. (#44 OCR + Codex #276 P2 ×2)
+        let actionLabelBlock = try sourceBlock(
             in: source,
-            startingAt: "Text(\"Long-press for pause options\".lavaLocalized)",
-            endingBefore: "}"
+            startingAt: "private var actionLabel: some View {",
+            endingBefore: "enum GuardDestination"
         )
-        XCTAssertFalse(hintBlock.contains(".lineLimit(1)"),
-                       "The long-press hint must wrap at large text.")
-        XCTAssertFalse(hintBlock.contains(".minimumScaleFactor("),
-                       "The long-press hint must not shrink-to-fit.")
+        XCTAssertTrue(actionLabelBlock.contains("Text(\"Long-press for pause options\".lavaLocalized)"),
+                      "actionLabel block must still cover the long-press hint (guards against a shifted/empty extraction).")
+        XCTAssertFalse(actionLabelBlock.contains(".lineLimit(1)"),
+                       "The primary-action label / long-press hint must wrap at large text, not clamp to one line.")
+        XCTAssertFalse(actionLabelBlock.contains(".minimumScaleFactor("),
+                       "The primary-action label / long-press hint must not shrink-to-fit.")
 
         // The primary-action label grows instead of clipping to a fixed height (≥44pt hit target).
         XCTAssertTrue(source.contains(".frame(minHeight: ProtectionStatusMetrics.primaryActionHeight)"),

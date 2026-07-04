@@ -6,6 +6,11 @@ struct LavaSecurityPlusOffer: Identifiable {
     let plan: LavaSecurityPlusPlan
     let displayPrice: String
     let commitmentDisplayPrice: String?
+    /// Whole-percent annual saving versus paying the monthly plan for 12 months,
+    /// computed from the customer's own storefront prices. `nil` when it can't be
+    /// derived from live StoreKit prices, or is too small to advertise — the pitch
+    /// then stays qualitative instead of quoting a number that isn't true here.
+    let savingsPercent: Int?
     let product: Product?
 
     var id: String {
@@ -241,19 +246,31 @@ final class LavaSecurityPlusStore: ObservableObject {
         return product
     }
 
+    /// Smallest annual saving (versus 12× the monthly price) we will advertise as
+    /// a percentage. Below this — or when we can't read both prices from StoreKit —
+    /// the yearly pitch drops the number, so a storefront whose App Store price
+    /// tiers don't preserve the base-currency ratio never shows an inflated figure.
+    static let minimumDisplayableSavingsPercent = 5
+
     private static func fallbackOffers() -> [LavaSecurityPlusOffer] {
         LavaSecurityPlusPolicy.fallbackOfferOrder.map {
             LavaSecurityPlusOffer(
                 plan: $0,
                 displayPrice: $0.fallbackDisplayPrice,
                 commitmentDisplayPrice: nil,
+                savingsPercent: nil,
                 product: nil
             )
         }
     }
 
     private static func offers(from productsByID: [String: Product]) -> [LavaSecurityPlusOffer] {
-        LavaSecurityPlusPolicy.recommendedOfferOrder.compactMap { plan in
+        let savingsPercent = yearlySavingsPercent(
+            yearly: productsByID[LavaSecurityPlusPolicy.yearly.productID],
+            monthly: productsByID[LavaSecurityPlusPolicy.monthly.productID]
+        )
+
+        return LavaSecurityPlusPolicy.recommendedOfferOrder.compactMap { plan in
             guard plan.kind != .yearlyPaidMonthly else {
                 return yearlyPaidMonthlyOffer(from: productsByID[plan.productID])
             }
@@ -262,9 +279,33 @@ final class LavaSecurityPlusStore: ObservableObject {
                 plan: plan,
                 displayPrice: productsByID[plan.productID]?.displayPrice ?? plan.fallbackDisplayPrice,
                 commitmentDisplayPrice: nil,
+                savingsPercent: plan.kind == .yearly ? savingsPercent : nil,
                 product: productsByID[plan.productID]
             )
         }
+    }
+
+    /// Floor-rounded annual saving of the upfront yearly plan versus paying the
+    /// monthly plan for a year, in the customer's storefront currency. Rounds down
+    /// so we can only ever understate the saving, and returns `nil` unless both
+    /// products loaded and the saving clears `minimumDisplayableSavingsPercent`.
+    private static func yearlySavingsPercent(yearly: Product?, monthly: Product?) -> Int? {
+        guard let yearly, let monthly else {
+            return nil
+        }
+
+        let annualizedMonthly = monthly.price * 12
+        guard annualizedMonthly > 0, yearly.price < annualizedMonthly else {
+            return nil
+        }
+
+        let savingFraction = (annualizedMonthly - yearly.price) / annualizedMonthly
+        let percent = Int((NSDecimalNumber(decimal: savingFraction).doubleValue * 100).rounded(.down))
+        guard percent >= minimumDisplayableSavingsPercent else {
+            return nil
+        }
+
+        return percent
     }
 
     private static func yearlyPaidMonthlyOffer(from product: Product?) -> LavaSecurityPlusOffer? {
@@ -286,6 +327,7 @@ final class LavaSecurityPlusStore: ObservableObject {
                 commitmentDisplayPrice: commitmentPricingTerms.commitmentInfo.price.formatted(
                     product.priceFormatStyle
                 ),
+                savingsPercent: nil,
                 product: product
             )
         }
