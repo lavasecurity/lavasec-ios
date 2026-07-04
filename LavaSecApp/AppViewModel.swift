@@ -8861,6 +8861,18 @@ final class AppViewModel: ObservableObject {
         // tunnel's self-reconnect isn't gated off until the user re-toggles.
         if let manager {
             Self.seedOnDemandConfirmedIfAbsent(from: manager)
+            // Reconcile a STALE confirmed-on-demand bit against the live manager: if the profile
+            // is installed but on-demand is no longer armed — the user disabled Connect On Demand
+            // or removed/re-added the VPN profile OUTSIDE the app, where `setManagerOnDemand` never
+            // runs — the cached bit can stay `true`. Left unreconciled, a `.disconnected` manager
+            // would show "Reconnecting" and persist `protectionEnabled = true` with nothing armed
+            // to reconnect. Clear it. Reconciling ONLY in the clear direction is race-safe: an
+            // app-initiated arm sets `manager.isOnDemandEnabled = true` in-memory BEFORE its
+            // save (on this same cached manager instance), so `isOnDemandEnabled` is already true
+            // throughout that flow and this never clobbers the arming's deliberate pre-save clear.
+            if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {
+                Self.setOnDemandConfirmedEnabled(false)
+            }
         }
 
         // The status poll repeats with identical state; published properties only

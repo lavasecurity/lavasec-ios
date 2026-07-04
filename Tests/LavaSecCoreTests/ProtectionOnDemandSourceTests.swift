@@ -121,6 +121,16 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             block.contains("let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
             "The persisted protectionEnabled hint must keep the armed-reconnect state true, not derive from vpnStatus alone."
         )
+        // Codex #262 P2: the cached confirmed-on-demand bit must be RECONCILED against the live
+        // manager so an externally-disabled on-demand (or re-added profile) can't leave a stale
+        // `true` that shows "Reconnecting" / persists protectionEnabled=true with nothing armed.
+        // Clear-direction only (race-safe vs an in-flight app arm, which sets isOnDemandEnabled
+        // true in-memory before its save).
+        XCTAssertTrue(
+            block.contains("if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {")
+                && block.contains("Self.setOnDemandConfirmedEnabled(false)"),
+            "A disconnected manager whose on-demand is no longer armed must clear the stale confirmed-on-demand bit before deriving the reconnecting state."
+        )
     }
 
     /// The armed-reconnect state must be honored across the lifecycle restore/enable paths too, not
