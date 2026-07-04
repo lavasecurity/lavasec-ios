@@ -323,7 +323,7 @@ private struct AllFiltersView: View {
         .toolbar {
             if isEditing {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel) {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, accessibilityInputLabels: ["Close".lavaLocalized, "Done".lavaLocalized]) {
                         // Confirm before discarding staged deletions; otherwise just leave edit mode
                         // (onChange(of: isEditing) clears the — empty — staged set).
                         if stagedDeletions.isEmpty {
@@ -350,7 +350,8 @@ private struct AllFiltersView: View {
                     // the how-to.
                     NativeToolbarIconButton(
                         systemName: "moon",
-                        accessibilityLabel: "Switch filters with a Focus"
+                        accessibilityLabel: "Switch filters with a Focus",
+                        accessibilityInputLabels: ["Focus filters".lavaLocalized]
                     ) {
                         isShowingFocusInfo = true
                     }
@@ -1672,7 +1673,7 @@ private struct FilterEditToolbar: ToolbarContent {
     var body: some ToolbarContent {
         if isEditing {
             ToolbarItem(placement: .cancellationAction) {
-                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, action: closeEditing)
+                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, accessibilityInputLabels: ["Close".lavaLocalized, "Done".lavaLocalized], action: closeEditing)
             }
 
             ToolbarItem(placement: .confirmationAction) {

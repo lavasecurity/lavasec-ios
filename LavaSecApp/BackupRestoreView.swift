@@ -188,11 +188,20 @@ struct BackupRestoreView: View {
                 await MainActor.run {
                     restoreStatus = .success
                     isRestoring = false
+                    // The status panel updates in place, so announce the settled outcome for
+                    // VoiceOver. Reuses the on-screen title + detail (already localized).
+                    LavaAccessibilityAnnouncer.announce(
+                        RestoreStatus.success.title.lavaLocalized + " " + RestoreStatus.success.detail.lavaLocalized
+                    )
                 }
             } catch {
+                let status = Self.failureStatus(for: error)
                 await MainActor.run {
-                    restoreStatus = Self.failureStatus(for: error)
+                    restoreStatus = status
                     isRestoring = false
+                    LavaAccessibilityAnnouncer.announce(
+                        status.title.lavaLocalized + " " + status.detail.lavaLocalized
+                    )
                 }
             }
         }

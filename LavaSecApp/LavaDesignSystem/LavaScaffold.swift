@@ -658,6 +658,10 @@ struct NativeToolbarIconButton: View {
     /// Optional semantic role. Drives the system's role styling (prominent confirm,
     /// destructive tint, etc.); leave nil for a plain icon action.
     var role: LavaActionRole? = nil
+    /// Extra Voice Control spoken names ("tap <name>"), ADDED to the accessibility-label command —
+    /// not a replacement — so a short alias never strips the existing "tap <label>" command. Set it
+    /// where the label is long/phrase-like, to offer a shorter command alongside it.
+    var accessibilityInputLabels: [String] = []
     let action: () -> Void
 
     var body: some View {
@@ -669,6 +673,11 @@ struct NativeToolbarIconButton: View {
             .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
         }
         .accessibilityLabel(accessibilityLabel)
+        // Aliases FIRST, then the label: `.accessibilityInputLabels` replaces the default set, and
+        // Voice Control's "Show Names" overlay surfaces the FIRST entry — so a short alias becomes
+        // the displayed/primary command while the original "tap <label>" still matches via the
+        // appended label. Empty aliases → just the label, identical to the system default.
+        .accessibilityInputLabels(accessibilityInputLabels + [accessibilityLabel])
     }
 }
 

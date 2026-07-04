@@ -5387,7 +5387,11 @@ final class AppViewModel: ObservableObject {
         clearAllLocalLogs()
     }
 
-    func clearDomainHistory() {
+    /// Returns whether the clear durably persisted. A write failure is caught here (surfacing an
+    /// error banner + failure haptic) rather than thrown, so callers that need to confirm the clear
+    /// to the user — e.g. a VoiceOver announcement — must gate on this result, not assume success.
+    @discardableResult
+    func clearDomainHistory() -> Bool {
         // One timestamp for both the store's applied-marker and the control request, so
         // the tunnel's force-apply gate reads `requestedAt > marker` = false (PST-1).
         let clearedAt = Date()
@@ -5401,14 +5405,18 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
             vpnMessage = "Could not clear local history: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
-    func clearLocalFilteringCounts() {
+    /// Returns whether the clear durably persisted (see `clearDomainHistory`).
+    @discardableResult
+    func clearLocalFilteringCounts() -> Bool {
         let clearedAt = Date()
         diagnostics.clearFilteringCounts(startedAt: clearedAt)
 
@@ -5420,14 +5428,18 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
             vpnMessage = "Could not clear local filtering counts: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
-    func clearAllLocalLogs() {
+    /// Returns whether the primary diagnostics clear durably persisted (see `clearDomainHistory`).
+    @discardableResult
+    func clearAllLocalLogs() -> Bool {
         let clearedAt = Date()
         diagnostics.clearFilteringCounts(startedAt: clearedAt)
         diagnostics.clearDomainHistory(clearedAt: clearedAt)
@@ -5450,10 +5462,12 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearIncidentLedgerMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
             vpnMessage = "Could not clear local logs: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
@@ -5573,11 +5587,14 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func clearNetworkActivityLog(notifyTunnel: Bool = true) {
+    /// Best-effort: the underlying clear surfaces no failure to the caller, so this always reports
+    /// success. Returns `Bool` for a uniform signature with the other clears (see `clearDomainHistory`).
+    @discardableResult
+    func clearNetworkActivityLog(notifyTunnel: Bool = true) -> Bool {
         guard let networkActivityLogURL else {
             networkActivityLogReadGate.reset()
             networkActivityLog = NetworkActivityLog()
-            return
+            return true
         }
 
         NetworkActivityLogPersistence.clear(at: networkActivityLogURL)
@@ -5588,11 +5605,16 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearNetworkActivityLogMessage)
             }
         }
+        return true
     }
 
-    func clearLavaGuardProgress() {
+    /// Best-effort: the underlying persist surfaces no failure to the caller, so this always reports
+    /// success (see `clearNetworkActivityLog`).
+    @discardableResult
+    func clearLavaGuardProgress() -> Bool {
         lavaGuardProgress.clearUsageProgress()
         persistLavaGuardProgress()
+        return true
     }
 
     func setKeepFilteringCounts(_ keepFilteringCounts: Bool, clearCounts: Bool = true) {

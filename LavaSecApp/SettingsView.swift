@@ -3582,17 +3582,26 @@ struct PrivacyDataSettingsView: View {
 
     private func clear(_ target: LocalLogClearTarget) {
         performAppSettingsMutation(reason: "Delete Local Logs") {
+            let didClear: Bool
             switch target {
             case .filteringCounts:
-                viewModel.clearLocalFilteringCounts()
+                didClear = viewModel.clearLocalFilteringCounts()
             case .domainHistory:
-                viewModel.clearDomainHistory()
+                didClear = viewModel.clearDomainHistory()
             case .networkActivity:
-                viewModel.clearNetworkActivityLog()
+                didClear = viewModel.clearNetworkActivityLog()
             case .lavaGuardProgress:
-                viewModel.clearLavaGuardProgress()
+                didClear = viewModel.clearLavaGuardProgress()
             case .all:
-                viewModel.clearAllLocalLogs()
+                didClear = viewModel.clearAllLocalLogs()
+            }
+            // Rows clear in place with no on-screen confirmation, so announce completion for
+            // VoiceOver — but ONLY when the clear durably persisted. The VM catches write failures
+            // internally (surfacing an error banner + failure haptic) rather than throwing, so an
+            // unconditional announcement would say "… cleared" even on a failed write. On failure
+            // the error banner + haptic already convey the outcome.
+            if didClear {
+                LavaAccessibilityAnnouncer.announce(target.clearedConfirmation.lavaLocalized)
             }
         }
     }
@@ -4053,6 +4062,24 @@ private enum LocalLogClearTarget: Identifiable {
             return "This removes unearned Lava Guard progress from this phone. Earned Lava Guards stay unlocked."
         case .all:
             return "This removes saved filtering counts, domain history, network activity, and unearned Lava Guard progress from this phone."
+        }
+    }
+
+    // Past-tense confirmation spoken to VoiceOver after the clear completes (assistive-nav
+    // Task 6). The rows clear in place with no on-screen confirmation, so for a VoiceOver
+    // user this announcement is the only completion signal.
+    var clearedConfirmation: String {
+        switch self {
+        case .filteringCounts:
+            return "Filtering counts cleared."
+        case .domainHistory:
+            return "Domain history cleared."
+        case .networkActivity:
+            return "Network activity cleared."
+        case .lavaGuardProgress:
+            return "Lava Guard progress cleared."
+        case .all:
+            return "All logs cleared."
         }
     }
 }

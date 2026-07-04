@@ -48,11 +48,21 @@ public struct RuleSetCache: Sendable {
         ) else {
             return
         }
-        for entry in entries
-            where entry.lastPathComponent.hasPrefix("v")
-            && entry.lastPathComponent != currentVersionDirectory {
+        for entry in entries where Self.isSupersededVersionDirectory(entry.lastPathComponent, current: currentVersionDirectory) {
             try? FileManager.default.removeItem(at: entry)
         }
+    }
+
+    /// Match ONLY a superseded `v<digits>` version tree — the exact pattern `directoryURL` uses.
+    /// This is a destructive `removeItem`, so the filter validates the numeric remainder rather
+    /// than a bare `hasPrefix("v")`: a future sibling like `vendor`/`versions` under `parsed-rules/`
+    /// must never be swept even though none exists today.
+    static func isSupersededVersionDirectory(_ name: String, current: String) -> Bool {
+        guard name != current, name.hasPrefix("v") else {
+            return false
+        }
+        let remainder = name.dropFirst()
+        return !remainder.isEmpty && remainder.allSatisfy(\.isNumber)
     }
 
     public func load(sourceID: String, contentSHA256: String, parseFormat: BlocklistFormat) -> Entry? {

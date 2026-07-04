@@ -21,8 +21,8 @@ final class AccessibilityFilterReviewSourceTests: XCTestCase {
         // The add-vs-remove action was conveyed only by the +/- glyph + tint; expose it as a stable
         // localized label so VoiceOver doesn't lose it, with the item name as the value.
         XCTAssertTrue(
-            block.contains(".accessibilityLabel(Text(symbol == \"+\" ? \"Added\" : \"Removed\"))"),
-            "The row must expose the add/remove action as a stable localized label."
+            block.contains(".accessibilityLabel(Text((symbol == \"+\" ? \"Added\" : \"Removed\").lavaLocalized))"),
+            "The row must expose the add/remove action as a stable LOCALIZED label (.lavaLocalized — a bare Text(ternary-String) uses the verbatim init and renders English in every locale)."
         )
         XCTAssertTrue(
             block.contains(".accessibilityValue(Text(localizesTitle ? title.lavaLocalized : title))"),

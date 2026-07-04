@@ -219,6 +219,12 @@ struct BackupSetupView: View {
                     }
                     .buttonStyle(LavaPanelActionButtonStyle())
                     .disabled(recoveryPhrase.isEmpty)
+                    // The visible label flips to "Copied" after a tap. Surface the stable "Copy
+                    // phrase" / "Copy" commands FIRST (Voice Control's Show Names uses the first
+                    // entry), then append the *current* visible label so a user reading "Copied" can
+                    // still say "tap Copied" to re-copy. Pre-tap the label is already "Copy phrase",
+                    // so only the "Copied" state needs appending.
+                    .accessibilityInputLabels(["Copy phrase".lavaLocalized, "Copy".lavaLocalized] + (copiedRecoveryPhrase ? ["Copied".lavaLocalized] : []))
                 }
             }
         }
@@ -427,6 +433,9 @@ struct BackupSetupView: View {
                 do {
                     try await viewModel.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
                     ProtectionHapticFeedback.play(.actionSucceeded)
+                    // Success dismisses the sheet immediately, so there is no on-screen
+                    // confirmation for VoiceOver to land on — announce that backup is on.
+                    LavaAccessibilityAnnouncer.announce("Encrypted backup is ready".lavaLocalized)
                     dismiss()
                 } catch {
                     errorMessage = error.localizedDescription
