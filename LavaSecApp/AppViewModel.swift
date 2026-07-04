@@ -2280,10 +2280,10 @@ final class AppViewModel: ObservableObject {
 
     var deviceDNSFallbackDetailText: String {
         if #available(iOS 26.0, *) {
-            return "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back."
+            return "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can."
         }
 
-        return "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back. On iOS 17-25, this is best effort and might not always work depending on network conditions."
+        return "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can. On iOS 17–25 this is best effort."
     }
 
     var deviceDNSResolverDetailText: String {
@@ -2291,7 +2291,7 @@ final class AppViewModel: ObservableObject {
             return "Uses the DNS resolver from the current Wi-Fi or cellular network while Lava still filters locally."
         }
 
-        return "Uses the DNS resolver Lava can capture from the current Wi-Fi or cellular network. On iOS 17-25, this might not always work depending on network conditions."
+        return "Uses the DNS provider from your current Wi-Fi or cellular network. On iOS 17–25 this may not always work."
     }
 
     var filterFreshnessText: String {

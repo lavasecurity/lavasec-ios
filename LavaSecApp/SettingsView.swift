@@ -750,7 +750,7 @@ private struct AccountSettingsView: View {
                                 backupMaintenanceButton(.disable)
                             }
 
-                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, the online copy can't be recovered.".lavaLocalized)
+                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, it's gone for good.".lavaLocalized)
                                 .lavaQuietNoteText()
                         }
                     }
@@ -876,9 +876,9 @@ private enum BackupMaintenanceAction: Identifiable {
     var message: String {
         switch self {
         case .clear:
-            return "This permanently deletes the encrypted backup stored for your account. It cannot be recovered. Encrypted backup stays on for this device and will upload a fresh copy on the next backup."
+            return "Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."
         case .disable:
-            return "This turns off encrypted backup on this device and permanently deletes the copy stored for your account. It cannot be recovered. You can set up a new backup later."
+            return "Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."
         }
     }
 
@@ -2174,7 +2174,7 @@ struct DNSResolverSettingsView: View {
                     if usesDeviceDNSSetting {
                         ResolverOptionControl(
                             title: "Fallback to alternative DNS",
-                            detail: "If your device's DNS stops responding, Lava routes allowed lookups through a chosen alternative resolver, then returns to your device's DNS automatically.",
+                            detail: "If your device's DNS stops responding, Lava sends allowed requests to a backup DNS provider, then switches back automatically.",
                             isOn: usesEncryptedDeviceDNSFallbackBinding
                         )
                     } else {
@@ -5065,7 +5065,7 @@ private struct VersionNerdStatsView: View {
 
             LavaSectionGroup(
                 "Tunnel Health",
-                footer: "Local counts of how Lava reaches the internet — no website names. They track when lookups worked, failed, retried, or briefly fell back to your phone's settings."
+                footer: "Local counts of how Lava reaches the internet — no site names. Tracks when requests worked, failed, retried, or briefly used your phone's settings."
             ) {
                 LavaPlainCard {
                     VStack(spacing: 10) {
