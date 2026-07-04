@@ -39,8 +39,14 @@ final class AccessibilityReducedMotionSourceTests: XCTestCase {
             source.contains(".animation(.easeInOut(duration: 0.2), value: fallbackResolverPresetID)"),
             "The fallback provider animation must not remain ungated."
         )
-        // Positively verify the GATED replacement is present too, so an accidental deletion of the
-        // fallback-provider animation line can't pass this test vacuously (asserts-gone alone would).
+        // Positively verify the GATED replacements are present too, so an accidental deletion of a
+        // gated animation line can't pass this test vacuously (asserts-gone alone would). The
+        // panel-level `value: selection` modifier is a DISTINCT site from the segment-tap
+        // `withAnimation(...)` asserted above, so it needs its own positive check.
+        XCTAssertTrue(
+            source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: selection)"),
+            "The selection panel animation must route through the Reduce-Motion gate."
+        )
         XCTAssertTrue(
             source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: fallbackResolverPresetID)"),
             "The fallback provider animation must route through the Reduce-Motion gate."

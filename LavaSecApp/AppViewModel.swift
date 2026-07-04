@@ -10890,12 +10890,20 @@ final class AppViewModel: ObservableObject {
     // rules out of fail-closed. Fail-closed stays the safe default; this just
     // supersedes it promptly. (Fixes: filters shown red / traffic blocked after
     // an app restart while Connect-On-Demand keeps the tunnel up.)
+    //
+    // ALSO covers the armed-but-DROPPED launch (`.disconnected` + on-demand armed):
+    // restoreProtectionIfNeeded deliberately skips enableProtection there (letting iOS
+    // reconnect), which also skips the snapshot publish enableProtection would have done.
+    // Without this the stale/missing `latest.json` pointer stays unrepaired until iOS
+    // reconnects, at which point the tunnel starts cold on old/fail-closed rules. Publishing
+    // the snapshot here — WITHOUT starting the VPN — hands iOS's on-demand reconnect the real
+    // rules (the reconnect UI is unaffected; only the shared snapshot is republished).
     private func reconcileTunnelSnapshotAfterLaunch() async {
         #if targetEnvironment(simulator)
         return
         #else
         await refreshProtectionStatus(force: true)
-        guard isProtectionEnabledStatus(vpnStatus) else {
+        guard isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect else {
             return
         }
 

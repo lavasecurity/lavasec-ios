@@ -126,11 +126,26 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // `true` that shows "Reconnecting" / persists protectionEnabled=true with nothing armed.
         // Clear-direction only (race-safe vs an in-flight app arm, which sets isOnDemandEnabled
         // true in-memory before its save).
+        // Prove the clear sits INSIDE the !isOnDemandEnabled guard body, not merely somewhere in the
+        // method — there are other setOnDemandConfirmedEnabled(false) calls in AppViewModel (the arm
+        // flow), so two independent `contains` would pass even if this clear were hoisted out of the
+        // guard to run unconditionally (which would clobber an in-flight app arm).
+        let reconcileGuard = try XCTUnwrap(
+            block.range(of: "if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {"),
+            "A disconnected manager whose on-demand is no longer armed must clear the stale confirmed-on-demand bit before deriving the reconnecting state.")
+        let afterGuard = block[reconcileGuard.upperBound...]
+        let guardClose = try XCTUnwrap(afterGuard.range(of: "}")?.lowerBound)
         XCTAssertTrue(
-            block.contains("if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {")
-                && block.contains("Self.setOnDemandConfirmedEnabled(false)"),
-            "A disconnected manager whose on-demand is no longer armed must clear the stale confirmed-on-demand bit before deriving the reconnecting state."
-        )
+            afterGuard[..<guardClose].contains("Self.setOnDemandConfirmedEnabled(false)"),
+            "The stale-bit clear must sit INSIDE the !isOnDemandEnabled guard body (clear-direction only), not run unconditionally.")
+        // …and it must run BEFORE the protectionEnabled derivation reads isAwaitingOnDemandReconnect
+        // (which reads the bit). If the reconcile were moved below the derivation, an externally
+        // disabled profile would still derive protectionEnabled=true off the stale bit (Codex).
+        let derivationIndex = try XCTUnwrap(
+            block.range(of: "let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect")?.lowerBound)
+        XCTAssertLessThan(
+            reconcileGuard.lowerBound, derivationIndex,
+            "The stale-bit reconcile must run BEFORE the protectionEnabled derivation, else the derivation reads the stale confirmed-on-demand bit.")
     }
 
     /// The armed-reconnect state must be honored across the lifecycle restore/enable paths too, not
@@ -181,8 +196,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             endingBefore: "private func sendTunnelMessage("
         )
         XCTAssertTrue(
-            reconcileBlock.contains("guard isProtectionEnabledStatus(vpnStatus) else"),
-            "Reconcile must only act when protection is already active."
+            reconcileBlock.contains("guard isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect else"),
+            "Reconcile must act when protection is active OR armed-but-dropped — an armed-reconnect launch must publish the snapshot BEFORE iOS reconnects, else the tunnel starts cold on stale/fail-closed rules (Codex #44 P2)."
         )
         let prepareIndex = try XCTUnwrap(reconcileBlock.range(of: "preparedSnapshotForProtectionStartup()")?.lowerBound)
         let persistIndex = try XCTUnwrap(reconcileBlock.range(of: "persistSharedState(")?.lowerBound)
