@@ -82,8 +82,7 @@ struct BackupSetupView: View {
             Text(step.title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
 
             Spacer()

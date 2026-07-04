@@ -149,9 +149,16 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             restoreBlock.contains("guard !isProtectionEnabledStatus(vpnStatus), !isAwaitingOnDemandReconnect else"),
             "Restore must skip enableProtection while awaiting an on-demand reconnect."
         )
-        // The enable start-timeout keeps the hint true when on-demand is armed.
+        // The enable start-timeout keeps the hint true when on-demand is armed. Scope to
+        // enableProtection: the same expression also appears in updateProtectionStatus, so an
+        // unscoped `source.contains` could pass on the wrong site if this one regressed.
+        let enableBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func enableProtection(",
+            endingBefore: "private func disableProtection("
+        )
         XCTAssertTrue(
-            source.contains("configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
+            enableBlock.contains("configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
             "The enable start-timeout persist must preserve the armed-reconnect hint."
         )
     }

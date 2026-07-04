@@ -1709,9 +1709,10 @@ final class AppViewModel: ObservableObject {
         default:
             // Reuse the already-localized network-unavailable copy for the armed-but-dropped
             // (`.disconnected`) case: it accurately describes it ("Lava will resume when the network
-            // returns"), so no new catalog string is needed.
+            // returns"). Reference the single source rather than duplicating the literal, so the two
+            // can't drift.
             return isAwaitingOnDemandReconnect
-                ? "No internet path is available. Lava will resume when the network returns."
+                ? ProtectionConnectivityPresentation.subtitle(for: .networkUnavailable)
                 : "Turn on local protection when you are ready"
         }
     }

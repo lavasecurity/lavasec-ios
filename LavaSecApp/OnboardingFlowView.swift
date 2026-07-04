@@ -631,8 +631,6 @@ private struct OnboardingStepHeading: View {
             Text(title.lavaLocalized)
                 .font(.largeTitle.bold())
                 .foregroundStyle(LavaStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
 
@@ -1191,12 +1189,10 @@ private struct OnboardingPrimaryButton: View {
 
                 Text(title.lavaLocalized)
                     .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            .frame(minHeight: 52)
             .background(LavaStyle.safeControlGreen, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -1214,10 +1210,8 @@ private struct OnboardingSecondaryButton: View {
             Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.panelActionGreen)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(minHeight: 52)
                 .background(LavaStyle.panelActionFill, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)

@@ -617,16 +617,24 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(block.contains("configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)"),
                       "A silent Focus apply must claim the replacement gate as a non-cover-driver.")
 
-        // Every cover / Success-state / haptic mutation must sit behind the flag — the initial cover
-        // presentation, the deleted/frozen failure, the Success confirmation, and the catch-failure arm.
+        // Every cover / Success-state / haptic mutation must sit behind the flag: the initial cover
+        // presentation, the saving-progress churn, the gone/frozen failure arm, the Success block, and
+        // the catch-failure arm — five gates in switchToFilter today.
         XCTAssertGreaterThanOrEqual(
-            block.components(separatedBy: "if presentsPreparationCover {").count - 1, 4,
-            "The initial cover, the saving-progress churn, the Success block, and the failure arms must each be gated on presentsPreparationCover.")
+            block.components(separatedBy: "if presentsPreparationCover {").count - 1, 5,
+            "The initial cover, the saving-progress churn, the gone/frozen failure arm, the Success block, and the catch-failure arm must each be gated on presentsPreparationCover.")
 
-        // The Success confirmation ("message: \"Success\"" + the success haptic) must be inside a gate.
+        // The Success confirmation ("message: \"Success\"" + the success haptic) must be NESTED inside a
+        // gate, not merely preceded by one: take the nearest preceding gate-open and verify the gate has
+        // not closed before the Success line (opens >= closes on the span between them).
         let successIdx = try XCTUnwrap(block.range(of: "message: \"Success\"")?.lowerBound)
-        XCTAssertNotNil(block.range(of: "if presentsPreparationCover {", options: .backwards, range: block.startIndex..<successIdx),
-                        "The Success cover + haptic must be gated by an if presentsPreparationCover block.")
+        let gateOpen = try XCTUnwrap(
+            block.range(of: "if presentsPreparationCover {", options: .backwards, range: block.startIndex..<successIdx),
+            "The Success cover + haptic must be preceded by an if presentsPreparationCover gate.")
+        let between = block[gateOpen.upperBound..<successIdx]
+        XCTAssertGreaterThanOrEqual(
+            between.filter { $0 == "{" }.count, between.filter { $0 == "}" }.count,
+            "The Success cover + haptic must be NESTED inside the if presentsPreparationCover block (the gate must not close before it).")
 
         // The cold-compile progress is silenced too by threading the flag into prepareSwitchPublication.
         XCTAssertTrue(block.contains("presentsPreparationCover: presentsPreparationCover"),

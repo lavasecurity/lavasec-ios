@@ -97,8 +97,6 @@ struct ProtectionStatusPanel: View {
 
                     Text(viewModel.protectionTitle.lavaLocalized)
                         .font(.title.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
 
                     Text(viewModel.protectionSubtitle.lavaLocalized)
                         .lavaBodySupportingText()
@@ -274,13 +272,11 @@ private struct ProtectionPrimaryActionButton: View {
                     Text("Long-press for pause options".lavaLocalized)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: ProtectionStatusMetrics.primaryActionHeight)
+        .frame(minHeight: ProtectionStatusMetrics.primaryActionHeight)
     }
 }
 

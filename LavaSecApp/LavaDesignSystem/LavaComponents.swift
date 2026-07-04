@@ -378,13 +378,13 @@ struct LavaMetricPill: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.headline)
-                .lineLimit(1)
+                .lineLimit(2)
                 .minimumScaleFactor(0.75)
             Text(title.lavaLocalized)
                 .lavaMetricLabelText()
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 54)
+        .frame(minHeight: 54)
         .accessibilityElement(children: .combine)
         .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius))
     }
@@ -419,23 +419,23 @@ struct LavaOverviewMetricBlock: View {
                 .font(LavaTypography.metricNumeral)
                 .foregroundStyle(LavaStyle.ink)
                 .monospacedDigit()
-                .lineLimit(1)
+                .lineLimit(2)
                 .allowsTightening(true)
                 .minimumScaleFactor(0.9)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(minHeight: 52)
 
             Text(label.lavaLocalized)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(LavaStyle.secondaryText)
-                .lineLimit(1)
+                .lineLimit(2)
                 .minimumScaleFactor(0.9)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-                .frame(height: 20)
+                .frame(minHeight: 20)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 74)
+        .frame(minHeight: 74)
         .accessibilityElement(children: .combine)
     }
 }
@@ -468,7 +468,7 @@ struct LavaOverviewBannerRow: View {
         .padding(.vertical, allowsTitleWrapping ? 10 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 50)
-        .frame(height: rowHeight)
+        .frame(minHeight: rowHeight)
         .background(background, in: RoundedRectangle(cornerRadius: 16))
     }
 

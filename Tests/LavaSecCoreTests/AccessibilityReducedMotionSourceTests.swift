@@ -39,11 +39,18 @@ final class AccessibilityReducedMotionSourceTests: XCTestCase {
             source.contains(".animation(.easeInOut(duration: 0.2), value: fallbackResolverPresetID)"),
             "The fallback provider animation must not remain ungated."
         )
+        // Positively verify the GATED replacement is present too, so an accidental deletion of the
+        // fallback-provider animation line can't pass this test vacuously (asserts-gone alone would).
+        XCTAssertTrue(
+            source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: fallbackResolverPresetID)"),
+            "The fallback provider animation must route through the Reduce-Motion gate."
+        )
     }
 
     func testSharedButtonPressScaleIsGated() throws {
         let source = try readSource(.lavaComponents)
-        // All four standard button styles gate their press-scale; none animate it unconditionally.
+        // All standard button styles gate their press-scale; none animate it unconditionally. The
+        // exact count is an intentional guardrail — bump it (and the message) when a button style is added.
         XCTAssertEqual(
             source.components(separatedBy: ".animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)").count - 1, 4,
             "All four standard button styles must gate their press-scale animation on Reduce Motion."

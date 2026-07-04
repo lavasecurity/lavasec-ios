@@ -25,23 +25,37 @@ Risk: launch-critical text uses `.lineLimit(1)`, `minimumScaleFactor`, or fixed 
 
 | Site | Pattern today | Meaning carried | Status |
 |---|---|---|---|
-| `GuardView.swift:100` | protection **title** `.lineLimit(1).minimumScaleFactor(0.75)` | primary Guard status — full text only in `.accessibilityValue` | ❌ |
-| `LavaComponents.swift:413,417,429` | `LavaOverviewMetricBlock` value `.lineLimit(1).minimumScaleFactor(0.9)` in `.frame(height: 52)` inside tile `.frame(height: 74)` | metric value, not shown elsewhere | ❌ |
-| `LavaComponents.swift:372,378` | `LavaMetricPill` value `.lineLimit(1).minimumScaleFactor(0.75)` in `.frame(height: 54)` | metric value | ❌ |
-| `LavaComponents.swift:452,462` | `LavaOverviewBannerRow` title `.lineLimit(1)` (unless wrapping) + `.frame(height: 50)` | status/banner text | ❌ |
-| `OnboardingFlowView.swift:634` | page headline `.largeTitle.bold().lineLimit(1).minimumScaleFactor(0.68)` | onboarding headline, no wrapped fallback | ❌ |
-| `OnboardingFlowView.swift:1192,1197` | primary CTA `.lineLimit(1).minimumScaleFactor(0.82)` + `.frame(height: 52)` | primary button label | ❌ |
-| `OnboardingFlowView.swift:1215,1218` | secondary CTA, same pattern | secondary button label | ❌ |
-| `GuardView.swift:277` | `"Long-press for pause options".lineLimit(1).minimumScaleFactor(0.85)` | only affordance hint on the primary button | ❌ |
-| `DiagnosticsView.swift:330-352` | metric row `Text(label)` + `Text(value).lineLimit(1).minimumScaleFactor(0.7)` in one `HStack` | activity metric value | ❌ |
-| `DiagnosticsView.swift:970-975` | date endpoint `.lineLimit(1).minimumScaleFactor(0.72)` + `.frame(height: 56)` | activity date range | ❌ |
-| `DiagnosticsView.swift:819-824` | date-range pill `.lineLimit(1).minimumScaleFactor(0.82)` + `.frame(height: 34)` | filter pill | ❌ |
-| `BackupRestoreView.swift:84-85` | nav title `.lineLimit(1).minimumScaleFactor(0.8)` | screen title (`.isHeader`) | ❌ |
-| `BackupSetupView.swift:85-86` | step title `.lineLimit(1).minimumScaleFactor(0.8)` | backup step title | ❌ |
-| `SettingsView.swift:1553-1555` | `.lineLimit(1).minimumScaleFactor(0.78).fixedSize(horizontal: true, …)` | only `horizontal: true` fixedSize in the set — can push content off-screen | ❌ |
-| `FiltersView.swift:2470-2477` | category jump-pill label (also a contrast site, §2) | navigation pill | ❌ |
+| `GuardView.swift:100` | protection **title** `.lineLimit(1).minimumScaleFactor(0.75)` | primary Guard status — full text only in `.accessibilityValue` | ✅ |
+| `LavaComponents.swift:413,417,429` | `LavaOverviewMetricBlock` value `.lineLimit(1).minimumScaleFactor(0.9)` in `.frame(height: 52)` inside tile `.frame(height: 74)` | metric value, not shown elsewhere | ⚠️ partial |
+| `LavaComponents.swift:372,378` | `LavaMetricPill` value `.lineLimit(1).minimumScaleFactor(0.75)` in `.frame(height: 54)` | metric value | ⚠️ partial |
+| `LavaComponents.swift:452,462` | `LavaOverviewBannerRow` title `.lineLimit(1)` (unless wrapping) + `.frame(height: 50)` | status/banner text | ⚠️ partial |
+| `OnboardingFlowView.swift:634` | page headline `.largeTitle.bold().lineLimit(1).minimumScaleFactor(0.68)` | onboarding headline, no wrapped fallback | ✅ |
+| `OnboardingFlowView.swift:1192,1197` | primary CTA `.lineLimit(1).minimumScaleFactor(0.82)` + `.frame(height: 52)` | primary button label | ✅ |
+| `OnboardingFlowView.swift:1215,1218` | secondary CTA, same pattern | secondary button label | ✅ |
+| `GuardView.swift:277` | `"Long-press for pause options".lineLimit(1).minimumScaleFactor(0.85)` | only affordance hint on the primary button | ✅ |
+| `DiagnosticsView.swift:330-352` | metric row `Text(label)` + `Text(value).lineLimit(1).minimumScaleFactor(0.7)` in one `HStack` | activity metric value | ⚠️ partial |
+| `DiagnosticsView.swift:970-975` | date endpoint `.lineLimit(1).minimumScaleFactor(0.72)` + `.frame(height: 56)` | activity date range | ✅ |
+| `DiagnosticsView.swift:809-824` | date-range pill `.lineLimit(1).minimumScaleFactor(0.82)` + `.frame(height: 34)` — **toolbar title accessory** (`ToolbarItem(.topBarTrailing)`), cannot reflow | filter pill | ⚠️ keep |
+| `BackupRestoreView.swift:84-85` | nav title `.lineLimit(1).minimumScaleFactor(0.8)` | screen title (`.isHeader`) | ✅ |
+| `BackupSetupView.swift:85-86` | step title `.lineLimit(1).minimumScaleFactor(0.8)` | backup step title | ✅ |
+| `SettingsView.swift:1553-1555` | inside `ViewThatFits(.horizontal)` — the horizontal fixedSize drives the stacked fallback | ⚠️ keep |
+| `FiltersView.swift:2470-2477` | category jump-pill label (also a contrast site, §2) | navigation pill | ✅ (already reflow-safe) |
 
 Also-ran (lower launch-criticality): `OnboardingFlowView.swift:754`, `SettingsView.swift:1994`, `FiltersView.swift:611` (repeat-list filter name — full value is the row itself), `FiltersView.swift:1910`, `FiltersView.swift:1130`.
+
+### Fix (applied — Task 2, source only; largest-text device pass is still the Task 6 gate)
+
+Rule of thumb: **min-height + wrap.** Launch-critical text now *reflows* at large Dynamic Type instead of truncating/shrinking, and is **invisible at the default text size** (min-height equals the old fixed height, so text that already fits renders identically). ✅ marks the reflow shape applied in source; the ⏳ Larger-Text column below is the device/simulator gate.
+
+- **Fixed `.frame(height: X)` → `.frame(minHeight: X)`** on views that contain text (Guard primary-action label, onboarding CTAs, metric tiles, banner row, Activity date endpoint). Identical at default size; grows at large text. Non-text `.frame(height:)` (icons, bars, spacers, progress fills, hero art) was left untouched. Buttons keep a ≥44 pt hit target.
+- **Meaningful titles/labels: removed `.lineLimit(1)` + `.minimumScaleFactor(…)`** so they wrap — Guard protection title, the "Long-press for pause options" hint, onboarding headline + both CTA labels, `BackupRestoreView`/`BackupSetupView` titles (now `.multilineTextAlignment(.center)` since they sit centered between spacers), and the Activity date endpoint.
+- **Activity date-range pill — kept compact (Codex #265 P2).** Initially reflowed like the endpoint, then reverted: the pill is a **toolbar title accessory** rendered inside `ToolbarItem(placement: .topBarTrailing)` (via `LavaPrimaryTabScreenContent`). A toolbar item cannot reflow — a vertically-growing / multi-line pill (`Sep 2025–Jul 2026` at accessibility sizes) clips or collides inside the navigation bar. It keeps the compact one-line variant (`.lineLimit(1)` + `.minimumScaleFactor(0.82)` + fixed `.frame(height: 34)`); the full date range remains reachable in the picker sheet, whose endpoint tiles *do* reflow. The guardrail pins the compact form.
+- **Compact metric tiles — safe partial only** (`LavaOverviewMetricBlock`, `LavaMetricPill`, and the Diagnostics horizontal `label:value` row): `height:` → `minHeight:` and `.lineLimit(1)` → `.lineLimit(2)`, **keeping** the existing `minimumScaleFactor` as a gentle fallback. No stacked/`ViewThatFits` redesign — a hero numeral must not wrap into an unbounded column. `⚠️ partial`.
+- **`LavaOverviewBannerRow` — partial:** the fixed row `height:` is now `minHeight:`; the title's `.lineLimit(1)`/`.minimumScaleFactor` were **kept** because the row already exposes an opt-in `allowsTitleWrapping` parameter for callers that need wrapping (not in the remove-both set). `⚠️ partial`.
+- **`SettingsView` upgrade-comparison values — kept as-is (Codex P2).** Initially flipped to `horizontal: false`, then reverted: the row is inside `ViewThatFits(in: .horizontal)`, and the horizontal fixedSize is exactly what forces overflow so the STACKED VStack fallback is chosen at large text. Flipping it (with `.lineLimit(1)` + `.minimumScaleFactor(0.78)` still on the chain) let the row compress in place and never stack. Kept `horizontal: true`; the guardrail now pins that.
+- **`FiltersView` category jump-pill:** current source carries no `.lineLimit`/`.minimumScaleFactor`/fixed `height:` (it grows inside its horizontal scroller), so no change was needed — kept in scope only as a guardrail against a future truncation regression.
+- **Left alone:** the shared filled-pill button styles (`LavaPanelActionButtonStyle`/`LavaStandaloneActionButtonStyle`/`LavaSecondaryActionButtonStyle`) still pin `.frame(height: LavaSurface.actionButtonHeight)` + `.lineLimit(1)` — a broad, shared change outside the audit's ranked set; deferred. `.fixedSize(horizontal: false, vertical: true)` everywhere else is correct and untouched.
+- **Guardrail:** `AccessibilityLargeTextSourceTests` pins the reflow shape as text (truncation pattern gone, `minHeight`/wrap present) per site. Two stale layout pins were re-anchored to the new form: `GuardRetryLayoutSourceTests` (primary-action `minHeight`) and `AllowedExceptionsReminderSourceTests` (banner `minHeight: rowHeight`).
 
 **Safe / good (do not "fix"):** `.fixedSize(horizontal: false, vertical: true)` is used widely (`LavaScaffold.swift:14-42`, `GuardView.swift:33,126`, `OnboardingFlowView.swift:283,838,889,905,940`, many in `SettingsView`) — these *allow* vertical growth and should stay.
 

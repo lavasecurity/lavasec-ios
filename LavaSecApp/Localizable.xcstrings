@@ -1412,13 +1412,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日已拦截 %@ 个"
+            "value": "今日已拦截 %@ 次"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日已封鎖 %@ 個"
+            "value": "今日已封鎖 %@ 次"
           }
         },
         "es": {

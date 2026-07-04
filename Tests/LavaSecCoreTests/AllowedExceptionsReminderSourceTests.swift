@@ -35,7 +35,7 @@ final class AllowedExceptionsReminderSourceTests: XCTestCase {
         XCTAssertTrue(bannerBlock.contains(".lineLimit(titleLineLimit)"))
         XCTAssertTrue(bannerBlock.contains("private var titleLineLimit: Int?"))
         XCTAssertTrue(bannerBlock.contains("allowsTitleWrapping ? nil : 1"))
-        XCTAssertTrue(bannerBlock.contains(".frame(height: rowHeight)"))
+        XCTAssertTrue(bannerBlock.contains(".frame(minHeight: rowHeight)"))
         XCTAssertTrue(bannerBlock.contains(".frame(width: 28, height: 28)"))
     }
 }

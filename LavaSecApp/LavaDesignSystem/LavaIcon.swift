@@ -32,8 +32,9 @@ extension LavaIconRole {
 
     /// Tab-bar glyph for a given selection state: the **filled** variant when the tab is selected,
     /// the **outline** variant when it is not — a non-color (Differentiate Without Color) cue so the
-    /// active tab reads by shape, not just tint. Only the primary tabs vary by state; any other role
-    /// falls back to its canonical `sfSymbolName`. Glyph strings stay in this role layer, out of the UI.
+    /// active tab reads by shape, not just tint. Only the Guard and Settings tabs vary by state today
+    /// (the two with a distinct filled variant); any other role — including the Filters and Activity
+    /// tabs — falls back to its canonical `sfSymbolName`. Glyph strings stay in this role layer, out of the UI.
     func tabBarSymbolName(isSelected: Bool) -> String {
         switch self {
         case .guardShield: isSelected ? "shield.fill" : "shield"

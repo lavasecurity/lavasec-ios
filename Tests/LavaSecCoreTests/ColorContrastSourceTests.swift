@@ -57,6 +57,11 @@ final class ColorContrastSourceTests: XCTestCase {
         let soft = try token("lavaOrangeSoft", "dark", in: src)
         XCTAssertGreaterThanOrEqual(contrast(text, soft), 4.5,
             "lavaOrangeText on lavaOrangeSoft (dark) must clear 4.5:1")
+        // Cover the dark card background too — it differs from lavaOrangeSoft (dark), so the light
+        // test's white-card check has no dark equivalent without this.
+        let card = try token("cardBackground", "dark", in: src)
+        XCTAssertGreaterThanOrEqual(contrast(text, card), 4.5,
+            "lavaOrangeText on the dark card background must clear 4.5:1")
     }
 
     // MARK: The selected pill fill carries WHITE text in both appearances

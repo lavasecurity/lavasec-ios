@@ -27,5 +27,9 @@ final class LavaIconRoleSourceTests: XCTestCase {
         // per selection state via tabBarSymbolName for the Differentiate-Without-Color fill cue (R1).
         XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
         XCTAssertFalse(root.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
+        // The Settings tab migrated to the same per-selection role API — cover it too so a revert
+        // to a raw glyph string on either tab is caught.
+        XCTAssertTrue(root.contains("Label(\"Settings\", systemImage: LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings))"))
+        XCTAssertFalse(root.contains("Label(\"Settings\", systemImage: \"gearshape.fill\")"))
     }
 }

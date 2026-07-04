@@ -69,11 +69,12 @@ final class TypographyScaleSourceTests: XCTestCase {
             "blocklist-picker title outlier .headline.weight(.semibold) must be migrated"
         )
 
-        // The two empty-state rows drop their .body (17pt) placeholder onto the 15pt row role so
-        // an empty list lines up with its populated data rows.
+        // The empty-state rows drop their .body (17pt) placeholder onto the 15pt row role so an empty
+        // list lines up with its populated data rows. Two of the three EmptyFilterRow call sites pass
+        // titleFont explicitly; the third relies on the same value as the parameter default.
         XCTAssertEqual(
             filters.components(separatedBy: "titleFont:LavaTypography.rowTitle").count - 1, 2,
-            "both EmptyFilterRow call sites should pass titleFont: LavaTypography.rowTitle"
+            "the two explicit EmptyFilterRow call sites must pass titleFont: LavaTypography.rowTitle (the third uses the default)"
         )
     }
 
