@@ -26,7 +26,11 @@ final class ColorContrastSourceTests: XCTestCase {
     /// Parse `static let <token> = adaptiveColor(light: (r,g,b), dark: (r,g,b))` from LavaTokens.
     private func token(_ name: String, _ mode: String, in source: String,
                        file: StaticString = #filePath, line: UInt = #line) throws -> RGB {
-        let num = "([-0-9.]+)"
+        // Non-negative decimals only. A stray leading `-` (a defective token) would otherwise parse
+        // into a valid Double and INFLATE the luminance/contrast ratio, silently passing the >= 4.5
+        // gate; rejecting it makes XCTUnwrap(firstMatch) fail loudly instead. All current tokens are
+        // `\d+(\.\d+)?`-shaped, so this changes no existing assertion.
+        let num = "(\\d+(?:\\.\\d+)?)"
         let pattern = "\(name) = adaptiveColor\\(\\s*light: \\(\(num), \(num), \(num)\\),\\s*dark: \\(\(num), \(num), \(num)\\)"
         let re = try NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
         let ns = source as NSString
