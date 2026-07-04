@@ -195,6 +195,18 @@ public struct DiagnosticsStore: Codable, Sendable {
     private var activeLocalProtectionStartedAt: Date?
     public private(set) var startedAt: Date
 
+    /// PST-1 durable applied-markers: the request timestamp of the most recent
+    /// domain-history / filtering-counts clear THIS store has already applied. The
+    /// `diagnostics-control.json` request timestamps are durable and never removed, and
+    /// the tunnel force-applies the control file on EVERY start; without a durable record
+    /// of what was already applied (these lived only as in-memory ivars, nil in every
+    /// fresh process), one clear re-wipes all later-accumulated history/counts/uptime on
+    /// every reboot / self-reconnect relaunch / VPN toggle, forever. Codable-additive
+    /// (`decodeIfPresent` → nil on existing installs; a stale control timestamp then
+    /// re-applies exactly once on the upgrade boundary, then the marker pins it).
+    public private(set) var lastAppliedDomainHistoryClearAt: Date?
+    public private(set) var lastAppliedFilteringCountsClearAt: Date?
+
     /// Set whenever a fine-grained prune actually removes events — on load's
     /// day-rollover reset, on record, or on an explicit prune — so the owner can
     /// persist the trimmed store. Transient bookkeeping: never encoded, and reset
@@ -210,6 +222,8 @@ public struct DiagnosticsStore: Codable, Sendable {
         self.dayCounts = [:]
         self.activeLocalProtectionStartedAt = nil
         self.startedAt = startedAt
+        self.lastAppliedDomainHistoryClearAt = nil
+        self.lastAppliedFilteringCountsClearAt = nil
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -221,6 +235,8 @@ public struct DiagnosticsStore: Codable, Sendable {
         case dayCounts
         case activeLocalProtectionStartedAt
         case startedAt
+        case lastAppliedDomainHistoryClearAt
+        case lastAppliedFilteringCountsClearAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -234,6 +250,8 @@ public struct DiagnosticsStore: Codable, Sendable {
         dayCounts = try container.decodeIfPresent([String: DiagnosticsDayCount].self, forKey: .dayCounts) ?? [:]
         activeLocalProtectionStartedAt = try container.decodeIfPresent(Date.self, forKey: .activeLocalProtectionStartedAt)
         startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date()
+        lastAppliedDomainHistoryClearAt = try container.decodeIfPresent(Date.self, forKey: .lastAppliedDomainHistoryClearAt)
+        lastAppliedFilteringCountsClearAt = try container.decodeIfPresent(Date.self, forKey: .lastAppliedFilteringCountsClearAt)
 
         seedCurrentDayCountIfNeeded(calendar: .current)
     }
@@ -249,6 +267,8 @@ public struct DiagnosticsStore: Codable, Sendable {
         try container.encode(dayCounts, forKey: .dayCounts)
         try container.encodeIfPresent(activeLocalProtectionStartedAt, forKey: .activeLocalProtectionStartedAt)
         try container.encode(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(lastAppliedDomainHistoryClearAt, forKey: .lastAppliedDomainHistoryClearAt)
+        try container.encodeIfPresent(lastAppliedFilteringCountsClearAt, forKey: .lastAppliedFilteringCountsClearAt)
     }
 
     public var summary: DiagnosticsSummary {
@@ -423,8 +443,16 @@ public struct DiagnosticsStore: Codable, Sendable {
         return true
     }
 
-    public mutating func clearDomainHistory() {
+    /// Clear domain history. `clearedAt` records the request timestamp being satisfied so
+    /// the durable applied-marker can dedup a later force-apply of the same control
+    /// request (PST-1); pass it from every path that clears via the diagnostics-control
+    /// mechanism (tunnel apply, IPC clear message, app-side clear). Nil leaves the marker
+    /// untouched (internal force-off clears carry no control request to dedup against).
+    public mutating func clearDomainHistory(clearedAt: Date? = nil) {
         events.removeAll(keepingCapacity: true)
+        if let clearedAt {
+            lastAppliedDomainHistoryClearAt = clearedAt
+        }
     }
 
     public mutating func clearFilteringCounts(startedAt: Date = Date(), calendar: Calendar = .current) {
@@ -434,6 +462,11 @@ public struct DiagnosticsStore: Codable, Sendable {
         dayCounts.removeAll(keepingCapacity: true)
         activeLocalProtectionStartedAt = nil
         self.startedAt = startedAt
+        // `startedAt` IS the moment this counts window began, i.e. when it was last
+        // cleared — and this method is the only explicit-clear entry point (day rollover
+        // resets counters via `resetForCurrentDayIfNeeded`, which never touches this
+        // marker), so it doubles as the durable applied-marker (PST-1).
+        lastAppliedFilteringCountsClearAt = startedAt
         seedCurrentDayCountIfNeeded(calendar: calendar)
     }
 
@@ -554,7 +587,13 @@ public struct DiagnosticsStore: Codable, Sendable {
     ) -> [DomainFrequency] {
         var counts: [String: Int] = [:]
 
-        for event in events where event.decision.action == action && isIncluded(event) {
+        // Paused-allows aren't real filter matches — they're excluded from ranking so a
+        // domain reached only while protection happened to be paused doesn't crowd out
+        // domains the filter actually evaluated and allowed/blocked.
+        for event in events
+        where event.decision.action == action
+            && event.decision.reason != .pausedAllow
+            && isIncluded(event) {
             counts[event.domain, default: 0] += 1
         }
 

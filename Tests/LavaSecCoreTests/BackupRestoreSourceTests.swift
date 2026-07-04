@@ -2,7 +2,7 @@ import XCTest
 
 final class BackupRestoreSourceTests: XCTestCase {
     func testRecoveryModeUsesPasteToWordSlots() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("Paste full phrase"))
         XCTAssertTrue(source.contains("BackupRecoveryPhrase.fillSlots"))
@@ -10,7 +10,7 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRestoreDefaultsToDeviceUnlock() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("@State private var mode: BackupRestoreMode = .deviceKey"))
         XCTAssertTrue(source.contains("case deviceKey"))
@@ -18,22 +18,22 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRecoveryRestoreUsesNormalizedPhraseFromSlots() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("BackupRecoveryPhrase.phrase(from: recoveryWords)"))
         XCTAssertTrue(source.contains("recoverySecretForRestore"))
     }
 
     func testDeviceRestoreUsesKeychainCopy() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("Use this device's keychain"))
         XCTAssertFalse(source.contains("Use this device\""))
     }
 
     func testRestoreModesUseDevicePasskeyAndRecoveryWithoutLegacyPassword() throws {
-        let restoreSource = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let restoreSource = try readSource(.backupRestoreView)
+        let viewModelSource = try readSource(.appViewModel)
 
         XCTAssertTrue(restoreSource.contains("case deviceKey"))
         XCTAssertTrue(restoreSource.contains("case passkey"))
@@ -47,12 +47,16 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertFalse(restoreSource.contains("passwordSecret"))
         XCTAssertFalse(restoreSource.contains("Backup password"))
         XCTAssertFalse(viewModelSource.contains("decryptWithPassword(trimmedSecret)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(viewModelSource.contains("trimmedSecret"))
     }
 
     func testPasskeyRestoreUsesPRFNotServerEscrow() throws {
-        let coordinatorSource = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
-        let restoreSource = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let coordinatorSource = try readSource(.backupPasskeyCoordinator)
+        let restoreSource = try readSource(.backupRestoreView)
+        let viewModelSource = try readSource(.appViewModel)
 
         // Restore derives the slot key from a local authenticator PRF assertion — no
         // server-returned recovery secret, no recovery service.
@@ -68,7 +72,7 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRestoreShowsStatusIndicatorPanelInsteadOfMessageLine() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("\"Unlock and restore locally\""))
         XCTAssertTrue(source.contains("RestoreStatusPanel"))
@@ -78,10 +82,16 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("Restore cancelled"))
         // The crisp status indicator replaces the old free-floating message line.
         XCTAssertFalse(source.contains("isError ? LavaStyle.lavaOrange : LavaStyle.safeGreen"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaStyle"))
+        XCTAssertTrue(source.contains("lavaOrange"))
+        XCTAssertTrue(source.contains("safeGreen"))
     }
 
     func testRecoveryEntryUsesTextInputScaffoldWithSpaceToAdvance() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("LavaTextInputPanel"))
         XCTAssertTrue(source.contains("LavaTextEditorInputRow("))
@@ -96,14 +106,14 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRestoreCancellationIsDistinctFromFailure() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
+        let source = try readSource(.backupRestoreView)
 
         XCTAssertTrue(source.contains("if let passkeyError = error as? BackupPasskeyError, case .canceled = passkeyError"))
         XCTAssertTrue(source.contains("return .cancelled"))
     }
 
     func testWrongRecoveryPhraseUsesFriendlyMessage() throws {
-        let source = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let source = try readSource(.appViewModel)
 
         XCTAssertTrue(source.contains("case invalidRecoveryPhrase"))
         XCTAssertTrue(source.contains("That recovery phrase did not unlock this backup. Check the words and try again."))
@@ -111,8 +121,8 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRestoreFlowIsFullSheetWithFooterAction() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupRestoreView.swift")
-        let settings = try Self.readAppSource("LavaSecApp/SettingsView.swift")
+        let source = try readSource(.backupRestoreView)
+        let settings = try readSource(.settingsView)
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // matching the backup setup flow, instead of a pushed screen.
@@ -124,15 +134,10 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\")"))
         XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
         XCTAssertFalse(source.contains(".navigationTitle(\"Restore Backup\".lavaLocalized)"))
-    }
-
-    private static func readAppSource(_ relativePath: String) throws -> String {
-        let current = URL(fileURLWithPath: #filePath)
-        let packageRoot = current
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let fileURL = packageRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: fileURL, encoding: .utf8)
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settings.contains("LavaScreenContent"))
+        XCTAssertTrue(source.contains("lavaLocalized"))
     }
 }

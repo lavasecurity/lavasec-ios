@@ -5,27 +5,32 @@ import StoreKit
 struct LavaSecurityPlusOffer: Identifiable {
     let plan: LavaSecurityPlusPlan
     let displayPrice: String
+    let commitmentDisplayPrice: String?
     let product: Product?
 
     var id: String {
-        plan.productID
+        plan.id
     }
 
     var title: String {
         switch plan.kind {
         case .monthly:
-            "Monthly"
+            "Monthly".lavaLocalized
         case .yearly:
-            "Yearly"
+            "Yearly".lavaLocalized
+        case .yearlyPaidMonthly:
+            "Yearly, paid monthly".lavaLocalized
         }
     }
 
     var subtitle: String {
         switch plan.kind {
         case .monthly:
-            "Flexible subscription"
+            "Flexible subscription".lavaLocalized
         case .yearly:
-            "Best value"
+            "Best value".lavaLocalized
+        case .yearlyPaidMonthly:
+            "Lower monthly payment".lavaLocalized
         }
     }
 }
@@ -82,13 +87,7 @@ final class LavaSecurityPlusStore: ObservableObject {
     private var updatesTask: Task<Void, Never>?
 
     init() {
-        offers = LavaSecurityPlusPolicy.recommendedOfferOrder.map {
-            LavaSecurityPlusOffer(
-                plan: $0,
-                displayPrice: $0.fallbackDisplayPrice,
-                product: nil
-            )
-        }
+        offers = Self.fallbackOffers()
     }
 
     deinit {
@@ -116,23 +115,11 @@ final class LavaSecurityPlusStore: ObservableObject {
         defer { isLoadingProducts = false }
 
         do {
-            let products = try await Product.products(for: LavaSecurityPlusPolicy.productIDs)
+            let products = try await Product.products(for: LavaSecurityPlusPolicy.paywallProductIDs)
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
-            offers = LavaSecurityPlusPolicy.recommendedOfferOrder.map { plan in
-                LavaSecurityPlusOffer(
-                    plan: plan,
-                    displayPrice: productsByID[plan.productID]?.displayPrice ?? plan.fallbackDisplayPrice,
-                    product: productsByID[plan.productID]
-                )
-            }
+            offers = Self.offers(from: productsByID)
         } catch {
-            offers = LavaSecurityPlusPolicy.recommendedOfferOrder.map {
-                LavaSecurityPlusOffer(
-                    plan: $0,
-                    displayPrice: $0.fallbackDisplayPrice,
-                    product: nil
-                )
-            }
+            offers = Self.fallbackOffers()
         }
     }
 
@@ -144,7 +131,8 @@ final class LavaSecurityPlusStore: ObservableObject {
             guard case .verified(let transaction) = result,
                   let entitlement = activeEntitlement(
                     from: transaction,
-                    signedTransactionJWS: result.jwsRepresentation
+                    signedTransactionJWS: result.jwsRepresentation,
+                    source: .currentEntitlements
                   )
             else {
                 continue
@@ -174,6 +162,19 @@ final class LavaSecurityPlusStore: ObservableObject {
         if let appAccountToken {
             options.insert(.appAccountToken(appAccountToken))
         }
+        if offer.plan.kind == .yearlyPaidMonthly {
+            if #available(iOS 26.4, *) {
+                guard product.subscription?.pricingTerms.contains(where: {
+                    $0.billingPlanType == .monthly
+                }) == true else {
+                    throw LavaSecurityPlusStoreError.productUnavailable
+                }
+
+                options.insert(.billingPlanType(.monthly))
+            } else {
+                throw LavaSecurityPlusStoreError.productUnavailable
+            }
+        }
 
         let result = try await product.purchase(options: options)
         switch result {
@@ -184,7 +185,8 @@ final class LavaSecurityPlusStore: ObservableObject {
 
             guard let entitlement = activeEntitlement(
                 from: transaction,
-                signedTransactionJWS: verificationResult.jwsRepresentation
+                signedTransactionJWS: verificationResult.jwsRepresentation,
+                source: .purchase
             ) else {
                 await transaction.finish()
                 let refreshedEntitlement = await refreshEntitlements()
@@ -216,7 +218,8 @@ final class LavaSecurityPlusStore: ObservableObject {
 
         if let entitlement = activeEntitlement(
             from: transaction,
-            signedTransactionJWS: transactionResult.jwsRepresentation
+            signedTransactionJWS: transactionResult.jwsRepresentation,
+            source: .transactionUpdate
         ) {
             setEntitlement(entitlement)
         } else {
@@ -238,9 +241,84 @@ final class LavaSecurityPlusStore: ObservableObject {
         return product
     }
 
+    private static func fallbackOffers() -> [LavaSecurityPlusOffer] {
+        LavaSecurityPlusPolicy.fallbackOfferOrder.map {
+            LavaSecurityPlusOffer(
+                plan: $0,
+                displayPrice: $0.fallbackDisplayPrice,
+                commitmentDisplayPrice: nil,
+                product: nil
+            )
+        }
+    }
+
+    private static func offers(from productsByID: [String: Product]) -> [LavaSecurityPlusOffer] {
+        LavaSecurityPlusPolicy.recommendedOfferOrder.compactMap { plan in
+            guard plan.kind != .yearlyPaidMonthly else {
+                return yearlyPaidMonthlyOffer(from: productsByID[plan.productID])
+            }
+
+            return LavaSecurityPlusOffer(
+                plan: plan,
+                displayPrice: productsByID[plan.productID]?.displayPrice ?? plan.fallbackDisplayPrice,
+                commitmentDisplayPrice: nil,
+                product: productsByID[plan.productID]
+            )
+        }
+    }
+
+    private static func yearlyPaidMonthlyOffer(from product: Product?) -> LavaSecurityPlusOffer? {
+        guard let product else {
+            return nil
+        }
+
+        if #available(iOS 26.4, *) {
+            guard let subscription = product.subscription,
+                  let commitmentPricingTerms = subscription.pricingTerms.first(where: {
+                $0.billingPlanType == .monthly
+            }) else {
+                return nil
+            }
+
+            return LavaSecurityPlusOffer(
+                plan: LavaSecurityPlusPolicy.yearlyPaidMonthly,
+                displayPrice: commitmentPricingTerms.billingDisplayPrice,
+                commitmentDisplayPrice: commitmentPricingTerms.commitmentInfo.price.formatted(
+                    product.priceFormatStyle
+                ),
+                product: product
+            )
+        }
+
+        return nil
+    }
+
+    // Where a candidate `Transaction` came from. `Transaction.currentEntitlements`
+    // is StoreKit's own source of truth: it already drops truly-lapsed
+    // subscriptions and, crucially, *keeps* ones inside the billing grace / retry
+    // window — those carry a past `expirationDate` while still being entitled.
+    // Self-expiring against that date would wrongly demote a grace-period
+    // subscriber to Free (UX-3), so we trust StoreKit for that source and only
+    // apply the local expiry compare to the other, non-authoritative sources.
+    private enum EntitlementSource {
+        case currentEntitlements
+        case purchase
+        case transactionUpdate
+
+        var trustsStoreKitEntitlementWindow: Bool {
+            switch self {
+            case .currentEntitlements:
+                true
+            case .purchase, .transactionUpdate:
+                false
+            }
+        }
+    }
+
     private func activeEntitlement(
         from transaction: Transaction,
-        signedTransactionJWS: String
+        signedTransactionJWS: String,
+        source: EntitlementSource
     ) -> LavaSecurityPlusEntitlement? {
         guard LavaSecurityPlusPolicy.plan(for: transaction.productID) != nil else {
             return nil
@@ -250,7 +328,9 @@ final class LavaSecurityPlusStore: ObservableObject {
             return nil
         }
 
-        if let expirationDate = transaction.expirationDate, expirationDate <= Date() {
+        if !source.trustsStoreKitEntitlementWindow,
+           let expirationDate = transaction.expirationDate,
+           expirationDate <= Date() {
             return nil
         }
 

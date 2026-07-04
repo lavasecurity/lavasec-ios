@@ -30,7 +30,10 @@ public enum DiagnosticsPersistence {
 
     public static func makeJSONEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // Machine-only file rewritten whole on the debounced cadence (up to 120x/hour under
+        // active browsing) — sortedKeys keeps writes byte-stable for identical content, but
+        // pretty-printing only inflates the payload (~50%) on flash.
+        encoder.outputFormatting = [.sortedKeys]
         return encoder
     }
 }

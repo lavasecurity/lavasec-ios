@@ -2,9 +2,9 @@ import XCTest
 
 final class AppDeepLinkSourceTests: XCTestCase {
     func testAppDeclaresLavaDeepLinkEntrypoints() throws {
-        let infoPlist = try Self.readAppSource("LavaSecApp/Info.plist")
-        let entitlements = try Self.readAppSource("LavaSecApp/LavaSecApp.entitlements")
-        let appSource = try Self.readAppSource("LavaSecApp/LavaSecApp.swift")
+        let infoPlist = try readSource(.appInfoPlist)
+        let entitlements = try readSource(.appEntitlements)
+        let appSource = try readSource(.lavaSecApp)
 
         XCTAssertTrue(infoPlist.contains("<string>lavasecurity</string>"))
         XCTAssertTrue(entitlements.contains("applinks:lavasecurity.app"))
@@ -14,7 +14,7 @@ final class AppDeepLinkSourceTests: XCTestCase {
     }
 
     func testRootViewMapsDeepLinksToTabsAndSettingsRoutes() throws {
-        let rootSource = try Self.readAppSource("LavaSecApp/RootView.swift")
+        let rootSource = try readSource(.rootView)
 
         XCTAssertTrue(rootSource.contains("LavaAppDeepLink(url: url)"))
         XCTAssertTrue(rootSource.contains("private func handleDeepLink(_ deepLink: LavaAppDeepLink)"))
@@ -33,8 +33,8 @@ final class AppDeepLinkSourceTests: XCTestCase {
     }
 
     func testDeepLinkHandlerStagesImportAndNeverMutates() throws {
-        let rootSource = try Self.readAppSource("LavaSecApp/RootView.swift")
-        let handlerBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.rootView)
+        let handlerBlock = try sourceBlock(
             in: rootSource,
             startingAt: "private func handleDeepLink(_ deepLink: LavaAppDeepLink)",
             endingBefore: "private static func importStartMode"
@@ -94,11 +94,16 @@ final class AppDeepLinkSourceTests: XCTestCase {
                 "Deeplink handler must not call hot-path mutation \(symbol)"
             )
         }
+        // Canary: the negative pins above key on the rage-shake destination - if the sheet
+        // binding is renamed or removed, those pins pass vacuously. Anchored to the live
+        // sheet-item shape (a bare "RageShakeDestination" match would be satisfied by the
+        // dismissRageShakeDestination() method-name substring).
+        XCTAssertTrue(rootSource.contains(".sheet(item: $viewModel.rageShakeDestination)"))
     }
 
     func testSettingsHelpOpensCanonicalSupportPage() throws {
-        let settingsSource = try Self.readAppSource("LavaSecApp/SettingsView.swift")
-        let settingsBlock = try Self.sourceBlock(
+        let settingsSource = try readSource(.settingsView)
+        let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct SettingsNavigationRow: View"
@@ -112,26 +117,5 @@ final class AppDeepLinkSourceTests: XCTestCase {
         XCTAssertFalse(settingsSource.contains("case .help"))
         XCTAssertFalse(settingsSource.contains("private struct HelpSettingsView"))
         XCTAssertFalse(settingsSource.contains("private struct HelpArticleView"))
-    }
-
-    private static func readAppSource(_ relativePath: String) throws -> String {
-        let current = URL(fileURLWithPath: #filePath)
-        let packageRoot = current
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let fileURL = packageRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: fileURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

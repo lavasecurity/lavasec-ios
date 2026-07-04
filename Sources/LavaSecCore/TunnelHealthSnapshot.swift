@@ -52,9 +52,14 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// pinned under the reconnect threshold so a steadily hijacking/stale resolver never
     /// escalated (UR-37 / LAV-87); this survives that churn so recovery can engage.
     public var consecutiveRejectedSmokeResponseCount: Int
-    /// The resolver identity (`cacheIdentifier`) the rejected-response streak is counting,
+    /// The resolver identity (`primaryCacheIdentifier` — the primary alone, without the
+    /// fallback components that churn on handoff) the rejected-response streak is counting,
     /// so a handoff to a different resolver restarts the count instead of carrying it over.
     public var rejectedSmokeResponseResolverIdentity: String?
+    /// Times the rejected-response streak was re-keyed to a different resolver identity this
+    /// session. QA instrument for the identity scoping: during a steady-hijacker replay this
+    /// stays frozen while the streak climbs to the escalation threshold.
+    public var rejectedSmokeResponseRescopeCount: Int
     public var deviceDNSFallbackModeActive: Bool
     public var lastDeviceDNSFallbackActivatedAt: Date?
     public var deviceDNSFallbackActivationCount: Int
@@ -96,6 +101,16 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     public var lastNetworkSettingsReapplyFailureAt: Date?
     public var lastNetworkSettingsReapplyFailureReason: String?
     public var networkSettingsReapplyFailureCount: Int
+    /// Queries served fail-closed (`.protectionUnavailable`) this session. Deliberately kept
+    /// OUT of user-facing filtering counts and Domain History (a fail-closed block is not a
+    /// blocklist match — #164 honesty rule); without a health-side trace, a past fail-closed
+    /// window is indistinguishable from "no incident" in a field report.
+    public var failClosedServedQueryCount: Int
+    public var lastFailClosedAt: Date?
+    /// "snapshot-unavailable" (no usable snapshot could be loaded/compiled — a restart cannot
+    /// fix it) vs "transient-protection-unavailable" (e.g. the cold-start bootstrap window
+    /// while the real snapshot decodes).
+    public var lastFailClosedReason: String?
 
     private enum CodingKeys: String, CodingKey {
         case startedAt
@@ -127,6 +142,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case consecutiveDNSSmokeProbeFailureCount
         case consecutiveRejectedSmokeResponseCount
         case rejectedSmokeResponseResolverIdentity
+        case rejectedSmokeResponseRescopeCount
         case deviceDNSFallbackModeActive
         case lastDeviceDNSFallbackActivatedAt
         case deviceDNSFallbackActivationCount
@@ -150,6 +166,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lastNetworkSettingsReapplyFailureAt
         case lastNetworkSettingsReapplyFailureReason
         case networkSettingsReapplyFailureCount
+        case failClosedServedQueryCount
+        case lastFailClosedAt
+        case lastFailClosedReason
     }
 
     public init(
@@ -182,6 +201,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         consecutiveDNSSmokeProbeFailureCount: Int = 0,
         consecutiveRejectedSmokeResponseCount: Int = 0,
         rejectedSmokeResponseResolverIdentity: String? = nil,
+        rejectedSmokeResponseRescopeCount: Int = 0,
         deviceDNSFallbackModeActive: Bool = false,
         lastDeviceDNSFallbackActivatedAt: Date? = nil,
         deviceDNSFallbackActivationCount: Int = 0,
@@ -204,7 +224,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         lastSlowUpstreamResponseAt: Date? = nil,
         lastNetworkSettingsReapplyFailureAt: Date? = nil,
         lastNetworkSettingsReapplyFailureReason: String? = nil,
-        networkSettingsReapplyFailureCount: Int = 0
+        networkSettingsReapplyFailureCount: Int = 0,
+        failClosedServedQueryCount: Int = 0,
+        lastFailClosedAt: Date? = nil,
+        lastFailClosedReason: String? = nil
     ) {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
@@ -235,6 +258,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.consecutiveDNSSmokeProbeFailureCount = consecutiveDNSSmokeProbeFailureCount
         self.consecutiveRejectedSmokeResponseCount = consecutiveRejectedSmokeResponseCount
         self.rejectedSmokeResponseResolverIdentity = rejectedSmokeResponseResolverIdentity
+        self.rejectedSmokeResponseRescopeCount = rejectedSmokeResponseRescopeCount
         self.deviceDNSFallbackModeActive = deviceDNSFallbackModeActive
         self.lastDeviceDNSFallbackActivatedAt = lastDeviceDNSFallbackActivatedAt
         self.deviceDNSFallbackActivationCount = deviceDNSFallbackActivationCount
@@ -258,6 +282,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastNetworkSettingsReapplyFailureAt = lastNetworkSettingsReapplyFailureAt
         self.lastNetworkSettingsReapplyFailureReason = lastNetworkSettingsReapplyFailureReason
         self.networkSettingsReapplyFailureCount = networkSettingsReapplyFailureCount
+        self.failClosedServedQueryCount = failClosedServedQueryCount
+        self.lastFailClosedAt = lastFailClosedAt
+        self.lastFailClosedReason = lastFailClosedReason
     }
 
     public init(from decoder: Decoder) throws {
@@ -330,6 +357,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             String.self,
             forKey: .rejectedSmokeResponseResolverIdentity
         )
+        self.rejectedSmokeResponseRescopeCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .rejectedSmokeResponseRescopeCount
+        ) ?? 0
         self.deviceDNSFallbackModeActive = try container.decodeIfPresent(
             Bool.self,
             forKey: .deviceDNSFallbackModeActive
@@ -410,6 +441,18 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             Int.self,
             forKey: .networkSettingsReapplyFailureCount
         ) ?? 0
+        self.failClosedServedQueryCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .failClosedServedQueryCount
+        ) ?? 0
+        self.lastFailClosedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lastFailClosedAt
+        )
+        self.lastFailClosedReason = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastFailClosedReason
+        )
     }
 
     public var totalCacheLookups: Int {

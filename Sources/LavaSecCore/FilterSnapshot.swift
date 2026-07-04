@@ -11,6 +11,12 @@ public enum FilterDecisionReason: String, Codable, Sendable {
     case blocklist
     case threatGuardrail
     case invalidDomain
+    /// The domain would otherwise have gone through normal filtering, but protection was
+    /// temporarily paused, so the query was forwarded without evaluating allow/block rules.
+    /// Kept distinct from `.defaultAllow` so Domain History and the aggregate allow count
+    /// can tell "cleared the normal filter" apart from "let through because paused"; the
+    /// diagnostics store also excludes it from Top Domains ranking (not a real filter match).
+    case pausedAllow
     /// The query was blocked because protection could not serve it safely — the runtime
     /// is fail-closed (no usable rule snapshot is resident: over budget, a build failure,
     /// an upstream that rotated past the catalog's pinned hash, or the brief cold-start
@@ -31,6 +37,7 @@ public struct FilterDecision: Hashable, Codable, Sendable {
     }
 
     public static let defaultAllow = FilterDecision(action: .allow, reason: .defaultAllow)
+    public static let pausedAllow = FilterDecision(action: .allow, reason: .pausedAllow)
 }
 
 public struct FilterSnapshot: Codable, Sendable {

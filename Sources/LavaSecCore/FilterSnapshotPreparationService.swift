@@ -442,8 +442,13 @@ public actor FilterSnapshotPreparationService {
             compactSnapshotFilename: compactSnapshotFilename
         )
         let livePointerToken = artifactStore.loadArtifactPointer()?.token
+        // Warm reclamation has no promptness requirement, and the retain set here (live
+        // pointer + hosted tokens) does NOT include the just-superseded previous pointer
+        // dir the publish GC deliberately keeps — the long warm grace preserves that
+        // reader-survives-one-supersession posture (see warmGarbageGraceInterval).
         artifactStore.collectVersionedGarbage(
-            retaining: ([livePointerToken].compactMap { $0 }) + retainedTokens
+            retaining: ([livePointerToken].compactMap { $0 }) + retainedTokens,
+            graceInterval: FilterArtifactStore.warmGarbageGraceInterval
         )
     }
 

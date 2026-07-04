@@ -2,13 +2,13 @@ import XCTest
 
 final class AdminQAHapticsSourceTests: XCTestCase {
     func testPhoneQAIncludesStandaloneProtectionHapticPreviews() throws {
-        let source = try Self.source(named: "AdminQAView.swift", in: "LavaSecApp")
-        let phoneQABlock = try Self.sourceBlock(
+        let source = try readSource(.adminQAView)
+        let phoneQABlock = try sourceBlock(
             in: source,
             startingAt: "struct PhoneQAView: View",
             endingBefore: "private struct AdminQAActionRow"
         )
-        let previewBlock = try Self.sourceBlock(
+        let previewBlock = try sourceBlock(
             in: source,
             startingAt: "private enum PhoneQAHapticPreview",
             endingBefore: "private struct PhoneQAHapticPreviewRow"
@@ -35,33 +35,5 @@ final class AdminQAHapticsSourceTests: XCTestCase {
         XCTAssertTrue(previewBlock.contains(".protectionStartFailed"))
         XCTAssertTrue(previewBlock.contains(".protectionTurnedOff"))
         XCTAssertTrue(previewBlock.contains(".guardianTapAcknowledged"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

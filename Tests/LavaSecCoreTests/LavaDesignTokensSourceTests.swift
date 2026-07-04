@@ -30,7 +30,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(tokens.contains("static let iconBadgeCornerRadius: CGFloat = 10"))
 
         // ...and the components consume the tokens instead of inline literals.
-        let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
+        let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("cornerRadius: CGFloat = LavaSurface.controlCornerRadius"))
         XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)"))
         XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius)"))
@@ -43,10 +43,10 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(tokens.contains("static let errorText = dangerRed"))
 
         // Error text now resolves through the token, not raw SwiftUI `.red`.
-        let guardView = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
+        let guardView = try readSource(.guardView)
         XCTAssertTrue(guardView.contains("? LavaStyle.errorText : LavaStyle.secondaryText"))
         XCTAssertFalse(guardView.contains("? .red : LavaStyle.secondaryText"))
-        let onboarding = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
+        let onboarding = try readSource(.onboardingFlowView)
         XCTAssertTrue(onboarding.contains(".foregroundStyle(LavaStyle.errorText)"))
     }
 
@@ -64,7 +64,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     }
 
     func testLavaTierIsWiredIntoRepresentativeSurfaces() throws {
-        let settings = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let settings = try readSource(.settingsView)
         // Workshop depth: Nerd Stats + DNS Resolver + the "Information Sent" diagnostics preview —
         // declared via the SettingsSubpageContent tier: argument (the scaffold applies .lavaTier(tier)
         // internally), not a route-site modifier.
@@ -98,9 +98,9 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     /// The scale lives in `LavaSecCore` (not `LavaTokens.swift`) so the widget
     /// extension can share it — the app target's tokens file is invisible to it.
     func testIconSizeScaleLivesInCoreSoTheWidgetCanShareIt() throws {
-        let scale = try Self.source(named: "LavaIconSize.swift", in: "Sources/LavaSecCore")
+        let scale = try readSource(.lavaIconSize)
         XCTAssertTrue(scale.contains("public enum LavaIconSize"))
-        let widget = try Self.source(named: "LavaSecWidget.swift", in: "LavaSecWidget")
+        let widget = try readSource(.lavaSecWidget)
         XCTAssertTrue(widget.contains("fontSize: LavaIconSize.control"))
         XCTAssertTrue(widget.contains("fontSize: LavaIconSize.small"))
     }
@@ -108,21 +108,17 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     /// The hero shield call sites consume the token and no longer carry their old
     /// disagreeing literals.
     func testHeroShieldCallSitesConsumeTheToken() throws {
-        for (file, dir) in [
-            ("SecurityController.swift", "LavaSecApp"),
-            ("DiagnosticsView.swift", "LavaSecApp"),
-            ("SettingsView.swift", "LavaSecApp"),
-        ] {
-            let source = try Self.source(named: file, in: dir)
+        for sourceFile in [SourceFile.securityController, .diagnosticsView, .settingsView] {
+            let source = try readSource(sourceFile)
             XCTAssertTrue(source.contains(".font(.system(size: LavaIconSize.hero, weight: .semibold))"),
-                          "\(file) should render the hero shield via LavaIconSize.hero")
+                          "\(sourceFile.rawValue) should render the hero shield via LavaIconSize.hero")
             for stale in [
                 ".font(.system(size: 42, weight: .semibold))",
                 ".font(.system(size: 44, weight: .semibold))",
                 ".font(.system(size: 46, weight: .semibold))",
                 ".font(.system(size: 48, weight: .semibold))",
             ] {
-                XCTAssertFalse(source.contains(stale), "\(file) still has a stale hero literal: \(stale)")
+                XCTAssertFalse(source.contains(stale), "\(sourceFile.rawValue) still has a stale hero literal: \(stale)")
             }
         }
     }
@@ -134,7 +130,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(tokens.contains("enum LavaTypography"))
         XCTAssertTrue(tokens.contains("static let metricNumeral = Font.system(size: 42, weight: .bold, design: .rounded)"))
 
-        let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
+        let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains(".font(LavaTypography.metricNumeral)"))
         XCTAssertFalse(components.contains(".font(.system(size: 42, weight: .bold, design: .rounded))"))
     }
@@ -142,18 +138,6 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     // MARK: - Helpers
 
     private static func tokens() throws -> String {
-        try source(named: "LavaTokens.swift", in: "LavaSecApp/LavaDesignSystem")
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-        return try String(contentsOf: sourceURL, encoding: .utf8)
+        try readSource(.lavaTokens)
     }
 }

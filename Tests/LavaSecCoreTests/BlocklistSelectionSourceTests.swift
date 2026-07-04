@@ -2,8 +2,8 @@ import XCTest
 
 final class BlocklistSelectionSourceTests: XCTestCase {
     func testFilterDraftBlocklistSheetStartsFromCurrentDraftSelection() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blockedDomainsSheetBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let blockedDomainsSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "case .blocklist:",
             endingBefore: "case .blockedDomain:"
@@ -16,8 +16,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterDraftBlocklistSheetShowsAllCuratedLists() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let availableBlocklistsBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let availableBlocklistsBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private var availableBlocklists: [BlocklistSource]",
             endingBefore: "private var filterRuleBudgetStatus: AppViewModel.FilterRuleBudgetStatus"
@@ -34,9 +34,9 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterDraftBlocklistSheetSavesTheFullSelection() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let addSelectionBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let addSelectionBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private func addSelection()",
             endingBefore: "private func addCustomSource(displayName: String, rawURL: String) -> String?"
@@ -50,13 +50,13 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testKnownCustomBlocklistURLsRouteToCatalogSources() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let draftBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let draftBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func addCustomBlocklistToDraft(displayName: String, rawURL: String) -> String?",
             endingBefore: "func removeBlocklistFromDraft"
         )
-        let immediateBlock = try Self.sourceBlock(
+        let immediateBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func addCustomBlocklist(displayName: String, rawURL: String) -> String?",
             endingBefore: "func removeCustomBlocklist"
@@ -73,7 +73,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testPreparationTitleTransitionKeepsUpwardMotionWithoutStackingTitles() throws {
-        let reviewFlowSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
+        let reviewFlowSource = try readSource(.filterReviewFlowView)
         let start = try XCTUnwrap(reviewFlowSource.range(of: "struct PreparationTickerTitle: View")?.lowerBound)
         let titleBlock = String(reviewFlowSource[start...])
 
@@ -84,8 +84,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterEditToolbarUsesIconOnlyNativeActions() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let toolbarBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let toolbarBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
             endingBefore: "private struct LavaInlineInfoContent: View"
@@ -98,8 +98,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterDiscardUsesPopupDialogWithStandardActions() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let myListBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let myListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
@@ -117,8 +117,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testMyListPanelShowsActiveRuleCountNotRawDisplayCountsOrBudgetBar() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let myListBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let myListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
@@ -129,11 +129,15 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(myListBlock.contains("viewModel.stagedBlockedDomainsForDisplay().count"))
         // The budget meter lives only in the add-a-blocklist picker — not duplicated on the cover.
         XCTAssertFalse(myListBlock.contains("FilterRuleBudgetBar("))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("FilterRuleBudgetBar"))
     }
 
     func testMyListPullToRefreshUsesCatalogSync() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let myListBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let myListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
@@ -150,13 +154,13 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterActionButtonsUseLeadingGlyphsWithStableLabelSpacing() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let myListBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let myListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
-        let filterAddButtonBlock = try Self.sourceBlock(
+        let filterAddButtonBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterAddButton: View",
             endingBefore: "private struct DomainEntryForm: View"
@@ -174,11 +178,15 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(filterAddButtonBlock.contains("width: FilterActionLabelMetrics.iconFrameSize"))
         XCTAssertTrue(filterAddButtonBlock.contains("height: FilterActionLabelMetrics.iconFrameSize"))
         XCTAssertFalse(filterAddButtonBlock.contains("Label(title.lavaLocalized"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("lavaLocalized"))
     }
 
     func testBlocklistEditRowsUseStrikethroughInsteadOfPendingStatusPills() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let blocklistRowBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let blocklistRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistEffectRow: View",
             endingBefore: "private struct DomainEffectRow: View"
@@ -194,8 +202,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testDomainEditRowsUseStrikethroughInsteadOfPendingStatusPills() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let domainRowBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let domainRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainEffectRow: View",
             endingBefore: "private struct FilterAddButton: View"
@@ -210,27 +218,31 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(domainRowBlock.contains("private var status"))
         XCTAssertFalse(domainRowBlock.contains(".pendingRemoval"))
         XCTAssertFalse(domainRowBlock.contains(".newlyAdded"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("pendingRemoval"))
     }
 
     func testStandaloneToolbarIconButtonsUseFullTapAreas() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let toolbarBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let rootViewSource = try readSource(.lavaScaffold)
+        let toolbarBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct LavaToolbarIconButton: View",
             endingBefore: "struct NativeToolbarIconButton: View"
         )
-        let nativeToolbarBlock = try Self.sourceBlock(
+        let nativeToolbarBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct NativeToolbarIconButton: View",
             endingBefore: "private struct LavaToolbarIconSymbol: View"
         )
-        let blocklistRowBlock = try Self.sourceBlock(
+        let blocklistRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistEffectRow: View",
             endingBefore: "private struct DomainEffectRow: View"
         )
-        let domainRowBlock = try Self.sourceBlock(
+        let domainRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainEffectRow: View",
             endingBefore: "private struct FilterAddButton: View"
@@ -247,20 +259,19 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testBlocklistPickerUsesFlatRowsInsteadOfCondensedCard() throws {
-        let addBlocklistSheetBlock = try Self.sourceBlock(
-            in: try Self.source(named: "FiltersView.swift", in: "LavaSecApp"),
+        let addBlocklistSheetBlock = try sourceBlock(
+            in: try readSource(.filtersView),
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private enum CustomBlocklistFocusField"
         )
-        let flatListBlock = try Self.sourceBlock(
+        let flatListBlock = try sourceBlock(
             in: addBlocklistSheetBlock,
             startingAt: "private struct BlocklistPickerList: View",
             endingBefore: "private struct BlocklistPickerRow: View"
         )
-        let rowBlock = try Self.sourceBlock(
+        let rowBlock = try sourceBlock(
             in: addBlocklistSheetBlock,
-            startingAt: "private struct BlocklistPickerRow: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct BlocklistPickerRow: View"
         )
 
         XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistPickerList("))
@@ -275,11 +286,16 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(rowBlock.contains("BlocklistPickerSelectionGlyph("))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedList {"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedListItem("))
+
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(try readSource(.lavaCondensedList).contains("LavaCondensedList"))
     }
 
     func testBlocklistPickerUsesAllBlocklistsSearchAndCustomListRoute() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let addBlocklistSheetBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private struct BlocklistSearchField: View"
@@ -315,8 +331,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testBlocklistSearchFieldMatchesDomainHistorySearchDesign() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let searchFieldBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let searchFieldBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistSearchField: View",
             endingBefore: "private enum BlocklistPickerItem"
@@ -328,16 +344,20 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(searchFieldBlock.contains(".frame(height: 48)"))
         XCTAssertTrue(searchFieldBlock.contains(".lavaSurface(.panel, cornerRadius: LavaSurface.compactCornerRadius, borderTint: LavaSurface.panelStroke.opacity(0.65))"))
         XCTAssertFalse(searchFieldBlock.contains(".fill(LavaStyle.panelBackground)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("LavaStyle"))
     }
 
     func testBringYourOwnListSheetGatesFreeUsersAndUsesBackNavigation() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let byolBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let byolBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BringYourOwnListView: View",
             endingBefore: "private struct AddBlockedDomainSheet: View"
         )
-        let customListFormBlock = try Self.sourceBlock(
+        let customListFormBlock = try sourceBlock(
             in: byolBlock,
             startingAt: "private var customListForm: some View",
             endingBefore: "private var upgradeRow"
@@ -370,16 +390,21 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(customListFormBlock.contains("CustomBlocklistTextField"))
         XCTAssertFalse(customListFormBlock.contains("LavaPlainCard"))
         XCTAssertTrue(byolBlock.contains("dismiss()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("NativeToolbarIconButton"))
+        XCTAssertTrue(filtersViewSource.contains("LavaPlainCard"))
     }
 
     func testCustomBlocklistRowsUsePendingRefreshAndTrashConfirmation() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let customRowBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let customRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct CustomBlocklistPickerRow: View",
             endingBefore: "private struct BlocklistPickerStatusPill"
         )
-        let addBlocklistSheetBlock = try Self.sourceBlock(
+        let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private struct BlocklistSearchField: View"
@@ -401,26 +426,25 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testDomainEntrySheetsAutoFocusAndKeepStableKeyboardFriendlyLayout() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let formBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let formBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainEntryForm: View",
             endingBefore: "private struct DomainTextField: View"
         )
-        let fieldBlock = try Self.sourceBlock(
+        let fieldBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainTextField: View",
             endingBefore: "private enum AddBlocklistRoute"
         )
-        let blockedSheetBlock = try Self.sourceBlock(
+        let blockedSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct AddBlockedDomainSheet: View",
             endingBefore: "private struct AddAllowedExceptionSheet: View"
         )
-        let allowedSheetBlock = try Self.sourceBlock(
+        let allowedSheetBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct AddAllowedExceptionSheet: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct AddAllowedExceptionSheet: View"
         )
 
         XCTAssertTrue(formBlock.contains("@FocusState private var isDomainFieldFocused"))
@@ -440,16 +464,20 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(allowedSheetBlock.contains("scrolls: result?.isAccepted == false"))
         XCTAssertFalse(blockedSheetBlock.contains("result?.isAccepted == false ?"))
         XCTAssertFalse(allowedSheetBlock.contains("result?.isAccepted == false ?"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("isAccepted"))
     }
 
     func testCustomBlocklistURLInputStateLivesInDedicatedSubview() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let addBlocklistSheetBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private enum CustomBlocklistFocusField"
         )
-        let bringYourOwnListBlock = try Self.sourceBlock(
+        let bringYourOwnListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BringYourOwnListView: View",
             endingBefore: "private struct AddBlockedDomainSheet: View"
@@ -462,16 +490,22 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(bringYourOwnListBlock.contains("@State private var customDisplayName"))
         XCTAssertTrue(bringYourOwnListBlock.contains("@State private var customURL"))
         XCTAssertTrue(bringYourOwnListBlock.contains("@State private var customMessage"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(filtersViewSource.contains("customDisplayName"))
+        XCTAssertTrue(filtersViewSource.contains("customURL"))
+        XCTAssertTrue(filtersViewSource.contains("customMessage"))
     }
 
     func testCatalogAndPreparationCopyAvoidsRawFreshAndChecksumLanguage() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let freshnessTitleBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let freshnessTitleBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var blocklistCatalogFreshnessTitle: String",
             endingBefore: "var blocklistCatalogFreshnessDescription: String"
         )
-        let preparationBlock = try Self.sourceBlock(
+        let preparationBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func prepareAndApplyFilterDraft(",
             endingBefore: "func retryFilterPreparation()"
@@ -487,8 +521,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testReviewSheetUsesCompactAlignedChangeRows() throws {
-        let reviewFlowSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
-        let diffGroupBlock = try Self.sourceBlock(
+        let reviewFlowSource = try readSource(.filterReviewFlowView)
+        let diffGroupBlock = try sourceBlock(
             in: reviewFlowSource,
             startingAt: "struct DiffGroup: View",
             endingBefore: "struct FilterPreparationScreen: View"
@@ -500,7 +534,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
             return
         }
 
-        let rowBlock = try Self.sourceBlock(
+        let rowBlock = try sourceBlock(
             in: reviewFlowSource,
             startingAt: "struct FilterReviewChangeRow: View",
             endingBefore: "struct FilterPreparationScreen: View"
@@ -513,8 +547,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testReviewSheetUsesDismissiveToolbarIcon() throws {
-        let reviewFlowSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
-        let confirmationSheetBlock = try Self.sourceBlock(
+        let reviewFlowSource = try readSource(.filterReviewFlowView)
+        let confirmationSheetBlock = try sourceBlock(
             in: reviewFlowSource,
             startingAt: "struct FilterConfirmationSheet: View",
             endingBefore: "struct DiffGroup: View"
@@ -529,27 +563,26 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterSheetsUseNativeToolbarGlyphActions() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let filtersViewSource = try readSource(.filtersView)
 
-        let lavaPlusSheetBlock = try Self.sourceBlock(
+        let lavaPlusSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct LavaPlusUpgradeSheet: View",
             endingBefore: "private struct FilterEditToolbar: ToolbarContent"
         )
-        let addBlocklistSheetBlock = try Self.sourceBlock(
+        let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private enum CustomBlocklistFocusField"
         )
-        let addBlockedDomainSheetBlock = try Self.sourceBlock(
+        let addBlockedDomainSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct AddBlockedDomainSheet: View",
             endingBefore: "private struct AddAllowedExceptionSheet: View"
         )
-        let addAllowedExceptionSheetBlock = try Self.sourceBlock(
+        let addAllowedExceptionSheetBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct AddAllowedExceptionSheet: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct AddAllowedExceptionSheet: View"
         )
 
         for sheetBlock in [
@@ -565,8 +598,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testReviewSheetBlocksInvalidDraftsBeforeCompile() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let sharedReviewSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
+        let appViewModelSource = try readSource(.appViewModel)
+        let sharedReviewSource = try readSource(.filterReviewFlowView)
 
         XCTAssertTrue(appViewModelSource.contains("var filterDraftCanConfirm: Bool"))
         XCTAssertTrue(appViewModelSource.contains("var filterDraftValidationMessage: String?"))
@@ -577,13 +610,12 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testToolbarIconTemplateUsesCompactCircularChrome() throws {
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let toolbarTemplateBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.lavaScaffold)
+        let toolbarTemplateBlock = try sourceBlock(
             in: rootViewSource,
-            startingAt: "enum LavaToolbarMetrics",
-            endingBefore: "*** end ***"
+            startingAt: "enum LavaToolbarMetrics"
         )
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
+        let onboardingSource = try readSource(.onboardingFlowView)
 
         XCTAssertTrue(toolbarTemplateBlock.contains("static let buttonSize: CGFloat = 44"))
         XCTAssertTrue(toolbarTemplateBlock.contains("static let iconFrameSize: CGFloat = 24"))
@@ -625,8 +657,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testNativeToolbarIconButtonUsesSharedSquareLabelFrame() throws {
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let nativeToolbarButtonBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.lavaScaffold)
+        let nativeToolbarButtonBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct NativeToolbarIconButton: View",
             endingBefore: "private struct LavaToolbarIconSymbol"
@@ -639,8 +671,8 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterEditToolbarUsesSemanticNativePlacements() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let editToolbarBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let editToolbarBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
             endingBefore: "private struct LavaInlineInfoContent: View"
@@ -655,33 +687,5 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertFalse(editToolbarBlock.contains("LavaToolbarIconButton("))
         XCTAssertFalse(editToolbarBlock.contains("ToolbarItem(placement: .topBarLeading)"))
         XCTAssertFalse(editToolbarBlock.contains("ToolbarItem(placement: .topBarTrailing)"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

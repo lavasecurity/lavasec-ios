@@ -13,21 +13,25 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // protection on. Enabling on-demand there makes iOS bring the tunnel up
         // immediately on a fresh install (protection appears "on" with a filter
         // that is red and no working internet), so it must NOT enable on-demand.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let applyBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let applyBlock = try sourceBlock(
             in: source,
             startingAt: "func applyConfiguration(to manager: NETunnelProviderManager)",
             endingBefore: "func saveAndReload"
         )
         XCTAssertFalse(applyBlock.contains("isOnDemandEnabled = true"))
         XCTAssertFalse(applyBlock.contains("NEOnDemandRuleConnect()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("isOnDemandEnabled"))
     }
 
     func testEnableConfiguresConnectOnDemandAfterConnect() throws {
         // On-demand is enabled in enableProtection only after the tunnel is
         // confirmed connected, and before protectionEnabled is persisted.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let enableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection(operationID:"
@@ -41,8 +45,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     }
 
     func testTurnOffDisablesOnDemandBeforeStopping() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let disableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(operationID:",
             endingBefore: "private func reconnectProtectionNow"
@@ -56,8 +60,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     }
 
     func testReconnectDisablesOnDemandBeforeStopping() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let reconnectBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let reconnectBlock = try sourceBlock(
             in: source,
             startingAt: "vpnMessage = \"Reconnecting local protection...\"",
             endingBefore: "await enableProtection(logUserAction: false"
@@ -72,9 +76,9 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // wedges turn-off, so the disable retries before the stop instead of
         // swallowing the first error. The helper still delegates to the
         // set+persist helper and only gives up after retrying.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         XCTAssertTrue(source.contains("private func disableOnDemandWithRetry("))
-        let helperBlock = try Self.sourceBlock(
+        let helperBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableOnDemandWithRetry(",
             endingBefore: "private func reloadManagerFromPreferences"
@@ -94,7 +98,7 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     }
 
     func testSetManagerOnDemandHelperSetsAndPersistsTheFlag() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         // iOS only honors on-demand after a save, so the helper must both set the
         // flag and persist it.
         XCTAssertTrue(source.contains("manager.isOnDemandEnabled = enabled"))
@@ -107,13 +111,13 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // because restoreProtectionIfNeeded early-returns once the tunnel reads
         // as connected and a non-stale launch never re-pushes. The launch flow
         // must re-establish and push the snapshot when protection is active.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         XCTAssertTrue(
             source.contains("await reconcileTunnelSnapshotAfterLaunch()"),
             "The reconcile must be wired into the launch (loadVPNState) task chain."
         )
 
-        let reconcileBlock = try Self.sourceBlock(
+        let reconcileBlock = try sourceBlock(
             in: source,
             startingAt: "private func reconcileTunnelSnapshotAfterLaunch() async",
             endingBefore: "private func sendTunnelMessage("
@@ -138,7 +142,7 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // side effect of enabling/restoring protection — otherwise the system
         // dialog surfaces at the wrong moment (before the notifications step, or
         // on auto-restore at launch).
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         XCTAssertFalse(
             source.contains("prepareAuthorizationIfNeeded"),
             "enableProtection must not prepare/request notification authorization."
@@ -159,8 +163,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         //      down ASAP and cannot linger while the catalog syncs.
         //   2. Reconcile runs only when onboarding is complete, and AFTER the
         //      catalog work (it needs a snapshot to push).
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let launchBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let launchBlock = try sourceBlock(
             in: source,
             startingAt: "if loadVPNState {",
             endingBefore: "vpnStatusObserver = NotificationCenter"
@@ -189,8 +193,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // uses) re-shows the "Add VPN Configurations" system prompt on a profile
         // this install does not own — surfacing it mid-onboarding (the "VPN prompt
         // at step 1" bug). removeFromPreferences is silent.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private func neutralizeInheritedProtectionDuringOnboarding() async",
             endingBefore: "private func sendTunnelMessage("
@@ -217,6 +221,10 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             block.contains("tunnelManager = nil"),
             "After removal there is no manager — clear the cached reference."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("setManagerOnDemand"))
     }
 
     func testRestoreProtectionIsGatedOnOnboardingCompletion() throws {
@@ -227,8 +235,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // the caller's shouldRestoreProtection true, which would otherwise drive
         // enableProtection -> saveToPreferences (the VPN prompt) before the
         // onboarding VPN step. The onboarding gate must precede the enable call.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private func restoreProtectionIfNeeded(wasEnabled: Bool) async",
             endingBefore: "private func reconcileTunnelSnapshotAfterLaunch"
@@ -244,8 +252,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     func testHasCompletedOnboardingReadsOnboardingFlag() throws {
         // The gate must read the same flag RootView's @AppStorage onboarding gate
         // uses, so the launch chain and the UI agree on "onboarding complete".
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private var hasCompletedOnboarding: Bool",
             endingBefore: "private func neutralizeInheritedProtectionDuringOnboarding"
@@ -259,8 +267,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         // tunnel), turn-off must not dead-end at "Could not stop protection" and
         // leave the user offline. It must attempt to delete the stuck profile to
         // restore connectivity before surfacing the failure.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let disableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(operationID:",
             endingBefore: "private func reconnectProtectionNow"
@@ -281,8 +289,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     func testForceRemoveRecoveryDeletesProfileAndClearsState() throws {
         // The recovery helper must actually delete the profile (removeManager) so
         // the stuck on-demand rules are cleared, and reset protection to stopped.
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let helperBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let helperBlock = try sourceBlock(
             in: source,
             startingAt: "private func forceRemoveStuckProtectionProfile()",
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
@@ -295,33 +303,5 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             helperBlock.contains("vpnStatus = .disconnected"),
             "Recovery must reset protection to a stopped state."
         )
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

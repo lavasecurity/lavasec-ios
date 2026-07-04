@@ -5,11 +5,20 @@ final class SubscriptionPolicyTests: XCTestCase {
     func testLavaSecurityPlusProductIDsMatchAppStoreConnectSetup() {
         XCTAssertEqual(LavaSecurityPlusPolicy.monthly.productID, "lava_security_plus_monthly")
         XCTAssertEqual(LavaSecurityPlusPolicy.yearly.productID, "lava_security_plus_yearly")
+        XCTAssertEqual(LavaSecurityPlusPolicy.yearlyPaidMonthly.productID, "lava_security_plus_yearly")
         XCTAssertEqual(
-            LavaSecurityPlusPolicy.recommendedOfferOrder.map(\.productID),
+            LavaSecurityPlusPolicy.recommendedOfferOrder.map(\.id),
             [
-                "lava_security_plus_yearly",
-                "lava_security_plus_monthly"
+                "yearly",
+                "yearlyPaidMonthly",
+                "monthly"
+            ]
+        )
+        XCTAssertEqual(
+            LavaSecurityPlusPolicy.paywallProductIDs,
+            [
+                "lava_security_plus_monthly",
+                "lava_security_plus_yearly"
             ]
         )
     }
@@ -17,10 +26,37 @@ final class SubscriptionPolicyTests: XCTestCase {
     func testLavaSecurityPlusPlansAreAutoRenewableSubscriptions() {
         XCTAssertTrue(LavaSecurityPlusPolicy.monthly.isSubscription)
         XCTAssertTrue(LavaSecurityPlusPolicy.yearly.isSubscription)
-        XCTAssertEqual(LavaSecurityPlusPolicy.productIDs, [
-            "lava_security_plus_monthly",
-            "lava_security_plus_yearly"
-        ])
+        XCTAssertTrue(LavaSecurityPlusPolicy.yearlyPaidMonthly.isSubscription)
+    }
+
+    func testLavaSecurityPlusOfferOrderKeepsYearlyCommitmentBetweenYearlyAndMonthly() {
+        XCTAssertEqual(
+            LavaSecurityPlusPolicy.recommendedOfferOrder.map(\.kind),
+            [
+                .yearly,
+                .yearlyPaidMonthly,
+                .monthly
+            ]
+        )
+        XCTAssertEqual(
+            LavaSecurityPlusPolicy.fallbackOfferOrder.map(\.kind),
+            [
+                .yearly,
+                .monthly
+            ]
+        )
+        XCTAssertFalse(LavaSecurityPlusPolicy.fallbackOfferOrder.contains { $0.kind == .yearlyPaidMonthly })
+        XCTAssertEqual(LavaSecurityPlusPolicy.plan(for: "lava_security_plus_yearly")?.kind, .yearly)
+        XCTAssertNotEqual(LavaSecurityPlusPolicy.plan(for: "lava_security_plus_yearly")?.kind, .yearlyPaidMonthly)
+        XCTAssertNil(LavaSecurityPlusPolicy.plan(for: "lava_security_plus_lifetime"))
+        XCTAssertEqual(
+            LavaSecurityPlusPolicy.recommendedOfferOrder.map(\.id),
+            [
+                "yearly",
+                "yearlyPaidMonthly",
+                "monthly"
+            ]
+        )
     }
 
     func testPlusLimitsKeepPaidAliasForCompatibility() {
