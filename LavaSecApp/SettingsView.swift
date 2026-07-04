@@ -473,7 +473,7 @@ private struct SettingsNavigationRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(summary.lavaLocalized)
                         .lavaRowSubtitleText()
@@ -534,7 +534,7 @@ private struct SettingsExternalLinkRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(summary.lavaLocalized)
                         .lavaRowSubtitleText()
@@ -571,7 +571,7 @@ private struct SettingsSystemSettingsRow: View {
         } label: {
             HStack(spacing: 12) {
                 Text(title.lavaLocalized)
-                    .font(.headline)
+                    .lavaCardTitleText()
                     .foregroundStyle(.primary)
 
                 Spacer(minLength: 8)
@@ -1156,7 +1156,7 @@ private struct UpgradeSettingsView: View {
         SettingsSubpageContent(tier: .celebratory) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("More room for your rules")
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .font(.title3.bold())
 
                 LavaInfoCard {
@@ -3234,7 +3234,7 @@ private struct ResolverPresetRowContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .lavaRowTitleText()
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
@@ -3260,7 +3260,7 @@ private struct CustomDNSResolverRow: View {
         ) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Custom DNS".lavaLocalized)
-                    .font(.subheadline.weight(.medium))
+                    .lavaRowTitleText()
                     .lavaInactiveText(!isEnabled)
                     .lineLimit(2)
                     .minimumScaleFactor(0.82)
@@ -4814,7 +4814,7 @@ private struct BugReportTopicOptionRow: View {
                 .accessibilityHidden(true)
 
             Text(title.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .lavaRowTitleText()
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 

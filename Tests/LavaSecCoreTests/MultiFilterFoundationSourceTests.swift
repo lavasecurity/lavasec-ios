@@ -209,8 +209,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "Per-filter: a switch must NOT clear the previous filter's draft.")
         // Overlapping switches AND switch-vs-restore/import are serialized by the shared
         // configuration-replacement gate: the attempt claims a token and bails before committing
-        // if a newer replacement superseded it.
-        XCTAssertTrue(block.contains("let switchToken = configurationReplacementGate.begin(ownsPreparationCover: true)"))
+        // if a newer replacement superseded it. Cover ownership follows presentsPreparationCover —
+        // a user switch owns the cover; a silent Focus reconcile apply does not.
+        XCTAssertTrue(block.contains("let switchToken = configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)"))
         let supersedeCommitIdx = try XCTUnwrap(successPart.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {")?.lowerBound)
         let successCommitIdx = try XCTUnwrap(successPart.range(of: "library.setActiveFilter(id: id)")?.lowerBound)
         XCTAssertLessThan(supersedeCommitIdx, successCommitIdx, "A superseded switch must bail before committing.")
@@ -642,13 +643,17 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertLessThan(draftCatchGuardIdx, draftCatchFailedIdx,
                           "The draft-apply catch must bail when superseded before touching the shared cover.")
 
-        // Cover-driving replacers (switch + draft apply) claim the gate as cover owners so a
-        // superseded one knows to dismiss its stranded spinner when a non-cover-driver (restore/
-        // import) supersedes it; restore/import claim as non-owners (plain begin()).
+        // Cover-driving replacers claim the gate as cover owners so a superseded one knows to dismiss
+        // its stranded spinner when a non-cover-driver (restore/import) supersedes it; restore/import
+        // claim as non-owners (plain begin()). The draft apply ALWAYS owns the cover; the filter switch
+        // owns it only for a genuine user switch — a silent Focus reconcile apply
+        // (stampsForegroundSwitch:false ⇒ presentsPreparationCover == false) drives no cover.
         XCTAssertTrue(app.contains("configurationReplacementGate.begin(ownsPreparationCover: true)"),
-                      "Switch + draft apply must claim the gate as preparation-cover owners.")
-        XCTAssertEqual(app.components(separatedBy: "begin(ownsPreparationCover: true)").count - 1, 2,
-                       "Exactly the two cover-driving replacers (switch + draft apply) own the cover.")
+                      "The draft apply must claim the gate as a preparation-cover owner.")
+        XCTAssertEqual(app.components(separatedBy: "begin(ownsPreparationCover: true)").count - 1, 1,
+                       "Only the draft apply owns the cover unconditionally.")
+        XCTAssertEqual(app.components(separatedBy: "begin(ownsPreparationCover: presentsPreparationCover)").count - 1, 1,
+                       "The filter switch claims cover ownership conditionally (silent for a Focus reconcile apply).")
         XCTAssertTrue(app.contains("private func dismissPreparationCoverIfStrandedBySupersession()"),
                       "A superseded cover-driver dismisses its stranded cover via a shared helper.")
         XCTAssertTrue(app.contains("guard !configurationReplacementGate.currentOwnerOwnsPreparationCover else { return }"),

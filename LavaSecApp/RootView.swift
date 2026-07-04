@@ -49,13 +49,16 @@ struct RootView: View {
                 scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel)
             )
                 .tabItem {
-                    Label("Guard", systemImage: LavaIconRole.guardShield.sfSymbolName)
+                    // Fill on select (outline when not) so the active tab reads without relying on
+                    // tint — a Differentiate Without Color cue. VoiceOver selection is already
+                    // conveyed by the native tab bar.
+                    Label("Guard", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))
                 }
                 .tag(LavaRootTab.guardPanel)
 
             SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))
                 .tabItem {
-                    Label("Settings", systemImage: LavaIconRole.settings.sfSymbolName)
+                    Label("Settings", systemImage: LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings))
                 }
                 .tag(LavaRootTab.settings)
         }

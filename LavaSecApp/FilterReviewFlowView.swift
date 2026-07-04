@@ -219,7 +219,7 @@ struct FilterPreparationScreen: View {
                 case .failed(let message):
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: LavaIconSize.heroResult, weight: .bold))
-                        .foregroundStyle(LavaStyle.lavaOrange)
+                        .foregroundStyle(LavaStyle.lavaOrangeText)
                         .accessibilityHidden(true)
 
                     VStack(spacing: 10) {

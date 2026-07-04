@@ -105,6 +105,47 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private func setManagerOnDemand("))
     }
 
+    /// An armed-but-dropped tunnel (`.disconnected` + confirmed on-demand) must persist
+    /// `protectionEnabled = true`, not merely render as "Reconnecting": the tunnel's own
+    /// self-reconnect (`TunnelSelfReconnectPolicy`) hard-requires the persisted hint, so a filter
+    /// edit/switch during the drop that wrote a false hint would suppress future self-reconnects
+    /// even though the user never turned protection off (Codex #262 P2).
+    func testProtectionEnabledHintPreservedWhileAwaitingOnDemandReconnect() throws {
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
+            in: source,
+            startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionOnSucceededHapticIfNeeded("
+        )
+        XCTAssertTrue(
+            block.contains("let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
+            "The persisted protectionEnabled hint must keep the armed-reconnect state true, not derive from vpnStatus alone."
+        )
+    }
+
+    /// The armed-reconnect state must be honored across the lifecycle restore/enable paths too, not
+    /// just the persist derivation — otherwise the preserved hint drives a redundant enableProtection
+    /// whose no-network start-timeout re-persists `protectionEnabled = false`, undoing it and
+    /// suppressing the self-reconnect (Codex #262 P2 follow-up).
+    func testAwaitingOnDemandReconnectHonoredInRestoreAndEnableTimeout() throws {
+        let source = try readSource(.appViewModel)
+        // Restore treats armed-reconnect as already-active (iOS will reconnect) — it must not force enable.
+        let restoreBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func restoreProtectionIfNeeded(wasEnabled: Bool) async",
+            endingBefore: "private func reconcileTunnelSnapshotAfterLaunch"
+        )
+        XCTAssertTrue(
+            restoreBlock.contains("guard !isProtectionEnabledStatus(vpnStatus), !isAwaitingOnDemandReconnect else"),
+            "Restore must skip enableProtection while awaiting an on-demand reconnect."
+        )
+        // The enable start-timeout keeps the hint true when on-demand is armed.
+        XCTAssertTrue(
+            source.contains("configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
+            "The enable start-timeout persist must preserve the armed-reconnect hint."
+        )
+    }
+
     func testLaunchReconcilesTunnelSnapshotWhenAlreadyConnected() throws {
         // On-demand persists across restarts, so on launch iOS can bring the
         // tunnel up cold — it loads fail-closed and never recovers on its own,

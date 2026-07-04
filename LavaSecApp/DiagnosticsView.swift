@@ -662,7 +662,7 @@ private enum NetworkActivityTheme {
         case .networkChange, .protectionLifecycle, .userAction:
             return LavaStyle.safeGreen
         case .smokeTest(let isWarning):
-            return isWarning ? LavaStyle.lavaOrange : LavaStyle.safeGreen
+            return isWarning ? LavaStyle.lavaOrangeText : LavaStyle.safeGreen
         case .deviceDNS, .reconnect:
             return LavaStyle.secondaryText
         }

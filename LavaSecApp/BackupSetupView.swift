@@ -160,7 +160,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -181,7 +181,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -255,7 +255,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

@@ -551,7 +551,7 @@ struct ImportOptionRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(subtitle.lavaLocalized)
                         .lavaRowSubtitleText()

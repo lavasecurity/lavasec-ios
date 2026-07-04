@@ -594,5 +594,63 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "The aborted-flip branch must dismiss the preparation cover.")
     }
 
+    /// A Focus-driven reconcile apply (`switchToFilter(stampsForegroundSwitch: false)`) must be SILENT —
+    /// no full-screen preparation cover, no "Success" modal, no haptic — mirroring the committed-adopt
+    /// path (`applyCommittedOnDiskActiveFilter`). Surfacing that modal for an automation the user did not
+    /// initiate is what popped a "Success" page every time the app was opened after a Focus switch. Pin
+    /// that every cover-driving UI mutation in the switch is gated on the stampsForegroundSwitch-derived
+    /// flag, so a genuine user switch still shows the cover while the reconcile replay does not.
+    func testProgrammaticFocusApplySuppressesPreparationCover() throws {
+        let app = try readSource(.appViewModel)
+        let block = try sourceBlock(
+            in: app,
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
+            endingBefore: "private enum SwitchPublication"
+        )
+
+        // The cover-suppression flag is DERIVED from stampsForegroundSwitch (only the reconcile passes
+        // false), so a user switch keeps the cover and the automated replay drops it — no new call arg.
+        XCTAssertTrue(block.contains("let presentsPreparationCover = stampsForegroundSwitch"),
+                      "switchToFilter must derive presentsPreparationCover from stampsForegroundSwitch.")
+
+        // A silent apply drives no cover, so it claims the replacement gate as a non-cover-driver.
+        XCTAssertTrue(block.contains("configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)"),
+                      "A silent Focus apply must claim the replacement gate as a non-cover-driver.")
+
+        // Every cover / Success-state / haptic mutation must sit behind the flag — the initial cover
+        // presentation, the deleted/frozen failure, the Success confirmation, and the catch-failure arm.
+        XCTAssertGreaterThanOrEqual(
+            block.components(separatedBy: "if presentsPreparationCover {").count - 1, 4,
+            "The initial cover, the saving-progress churn, the Success block, and the failure arms must each be gated on presentsPreparationCover.")
+
+        // The Success confirmation ("message: \"Success\"" + the success haptic) must be inside a gate.
+        let successIdx = try XCTUnwrap(block.range(of: "message: \"Success\"")?.lowerBound)
+        XCTAssertNotNil(block.range(of: "if presentsPreparationCover {", options: .backwards, range: block.startIndex..<successIdx),
+                        "The Success cover + haptic must be gated by an if presentsPreparationCover block.")
+
+        // The cold-compile progress is silenced too by threading the flag into prepareSwitchPublication.
+        XCTAssertTrue(block.contains("presentsPreparationCover: presentsPreparationCover"),
+                      "switchToFilter must pass presentsPreparationCover into prepareSwitchPublication.")
+
+        let prepareBlock = try sourceBlock(
+            in: app,
+            startingAt: "private func prepareSwitchPublication(",
+            endingBefore: "private func warmReusableSnapshotForSwitch("
+        )
+        XCTAssertTrue(prepareBlock.contains("presentsPreparationCover: Bool"),
+                      "prepareSwitchPublication must accept the presentsPreparationCover flag.")
+        XCTAssertTrue(prepareBlock.contains("if presentsPreparationCover {"),
+                      "prepareSwitchPublication must gate its cold-compile progress churn on the flag.")
+
+        // The reconcile is the caller that passes stampsForegroundSwitch:false (⇒ silent).
+        let reconcileBlock = try sourceBlock(
+            in: app,
+            startingAt: "func reconcilePendingFilterSwitch() async {",
+            endingBefore: "private func persistSharedState("
+        )
+        XCTAssertTrue(reconcileBlock.contains("await switchToFilter(id: request.targetFilterID, stampsForegroundSwitch: false)"),
+                      "The reconcile replay must drive the silent (stampsForegroundSwitch:false) apply.")
+    }
+
     // MARK: - Source introspection helpers
 }

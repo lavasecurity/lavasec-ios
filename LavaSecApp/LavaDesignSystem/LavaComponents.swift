@@ -36,7 +36,7 @@ struct LavaNavigationRow<Destination: View>: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(summary.lavaLocalized)
                         .lavaRowSubtitleText()
@@ -62,6 +62,7 @@ struct LavaNavigationRow<Destination: View>: View {
 }
 
 private struct LavaNavigationRowButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
@@ -69,11 +70,12 @@ private struct LavaNavigationRowButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous)
                     .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
             }
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
 struct LavaPanelActionButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     let cornerRadius: CGFloat
@@ -100,11 +102,12 @@ struct LavaPanelActionButtonStyle: ButtonStyle {
             }
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
             .opacity(isEnabled ? 1 : 0.55)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
 struct LavaStandaloneActionButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -125,7 +128,7 @@ struct LavaStandaloneActionButtonStyle: ButtonStyle {
             }
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
             .opacity(isEnabled ? 1 : 0.45)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
@@ -134,6 +137,7 @@ struct LavaStandaloneActionButtonStyle: ButtonStyle {
 /// the calm/escape choice (e.g. a dialog's "Not now") beside the green primary —
 /// never competing with it for emphasis.
 struct LavaSecondaryActionButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -154,7 +158,7 @@ struct LavaSecondaryActionButtonStyle: ButtonStyle {
             }
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
             .opacity(isEnabled ? 1 : 0.45)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
 
@@ -270,7 +274,7 @@ struct LavaTextEditorInputRow: View {
                 if let characterLimit {
                     Text("\(text.count)/\(characterLimit)")
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(text.count >= characterLimit ? LavaStyle.lavaOrange : LavaStyle.tertiaryText)
+                        .foregroundStyle(text.count >= characterLimit ? LavaStyle.lavaOrangeText : LavaStyle.tertiaryText)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .accessibilityLabel("\(text.count) of \(characterLimit) characters used")
                         .onChange(of: text) { _, newValue in
@@ -345,7 +349,7 @@ struct LavaDetailRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title.lavaLocalized)
-                    .font(.headline)
+                    .lavaCardTitleText()
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -361,6 +365,11 @@ struct LavaDetailRow: View {
     }
 }
 
+/// Compact metric chip: a `.headline` (17 pt) value over a small label, sized for a
+/// row of side-by-side stats. The larger sibling `LavaOverviewMetricBlock` renders its
+/// value at the 42 pt `LavaTypography.metricNumeral`. The two scales are **intentionally
+/// different** — a hero "blocked today" numeral versus a dense stat chip — not a drift to
+/// reconcile; keep them apart.
 struct LavaMetricPill: View {
     let title: String
     let value: String

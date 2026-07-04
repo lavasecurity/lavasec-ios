@@ -599,7 +599,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(settings.contains("case .emerald:"))
         XCTAssertTrue(settings.contains("\"Giveaways should not ask for secrets.\""))
         XCTAssertTrue(settings.contains("\"Make me your web-surfing buddy!\""))
-        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
+        // The Guard tab stays a plain SF Symbol Label (no custom mascot view); the glyph now
+        // resolves per selection via tabBarSymbolName for the R1 fill-on-select cue.
+        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
         XCTAssertFalse(tabViewBlock.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))

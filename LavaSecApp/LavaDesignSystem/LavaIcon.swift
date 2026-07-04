@@ -29,6 +29,18 @@ extension LavaIconRole {
         case .chevronRight:    "chevron.right"
         }
     }
+
+    /// Tab-bar glyph for a given selection state: the **filled** variant when the tab is selected,
+    /// the **outline** variant when it is not — a non-color (Differentiate Without Color) cue so the
+    /// active tab reads by shape, not just tint. Only the primary tabs vary by state; any other role
+    /// falls back to its canonical `sfSymbolName`. Glyph strings stay in this role layer, out of the UI.
+    func tabBarSymbolName(isSelected: Bool) -> String {
+        switch self {
+        case .guardShield: isSelected ? "shield.fill" : "shield"
+        case .settings:    isSelected ? "gearshape.fill" : "gearshape"
+        default:           sfSymbolName
+        }
+    }
 }
 
 /// Renders a `LavaIconRole` as its platform glyph (iOS: the SF Symbol).

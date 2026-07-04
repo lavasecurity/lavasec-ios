@@ -12,7 +12,8 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Security Plus\")"))
         XCTAssertTrue(settingsSource.contains(".navigationBarTitleDisplayMode(.large)"))
         XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")"))
-        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")\n                    .foregroundStyle(LavaStyle.lavaOrange)"))
+        // Retinted to lavaOrangeText for WCAG contrast (visual a11y Task 3) — still the orange role.
+        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")\n                    .foregroundStyle(LavaStyle.lavaOrangeText)"))
         XCTAssertFalse(settingsSource.contains("title: \"More room for your rules\""))
         XCTAssertFalse(settingsSource.contains("UpgradeLargeTitle()"))
         XCTAssertFalse(settingsSource.contains("Text(\"Lava Security Plus\")\n                        .foregroundStyle(LavaStyle.lavaOrange)\n                    Text(\" unlocks\")"))

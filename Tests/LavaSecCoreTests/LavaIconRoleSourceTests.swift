@@ -23,7 +23,9 @@ final class LavaIconRoleSourceTests: XCTestCase {
         XCTAssertTrue(components.contains("Image(systemName: icon.sfSymbolName)"))
 
         let root = try readSource(.rootView)
-        XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
+        // The Guard tab still names the ROLE (not a raw glyph string); it now resolves the glyph
+        // per selection state via tabBarSymbolName for the Differentiate-Without-Color fill cue (R1).
+        XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
         XCTAssertFalse(root.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
     }
 }

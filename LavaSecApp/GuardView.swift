@@ -93,7 +93,7 @@ struct ProtectionStatusPanel: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Lava Security")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(LavaStyle.lavaOrange)
+                        .foregroundStyle(LavaStyle.lavaOrangeText)
 
                     Text(viewModel.protectionTitle.lavaLocalized)
                         .font(.title.bold())

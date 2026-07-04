@@ -41,6 +41,22 @@ enum LavaStyle {
         light: (1.00, 0.92, 0.86),
         dark: (0.30, 0.13, 0.08)
     )
+    /// The orange used as FOREGROUND TEXT/glyphs. `lavaOrange` (bright) is a fine accent/fill but
+    /// too light for text on light backgrounds — it measures ~2.93:1 on `lavaOrangeSoft` and ~3.4:1
+    /// on card/panel, below the 4.5:1 WCAG text target. This darker burnt-orange clears it (light:
+    /// 4.57:1 on soft, 5.30:1 on card). Dark mode keeps the bright orange, which already passes
+    /// (5.84:1 on soft-dark). Use this wherever orange is the text color; keep `lavaOrange` for fills.
+    static let lavaOrangeText = adaptiveColor(
+        light: (0.75, 0.25, 0.09),
+        dark: (1.00, 0.54, 0.34)
+    )
+    /// A darker orange for a SELECTED pill/segment fill that carries WHITE text. Plain `lavaOrange`
+    /// as a white-text fill fails (3.40:1 light / 2.33:1 dark); this clears 4.5:1 in both (4.82:1
+    /// light / 5.64:1 dark). Non-selected fills keep `lavaOrange`/`lavaOrangeSoft`.
+    static let lavaOrangeSelectedFill = adaptiveColor(
+        light: (0.78, 0.28, 0.12),
+        dark: (0.68, 0.28, 0.15)
+    )
     static let cream = adaptiveColor(
         light: (1.00, 0.98, 0.94),
         dark: (0.11, 0.10, 0.09)
@@ -200,7 +216,20 @@ enum LavaSpacing {
 ///
 /// Portable *numeric* glyph sizes live in `LavaIconSize` (in `LavaSecCore`, so the
 /// widget can share them); these helpers wrap SwiftUI's `Font`, which is app-only.
+/// The app's type scale — one named role per kind of text, so the same kind is one size
+/// everywhere and cannot drift per screen (the color analog is `LavaStyle`). All roles are
+/// Dynamic-Type-scaling semantic fonts except the fixed metric numeral. Prefer the matching
+/// `View.lava…Text()` modifier at call sites; the raw `Font` here is for APIs that take a `Font`
+/// (e.g. `LavaCondensedListItem.titleFont`).
 enum LavaTypography {
+    /// Primary text of a list / table ROW. `.subheadline` semibold (15 pt). The single row-title
+    /// size — every data-row title resolves here so screens can't each pick their own.
+    static let rowTitle = Font.subheadline.weight(.semibold)
+
+    /// Title of a tappable ENTRY CARD or navigation row (the surfaces that OPEN a list/detail).
+    /// One step above a row title: `.headline` (17 pt semibold).
+    static let cardTitle = Font.headline
+
     /// Large rounded numeral for an overview metric block's headline value (e.g.
     /// the "blocked today" count). Apply `.monospacedDigit()` at the call site so
     /// the digits stay column-aligned as the value animates.
