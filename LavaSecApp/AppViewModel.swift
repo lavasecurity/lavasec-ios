@@ -684,17 +684,31 @@ private struct RegisteredBackupPasskey: Equatable {
 @MainActor
 private final class FilterPreparationProgressPresenter {
     private let policy: FilterPreparationPresentationPolicy
+    // A silent (coverless) switch — a programmatic Focus reconcile apply — renders nothing, so the
+    // phase-visibility holds are pure dead time that only keep the previous filter active longer.
+    // When no cover is presented, `present`/`holdCurrentPhaseIfNeeded` short-circuit their sleeps
+    // (the setState closure is already a no-op on that path), so a Focus automation applies without
+    // any UI-only delay. (Codex #44 P2)
+    private let presentsCover: Bool
     private var currentPhase: FilterPreparationPhase?
     private var phaseStartedAt: Date?
 
-    init(policy: FilterPreparationPresentationPolicy = FilterPreparationPresentationPolicy()) {
+    init(
+        policy: FilterPreparationPresentationPolicy = FilterPreparationPresentationPolicy(),
+        presentsCover: Bool = true
+    ) {
         self.policy = policy
+        self.presentsCover = presentsCover
     }
 
     func present(
         _ update: FilterPreparationProgressUpdate,
         setState: (FilterPreparationState) -> Void
     ) async {
+        // No cover on screen (silent Focus apply): nothing to hold, so don't sleep. currentPhase/
+        // phaseStartedAt exist only to pace the cover, so leaving them untouched is inert here.
+        guard presentsCover else { return }
+
         let holdDuration = policy.holdDurationBeforePresenting(
             currentPhase: currentPhase,
             phaseStartedAt: phaseStartedAt,
@@ -719,7 +733,8 @@ private final class FilterPreparationProgressPresenter {
     }
 
     func holdCurrentPhaseIfNeeded() async {
-        guard phaseStartedAt != nil
+        // Same rationale as `present`: a coverless silent apply has no phase to hold on screen.
+        guard presentsCover, phaseStartedAt != nil
         else {
             return
         }
@@ -3724,7 +3739,9 @@ final class AppViewModel: ObservableObject {
         }
 
         do {
-            let progressPresenter = FilterPreparationProgressPresenter()
+            // A silent Focus apply presents no cover, so the presenter skips its phase-visibility
+            // holds — the automation commits/publishes without UI-only delay (Codex #44 P2).
+            let progressPresenter = FilterPreparationProgressPresenter(presentsCover: presentsPreparationCover)
             // Instant switch-back: reuse the target's still-warm compiled artifacts (a pointer flip)
             // when its lastCompiledToken is valid for the current config + a FRESH cached catalog, else
             // cold-compile. Both yield a PreparedFilterSnapshot the shared tail below commits + publishes

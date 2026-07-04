@@ -640,6 +640,22 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(block.contains("presentsPreparationCover: presentsPreparationCover"),
                       "switchToFilter must pass presentsPreparationCover into prepareSwitchPublication.")
 
+        // Beyond suppressing the state write, a silent apply must not PAY the presenter's phase-
+        // visibility holds — those sleeps only pace an on-screen cover, so on a coverless Focus apply
+        // they are dead time that keeps the previous filter active longer. The presenter is built with
+        // the flag, and both present() and holdCurrentPhaseIfNeeded() short-circuit their sleeps on it.
+        XCTAssertTrue(block.contains("FilterPreparationProgressPresenter(presentsCover: presentsPreparationCover)"),
+                      "switchToFilter must build the presenter with presentsCover: presentsPreparationCover so a silent apply skips the holds.")
+        let presenterBlock = try sourceBlock(
+            in: app,
+            startingAt: "private final class FilterPreparationProgressPresenter {",
+            endingBefore: "private func sleep("
+        )
+        XCTAssertTrue(presenterBlock.contains("guard presentsCover else { return }"),
+                      "present() must skip its phase-hold sleep when no cover is presented.")
+        XCTAssertTrue(presenterBlock.contains("guard presentsCover, phaseStartedAt != nil"),
+                      "holdCurrentPhaseIfNeeded() must skip its hold when no cover is presented.")
+
         let prepareBlock = try sourceBlock(
             in: app,
             startingAt: "private func prepareSwitchPublication(",
