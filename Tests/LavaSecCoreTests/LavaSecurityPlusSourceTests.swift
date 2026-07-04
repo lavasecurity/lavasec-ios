@@ -156,7 +156,12 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("let savingsPercent: Int?"))
         XCTAssertTrue(storeSource.contains("func yearlySavingsPercent(yearly: Product?, monthly: Product?)"))
         XCTAssertTrue(storeSource.contains("let annualizedMonthly = monthly.price * 12"))
-        XCTAssertTrue(storeSource.contains(".rounded(.down)"))
+        // Floored in Decimal space via Int(truncating:) (truncates toward zero) so it never
+        // overstates — NOT through a Double round-trip, which drops a clean integer point (an exact
+        // Decimal 0.37 becomes 0.36999… → 36 instead of 37). (#44 Kilo finding)
+        XCTAssertTrue(storeSource.contains("Int(truncating: NSDecimalNumber("))
+        XCTAssertFalse(storeSource.contains(".doubleValue * 100"),
+                       "The savings floor must stay in Decimal space, not round-trip the fraction through Double.")
         XCTAssertTrue(storeSource.contains("minimumDisplayableSavingsPercent"))
         XCTAssertTrue(storeSource.contains("savingsPercent: plan.kind == .yearly ? savingsPercent : nil"))
 

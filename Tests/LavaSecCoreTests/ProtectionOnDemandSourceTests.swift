@@ -134,7 +134,10 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             block.range(of: "if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {"),
             "A disconnected manager whose on-demand is no longer armed must clear the stale confirmed-on-demand bit before deriving the reconnecting state.")
         let afterGuard = block[reconcileGuard.upperBound...]
-        let guardClose = try XCTUnwrap(afterGuard.range(of: "}")?.lowerBound)
+        // Anchor the guard's closing brace at ITS indentation (12 spaces) rather than the first `}`,
+        // so a future nested brace-delimited block in the guard body (deeper-indented) can't be
+        // mistaken for the guard close and truncate the slice before the clear call. (#44 OCR)
+        let guardClose = try XCTUnwrap(afterGuard.range(of: "\n            }")?.lowerBound)
         XCTAssertTrue(
             afterGuard[..<guardClose].contains("Self.setOnDemandConfirmedEnabled(false)"),
             "The stale-bit clear must sit INSIDE the !isOnDemandEnabled guard body (clear-direction only), not run unconditionally.")
@@ -356,6 +359,36 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         XCTAssertLessThan(
             recoveryIndex, throwIndex,
             "Recovery must be attempted before giving up with vpnStillStopping."
+        )
+    }
+
+    func testTurnOffForceRemovesWhenOnDemandDisableFailsEvenIfAlreadyStopped() throws {
+        // Regression (#44 Codex P2): the reconnecting turn-off routes an armed-but-dropped tunnel
+        // (already `.disconnected`) through disableProtection. There `waitForProtectionToStop()`
+        // returns true immediately, so a `== false` gate would SKIP the force-remove backstop — yet a
+        // failed on-demand disable leaves the saved profile armed and iOS re-arms the tunnel, so the
+        // user can't actually turn protection off. disableProtection must capture the disable result
+        // and force-remove when it failed, not only when the tunnel is stuck running.
+        let source = try readSource(.appViewModel)
+        let disableBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func disableProtection(operationID:",
+            endingBefore: "private func reconnectProtectionNow"
+        )
+        XCTAssertTrue(
+            disableBlock.contains("onDemandDisabled = await disableOnDemandWithRetry(on: manager)"),
+            "disableProtection must capture whether on-demand actually got disabled (its result must not be ignored)."
+        )
+        // The backstop seeds on `!onDemandDisabled` (so a failed disable forces removal even when the
+        // tunnel is already stopped) and still fires when the tunnel never stops. (Branched rather than
+        // `|| await …` because `await` can't sit in a `||` autoclosure.)
+        XCTAssertTrue(
+            disableBlock.contains("var mustForceRemoveProfile = !onDemandDisabled"),
+            "The force-remove backstop must seed on !onDemandDisabled, so an armed-but-dropped turn-off with a failed on-demand disable can't leave the profile re-arming."
+        )
+        XCTAssertTrue(
+            disableBlock.contains("mustForceRemoveProfile = await waitForProtectionToStop() == false"),
+            "The backstop must also fire when the tunnel never reaches a stopped state."
         )
     }
 

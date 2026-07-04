@@ -8631,8 +8631,13 @@ final class AppViewModel: ObservableObject {
             // so retry briefly (disableOnDemandWithRetry) rather than swallowing
             // the first error; a persistent failure still falls through to the
             // stop, backstopped by forceRemoveStuckProtectionProfile().
+            // Capture whether on-demand actually got disabled: a persistent failure means the SAVED
+            // profile is still armed, so iOS will reconnect the tunnel even from a stopped/disconnected
+            // state — the force-remove backstop below must run in that case too, not only when the
+            // tunnel is stuck running (see the reconnecting turn-off path below).
+            var onDemandDisabled = true
             if let manager {
-                await disableOnDemandWithRetry(on: manager)
+                onDemandDisabled = await disableOnDemandWithRetry(on: manager)
             }
 
             manager?.connection.stopVPNTunnel()
@@ -8641,21 +8646,33 @@ final class AppViewModel: ObservableObject {
                 endProtectionVPNSession()
                 tunnelManager = nil
                 vpnStatus = .disconnected
-            } else if await waitForProtectionToStop() == false {
-                // The tunnel never reached a stopped state. The usual cause is
-                // that Connect-On-Demand could not be disabled above (that step
-                // is best-effort), so iOS keeps reasserting the tunnel — and if
-                // the provider has already exited, the device is left with a dead
-                // tunnel, no working internet, and no in-app way out (UR-31/UR-32:
-                // "couldn't connect to the internet and Lava wouldn't turn off
-                // either, showing 'Couldn't stop protection'"). Last resort:
-                // delete the VPN profile so its on-demand rules go away and
-                // connectivity is restored. The profile (and the system VPN
+            } else {
+                // Force-remove when EITHER on-demand could not be disabled OR the tunnel never reached
+                // a stopped state. The `!onDemandDisabled` arm is load-bearing for the reconnecting
+                // turn-off (an armed-but-dropped tunnel routed here via toggleProtection): the manager
+                // is already `.disconnected`, so `waitForProtectionToStop()` returns true immediately
+                // and would skip this backstop — yet the still-armed profile means iOS re-arms the
+                // tunnel and the user can't actually turn protection off. The usual stuck-RUNNING cause
+                // is the same best-effort-disable failure leaving a dead tunnel with no working internet
+                // and no in-app way out (UR-31/UR-32: "couldn't connect to the internet and Lava
+                // wouldn't turn off either"). Last resort either way: delete the VPN profile so its
+                // on-demand rules go away and connectivity is restored. The profile (and the system VPN
                 // permission prompt) is recreated next time protection is enabled.
-                guard await forceRemoveStuckProtectionProfile() else {
-                    throw LavaSecAppError.vpnStillStopping
+                //
+                // Branch explicitly rather than `!onDemandDisabled || await …` — `await` may not sit in
+                // the RHS autoclosure of `||` — and this also preserves the short-circuit: when the
+                // disable already failed we go straight to force-remove without waiting for a clean stop
+                // that the still-armed profile won't allow anyway.
+                var mustForceRemoveProfile = !onDemandDisabled
+                if !mustForceRemoveProfile {
+                    mustForceRemoveProfile = await waitForProtectionToStop() == false
                 }
-                stoppedViaProfileRemoval = true
+                if mustForceRemoveProfile {
+                    guard await forceRemoveStuckProtectionProfile() else {
+                        throw LavaSecAppError.vpnStillStopping
+                    }
+                    stoppedViaProfileRemoval = true
+                }
             }
             lastProtectionStatusRefresh = Date()
             configuration.protectionEnabled = false

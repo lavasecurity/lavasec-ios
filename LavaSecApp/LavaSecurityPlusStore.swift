@@ -299,8 +299,15 @@ final class LavaSecurityPlusStore: ObservableObject {
             return nil
         }
 
-        let savingFraction = (annualizedMonthly - yearly.price) / annualizedMonthly
-        let percent = Int((NSDecimalNumber(decimal: savingFraction).doubleValue * 100).rounded(.down))
+        // Keep the whole computation in Decimal space and floor via Int(truncating:) (truncates
+        // toward zero, i.e. floors for the positive range here). Routing the fraction through Double
+        // first — as `NSDecimalNumber(decimal:).doubleValue` did — can drop a clean integer point: an
+        // exact Decimal 0.37 becomes the binary64 0.36999999999999996, so `* 100` is 36.999… and the
+        // floor yields 36 instead of 37, understating the saving (or pushing a real 5% down to 4% and
+        // below `minimumDisplayableSavingsPercent`, suppressing it entirely). StoreKit prices are
+        // Decimal everywhere else in this type; this was the only Double round-trip. (#44 review)
+        let percent = Int(truncating: NSDecimalNumber(
+            decimal: (annualizedMonthly - yearly.price) * 100 / annualizedMonthly))
         guard percent >= minimumDisplayableSavingsPercent else {
             return nil
         }
