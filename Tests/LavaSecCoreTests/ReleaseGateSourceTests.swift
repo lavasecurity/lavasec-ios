@@ -2,11 +2,11 @@ import XCTest
 
 final class ReleaseGateSourceTests: XCTestCase {
     func testPhoneQASurfacesAreCompileGatedOutOfRelease() throws {
-        let adminQA = try Self.source("LavaSecApp/AdminQAView.swift")
-        let settings = try Self.source("LavaSecApp/SettingsView.swift")
-        let root = try Self.source("LavaSecApp/RootView.swift")
-        let viewModel = try Self.source("LavaSecApp/AppViewModel.swift")
-        let rageShakeQA = try Self.source("Sources/LavaSecCore/RageShakeQA.swift")
+        let adminQA = try readSource(.adminQAView)
+        let settings = try readSource(.settingsView)
+        let root = try readSource(.rootView)
+        let viewModel = try readSource(.appViewModel)
+        let rageShakeQA = try readSource(.rageShakeQA)
 
         XCTAssertTrue(
             adminQA.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#if DEBUG || LAVA_QA_TOOLS"),
@@ -41,7 +41,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(root.contains("#endif\n            case .bugReport:"))
         XCTAssertFalse(root.contains("#else\n            case .phoneQA:"))
 
-        let rageShakeGate = try Self.sourceBlock(
+        let rageShakeGate = try sourceBlock(
             in: viewModel,
             startingAt: "var canOpenPhoneQAFromRageShake: Bool",
             endingBefore: "func handleRageShake()"
@@ -72,7 +72,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    @Published private(set) var adminQAStatusMessage"))
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    var qaProbeSummaryText"))
 
-        let adminQACommandBlock = try Self.sourceBlock(
+        let adminQACommandBlock = try sourceBlock(
             in: viewModel,
             startingAt: "#if DEBUG || LAVA_QA_TOOLS\n    func applyHostedQAProbeSet()",
             endingBefore: "func clearDiagnostics()"
@@ -80,10 +80,14 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(adminQACommandBlock.contains("func applyAdminQAAction(_ action: AdminQAAction)"))
         XCTAssertTrue(adminQACommandBlock.contains("func applyAdminQAVPNProfileAction(_ action: AdminQAVPNProfileAction) async"))
         XCTAssertTrue(adminQACommandBlock.contains("#endif"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settings.contains("phoneQA"))
     }
 
     func testReleaseBuildSettingsUseExplicitReleaseCompilationCondition() throws {
-        let project = try Self.source("LavaSec.xcodeproj/project.pbxproj")
+        let project = try readSource(.xcodeProject)
         let releaseConfigurationIDs = [
             "1A000001000000000000B002 /* Release */",
             "1A000001000000000000B102 /* Release */",
@@ -127,10 +131,10 @@ final class ReleaseGateSourceTests: XCTestCase {
     }
 
     func testReleaseFilteringIgnoresPersistedQAProbeSets() throws {
-        let appConfiguration = try Self.source("Sources/LavaSecCore/AppConfiguration.swift")
-        let filterSnapshot = try Self.source("Sources/LavaSecCore/FilterSnapshot.swift")
+        let appConfiguration = try readSource(.appConfiguration)
+        let filterSnapshot = try readSource(.filterSnapshot)
 
-        let decodeBlock = try Self.sourceBlock(
+        let decodeBlock = try sourceBlock(
             in: appConfiguration,
             startingAt: "isPaid = try container.decodeIfPresent(Bool.self, forKey: .isPaid)",
             endingBefore: "customBlocklists = try container.decodeIfPresent"
@@ -140,7 +144,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(decodeBlock.contains("#else"))
         XCTAssertTrue(decodeBlock.contains("qaProbeSet = nil"))
 
-        let qaApplyBlock = try Self.sourceBlock(
+        let qaApplyBlock = try sourceBlock(
             in: filterSnapshot,
             startingAt: "public func applyingQAProbeSet(_ probeSet: QADomainProbeSet?) -> FilterSnapshot",
             endingBefore: "public extension AppConfiguration"
@@ -148,29 +152,6 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(qaApplyBlock.contains("#if DEBUG || LAVA_QA_TOOLS"))
         XCTAssertTrue(qaApplyBlock.contains("#else"))
         XCTAssertTrue(qaApplyBlock.contains("return self"))
-    }
-
-    private static func source(_ relativePath: String) throws -> String {
-        let sourceURL = packageRootURL.appendingPathComponent(relativePath)
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static var packageRootURL: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 
     private static func buildConfigurationBlock(in project: String, identifier: String) throws -> String {

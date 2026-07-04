@@ -66,6 +66,14 @@ public enum ProtectionConnectivityPolicy {
     private static let freshRecoveryWindow: TimeInterval = 10
     private static let reconnectFailureThreshold = 3
     private static let slowResponseThresholdMilliseconds = 2_500
+
+    /// Read-only mirror of `reconnectFailureThreshold` for OBSERVERS (the incident
+    /// ledger records the rejected-response streak reaching this bar). Exposed so the
+    /// tunnel-side write can't drift from the policy's own predicate; never an input
+    /// to any decision outside this type.
+    public static var sustainedRejectedSmokeResponseThreshold: Int {
+        reconnectFailureThreshold
+    }
     private static let slowResponseThreshold = 3
     private static let restartFailureReasons: Set<String> = [
         "timeout",

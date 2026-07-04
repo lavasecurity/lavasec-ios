@@ -48,3 +48,6 @@ Config/*.local.xcconfig
 # ---- Merge / patch leftovers ----
 *.orig
 *.rej
+
+# ---- Claude Code local scaffolding (git worktrees, local agent state) ----
+.claude/

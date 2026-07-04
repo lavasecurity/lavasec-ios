@@ -323,7 +323,7 @@ private struct AllFiltersView: View {
         .toolbar {
             if isEditing {
                 ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel) {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, accessibilityInputLabels: ["Close".lavaLocalized, "Done".lavaLocalized]) {
                         // Confirm before discarding staged deletions; otherwise just leave edit mode
                         // (onChange(of: isEditing) clears the — empty — staged set).
                         if stagedDeletions.isEmpty {
@@ -350,7 +350,8 @@ private struct AllFiltersView: View {
                     // the how-to.
                     NativeToolbarIconButton(
                         systemName: "moon",
-                        accessibilityLabel: "Switch filters with a Focus"
+                        accessibilityLabel: "Switch filters with a Focus",
+                        accessibilityInputLabels: ["Focus filters".lavaLocalized]
                     ) {
                         isShowingFocusInfo = true
                     }
@@ -1113,6 +1114,9 @@ private struct FiltersOverviewPanel: View {
             Text("When the connection is".lavaLocalized)
                 .font(.subheadline)
                 .foregroundStyle(LavaStyle.secondaryText)
+                // The lead-in reads as part of the picker's own label below, so don't
+                // announce it as a separate VoiceOver element.
+                .accessibilityHidden(true)
 
             Button {
                 showingPicker = true
@@ -1129,6 +1133,9 @@ private struct FiltersOverviewPanel: View {
                 .background(Capsule().fill(LavaStyle.lavaOrangeSoft))
             }
             .buttonStyle(.plain)
+            // Announce this as a picker: a stable label with the current option as the value.
+            .accessibilityLabel(Text("When the connection is".lavaLocalized))
+            .accessibilityValue(Text(preview.label.lavaLocalized))
             .popover(isPresented: $showingPicker) {
                 connectionPickerPopover
                     .presentationCompactAdaptation(.popover)
@@ -1159,6 +1166,9 @@ private struct FiltersOverviewPanel: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // The selected option is shown by a checkmark (a non-color shape cue); also
+                // expose it to VoiceOver as the selected element.
+                .accessibilityAddTraits(option == preview ? [.isSelected] : [])
 
                 if index < FilterConnectionPreview.allCases.count - 1 {
                     Divider()
@@ -1663,7 +1673,7 @@ private struct FilterEditToolbar: ToolbarContent {
     var body: some ToolbarContent {
         if isEditing {
             ToolbarItem(placement: .cancellationAction) {
-                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, action: closeEditing)
+                NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close edit mode", role: .cancel, accessibilityInputLabels: ["Close".lavaLocalized, "Done".lavaLocalized], action: closeEditing)
             }
 
             ToolbarItem(placement: .confirmationAction) {

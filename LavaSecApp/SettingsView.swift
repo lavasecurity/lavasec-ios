@@ -468,6 +468,7 @@ private struct SettingsNavigationRow: View {
                         .foregroundStyle(LavaStyle.safeGreen)
                         .frame(width: 34, height: 34)
                         .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityHidden(true)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -485,6 +486,7 @@ private struct SettingsNavigationRow: View {
                 Image(systemName: "chevron.right")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -750,7 +752,7 @@ private struct AccountSettingsView: View {
                                 backupMaintenanceButton(.disable)
                             }
 
-                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, the online copy can't be recovered.".lavaLocalized)
+                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, it's gone for good.".lavaLocalized)
                                 .lavaQuietNoteText()
                         }
                     }
@@ -876,9 +878,9 @@ private enum BackupMaintenanceAction: Identifiable {
     var message: String {
         switch self {
         case .clear:
-            return "This permanently deletes the encrypted backup stored for your account. It cannot be recovered. Encrypted backup stays on for this device and will upload a fresh copy on the next backup."
+            return "Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."
         case .disable:
-            return "This turns off encrypted backup on this device and permanently deletes the copy stored for your account. It cannot be recovered. You can set up a new backup later."
+            return "Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."
         }
     }
 
@@ -1263,10 +1265,11 @@ private struct UpgradeSettingsView: View {
             return viewModel.lavaSecurityPlusOffers
         }
 
-        return LavaSecurityPlusPolicy.recommendedOfferOrder.map {
+        return LavaSecurityPlusPolicy.fallbackOfferOrder.map {
             LavaSecurityPlusOffer(
                 plan: $0,
                 displayPrice: $0.fallbackDisplayPrice,
+                commitmentDisplayPrice: nil,
                 product: nil
             )
         }
@@ -1276,6 +1279,8 @@ private struct UpgradeSettingsView: View {
         switch kind {
         case .yearly:
             "\"We are saving 37%! This has the best value.\""
+        case .yearlyPaidMonthly:
+            "\"If we commit for 12 months, each month is cheaper.\""
         case .monthly:
             "\"We already saved this by unplugging appliances.\""
         }
@@ -1378,7 +1383,7 @@ private struct UpgradeSettingsView: View {
 private struct UpgradeLegalFooter: View {
     var body: some View {
         VStack(spacing: 8) {
-            Text("Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings.")
+            Text("Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment; after that, cancelling affects the next renewal per App Store terms. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings.")
                 .lavaQuietNoteText()
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1489,6 +1494,7 @@ private struct UpgradePlanComparisonView: View {
         ("Allowed domains", "\(FeatureLimits.free.maxAllowedDomains)", .text("\(FeatureLimits.paid.maxAllowedDomains)")),
         ("Blocked domains", "\(FeatureLimits.free.maxBlockedDomains)", .text("\(FeatureLimits.paid.maxBlockedDomains)")),
         ("All Lava Guards", nil, .unlocked),
+        ("Family Sharing", nil, .unlocked),
         ("Custom blocklists", nil, .unlocked),
         ("Custom DNS", nil, .unlocked)
     ]
@@ -1584,13 +1590,25 @@ private struct UpgradePlanOfferRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(offer.displayPrice)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(LavaStyle.safeGreen)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .layoutPriority(1)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(offer.displayPrice)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(LavaStyle.safeGreen)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    if offer.plan.kind == .yearlyPaidMonthly,
+                       let commitmentDisplayPrice = offer.commitmentDisplayPrice {
+                        Text("%@ total".lavaLocalizedFormat(commitmentDisplayPrice))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                }
+                .layoutPriority(1)
             }
         }
     }
@@ -2152,7 +2170,7 @@ struct DNSResolverSettingsView: View {
             tier: .technical,
             intro: LavaInfoPanel(
                 title: "How websites get found",
-                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone — only change it if you know you want to.",
+                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone, so we recommend keeping it.",
                 systemImage: "network"
             )
         ) {
@@ -2174,7 +2192,7 @@ struct DNSResolverSettingsView: View {
                     if usesDeviceDNSSetting {
                         ResolverOptionControl(
                             title: "Fallback to alternative DNS",
-                            detail: "If your device's DNS stops responding, Lava routes allowed lookups through a chosen alternative resolver, then returns to your device's DNS automatically.",
+                            detail: "If your device's DNS stops responding, Lava sends allowed requests to a backup DNS provider, then switches back automatically.",
                             isOn: usesEncryptedDeviceDNSFallbackBinding
                         )
                     } else {
@@ -2235,6 +2253,13 @@ struct DNSResolverSettingsView: View {
                             }
                             .buttonStyle(.plain)
                             .tint(LavaStyle.safeGreen)
+                            // Provider-selection VoiceOver semantics (WS-S): lead with the
+                            // provider name as the accessibility label and carry the
+                            // transport-address summary as the value, so VoiceOver announces
+                            // the provider identity first instead of a name+address run-on.
+                            // Selection itself stays on LavaSelectableRow's .isSelected trait.
+                            .accessibilityLabel(preset.displayName.lavaLocalized)
+                            .accessibilityValue(metadata(for: preset).lavaLocalized)
 
                             LavaCondensedDivider(leadingInset: 16)
                         }
@@ -2250,6 +2275,8 @@ struct DNSResolverSettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .tint(LavaStyle.safeGreen)
+                        .accessibilityLabel("Custom DNS".lavaLocalized)
+                        .accessibilityValue(customResolverMetadata.lavaLocalized)
                     }
                 }
 
@@ -3555,17 +3582,26 @@ struct PrivacyDataSettingsView: View {
 
     private func clear(_ target: LocalLogClearTarget) {
         performAppSettingsMutation(reason: "Delete Local Logs") {
+            let didClear: Bool
             switch target {
             case .filteringCounts:
-                viewModel.clearLocalFilteringCounts()
+                didClear = viewModel.clearLocalFilteringCounts()
             case .domainHistory:
-                viewModel.clearDomainHistory()
+                didClear = viewModel.clearDomainHistory()
             case .networkActivity:
-                viewModel.clearNetworkActivityLog()
+                didClear = viewModel.clearNetworkActivityLog()
             case .lavaGuardProgress:
-                viewModel.clearLavaGuardProgress()
+                didClear = viewModel.clearLavaGuardProgress()
             case .all:
-                viewModel.clearAllLocalLogs()
+                didClear = viewModel.clearAllLocalLogs()
+            }
+            // Rows clear in place with no on-screen confirmation, so announce completion for
+            // VoiceOver — but ONLY when the clear durably persisted. The VM catches write failures
+            // internally (surfacing an error banner + failure haptic) rather than throwing, so an
+            // unconditional announcement would say "… cleared" even on a failed write. On failure
+            // the error banner + haptic already convey the outcome.
+            if didClear {
+                LavaAccessibilityAnnouncer.announce(target.clearedConfirmation.lavaLocalized)
             }
         }
     }
@@ -4028,6 +4064,24 @@ private enum LocalLogClearTarget: Identifiable {
             return "This removes saved filtering counts, domain history, network activity, and unearned Lava Guard progress from this phone."
         }
     }
+
+    // Past-tense confirmation spoken to VoiceOver after the clear completes (assistive-nav
+    // Task 6). The rows clear in place with no on-screen confirmation, so for a VoiceOver
+    // user this announcement is the only completion signal.
+    var clearedConfirmation: String {
+        switch self {
+        case .filteringCounts:
+            return "Filtering counts cleared."
+        case .domainHistory:
+            return "Domain history cleared."
+        case .networkActivity:
+            return "Network activity cleared."
+        case .lavaGuardProgress:
+            return "Lava Guard progress cleared."
+        case .all:
+            return "All logs cleared."
+        }
+    }
 }
 
 private enum BugReportStep: Int, CaseIterable, Identifiable {
@@ -4206,6 +4260,7 @@ struct BugReportSettingsView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])
 
                         if index < BugReportIssueType.allCases.count - 1 {
                             LavaCondensedDivider()
@@ -4860,7 +4915,9 @@ private struct BugReportStepProgressView: View {
 
     private func stepLabel(for step: BugReportStep) -> some View {
         Text("\(step.displayNumber) \(step.title.lavaLocalized)")
-            .font(.caption.weight(.semibold))
+            // Current step also carries a heavier weight — a non-color cue so the active step
+            // survives grayscale, not just the selection tint swap.
+            .font(.caption.weight(step == currentStep ? .heavy : .semibold))
             .foregroundStyle(isUnavailableStep(step) ? LavaStyle.tertiaryText : Color.primary)
             .lineLimit(1)
             .minimumScaleFactor(0.72)
@@ -4870,6 +4927,7 @@ private struct BugReportStepProgressView: View {
             .lavaSurface(.selection(isSelected: step == currentStep))
             .opacity(isUnavailableStep(step) ? 0.55 : 1)
             .contentShape(Rectangle())
+            .accessibilityAddTraits(step == currentStep ? [.isSelected] : [])
     }
 
     private func isUnavailableStep(_ step: BugReportStep) -> Bool {
@@ -5065,7 +5123,7 @@ private struct VersionNerdStatsView: View {
 
             LavaSectionGroup(
                 "Tunnel Health",
-                footer: "Local counts of how Lava reaches the internet — no website names. They track when lookups worked, failed, retried, or briefly fell back to your phone's settings."
+                footer: "Local counts of how Lava reaches the internet — no site names. Tracks when requests worked, failed, retried, or briefly used your phone's settings."
             ) {
                 LavaPlainCard {
                     VStack(spacing: 10) {

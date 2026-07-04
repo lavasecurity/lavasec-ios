@@ -1,6 +1,20 @@
 import Foundation
 
+/// Why a backup payload could not be decoded/restored on this build.
+public enum BackupConfigurationPayloadError: Error, Equatable, Sendable {
+    /// The payload advertises a schema newer than this build understands. Restoring it
+    /// would decode a lossy subset and then re-seal a downgraded (schema-1) envelope over
+    /// the newer single-envelope backup, permanently clobbering it — so we refuse instead.
+    case unsupportedSchemaVersion(Int)
+}
+
 public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
+    /// Bumped only when the wire format changes in a way an older reader cannot safely
+    /// restore. A payload whose `schemaVersion` exceeds this is rejected at decode time
+    /// (mirrors `ShareableFilterConfiguration.decode(configurationCode:)`) so a future
+    /// vN+1 backup is never silently downgraded on a vN device.
+    public static let currentSupportedSchemaVersion = 1
+
     public let schemaVersion: Int
     public let enabledBlocklistIDs: Set<String>
     public let allowedDomains: Set<String>
@@ -105,7 +119,15 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        let decodedSchemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        // Reject a future-schema payload BEFORE reading any other field, so a vN+1 backup
+        // restored on a vN device throws here instead of decoding a lossy subset that a
+        // later re-seal would then write back as a downgraded schema-1 envelope. Older/current
+        // schemas still decode (additive fields are already tolerant of absence above/below).
+        guard decodedSchemaVersion <= Self.currentSupportedSchemaVersion else {
+            throw BackupConfigurationPayloadError.unsupportedSchemaVersion(decodedSchemaVersion)
+        }
+        self.schemaVersion = decodedSchemaVersion
         self.enabledBlocklistIDs = try container.decode(Set<String>.self, forKey: .enabledBlocklistIDs)
         self.allowedDomains = try container.decode(Set<String>.self, forKey: .allowedDomains)
         self.blockedDomains = try container.decode(Set<String>.self, forKey: .blockedDomains)

@@ -49,7 +49,8 @@ final class FilterPublishLockTests: XCTestCase {
     func testTryExclusiveLockAbortsWhenContendedByAnotherProcess() throws {
         let python = "/usr/bin/python3"
         guard FileManager.default.isExecutableFile(atPath: python) else {
-            throw XCTSkip("python3 unavailable; cross-process flock contention is covered by the device gate.")
+            try skipVisibly("python3 unavailable; cross-process flock contention is covered by the device gate.")
+            return
         }
 
         let lockURL = try makeLockURL()
@@ -76,15 +77,16 @@ final class FilterPublishLockTests: XCTestCase {
             holder.waitUntilExit()
         }
 
-        // Wait (bounded) for the child to actually hold the lock.
-        let deadline = Date().addingTimeInterval(5)
+        // Wait (bounded) for the child to actually hold the lock. The loop exits as soon as
+        // the sentinel appears, so the generous deadline costs nothing in the common case.
+        let deadline = Date().addingTimeInterval(20)
         while !FileManager.default.fileExists(atPath: readyURL.path), Date() < deadline {
             usleep(10_000)
         }
-        try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: readyURL.path),
-            "holder process did not acquire the lock in time"
-        )
+        guard FileManager.default.fileExists(atPath: readyURL.path) else {
+            try skipVisibly("holder process did not acquire the lock within 20s")
+            return
+        }
 
         var ran = false
         let result: Int? = FilterPublishLock.withTryExclusiveLock(at: lockURL) { () -> Int in
@@ -93,6 +95,18 @@ final class FilterPublishLockTests: XCTestCase {
         }
         XCTAssertNil(result, "A cross-process-contended non-blocking acquire must abort.")
         XCTAssertFalse(ran, "The body must NOT run when another process holds the lock (degrade-ABORT).")
+    }
+
+    /// This is the ONLY in-lane proof that cross-process `flock` contention degrade-ABORTs.
+    /// On CI the runner image is pinned, so either skip condition (python3 missing, holder
+    /// wedged) is an environment regression that would otherwise retire the proof silently —
+    /// fail loud there. Locally it stays a visible skip.
+    private func skipVisibly(_ reason: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        if ProcessInfo.processInfo.environment["CI"] == "true" {
+            XCTFail("cross-process flock proof would silently stop running on CI: \(reason)", file: file, line: line)
+            return
+        }
+        throw XCTSkip(reason)
     }
 
     private func makeLockURL() throws -> URL {

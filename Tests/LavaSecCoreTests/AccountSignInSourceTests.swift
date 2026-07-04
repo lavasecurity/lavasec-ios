@@ -2,13 +2,13 @@ import XCTest
 
 final class AccountSignInSourceTests: XCTestCase {
     func testSettingsAccountEntryAndPageUseBackupTitle() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let settingsRootBlock = try Self.sourceBlock(
+        let settingsViewSource = try readSource(.settingsView)
+        let settingsRootBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct AccountSettingsView: View"
         )
-        let accountPageBlock = try Self.sourceBlock(
+        let accountPageBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountSettingsView: View",
             endingBefore: "private struct BackupOptionControl: View"
@@ -24,8 +24,8 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testSignInRowsUseProviderSpecificProgressState() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let settingsViewSource = try readSource(.settingsView)
+        let appViewModelSource = try readSource(.appViewModel)
 
         XCTAssertTrue(appViewModelSource.contains("var isAppleSignInInProgress: Bool"))
         XCTAssertTrue(appViewModelSource.contains("var isGoogleSignInInProgress: Bool"))
@@ -36,13 +36,13 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testSignInTitlesOnlyShowOpeningForActiveProvider() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let appleTitleBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let appleTitleBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var appleSignInActionTitle: String",
             endingBefore: "var googleSignInActionTitle: String"
         )
-        let googleTitleBlock = try Self.sourceBlock(
+        let googleTitleBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var googleSignInActionTitle: String",
             endingBefore: "var encryptedBackupSummaryText: String"
@@ -52,17 +52,21 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertFalse(appleTitleBlock.contains("isAccountSignInInProgress ? \"Opening Apple sign-in\""))
         XCTAssertTrue(googleTitleBlock.contains("isGoogleSignInInProgress ? \"Opening Google sign-in\" : \"Sign in with Google\""))
         XCTAssertFalse(googleTitleBlock.contains("isAccountSignInInProgress ? \"Opening Google sign-in\""))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(appViewModelSource.contains("isAccountSignInInProgress"))
     }
 
     func testConnectedTitlesAreProviderSpecific() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let appleTitleBlock = try Self.sourceBlock(
+        let settingsViewSource = try readSource(.settingsView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let appleTitleBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var appleSignInActionTitle: String",
             endingBefore: "var googleSignInActionTitle: String"
         )
-        let googleTitleBlock = try Self.sourceBlock(
+        let googleTitleBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var googleSignInActionTitle: String",
             endingBefore: "var encryptedBackupSummaryText: String"
@@ -78,11 +82,15 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertFalse(googleTitleBlock.contains("signedInProviderName.map"))
         XCTAssertTrue(settingsViewSource.contains("if viewModel.isAppleAccountConnected"))
         XCTAssertTrue(settingsViewSource.contains("if viewModel.isGoogleAccountConnected"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(appViewModelSource.contains("signedInProviderName"))
     }
 
     func testAccountStatusTextUsesProviderLabelsInsteadOfEmailAddresses() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let statusBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let statusBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "var accountStatusText: String",
             endingBefore: "var accountStatusDetailText: String"
@@ -96,15 +104,15 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountSheetsShowProviderEmailRows() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let settingsSheetBlock = try Self.sourceBlock(
+        let settingsViewSource = try readSource(.settingsView)
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
         )
-        let onboardingSignedInBlock = try Self.sourceBlock(
+        let onboardingSignedInBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "if viewModel.isAccountSignedIn {",
             endingBefore: "} else {"
@@ -126,24 +134,24 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountSheetProviderRowsMatchActionTypographyTruncateLongEmailsAndSignOutIsNeutral() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let settingsSheetBlock = try Self.sourceBlock(
+        let settingsViewSource = try readSource(.settingsView)
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
         )
-        let settingsConnectionRowBlock = try Self.sourceBlock(
+        let settingsConnectionRowBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountConnectionRow: View",
             endingBefore: "private struct SettingsActionRow"
         )
-        let onboardingSheetBlock = try Self.sourceBlock(
+        let onboardingSheetBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingAccountSheet: View",
             endingBefore: "private struct OnboardingSignedInAccountRow: View"
         )
-        let onboardingConnectionRowBlock = try Self.sourceBlock(
+        let onboardingConnectionRowBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingSignedInAccountRow: View",
             endingBefore: "private struct OnboardingAccountActionRow: View"
@@ -170,13 +178,13 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testStartingOneProviderSignInPreservesExistingConnectedProviders() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let appleSignInBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let appleSignInBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func beginSignInWithApple()",
             endingBefore: "func beginSignInWithGoogle()"
         )
-        let googleSignInBlock = try Self.sourceBlock(
+        let googleSignInBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func beginSignInWithGoogle()",
             endingBefore: "func signOutAccount()"
@@ -189,8 +197,8 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountServiceKeepsOneCanonicalSupabaseIdentity() throws {
-        let serviceSource = try Self.source(named: "AccountAuthService.swift", in: "LavaSecApp")
-        let storeSource = try Self.source(named: "AccountSessionKeychainStore.swift", in: "LavaSecApp")
+        let serviceSource = try readSource(.accountAuthService)
+        let storeSource = try readSource(.accountSessionKeychainStore)
 
         XCTAssertTrue(serviceSource.contains("connections.contains(userID: session.user.id)"))
         XCTAssertTrue(serviceSource.contains("try sessionStore.deleteAllSessions()"))
@@ -208,8 +216,8 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testLinkedSupabaseProvidersDoNotAppearAsLocalSignIns() throws {
-        let serviceSource = try Self.source(named: "AccountAuthService.swift", in: "LavaSecApp")
-        let connectionBlock = try Self.sourceBlock(
+        let serviceSource = try readSource(.accountAuthService)
+        let connectionBlock = try sourceBlock(
             in: serviceSource,
             startingAt: "private static func makeConnections(\n        from session: SupabaseIDTokenAuthSession,",
             endingBefore: "\n    private static func makeConnection("
@@ -223,18 +231,18 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testBackupSyncUsesCurrentSupabaseIdentityOnce() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let uploadBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let uploadBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "private func uploadEncryptedBackup(",
             endingBefore: "private func uploadPendingEncryptedBackupIfPossible()"
         )
-        let restoreBlock = try Self.sourceBlock(
+        let restoreBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func restoreEncryptedBackup(",
             endingBefore: "func refreshDiagnostics()"
         )
-        let fetchBlock = try Self.sourceBlock(
+        let fetchBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "private func loadAvailableEncryptedBackupEnvelope()",
             endingBefore: "private func loadEncryptedBackupState()"
@@ -252,16 +260,16 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountDeletionIsExposedFromAccountSheets() throws {
-        let settingsViewSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let serviceSource = try Self.source(named: "AccountAuthService.swift", in: "LavaSecApp")
-        let settingsSheetBlock = try Self.sourceBlock(
+        let settingsViewSource = try readSource(.settingsView)
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let serviceSource = try readSource(.accountAuthService)
+        let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
         )
-        let onboardingSheetBlock = try Self.sourceBlock(
+        let onboardingSheetBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingAccountSheet: View",
             endingBefore: "private struct OnboardingSignedInAccountRow: View"
@@ -288,36 +296,11 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testBeginSignInTracksActiveProviderUntilFlowFinishes() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let appViewModelSource = try readSource(.appViewModel)
 
         XCTAssertTrue(appViewModelSource.contains("@Published private(set) var accountSignInProviderInProgress: AccountAuthProvider?"))
         XCTAssertTrue(appViewModelSource.contains("accountSignInProviderInProgress = .apple"))
         XCTAssertTrue(appViewModelSource.contains("accountSignInProviderInProgress = .google"))
         XCTAssertTrue(appViewModelSource.contains("defer { accountSignInProviderInProgress = nil }"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
     }
 }

@@ -37,15 +37,15 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testGroupContainerNamesTheFilterLibraryFile() throws {
-        let source = try Self.source(named: "AppGroup.swift", in: "Shared")
+        let source = try readSource(.appGroup)
         XCTAssertTrue(source.contains(#"filterLibraryFilename = "filter-library.json""#))
     }
 
     // MARK: - Persistence boundary keeps the library in lockstep
 
     func testConfigOnlyPersistSyncsAndWritesTheLibrary() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private func persistConfigurationOnly(",
             endingBefore: "private func syncActiveFilterFromConfiguration()"
@@ -57,8 +57,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testSharedStatePersistSyncsRecordsTokenAndWritesLibrary() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "let didRewriteArtifacts = rewritesRuleArtifacts",
             endingBefore: "private func persistConfigurationOnly("
@@ -73,8 +73,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testSyncActiveFilterClearsStaleTokenOnlyOnRealChange() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private func syncActiveFilterFromConfiguration() {",
             endingBefore: "private func persistFilterLibrary()"
@@ -91,8 +91,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Migration
 
     func testLaunchLoadMigratesLegacyConfigIntoOneDefaultFilter() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let loadBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let loadBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadPersistedConfiguration() {",
             endingBefore: "private func loadOrMigrateFilterLibrary()"
@@ -100,7 +100,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(loadBlock.contains("loadOrMigrateFilterLibrary()"),
                       "The launch load must always load/migrate the library.")
 
-        let migrateBlock = try Self.sourceBlock(
+        let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
             endingBefore: "private func persistDiagnostics()"
@@ -136,13 +136,17 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "Reconcile when the generations differ OR the library is at the generation-0 sentinel.")
         XCTAssertTrue(migrateBlock.contains("configuration.configurationGeneration = max("),
                       "Reconcile must advance the in-memory generation to at least the library's so a headless publish aborts.")
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("persistFilterLibrary"))
     }
 
     // MARK: - GC widen
 
     func testArtifactPublishRetainsEveryFilterCompiledToken() throws {
-        let appSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let publishBlock = try Self.sourceBlock(
+        let appSource = try readSource(.appViewModel)
+        let publishBlock = try sourceBlock(
             in: appSource,
             startingAt: "private func persistPreparedSnapshotArtifacts(",
             endingBefore: "private func retainedFilterArtifactTokens()"
@@ -150,7 +154,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(publishBlock.contains("additionalRetainedTokens: retainedFilterArtifactTokens()"),
                       "Publish must pass the hosted filters' tokens so GC keeps them warm.")
 
-        let retainBlock = try Self.sourceBlock(
+        let retainBlock = try sourceBlock(
             in: appSource,
             startingAt: "private func retainedFilterArtifactTokens() -> [String] {",
             endingBefore: "private func persistSharedState("
@@ -161,7 +165,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The active filter's token leads the warm set (most likely switch-back).")
 
         // The core GC must actually fold the extra tokens into its retained set.
-        let coreSource = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
+        let coreSource = try readSource(.filterSnapshotPreparationService)
         XCTAssertTrue(coreSource.contains("additionalRetainedTokens: [String] = []"),
                       "persistArtifacts must accept the extra retained tokens (default empty ⇒ today's behaviour).")
         XCTAssertTrue(coreSource.contains("+ additionalRetainedTokens"),
@@ -171,8 +175,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Phase 1: switch / create / delete (view-model)
 
     func testSwitchCommitsOnlyAfterPrepareAndKeepsPreviousOnFailure() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
             endingBefore: "private enum SwitchPublication"
@@ -236,16 +240,20 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The rollback must be persisted (persistSharedState may have written the target to disk before the publish threw).")
         XCTAssertFalse(catchBlock.contains("configuration = nextConfiguration"), "Failure must not commit the target config.")
         XCTAssertFalse(catchBlock.contains("setActiveFilter(id: id)"), "Failure must not commit the target active id.")
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("filterEditDraft"))
     }
 
     /// Instant switch-back: a switch reuses the target filter's still-warm compiled artifacts (a
     /// pointer flip) when valid, and only cold-compiles on a miss — without ever serving stale rules.
     func testSwitchReusesWarmArtifactBeforeCompiling() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
         // prepareSwitchPublication: try warm reuse FIRST (gated on the target's lastCompiledToken),
         // fall back to the cold prepareFilterSnapshot on a miss.
-        let prepareBlock = try Self.sourceBlock(
+        let prepareBlock = try sourceBlock(
             in: source,
             startingAt: "private func prepareSwitchPublication(",
             endingBefore: "private func warmReusableSnapshotForSwitch("
@@ -264,7 +272,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // The shared candidate loop (used by the foreground switch AND the headless warm switch): try
         // the library token + the sidecar token, each validated by the per-token loader.
-        let warmCandidateBlock = try Self.sourceBlock(
+        let warmCandidateBlock = try sourceBlock(
             in: source,
             startingAt: "private func warmReusableSnapshotForSwitch(",
             endingBefore: "private func loadReusableWarmSnapshotForSwitch("
@@ -277,7 +285,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // The app's per-token loader delegates to the SHARED LavaSecCore validation core
         // (WarmFilterSnapshotLoader) so the foreground switch and the headless Focus engine can never
         // drift on reuse safety (LAV-100 Phase 4).
-        let appLoadBlock = try Self.sourceBlock(
+        let appLoadBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadReusableWarmSnapshotForSwitch(",
             endingBefore: "private func duplicateName(of name: String)"
@@ -289,8 +297,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // warm token's manifest + decoded snapshot against the TARGET's current configuration + cached
         // catalog (same checks as warm-startup reuse), and requires the snapshot to hash back to the
         // directory it came from so the later pointer flip targets exactly the validated dir.
-        let loader = try Self.source(named: "WarmFilterSnapshotLoader.swift", in: "Sources/LavaSecCore")
-        let loadBlock = try Self.sourceBlock(
+        let loader = try readSource(.warmFilterSnapshotLoader)
+        let loadBlock = try sourceBlock(
             in: loader,
             startingAt: "public static func loadReusable(",
             endingBefore: "public static func stillReusableAgainstCachedCatalog("
@@ -331,7 +339,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // snapshot's allowlist-overlap subset) + allowed + blocked.
         for builder in ["private func preparedSummary(for snapshot: FilterSnapshot)",
                         "nonisolated static func buildBackgroundPreparedSnapshot("] {
-            let builderBlock = try Self.sourceBlock(in: source, startingAt: builder, endingBefore: "\n    private func ")
+            let builderBlock = try sourceBlock(in: source, startingAt: builder, endingBefore: "\n    private func ")
             XCTAssertTrue(builderBlock.contains("tierBudgetRuleCount: blocklistRuleCount.map {")
                             && builderBlock.contains("$0 + threatGuardrail.count + configuration.allowedDomains.count + configuration.blockedDomains.count"),
                           "\(builder) must populate tierBudgetRuleCount with the cold-gate formula so warm reuse isn't always rejected.")
@@ -341,7 +349,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // The shared switch tail applies the reused snapshot's already-compiled rules + catalog the
         // same way the warm-startup path does, and only a compiled publish updates the source hashes.
-        let switchBlock = try Self.sourceBlock(
+        let switchBlock = try sourceBlock(
             in: source,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
             endingBefore: "private enum SwitchPublication"
@@ -380,7 +388,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The .warm post-persist branch must skip the reuse apply if a sync moved the catalog during the persist.")
         XCTAssertEqual(switchBlock.components(separatedBy: "try await persistSharedState(").count - 1, 1,
                        "The warm switch must publish once — no post-persist inline recompile/republish.")
-        let rehydrateBlock = try Self.sourceBlock(
+        let rehydrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func rehydrateRuleSetCachesAfterWarmSwitch(",
             endingBefore: "private func duplicateName(of name: String)"
@@ -409,7 +417,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // in the .warm branch and cleared at the single fresh-cache chokepoint (applyCatalogSyncResult).
         XCTAssertTrue(switchBlock.contains("hasPendingWarmSwitchCacheRehydration = true"),
                       "The warm switch must mark the per-source caches pending so in-place edits defer.")
-        let applyResultBlock = try Self.sourceBlock(
+        let applyResultBlock = try sourceBlock(
             in: source,
             startingAt: "private func applyCatalogSyncResult(",
             endingBefore: "private func loadCachedCatalogAfterSyncFailure("
@@ -422,14 +430,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                         && source.contains("guard hasPendingWarmSwitchCacheRehydration else { return nil }"),
                       "A shared helper reports when in-place blocklist edits must be deferred.")
         for method in ["func toggleBlocklist(", "func addCustomBlocklist(", "func removeCustomBlocklist("] {
-            let editBlock = try Self.sourceBlock(in: source, startingAt: method, endingBefore: "\n    func ")
+            let editBlock = try sourceBlock(in: source, startingAt: method, endingBefore: "\n    func ")
             XCTAssertTrue(editBlock.contains("deferralReasonForInPlaceBlocklistEdit()"),
                           "\(method) must defer while a warm-switch cache rehydration is pending.")
         }
         // restoreFiltersToDefault supersedes the warm switch and rebuilds + sync-fills its own
         // coverage, so it must clear the pending flag (the superseded rehydration bails without
         // clearing) — else a warm switch whose target was fully cached would wedge the flag.
-        let restoreDefaultBlock = try Self.sourceBlock(
+        let restoreDefaultBlock = try sourceBlock(
             in: source,
             startingAt: "func restoreFiltersToDefault() {",
             endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
@@ -443,7 +451,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // filter would look warm yet cold-compile on its next switch. It stamps only a token the switch
         // reuse gate would honor NOW: the SAME canReuseForProtectionStartup check, against a freshly
         // re-read cached catalog (Codex r12).
-        let warmBlock = try Self.sourceBlock(
+        let warmBlock = try sourceBlock(
             in: source,
             startingAt: "func warmFilterArtifact(forFilterID",
             endingBefore: "private func reconcileWarmNonActiveFilters("
@@ -478,7 +486,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// and PROMOTES valid entries into the library. The load-bearing safety invariant is that the
     /// background warm loop never writes filter-library.json / app-configuration.json.
     func testBackgroundWarmIndexSidecarWiring() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
         // Switch read-fallback: try BOTH the library token and the sidecar token (validated
         // identically). A non-nil-but-STALE library token must not block the fresh sidecar one
@@ -504,7 +512,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "The freshness touch is removed — latest.json is only trustworthy-current on a commit, which already refreshes its mtime (Codex #138 r6 P1).")
 
         // Promotion: reconcile promotes a valid sidecar token into the library instead of recompiling.
-        let reconcileBlock = try Self.sourceBlock(
+        let reconcileBlock = try sourceBlock(
             in: source,
             startingAt: "private func reconcileWarmNonActiveFilters(",
             endingBefore: "/// Promote a sidecar"
@@ -520,7 +528,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "An overlapping warm-reconcile trigger must queue a rerun, not drop the pass.")
         XCTAssertTrue(reconcileBlock.contains("await reconcileWarmNonActiveFiltersOnce()"),
                       "The wrapper must drain via the single-pass method in a rerun loop.")
-        let promoteBlock = try Self.sourceBlock(
+        let promoteBlock = try sourceBlock(
             in: source,
             startingAt: "private func promoteWarmTokenIntoLibrary(",
             endingBefore: "private func warmNonActiveFiltersInBackground("
@@ -532,7 +540,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("await warmNonActiveFiltersInBackground()"),
                       "The background refresh must warm non-active filters after publishing the active one.")
 
-        let bgBlock = try Self.sourceBlock(
+        let bgBlock = try sourceBlock(
             in: source,
             startingAt: "private func warmNonActiveFiltersInBackground(",
             endingBefore: "// MARK: - Focus auto-switch coordination (LAV-100 Phase 3)"
@@ -571,8 +579,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// persistArtifacts must re-stage UNDER the publish lock (re-materializing a reaped dir) before
     /// flipping, so the pointer never names a missing directory (Codex #133 r3).
     func testPublishReStagesUnderThePublishLockBeforeFlipping() throws {
-        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
-        let flip = try Self.sourceBlock(
+        let service = try readSource(.filterSnapshotPreparationService)
+        let flip = try sourceBlock(
             in: service,
             startingAt: "let flipUnderLock: () throws -> PublishOutcome = {",
             endingBefore: "switch lockMode {"
@@ -589,11 +597,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// the post-persist (artifact-actor await) side-effect tail — otherwise a superseded replacer
     /// silently reverts a concurrent one or desyncs the rule caches.
     func testEveryWholesaleReplacerClaimsAndRechecksTheGate() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
 
         // Import: claims importToken, re-checks before commit AND after the persist (applyCatalogSyncResult
         // is deferred past the persist so a superseded import can't desync caches).
-        let importBlock = try Self.sourceBlock(
+        let importBlock = try sourceBlock(
             in: app,
             startingAt: "func applyImportedShareableConfiguration(",
             endingBefore: "func retryFilterPreparation()"
@@ -610,7 +618,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Draft apply: a fourth wholesale replacer — claims draftToken, re-checks before commit AND
         // after the persist, and resets the retryable flag so a prior dead-end switch can't leak.
-        let draftBlock = try Self.sourceBlock(
+        let draftBlock = try sourceBlock(
             in: app,
             startingAt: "func prepareAndApplyFilterDraft(origin: FilterReviewOrigin",
             endingBefore: "func isFilterFrozen("
@@ -660,8 +668,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testWarmArtifactRetentionKeepsEveryNonFrozenFilter() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "private func retainedFilterArtifactTokens() -> [String] {",
             endingBefore: "func warmFilterArtifact(forFilterID"
@@ -679,8 +687,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testCreateFilterIsPlusGatedAndLibraryOnly() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
             in: source,
             startingAt: "func createFilter(name: String, duplicatingFilterID:",
             endingBefore: "func renameFilter(id: String"
@@ -695,11 +703,15 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "A new filter is warmed off the hot path for instant later switching.")
         XCTAssertFalse(block.contains("notifyTunnelSnapshotUpdated"),
                        "A new (non-active) filter must not republish / reload the live tunnel.")
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("notifyTunnelSnapshotUpdated"))
     }
 
     func testDeleteFilterDelegatesToInvariantSafeRemoval() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let deleteBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let deleteBlock = try sourceBlock(
             in: source,
             startingAt: "func deleteFilter(id: String) -> Bool {",
             endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
@@ -712,7 +724,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "Delete must use the invariant-safe removal (refuses active / last).")
 
         // rename enforces the same model-level freeze.
-        let renameBlock = try Self.sourceBlock(
+        let renameBlock = try sourceBlock(
             in: source,
             startingAt: "func renameFilter(id: String, to name: String) {",
             endingBefore: "func deleteFilter(id: String) -> Bool {"
@@ -722,7 +734,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testFrozenFilterRuleMatchesDowngradeSemantics() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         // Freeze is count-aware: nothing freezes while the library fits the tier cap (Free's three
         // seeded filters are all switchable); only a lapsed-Plus library OVER the cap freezes its
         // excess non-active filters. The active filter is never frozen.
@@ -731,10 +743,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testMigrationWriteIsSkippedForHeadlessRefreshAndRetryRoutesToSwitch() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         // The headless background-refresh model must not persist the migration (read-only),
         // or it could overwrite a foreground-created library (read→write race).
-        let migrateBlock = try Self.sourceBlock(
+        let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
             endingBefore: "private func persistDiagnostics()"
@@ -745,7 +757,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // The shared failure screen's Try Again retries a failed SWITCH (no draft), not a
         // no-op draft apply.
-        let retryBlock = try Self.sourceBlock(
+        let retryBlock = try sourceBlock(
             in: source,
             startingAt: "func retryFilterPreparation() {",
             endingBefore: "var tunnelCacheHitRateText"
@@ -755,12 +767,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testBackupIncludesLibraryAndOrdersPersistWritesByDurability() throws {
-        let core = try Self.source(named: "BackupConfigurationPayload.swift", in: "Sources/LavaSecCore")
+        let core = try readSource(.backupConfigurationPayload)
         XCTAssertTrue(core.contains("public let filterLibrary: FilterLibrary?"),
                       "The backup payload must carry the whole filter library.")
         XCTAssertTrue(core.contains("func restoredFilterLibrary() -> FilterLibrary?"))
 
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
         XCTAssertTrue(app.contains("filterLibrary: library"),
                       "Turn-on must seal the library into the payload.")
         XCTAssertTrue(app.contains("payload.restoredFilterLibrary()"),
@@ -769,7 +781,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "Library-only changes must schedule a backup, like config changes.")
         // A failed library-only write must roll the published library back to its pre-mutation
         // snapshot, so a change reported as failed isn't left live (or persisted later by config).
-        let persistLibBlock = try Self.sourceBlock(
+        let persistLibBlock = try sourceBlock(
             in: app,
             startingAt: "private func persistLibraryOnlyChange(rollingBackTo previousLibrary: FilterLibrary)",
             endingBefore: "func renameFilter(id: String, to name: String)"
@@ -792,7 +804,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // edit's library write (in the `if !prioritizesConfigurationDurability` block, source-first)
         // precedes the config write; a restore's library write (in the `if prioritizes…` block,
         // source-last) follows it.
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let writer = try readSource(.sharedFilterStatePersistence)
         let cfgIdx = try XCTUnwrap(writer.range(of: "configurationData.write(to: configurationURL")?.lowerBound)
         let normalLibIdx = try XCTUnwrap(writer.range(of: "libraryData.write(to: filterLibraryURL")?.lowerBound)
         let restoreLibIdx = try XCTUnwrap(writer.range(of: "libraryData.write(to: filterLibraryURL", options: .backwards)?.lowerBound)
@@ -806,14 +818,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // whose stamp lost the race. Delegating — rather than an un-bumped library-only write — is what lets
         // a foreground edit trip the App Intents extension's stale-reader fence (Codex P1, state-agnostic
         // switch); the actual stamp is single-sourced in the shared writer (asserted below at lines ~813).
-        let persistFilterLibraryBlock = try Self.sourceBlock(
+        let persistFilterLibraryBlock = try sourceBlock(
             in: app,
             startingAt: "private func persistFilterLibrary(",
             endingBefore: "private func uploadEncryptedBackup("
         )
         XCTAssertTrue(persistFilterLibraryBlock.contains("persistConfigurationOnly("),
                       "persistFilterLibrary must delegate to persistConfigurationOnly so a library-only edit bumps the shared generation (and the extension's fence can trip).")
-        let loadBlock = try Self.sourceBlock(
+        let loadBlock = try sourceBlock(
             in: app,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
             endingBefore: "private func persistDiagnostics()"
@@ -830,17 +842,17 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testBackupReSealsOnChangeAndRestoreIsLibraryAuthoritative() throws {
-        let core = try Self.source(named: "ZeroKnowledgeBackupEnvelope.swift", in: "Sources/LavaSecCore")
+        let core = try readSource(.zeroKnowledgeBackupEnvelope)
         XCTAssertTrue(core.contains("public func resealingPayload("),
                       "The envelope must re-seal a new payload while keeping every key slot.")
 
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
         XCTAssertTrue(app.contains("private func refreshLocalEncryptedBackupEnvelope()"))
         XCTAssertTrue(app.contains("envelope.resealingPayload(payload, deviceSecret: deviceSecret)"),
                       "Changes must re-seal the local envelope with the current config + library.")
 
         // Re-seal runs even when automatic upload is off, so the local envelope stays current.
-        let scheduleBlock = try Self.sourceBlock(
+        let scheduleBlock = try sourceBlock(
             in: app,
             startingAt: "private func scheduleAutomaticBackupAfterConfigurationChange() {",
             endingBefore: "private func runScheduledAutomaticBackup()"
@@ -853,7 +865,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                           "Re-seal must be decoupled from the cached backup state (run before the isConfigured gate).")
 
         // Restore is library-authoritative: the restored library's active filter regenerates config.
-        let restoreBlock = try Self.sourceBlock(
+        let restoreBlock = try sourceBlock(
             in: app,
             startingAt: "if let restoredLibrary = payload.restoredFilterLibrary()",
             endingBefore: "try await persistSharedState("
@@ -874,7 +886,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // After restore the envelope is on disk, so the cached backup state must be refreshed
         // from the store (it was .off on a fresh device); otherwise post-restore edits are gated
         // off by the stale .off state and never re-seal / re-upload.
-        let restoreFnBlock = try Self.sourceBlock(
+        let restoreFnBlock = try sourceBlock(
             in: app,
             startingAt: "func restoreEncryptedBackup(secret: String, mode: BackupRestoreMode) async throws {",
             endingBefore: "func clearEncryptedBackup() async {"
@@ -904,7 +916,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "The recovery rekey must not be best-effort (if let).")
         // The re-key writes must PROPAGATE (not try?) so a failed persist fails the restore
         // instead of silently leaving a saved secret that can't unwrap the on-disk envelope.
-        let rekeyPersist = try Self.sourceBlock(
+        let rekeyPersist = try sourceBlock(
             in: app,
             startingAt: "if didRekeyDeviceSlot {",
             endingBefore: "configuration = payload.restoredConfiguration()"
@@ -937,8 +949,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // draft — otherwise a draft preserved by the edge-swipe path resumes on the next My
         // filter open and Save applies a pre-restore edit over the freshly seeded Balanced
         // filter with no second restore confirmation (#118 follow-up).
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let restore = try Self.sourceBlock(
+        let app = try readSource(.appViewModel)
+        let restore = try sourceBlock(
             in: app,
             startingAt: "func restoreFiltersToDefault() {",
             endingBefore: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {"
@@ -957,7 +969,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Phase 1: surfaces (FiltersView)
 
     func testFiltersViewExposesInEffectRowAllFiltersPageAndSwitch() throws {
-        let source = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let source = try readSource(.filtersView)
         // The in-effect ("Now filtering") row and the library entry are consolidated
         // under a single conversational "What's filtering?" section.
         XCTAssertTrue(source.contains(#"LavaSectionGroup("What's filtering?")"#))
@@ -976,7 +988,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "Per-filter: the Apply/View discard dialog must be gone.")
         // applyFilter switches — a live protection change gated behind the same fresh-auth surface
         // as save/import (the guard must precede the switch call).
-        let applyBlock = try Self.sourceBlock(
+        let applyBlock = try sourceBlock(
             in: source,
             startingAt: "private func applyFilter(_ filter: Filter) {",
             endingBefore: "private func viewFilter(_ filter: Filter) {"
@@ -986,7 +998,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertLessThan(authIdx, switchIdx, "Fresh-auth must gate the filter switch.")
         XCTAssertTrue(applyBlock.contains("for: .filterEditing"))
         // viewFilter opens the tapped (non-active) filter's detail without loading it.
-        let viewBlock = try Self.sourceBlock(
+        let viewBlock = try sourceBlock(
             in: source,
             startingAt: "private func viewFilter(_ filter: Filter) {",
             endingBefore: "@ViewBuilder private var restoreDefaultsButton"
@@ -1011,14 +1023,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testNonActiveFilterViewIsDecoupledFromTheActiveFilter() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
 
         // PER-FILTER STORAGE: drafts are a dictionary keyed by filter id, with a computed proxy
         // (current = target ?? active) and an active-keyed accessor. This is what dissolves the
         // single-slot aliasing the #120/#121 guards worked around.
         XCTAssertTrue(app.contains("var filterEditDrafts: [String: FilterEditDraft] = [:]"))
         XCTAssertTrue(app.contains("var filterEditTargetID: String?"))
-        let proxy = try Self.sourceBlock(
+        let proxy = try sourceBlock(
             in: app,
             startingAt: "var filterEditDraft: FilterEditDraft? {",
             endingBefore: "var activeFilterDraft: FilterEditDraft? {"
@@ -1038,7 +1050,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // The detail baseline still substitutes the target's four fields (unchanged), and editing
         // seeds the draft from it.
-        let baseline = try Self.sourceBlock(
+        let baseline = try sourceBlock(
             in: app,
             startingAt: "private var filterDetailBaseline: AppConfiguration {",
             endingBefore: "var detailFilter: Filter {"
@@ -1051,7 +1063,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // beginViewingFilterDetail just points the page at a filter — no stale-draft drop, because
         // each filter's draft lives under its own key (opening B never touches A's draft).
-        let begin = try Self.sourceBlock(
+        let begin = try sourceBlock(
             in: app,
             startingAt: "func beginViewingFilterDetail(id: String?) {",
             endingBefore: "func endViewingFilterDetail() {"
@@ -1061,7 +1073,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // endViewingFilterDetail unifies active/non-active: drop a CLEAN draft, keep a DIRTY one in
         // its per-filter slot (resume on re-open), then stop targeting. No active/non-active branch.
-        let end = try Self.sourceBlock(
+        let end = try sourceBlock(
             in: app,
             startingAt: "func endViewingFilterDetail() {",
             endingBefore: "var isFilterEditing: Bool {"
@@ -1075,12 +1087,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertFalse(app.contains("filterActionDiscardsUnsavedDraft"))
         XCTAssertFalse(app.contains("resetNonActiveFilterDetailOnRootNavigation"))
         XCTAssertFalse(app.contains("cancelFilterEditingOnPageDisappear"))
-        let rootView = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootView = try readSource(.rootView)
         XCTAssertFalse(rootView.contains("resetNonActiveFilterDetailOnRootNavigation"))
 
         // Domain History edits the ACTIVE filter's keyed draft (activeFilterDraft) and refuses only
         // when the ACTIVE filter has an unsaved draft (a non-active filter's draft is irrelevant).
-        let stage = try Self.sourceBlock(
+        let stage = try sourceBlock(
             in: app,
             startingAt: "func stageDomainHistoryDomainAction(",
             endingBefore: "func removeAllowedDomainFromDraft("
@@ -1089,7 +1101,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(stage.contains("activeFilterDraft = FilterEditDraft(configuration: result.configuration)"))
 
         // deleteFilter just drops the deleted filter's keyed draft.
-        let delete = try Self.sourceBlock(
+        let delete = try sourceBlock(
             in: app,
             startingAt: "func deleteFilter(id: String) -> Bool {",
             endingBefore: "func restoreFiltersToDefault()"
@@ -1099,12 +1111,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // FiltersView: teardown still driven by the navigation binding (both MyListCover sites), the
         // self-healing onAppear re-assert + dismiss-on-stale are kept, and the discard dialogs +
         // PendingFilterAction are gone.
-        let filtersView = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let filtersView = try readSource(.filtersView)
         let teardownSites = filtersView.components(separatedBy: "if !presented { viewModel.endViewingFilterDetail() }").count - 1
         XCTAssertEqual(teardownSites, 2, "Both MyListCover navigationDestinations must tear down on dismissal.")
         XCTAssertFalse(filtersView.contains("PendingFilterAction"))
         XCTAssertFalse(filtersView.contains("Discard unsaved changes?"))
-        let myList = try Self.sourceBlock(
+        let myList = try sourceBlock(
             in: filtersView,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
@@ -1117,12 +1129,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testNonActiveFilterEditAppliesLibraryOnlyWithNoRecompile() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
 
         // The non-active save is a dedicated method (NOT the active prepareAndApplyFilterDraft
         // path): it returns a message on failure so the caller shows it inline rather than the
         // full-screen preparation cover.
-        let nonActive = try Self.sourceBlock(
+        let nonActive = try sourceBlock(
             in: app,
             startingAt: "func saveNonActiveFilterDraft() -> String? {",
             endingBefore: "// MARK: - Multi-filter library"
@@ -1149,24 +1161,32 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "A non-active library-only failure must not flip the global catalog/protection error flag.")
 
         // The detail page routes a non-active save to this method and shows its message inline.
-        let filtersView = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let saveChanges = try Self.sourceBlock(
+        let filtersView = try readSource(.filtersView)
+        let saveChanges = try sourceBlock(
             in: filtersView,
             startingAt: "private func saveChanges() {",
             endingBefore: "private enum BlockedDomainSheet"
         )
         XCTAssertTrue(saveChanges.contains("if viewModel.isViewingNonActiveFilter {"))
         XCTAssertTrue(saveChanges.contains("nonActiveSaveError = viewModel.saveNonActiveFilterDraft()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(app.contains("prepareFilterSnapshot"))
+        XCTAssertTrue(app.contains("persistSharedState"))
+        XCTAssertTrue(app.contains("notifyTunnelSnapshotUpdated"))
+        XCTAssertTrue(app.contains("isFilterPreparationScreenPresented"))
+        XCTAssertTrue(app.contains("catalogStatusIsError"))
     }
 
     func testPreparationCoverIsOriginScopedAndReSealClearsUploadMarker() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
         // Origin-scoped preparation cover: the model tracks which surface owns the shared cover,
         // set at the apply/switch entry points (not at staging, so it can't go stale).
         XCTAssertTrue(app.contains("var filterPreparationOrigin: FilterReviewOrigin"))
         XCTAssertTrue(app.contains("func prepareAndApplyFilterDraft(origin: FilterReviewOrigin"))
         XCTAssertTrue(app.contains("filterPreparationOrigin = origin"))
-        let switchBlock = try Self.sourceBlock(
+        let switchBlock = try sourceBlock(
             in: app,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
             endingBefore: "private func duplicateName(of name: String)"
@@ -1176,7 +1196,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Re-seal clears the upload marker so currentState() doesn't report a stale .synced after a
         // local change (Settings would otherwise claim the latest backup is already uploaded).
-        let resealBlock = try Self.sourceBlock(
+        let resealBlock = try sourceBlock(
             in: app,
             startingAt: "private func refreshLocalEncryptedBackupEnvelope()",
             endingBefore: "private func loadLocalEncryptedBackupEnvelope()"
@@ -1189,12 +1209,25 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "A local re-seal must clear the stale upload marker.")
         XCTAssertTrue(resealBlock.contains("loadEncryptedBackupState()"),
                       "And refresh the cached state so Settings reflects 'not yet uploaded'.")
+        // PST-5 (Codex #218): the refresh path must NOT downgrade a future-schema local envelope. When
+        // decrypt throws unsupportedSchemaVersion it must skip the reseal (return), not swallow it and
+        // overwrite the newer envelope with a schema-1 payload.
+        XCTAssertTrue(resealBlock.contains("catch BackupConfigurationPayloadError.unsupportedSchemaVersion"),
+                      "Re-seal must distinguish an unsupported (newer) schema and skip, not downgrade it.")
+        // PST-5 (Codex #218 round 2): a RESTORE that hits a newer-schema payload (correct unlock secret
+        // but undecodable schema) must surface a DISTINCT actionable error, not be mislabeled as a wrong
+        // device key / phrase / passkey. A dedicated case + the restore decrypt paths mapping to it.
+        XCTAssertTrue(app.contains("case unsupportedBackupSchema"),
+                      "A newer-schema restore needs its own actionable 'update the app' error.")
+        XCTAssertTrue(app.contains("throw EncryptedBackupError.unsupportedBackupSchema"),
+                      "The restore decrypt paths must map unsupportedSchemaVersion to that distinct error, " +
+                      "before the generic invalid-unlock catch.")
 
         // An in-flight upload must version-check the local envelope before recording .synced, so a
         // re-seal during the upload can't leave a stale "uploaded" marker for the older envelope.
         XCTAssertTrue(app.contains("recordEncryptedBackupUploadIfStillCurrent("),
                       "Upload must only record the marker if the uploaded envelope is still current.")
-        let uploadGuard = try Self.sourceBlock(
+        let uploadGuard = try sourceBlock(
             in: app,
             startingAt: "private func recordEncryptedBackupUploadIfStillCurrent(",
             endingBefore: "private func scheduleAutomaticBackupAfterConfigurationChange()"
@@ -1204,9 +1237,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Domain History applies through the shared review flow with its own origin, and its cover
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.
-        let review = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
+        let review = try readSource(.filterReviewFlowView)
         XCTAssertTrue(review.contains("prepareAndApplyFilterDraft(origin: origin)"))
-        let diagnostics = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
+        let diagnostics = try readSource(.diagnosticsView)
         XCTAssertTrue(diagnostics.contains("viewModel.filterPreparationOrigin == .domainHistory"),
                       "The Domain History cover must gate on its own origin.")
 
@@ -1223,7 +1256,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testFrozenFiltersAreReadOnlyAndEditModeIsAuthGated() throws {
-        let source = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let source = try readSource(.filtersView)
         // Frozen (lapsed-Plus) filters are read-only: delete is gated and rename is refused, but
         // they remain VIEWABLE — the dialog drops Apply and opens a read-only View (Codex r6).
         XCTAssertTrue(source.contains("&& !viewModel.isFilterFrozen(filter.id)"),
@@ -1235,7 +1268,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "Apply must be hidden for frozen filters.")
         // MyListCover renders a frozen filter read-only: no Edit affordance, and beginEditing is
         // guarded.
-        let myList = try Self.sourceBlock(
+        let myList = try sourceBlock(
             in: source,
             startingAt: "private struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
@@ -1250,8 +1283,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // the draft on appear (read-only view) and the save path must report it, not silently no-op.
         XCTAssertTrue(myList.contains("if isReadOnly, viewModel.filterEditDraft != nil {"),
                       "A now-frozen filter must drop its preserved draft on appear.")
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let save = try Self.sourceBlock(
+        let app = try readSource(.appViewModel)
+        let save = try sourceBlock(
             in: app,
             startingAt: "func saveNonActiveFilterDraft() -> String? {",
             endingBefore: "// MARK: - Multi-filter library"
@@ -1261,7 +1294,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Entering library edit mode (add/rename/delete) is gated on the filter-editing
         // surface, like My filter's edit entry point — auth must precede isEditing = true.
-        let editButton = try Self.sourceBlock(in: source, startingAt: "accessibilityLabel: \"Edit\") {", endingBefore: ".navigationDestination(")
+        let editButton = try sourceBlock(in: source, startingAt: "accessibilityLabel: \"Edit\") {", endingBefore: ".navigationDestination(")
         let authIdx = try XCTUnwrap(editButton.range(of: "requireAuthentication(")?.lowerBound)
         let enterIdx = try XCTUnwrap(editButton.range(of: "isEditing = true")?.lowerBound)
         XCTAssertLessThan(authIdx, enterIdx, "Auth must gate entering edit mode.")
@@ -1269,28 +1302,4 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     // MARK: - Helpers
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
-    }
 }

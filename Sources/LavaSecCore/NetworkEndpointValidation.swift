@@ -36,10 +36,18 @@ enum NetworkEndpointValidator {
             throw NetworkEndpointValidationError.credentialsNotAllowed
         }
 
-        guard let host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard var host = components.host?.trimmingCharacters(in: .whitespacesAndNewlines),
               !host.isEmpty
         else {
             return
+        }
+
+        // URLComponents returns an IPv6-literal host WITH its brackets ([2606:4700::1111])
+        // on current Foundation. Unstripped, `ipAddressScope` cannot parse it, so every
+        // IPv6-literal host — public or private — fell through to DomainName.normalize and
+        // was rejected with a misleading error, and the scope gate below never ran for IPv6.
+        if host.hasPrefix("["), host.hasSuffix("]") {
+            host = String(host.dropFirst().dropLast())
         }
 
         if isLocalhostName(host) {
@@ -47,7 +55,7 @@ enum NetworkEndpointValidator {
         }
 
         if let scope = ipAddressScope(host) {
-            if scope != .publicAddress(scope.version) {
+            if !scope.isPublicAddress {
                 throw NetworkEndpointValidationError.privateNetworkNotAllowed
             }
             return
@@ -86,6 +94,28 @@ enum NetworkEndpointValidator {
         }
 
         return scope.version == .ipv4 ? ([value], []) : ([], [value])
+    }
+
+    // SEC-1 connect-time gate: classify a RESOLVED peer address by its raw network-order
+    // bytes (an A/AAAA answer from `getaddrinfo`, or an IP literal's `rawValue`) as
+    // globally-routable public unicast, reusing the SAME `IPAddressScope` map —
+    // including the IPv4-mapped and NAT64-embedded borrowing — that
+    // `validatePublicSourceURL` applies to IP-LITERAL hosts. This is what lets the fetcher
+    // refuse a hostname that DNS-resolves into a private/loopback/reserved address (the
+    // residual `validatePublicSourceURL` cannot see, because it only classifies literals).
+    // Wrong-length input fails closed (treated as non-public).
+    static func isPublicResolvedIPv4(octets: [UInt8]) -> Bool {
+        guard octets.count == 4 else {
+            return false
+        }
+        return IPAddressScope(ipv4Octets: octets).isPublicAddress
+    }
+
+    static func isPublicResolvedIPv6(bytes: [UInt8]) -> Bool {
+        guard bytes.count == 16 else {
+            return false
+        }
+        return IPAddressScope(ipv6Bytes: bytes).isPublicAddress
     }
 
     private static func isLocalhostName(_ value: String) -> Bool {
@@ -157,11 +187,16 @@ private enum IPAddressScope: Equatable {
             self = .linkLocal(.ipv4)
         } else if (224...239).contains(first) {
             self = .multicast(.ipv4)
-        } else if first == 255
-            || (first == 100 && (64...127).contains(second))
-            || (first == 192 && second == 0 && (octets[2] == 0 || octets[2] == 2))
-            || (first == 198 && second == 51 && octets[2] == 100)
-            || (first == 203 && second == 0 && octets[2] == 113) {
+        } else if (240...255).contains(first)                                        // 240.0.0.0/4 Class E "reserved" (incl. 255.255.255.255 limited broadcast)
+            || (first == 100 && (64...127).contains(second))                          // 100.64.0.0/10 CGNAT (RFC 6598)
+            || (first == 192 && second == 0 && (octets[2] == 0 || octets[2] == 2))    // 192.0.0.0/24 IETF protocol assignments + 192.0.2.0/24 TEST-NET-1
+            || (first == 192 && second == 88 && octets[2] == 99)                      // 192.88.99.0/24 6to4 relay anycast (RFC 7526, deprecated)
+            || (first == 198 && (18...19).contains(second))                           // 198.18.0.0/15 benchmarking (RFC 2544)
+            || (first == 198 && second == 51 && octets[2] == 100)                     // 198.51.100.0/24 TEST-NET-2
+            || (first == 203 && second == 0 && octets[2] == 113) {                    // 203.0.113.0/24 TEST-NET-3
+            // Special-purpose ranges that are NOT globally-routable public unicast — they must
+            // fail the isPublicAddress gate so PinnedPublicHTTPSFetcher never pins/connects to a
+            // hostname that resolves into one (SSRF / DNS-rebinding defense in depth).
             self = .reserved(.ipv4)
         } else {
             self = .publicAddress(.ipv4)
@@ -173,6 +208,40 @@ private enum IPAddressScope: Equatable {
             self = .unspecified(.ipv6)
         } else if bytes.dropLast().allSatisfy({ $0 == 0 }) && bytes.last == 1 {
             self = .loopback(.ipv6)
+        } else if bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
+            // IPv4-mapped (::ffff:a.b.c.d): borrow the embedded IPv4 address's scope KIND so
+            // a mapped loopback/private literal cannot masquerade as a public IPv6 address
+            // (an SSRF-class dodge once bracketed URL hosts classify at all), but keep the
+            // .ipv6 version — the literal still has IPv6 syntax and must stay in the IPv6
+            // bucket when `dnsResolverAddresses` splits by family.
+            self = IPAddressScope(ipv4Octets: Array(bytes[12...15])).withVersion(.ipv6)
+        } else if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b,
+                  bytes[4..<12].allSatisfy({ $0 == 0 }) {
+            // NAT64 well-known prefix (64:ff9b::/96, RFC 6052): on an IPv6-only/NAT64
+            // network this literal RESOLVES to its embedded IPv4 target, so a NAT64-mapped
+            // loopback/private literal is a private-network fetch dressed as public IPv6.
+            // Borrow the embedded scope, mirroring DeviceDNSFallbackPolicy's low-32-bit
+            // treatment of the same prefix.
+            self = IPAddressScope(ipv4Octets: Array(bytes[12...15])).withVersion(.ipv6)
+        } else if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b,
+                  bytes[4] == 0x00, bytes[5] == 0x01 {
+            // NAT64 LOCAL-USE prefix (64:ff9b:1::/48, RFC 8215): reserved for a site's own
+            // IPv4/IPv6 translation, so on a network that routes it this literal resolves to
+            // whatever the LOCAL translator maps — the embedded IPv4 (at a prefix-dependent
+            // offset) is untrustworthy, and even an embedded-public-looking address could be
+            // locally remapped into private space. Unlike the globally-defined /96 there is no
+            // trustworthy "public" address here. Classify as PRIVATE, not reserved: that fails
+            // the isPublicAddress fetch gate so PinnedPublicHTTPSFetcher never pins/connects to
+            // it (SSRF / DNS-rebinding defense), while keeping it a usable local resolver —
+            // matching DeviceDNSFallbackPolicy, which keeps 64:ff9b:1:: reachable via CLAT.
+            self = .privateAddress(.ipv6)
+        } else if bytes[0..<12].allSatisfy({ $0 == 0 }) {
+            // IPv4-compatible IPv6 (::a.b.c.d, RFC 4291 §2.5.5.1 — deprecated): the high 96 bits
+            // are zero with NO 0xffff mapped marker. `::` (unspecified) and `::1` (loopback) are
+            // already handled above, so anything reaching here embeds a non-trivial IPv4 address.
+            // Borrow its scope exactly like the mapped/NAT64 cases so ::127.0.0.1 / ::10.0.0.1 /
+            // ::192.168.0.1 can't masquerade as public IPv6 and slip past the fetch gate.
+            self = IPAddressScope(ipv4Octets: Array(bytes[12...15])).withVersion(.ipv6)
         } else if bytes[0] == 0xff {
             self = .multicast(.ipv6)
         } else if bytes[0] & 0xfe == 0xfc {
@@ -199,6 +268,18 @@ private enum IPAddressScope: Equatable {
         }
     }
 
+    private func withVersion(_ version: IPAddressVersion) -> IPAddressScope {
+        switch self {
+        case .publicAddress: .publicAddress(version)
+        case .privateAddress: .privateAddress(version)
+        case .loopback: .loopback(version)
+        case .linkLocal: .linkLocal(version)
+        case .multicast: .multicast(version)
+        case .unspecified: .unspecified(version)
+        case .reserved: .reserved(version)
+        }
+    }
+
     var isUsableResolverAddress: Bool {
         switch self {
         case .publicAddress, .privateAddress:
@@ -206,5 +287,12 @@ private enum IPAddressScope: Equatable {
         case .loopback, .linkLocal, .multicast, .unspecified, .reserved:
             return false
         }
+    }
+
+    /// Globally-routable public unicast — the only scope a blocklist source (initial URL or
+    /// redirect target) may be fetched from. Everything else (private, loopback, link-local,
+    /// multicast, unspecified, reserved) is an SSRF target and refused.
+    var isPublicAddress: Bool {
+        self == .publicAddress(version)
     }
 }

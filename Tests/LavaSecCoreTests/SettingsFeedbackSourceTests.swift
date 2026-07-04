@@ -3,14 +3,13 @@ import XCTest
 
 final class SettingsFeedbackSourceTests: XCTestCase {
     func testRejectPanelUsesLavaOrangeBorderWhileInfoPanelKeepsDefaultBorder() throws {
-        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
-        let reviewSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
-        let infoPanelBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaComponents)
+        let reviewSource = try readSource(.filterReviewFlowView)
+        let infoPanelBlock = try sourceBlock(
             in: rootSource,
-            startingAt: "struct LavaInfoPanel: View",
-            endingBefore: "*** end ***"
+            startingAt: "struct LavaInfoPanel: View"
         )
-        let rejectPanelBlock = try Self.sourceBlock(
+        let rejectPanelBlock = try sourceBlock(
             in: reviewSource,
             startingAt: "struct DomainRejectPanel: View",
             endingBefore: "struct FilterConfirmationSheet: View"
@@ -22,8 +21,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSharedMultilineTextInputAlignsFreeformContentWithRowLabel() throws {
-        let rootSource = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
-        let editorRowBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaComponents)
+        let editorRowBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaTextEditorInputRow: View",
             endingBefore: "extension View"
@@ -36,9 +35,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSettingsRootUsesNativeLargeTitleScrollAndDropsFreeProtectionPanel() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let settingsBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let rootSource = try readSource(.lavaScaffold)
+        let settingsBlock = try sourceBlock(
             in: source,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct AccountSettingsView: View"
@@ -58,8 +57,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSupportRowsUseHelpAndFeedbackCopy() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let settingsBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let settingsBlock = try sourceBlock(
             in: source,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct AccountSettingsView: View"
@@ -79,18 +78,18 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testVersionNerdStatsAppSectionUsesTableRowsWithBuildAndPlatform() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let versionInfoBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let versionInfoBlock = try sourceBlock(
             in: source,
             startingAt: "private enum VersionInfo",
             endingBefore: "private struct PhoneQASettingsView: View"
         )
-        let nerdStatsBlock = try Self.sourceBlock(
+        let nerdStatsBlock = try sourceBlock(
             in: source,
             startingAt: "private struct VersionNerdStatsView: View",
             endingBefore: "private func refreshTunnelHealthSample() async"
         )
-        let appSectionBlock = try Self.sourceBlock(
+        let appSectionBlock = try sourceBlock(
             in: nerdStatsBlock,
             startingAt: "LavaSectionGroup(\"App\")",
             endingBefore: "LavaSectionGroup(\n                \"Tunnel Health\""
@@ -107,10 +106,14 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(appSectionBlock.contains("VersionNerdStatRow"))
         XCTAssertFalse(versionInfoBlock.contains("appBuild"))
         XCTAssertFalse(appSectionBlock.contains("systemImage: \"app.badge\""))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("infoValue"))
     }
 
     func testSettingsSubpagesUseSharedSubpageScaffold() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let source = try readSource(.settingsView)
 
         XCTAssertTrue(source.contains("private struct SettingsSubpageContent<Content: View>: View"))
         XCTAssertTrue(source.contains("private enum SettingsSubpageLayout"))
@@ -120,11 +123,15 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
         XCTAssertFalse(source.contains("LavaScreenContent(\n            spacing: 24"))
         XCTAssertTrue(source.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaScreenContent"))
     }
 
     func testScreenContentScrollAnchorDoesNotAddTopSpacing() throws {
-        let source = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let screenContentBlock = try Self.sourceBlock(
+        let source = try readSource(.lavaScaffold)
+        let screenContentBlock = try sourceBlock(
             in: source,
             startingAt: "struct LavaScreenContent<Content: View>: View",
             endingBefore: "struct LavaSheetScaffold"
@@ -140,8 +147,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackFlowUsesThreeStepsAndPrivacyFirstCopy() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
@@ -171,13 +178,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackDetailsStepUsesFlatRowsAndTextOnlyActions() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let contextPageBlock = try Self.sourceBlock(
+        let contextPageBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var contextPage: some View",
             endingBefore: "private var reviewPage: some View"
@@ -216,17 +223,21 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("Text(\"Review\".lavaLocalized)"))
         XCTAssertFalse(feedbackBlock.contains("Label(\""))
         XCTAssertFalse(feedbackBlock.contains("nextSystemImage"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaCondensedList"))
     }
 
     func testFeedbackInputsHaveExplicitDetailsCounterAndImplicitCaps() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let components = try Self.source(named: "LavaComponents.swift", in: "LavaSecApp/LavaDesignSystem")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let components = try readSource(.lavaComponents)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let contextPageBlock = try Self.sourceBlock(
+        let contextPageBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var contextPage: some View",
             endingBefore: "private var reviewPage: some View"
@@ -238,7 +249,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(contextPageBlock.contains("if newValue.count > BugReportInputLimits.affectedSite"))
         XCTAssertTrue(contextPageBlock.contains("if newValue.count > BugReportInputLimits.contactEmail"))
 
-        let editorRowBlock = try Self.sourceBlock(
+        let editorRowBlock = try sourceBlock(
             in: components,
             startingAt: "struct LavaTextEditorInputRow: View",
             endingBefore: "extension View"
@@ -260,18 +271,18 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackReviewStepUsesSeparatePanelsAndBackAction() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let reviewPageBlock = try Self.sourceBlock(
+        let reviewPageBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var reviewPage: some View",
             endingBefore: "private var thankYouPage: some View"
         )
-        let bottomActionsBlock = try Self.sourceBlock(
+        let bottomActionsBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var feedbackBottomActionButtons: some View",
             endingBefore: "private func goToStep(_ step: BugReportStep)"
@@ -307,7 +318,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(bottomActionsBlock.contains("Text(\"Cancel\".lavaLocalized)"))
         XCTAssertFalse(bottomActionsBlock.contains("requestDismiss()"))
 
-        let reviewRowBlock = try Self.sourceBlock(
+        let reviewRowBlock = try sourceBlock(
             in: source,
             startingAt: "private struct BugReportReviewRow: View",
             endingBefore: "private struct BugReportDiagnosticsInfoView"
@@ -315,11 +326,16 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(reviewRowBlock.contains("LavaTextInputRow(title: label)"))
         XCTAssertFalse(reviewRowBlock.contains("HStack(alignment: .center, spacing: 12)"))
         XCTAssertFalse(reviewRowBlock.contains(".frame(width: 116"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("lavaLocalized"))
+        XCTAssertTrue(source.contains("requestDismiss"))
     }
 
     func testDeviceDNSPresetOffersSelectableEncryptedFallback() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let resolverBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let resolverBlock = try sourceBlock(
             in: source,
             startingAt: "struct DNSResolverSettingsView: View",
             endingBefore: "struct PrivacyDataSettingsView: View"
@@ -354,10 +370,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testClearingCustomDoQFallbackKeepsEncryptedDefault() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
+        let source = try readSource(.settingsView)
         // The fallback picker's clear preset uses a Mullvad base (the primary section's
         // uses Google), so this start marker uniquely targets the fallback clear path.
-        let clearBlock = try Self.sourceBlock(
+        let clearBlock = try sourceBlock(
             in: source,
             startingAt: "DNSResolverPreset.customID ? DNSResolverPreset.mullvad : selectedBaseResolver",
             endingBefore: "private var customResolverHasChanges"
@@ -372,13 +388,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackSubmittingStateStaysInsideSubmitButton() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let statusBlock = try Self.sourceBlock(
+        let statusBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var bugReportStatusView: some View",
             endingBefore: "private func selectIssueType(_ type: BugReportIssueType)"
@@ -388,21 +404,25 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("case .sending:\n            \"Submitting\""))
         XCTAssertFalse(statusBlock.contains("case .sending:\n            LavaPlainCard"))
         XCTAssertFalse(feedbackBlock.contains("Sending feedback..."))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaPlainCard"))
     }
 
     func testFeedbackThankYouPageUsesMascotCopyIDAndNoClose() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let thankYouBlock = try Self.sourceBlock(
+        let thankYouBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private var thankYouPage: some View",
             endingBefore: "private var feedbackBottomActionBar: some View"
         )
-        let thankYouMascotBlock = try Self.sourceBlock(
+        let thankYouMascotBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private struct FeedbackThankYouMascot: View",
             endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
@@ -437,11 +457,15 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("withTransaction(transaction)"))
         XCTAssertTrue(feedbackBlock.contains("didCopySubmittedReportID = UIPasteboard.general.string == submittedReportID"))
         XCTAssertFalse(thankYouBlock.contains("LavaInfoPanel("))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaInfoPanel"))
     }
 
     func testFeedbackStepActionsArePinnedAndUseExpectedSecondaryButtons() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
@@ -458,14 +482,14 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackTypingReusesPreparedDiagnosticsInsteadOfRebuildingPerKeystroke() throws {
-        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let settingsSource = try readSource(.settingsView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let feedbackBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let inputChangedBlock = try Self.sourceBlock(
+        let inputChangedBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private func reportInputChanged()",
             endingBefore: "private func submitReport()"
@@ -482,12 +506,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         // The view model captures the heavy inputs once in prepareBugReport and
         // the cheap path reuses them without another refreshReports()/file read.
-        let prepareBlock = try Self.sourceBlock(
+        let prepareBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func prepareBugReport(context: BugReportContext)",
             endingBefore: "func refreshBugReportDraftContext(context: BugReportContext)"
         )
-        let refreshContextBlock = try Self.sourceBlock(
+        let refreshContextBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func refreshBugReportDraftContext(context: BugReportContext)",
             endingBefore: "func sendBugReport(context: BugReportContext) async"
@@ -500,16 +524,20 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(refreshContextBlock.contains("refreshReports()"))
         XCTAssertTrue(appViewModelSource.contains("private struct PreparedBugReportInputs"))
         XCTAssertTrue(appViewModelSource.contains("debugLogEntries: inputs.debugLogEntries"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settingsSource.contains("refreshDraft"))
     }
 
     func testFeedbackStepProgressUsesClickableSimpleNumberText() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let stepProgressBlock = try Self.sourceBlock(
+        let stepProgressBlock = try sourceBlock(
             in: source,
             startingAt: "private struct BugReportStepProgressView: View",
             endingBefore: "private struct BugReportPreviewSectionCard: View"
@@ -539,14 +567,14 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackFlowGuardsDirtyDismissalInSettingsAndRageShakeSheet() throws {
-        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
-        let feedbackBlock = try Self.sourceBlock(
+        let settingsSource = try readSource(.settingsView)
+        let rootSource = try readSource(.rootView)
+        let feedbackBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct LegalNoticesView: View"
         )
-        let rageShakeSheetBlock = try Self.sourceBlock(
+        let rageShakeSheetBlock = try sourceBlock(
             in: rootSource,
             startingAt: "private struct BugReportSheetView: View",
             endingBefore: "#Preview"
@@ -576,7 +604,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         // lock that lands mid-sample can't refresh the draft above the lock.
         XCTAssertTrue(feedbackBlock.contains("guard !Task.isCancelled, !isAppUnlockMaskVisible else { return }"))
 
-        let maskBlock = try Self.sourceBlock(
+        let maskBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct BugReportSheetLockMask",
             endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
@@ -594,13 +622,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testAccountPageRemovesFreeAccountInfoPanelAndUsesStandardAccountSheetChrome() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let accountBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let accountBlock = try sourceBlock(
             in: source,
             startingAt: "private struct AccountSettingsView: View",
             endingBefore: "private struct AppleSignInStatusIcon: View"
         )
-        let sheetBlock = try Self.sourceBlock(
+        let sheetBlock = try sourceBlock(
             in: source,
             startingAt: "private struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
@@ -618,13 +646,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSettingsModalSingleGlyphToolbarsUseNativeActions() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let passcodeBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let passcodeBlock = try sourceBlock(
             in: source,
             startingAt: "private struct SecurityPasscodeSetupView: View",
             endingBefore: "private enum LocalLogSetting"
         )
-        let feedbackBlock = try Self.sourceBlock(
+        let feedbackBlock = try sourceBlock(
             in: source,
             startingAt: "struct BugReportSettingsView: View",
             endingBefore: "private struct FeedbackThankYouMascot"
@@ -641,8 +669,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testEncryptedBackupSectionUsesInfoPanelAndAutomaticBackupToggle() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let accountBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let accountBlock = try sourceBlock(
             in: source,
             startingAt: "private struct AccountSettingsView: View",
             endingBefore: "private struct AppleSignInStatusIcon: View"
@@ -678,7 +706,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "backupMaintenanceButton(.disable)"
         ]))
 
-        let optionControlBlock = try Self.sourceBlock(
+        let optionControlBlock = try sourceBlock(
             in: source,
             startingAt: "private struct BackupOptionControl: View",
             endingBefore: "private struct AppleSignInStatusIcon: View"
@@ -689,20 +717,24 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "Text(detail.lavaLocalized)",
             ".lavaQuietNoteText()"
         ]))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("automaticBackupBinding"))
     }
 
     func testEncryptedBackupStateRecordsLastUploadAndSchedulesAutomaticBackupAfterChanges() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         // EncryptedBackupState moved to LavaSecCore (its copy + state derivation
         // are now covered behaviorally by EncryptedBackupStateTests); pin the
         // synced-case shape and timestamp formatting against the core file.
-        let stateSource = try Self.source(named: "EncryptedBackupState.swift", in: "Sources/LavaSecCore")
-        let preferenceBlock = try Self.sourceBlock(
+        let stateSource = try readSource(.encryptedBackupState)
+        let preferenceBlock = try sourceBlock(
             in: source,
             startingAt: "func setAutomaticBackupEnabled",
             endingBefore: "var dnsResolverSummaryText: String"
         )
-        let uploadBlock = try Self.sourceBlock(
+        let uploadBlock = try sourceBlock(
             in: source,
             startingAt: "private func uploadEncryptedBackup(",
             endingBefore: "private func uploadPendingEncryptedBackupIfPossible()"
@@ -723,8 +755,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testBugReportUsesGenericResolverNameInsteadOfCustomDisplayName() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let bugReportBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let bugReportBlock = try sourceBlock(
             in: source,
             startingAt: "private func makeBugReportBundle(context: BugReportContext) -> BugReportBundle",
             endingBefore: "private func submitBugReport"
@@ -735,8 +767,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testPrivacyDataShowsKeepLocalLogsSectionAndInfoPanel() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let privacyBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let privacyBlock = try sourceBlock(
             in: source,
             startingAt: "struct PrivacyDataSettingsView: View",
             endingBefore: "private enum LocalLogSetting"
@@ -767,11 +799,15 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(privacyBlock.contains("\"Privacy Promise\""))
         XCTAssertFalse(privacyBlock.contains("privacyPromiseFooter"))
         XCTAssertFalse(privacyBlock.contains("title: \"Filtering happens locally\""))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("SettingsActionRow"))
     }
 
     func testPrivacyDataShowsInlineClearOptionsBehindToggle() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let privacyBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let privacyBlock = try sourceBlock(
             in: source,
             startingAt: "struct PrivacyDataSettingsView: View",
             endingBefore: "private enum LocalLogSetting"
@@ -814,11 +850,15 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(privacyBlock.contains("route: .clearLocalLogs"))
         XCTAssertFalse(source.contains("private struct ClearLocalLogsSettingsView"))
         XCTAssertFalse(source.contains("case clearLocalLogs"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("SettingsNavigationRow"))
     }
 
     func testPrivacyDataSettingsSummaryNamesEnabledLocalLogs() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let localLogsBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let localLogsBlock = try sourceBlock(
             in: source,
             startingAt: "var localLogsStatusText: String",
             endingBefore: "var planStatusText: String"
@@ -837,8 +877,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDNSResolverSettingsShowsBaseResolversAndTransportSelectorOnly() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let resolverBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let resolverBlock = try sourceBlock(
             in: source,
             startingAt: "struct DNSResolverSettingsView: View",
             endingBefore: "struct PrivacyDataSettingsView: View"
@@ -983,7 +1023,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(resolverBlock.contains("Lava makes block decisions locally."))
         XCTAssertFalse(resolverBlock.contains("Rows marked (DoH)"))
 
-        let customTextFieldBlock = try Self.sourceBlock(
+        let customTextFieldBlock = try sourceBlock(
             in: resolverBlock,
             startingAt: "private struct CustomResolverTextField: View",
             endingBefore: "private struct ResolverTransportControl: View"
@@ -995,7 +1035,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(customTextFieldBlock.contains("isMultiline"))
         XCTAssertFalse(customTextFieldBlock.contains("TextEditor(text: $text)"))
 
-        let resolverSummaryBlock = try Self.sourceBlock(
+        let resolverSummaryBlock = try sourceBlock(
             in: resolverBlock,
             startingAt: "private func resolverAddressSummary",
             endingBefore: "private enum CustomResolverDiscardAction"
@@ -1003,7 +1043,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(resolverSummaryBlock.contains("let doqEndpointAddresses = preset.doqEndpoints.map(\\.displayAddress)"))
         XCTAssertTrue(resolverSummaryBlock.contains("return doqEndpointAddresses.joined(separator: \", \")"))
 
-        let canSaveBlock = try Self.sourceBlock(
+        let canSaveBlock = try sourceBlock(
             in: resolverBlock,
             startingAt: "private var canSaveCustomResolver: Bool",
             endingBefore: "private var canClearCustomResolver: Bool"
@@ -1011,14 +1051,14 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(canSaveBlock.contains("customResolverDraftIsCleared"))
         XCTAssertFalse(canSaveBlock.contains("customResolverDraftIsValid"))
 
-        let clearDraftsBlock = try Self.sourceBlock(
+        let clearDraftsBlock = try sourceBlock(
             in: resolverBlock,
             startingAt: "private func clearCustomResolverDrafts()",
             endingBefore: "private func requestCustomResolverDismiss()"
         )
         XCTAssertFalse(clearDraftsBlock.contains("focusedCustomResolverField = nil"))
 
-        let toggleRowBlock = try Self.sourceBlock(
+        let toggleRowBlock = try sourceBlock(
             in: source,
             startingAt: "private struct ResolverToggleRow: View",
             endingBefore: "private struct ResolverOptionControl: View"
@@ -1026,7 +1066,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(toggleRowBlock.contains("let detail: String"))
         XCTAssertFalse(toggleRowBlock.contains("Text(detail)"))
 
-        let optionControlBlock = try Self.sourceBlock(
+        let optionControlBlock = try sourceBlock(
             in: source,
             startingAt: "private struct ResolverOptionControl: View",
             endingBefore: "struct PrivacyDataSettingsView: View"
@@ -1038,7 +1078,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             ".lavaQuietNoteText()"
         ]))
 
-        let transportControlBlock = try Self.sourceBlock(
+        let transportControlBlock = try sourceBlock(
             in: source,
             startingAt: "private struct ResolverTransportControl: View",
             endingBefore: "private struct ResolverOptionControl: View"
@@ -1049,11 +1089,17 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(transportControlBlock.contains("Text(detail.lavaLocalized)"))
         XCTAssertTrue(transportControlBlock.contains(".lavaQuietNoteText()"))
         XCTAssertFalse(transportControlBlock.contains("Text(title)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("customResolverDraft"))
+        XCTAssertTrue(source.contains("configuredValue"))
+        XCTAssertTrue(source.contains("customResolverDraftIsValid"))
     }
 
     func testCustomResolverNameChangesPersistWithoutReloadingTunnel() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let nameBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let nameBlock = try sourceBlock(
             in: source,
             startingAt: "func setCustomResolverName(_ rawValue: String)",
             endingBefore: "private func persistResolverSettings"
@@ -1062,11 +1108,17 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(nameBlock.contains("try persistConfigurationOnly()"))
         XCTAssertFalse(nameBlock.contains("persistResolverSettings(activity: .changeResolver)"))
         XCTAssertFalse(nameBlock.contains("sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaSecAppGroup"))
+        XCTAssertTrue(source.contains("reloadConfigurationMessage"))
+        XCTAssertTrue(source.contains("sendTunnelMessage"))
     }
 
     func testDNSResolverSummaryUsesShortFallbackCopy() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let summaryBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let summaryBlock = try sourceBlock(
             in: source,
             startingAt: "var dnsResolverSummaryText: String",
             endingBefore: "var deviceDNSFallbackDetailText: String"
@@ -1114,8 +1166,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDomainHistoryAddsPullToRefreshUsingActivitySampling() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -1127,8 +1179,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testScreenContentUsesNativeRefreshableInsteadOfCustomPullRefresh() throws {
-        let source = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let screenContentBlock = try Self.sourceBlock(
+        let source = try readSource(.lavaScaffold)
+        let screenContentBlock = try sourceBlock(
             in: source,
             startingAt: "struct LavaScreenContent<Content: View>: View",
             endingBefore: "struct LavaSheetScaffold"
@@ -1149,13 +1201,13 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDNSResolverRowsUseTransportAddressesAndCondensedCustomRow() throws {
-        let source = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let resolverBlock = try Self.sourceBlock(
+        let source = try readSource(.settingsView)
+        let resolverBlock = try sourceBlock(
             in: source,
             startingAt: "struct DNSResolverSettingsView: View",
             endingBefore: "private struct ResolverToggleRow: View"
         )
-        let customRowBlock = try Self.sourceBlock(
+        let customRowBlock = try sourceBlock(
             in: source,
             startingAt: "private struct CustomDNSResolverRow: View",
             endingBefore: "private struct ResolverToggleRow: View"
@@ -1186,34 +1238,6 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(customRowBlock.contains("isInactive: !isEnabled"))
         XCTAssertFalse(customRowBlock.contains(".font(.subheadline.weight(.semibold))"))
         XCTAssertFalse(customRowBlock.contains("Text(\"Use your own resolver.\")"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
     }
 }
 

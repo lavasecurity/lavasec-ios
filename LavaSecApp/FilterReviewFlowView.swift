@@ -149,6 +149,7 @@ struct FilterReviewChangeRow: View {
                 .font(.body.weight(.bold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
 
             Text(localizesTitle ? title.lavaLocalized : title)
                 .font(.body.weight(.semibold))
@@ -162,6 +163,12 @@ struct FilterReviewChangeRow: View {
         .padding(.vertical, 12)
         .frame(minHeight: 56)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The +/- glyph is the only visual add/remove cue and is color-tinted, so expose the
+        // action as a stable localized label ("Added"/"Removed") with the item name as the value —
+        // otherwise VoiceOver would read only the name and lose the add-vs-remove distinction.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text((symbol == "+" ? "Added" : "Removed").lavaLocalized))
+        .accessibilityValue(Text(localizesTitle ? title.lavaLocalized : title))
     }
 
     private var systemImage: String {
@@ -198,6 +205,7 @@ struct FilterPreparationScreen: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                             .foregroundStyle(LavaStyle.safeGreen)
+                            .accessibilityHidden(true)
                         PreparationTickerTitle("Success")
                     } else {
                         SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
@@ -212,11 +220,13 @@ struct FilterPreparationScreen: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                         .foregroundStyle(LavaStyle.lavaOrange)
+                        .accessibilityHidden(true)
 
                     VStack(spacing: 10) {
                         Text("We couldn't update your filter")
                             .font(.title.bold())
                             .multilineTextAlignment(.center)
+                            .accessibilityAddTraits(.isHeader)
                         Text(message.lavaLocalized)
                             .lavaBodySupportingText()
                             .multilineTextAlignment(.center)
@@ -268,6 +278,36 @@ struct FilterPreparationScreen: View {
                 Spacer()
             }
             .padding(24)
+        }
+        .onAppear {
+            // A validation failure caught before any progress sets `.failed` and *then* presents
+            // this cover (AppViewModel.prepareAndApplyFilterDraft / switchToFilter), so the screen
+            // can mount already-terminal — `.onChange` would never fire for that state. Announce
+            // whatever terminal outcome is already on screen at mount; `.onChange` covers the rest.
+            announceFilterPreparationOutcome(viewModel.filterPreparationState)
+        }
+        .onChange(of: viewModel.filterPreparationState) { _, newState in
+            // The result glyph / ticker title change in place inside the already-presented cover,
+            // so VoiceOver does not move focus to them on its own. `.onChange` fires only on a
+            // DISTINCT state, so a terminal outcome speaks exactly once (not on each progress tick,
+            // and not again when the state later resets to `.idle`).
+            announceFilterPreparationOutcome(newState)
+        }
+    }
+
+    /// Speak a terminal prepare/apply outcome to VoiceOver. A no-op for non-terminal states, so it
+    /// is safe to call from both `.onAppear` (the state already set at mount) and `.onChange` (later
+    /// transitions): a terminal state is distinct, so exactly one of the two announces it — never both.
+    private func announceFilterPreparationOutcome(_ state: FilterPreparationState) {
+        switch state {
+        case .preparing(let progress, _) where progress >= 1:
+            LavaAccessibilityAnnouncer.announce("Filters updated.".lavaLocalized)
+        case .failed(let message):
+            LavaAccessibilityAnnouncer.announce(
+                "We couldn't update your filter".lavaLocalized + " " + message.lavaLocalized
+            )
+        default:
+            break
         }
     }
 }

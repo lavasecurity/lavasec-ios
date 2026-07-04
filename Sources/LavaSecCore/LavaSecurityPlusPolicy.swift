@@ -3,6 +3,7 @@ import Foundation
 public enum LavaSecurityPlusPlanKind: String, CaseIterable, Codable, Sendable {
     case monthly
     case yearly
+    case yearlyPaidMonthly
 }
 
 public struct LavaSecurityPlusPlan: Equatable, Codable, Identifiable, Sendable {
@@ -27,7 +28,7 @@ public struct LavaSecurityPlusPlan: Equatable, Codable, Identifiable, Sendable {
     }
 
     public var id: String {
-        productID
+        kind.rawValue
     }
 }
 
@@ -36,7 +37,7 @@ public enum LavaSecurityPlusPolicy {
         kind: .monthly,
         productID: "lava_security_plus_monthly",
         displayName: "Monthly",
-        fallbackDisplayPrice: "$3.99/month",
+        fallbackDisplayPrice: "$3.99",
         isSubscription: true
     )
 
@@ -44,21 +45,40 @@ public enum LavaSecurityPlusPolicy {
         kind: .yearly,
         productID: "lava_security_plus_yearly",
         displayName: "Yearly",
-        fallbackDisplayPrice: "$29.99/year",
+        fallbackDisplayPrice: "$29.99",
+        isSubscription: true
+    )
+
+    public static let yearlyPaidMonthly = LavaSecurityPlusPlan(
+        kind: .yearlyPaidMonthly,
+        productID: yearly.productID,
+        displayName: "Yearly, paid monthly",
+        fallbackDisplayPrice: "$2.99/month",
         isSubscription: true
     )
 
     public static let recommendedOfferOrder = [
         yearly,
+        yearlyPaidMonthly,
         monthly
     ]
 
-    public static let productIDs = [
+    public static let fallbackOfferOrder = [
+        yearly,
+        monthly
+    ]
+
+    public static let paywallProductIDs = [
         monthly.productID,
         yearly.productID
     ]
 
+    public static let entitlementPlans = [
+        monthly,
+        yearly
+    ]
+
     public static func plan(for productID: String) -> LavaSecurityPlusPlan? {
-        recommendedOfferOrder.first { $0.productID == productID }
+        entitlementPlans.first { $0.productID == productID }
     }
 }

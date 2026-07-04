@@ -2,12 +2,15 @@ name: Security
 
 # Delegates to the org-wide reusable security backstop (gitleaks secret scan +
 # mobsfscan mobile SAST). Replaces the self-contained inline copy this repo used to
-# carry: a public repo could not call a reusable workflow in the then-private
-# lavasecurity/.github, so the scan was vendored here and had drifted from the
-# canonical job. Now that lavasecurity/.github is public, a public repo can call it,
-# and the policy (gitleaks config trust, pinned image, mobsfscan SARIF upload) lives
-# in one hardened place again. The central mobsfscan job uploads findings to this
-# repo's code scanning (SARIF) — the capability the inline copy provided.
+# carry: a public repo could not call a reusable workflow while lavasecurity/.github
+# was private, so the scan was vendored here and drifted from the canonical job. Now
+# that lavasecurity/.github is public, both lanes call it and the policy (gitleaks
+# config trust, pinned image, mobsfscan SARIF upload) lives in one hardened place. The
+# mobsfscan SARIF upload to code scanning is gated on GitHub Advanced Security, so it
+# uploads on the public lane and auto-skips on the private mirror — the same
+# visibility-dependent behaviour the inline copy had. This file is a SHARED CI lane
+# kept byte-identical across the private and public repos (see ios.yml's header + the
+# export readiness gate); write comments lane-NEUTRAL so the invariant can hold.
 on:
   push:
     branches: [main]
@@ -15,8 +18,10 @@ on:
 
 jobs:
   security:
-    # mobsfscan SARIF upload writes to code scanning; grant the scope here because a
-    # reusable workflow cannot elevate beyond the permissions the caller passes.
+    # mobsfscan's SARIF upload writes to code scanning, so grant the scope here — a
+    # reusable workflow cannot elevate beyond the permissions the caller passes. The
+    # upload is gated on Advanced Security, so it no-ops on the private mirror; the grant
+    # is harmless there and keeps the public lane correct.
     permissions:
       contents: read
       security-events: write

@@ -32,6 +32,8 @@ final class DNSResponseCacheTests: XCTestCase {
     }
 
     func testCacheTTLRejectsUncacheableResponses() {
+        // No answers AND no authority SOA: negatively uncacheable too (the SOA-backed
+        // empty-answer cases live in the RFC 2308 section below).
         let noAnswers = Self.dnsResponse(id: 0, domain: "example.com", answerTTLs: [])
         let zeroTTL = Self.dnsResponse(id: 0, domain: "example.com", answerTTLs: [0])
         let truncatedHeader = Data([0x00, 0x00, 0x81, 0x80])
@@ -39,6 +41,186 @@ final class DNSResponseCacheTests: XCTestCase {
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: noAnswers))
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: zeroTTL))
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: truncatedHeader))
+    }
+
+    // MARK: - Negative caching (RFC 2308)
+
+    func testNegativeCacheTTLUsesSOAMinimumForNODATAAndNXDOMAIN() {
+        let nodata = Self.dnsResponse(
+            id: 0, domain: "example.com", answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30)
+        )
+        let nxdomain = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30)
+        )
+
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: nodata), 30)
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: nxdomain), 30)
+    }
+
+    func testNegativeCacheTTLIsBoundBySOARecordTTLAndClampedToSixtySeconds() {
+        // The SOA record TTL bounds the min — this is the path the pause-window
+        // answer-TTL cap flows through, since the cap rewrites the record TTL.
+        let boundByRecordTTL = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 10, minimum: 300)
+        )
+        // Negative entries clamp at 60s, far below the positive 300s cap, so a
+        // transient NXDOMAIN can never be pinned for minutes.
+        let clamped = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 3_600, minimum: 3_600)
+        )
+
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: boundByRecordTTL), 10)
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: clamped), 60)
+    }
+
+    func testServfailAndRefusedAreNeverCacheableEvenWithSOA() throws {
+        // FAIL-CLOSED, load-bearing: `indicatesResolverFailure` keys encrypted-fallback
+        // engagement off rcodes 2/5, and the tunnel's synthesized SERVFAILs flow into
+        // store() — a cached failure would replay while masking the recovery signal.
+        let servfail = Self.dnsResponse(
+            id: 1, domain: "example.com", rcode: 2, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30)
+        )
+        let refused = Self.dnsResponse(
+            id: 1, domain: "example.com", rcode: 5, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30)
+        )
+        // The synthesized-SERVFAIL shape (header-only, no records at all).
+        var synthesized = Self.dnsQuery(id: 1, domain: "example.com")
+        synthesized[2] = 0x81
+        synthesized[3] = 0x82
+
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: servfail))
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: refused))
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: synthesized))
+
+        let cache = DNSResponseCache()
+        let query = Self.dnsQuery(id: 1, domain: "example.com")
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+        cache.store(servfail, for: key, now: now)
+        cache.store(refused, for: key, now: now)
+        cache.store(synthesized, for: key, now: now)
+        XCTAssertEqual(cache.count, 0, "rcodes 2/5 must never enter the cache.")
+    }
+
+    func testNegativeEntryIsBoundByEveryReplayedRecordTTL() {
+        // A cache hit replays the whole packet, so a shorter-lived non-SOA record
+        // (e.g. DNSSEC NSEC/RRSIG in authority) bounds the entry below the SOA values,
+        // and a zero-TTL record anywhere vetoes caching - mirroring the positive path.
+        let shorterAuthorityRecord = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 300),
+            authorityTTLs: [5]
+        )
+        let zeroTTLAdditional = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30),
+            additionalNonOPTTTLs: [0]
+        )
+        // OPT pseudo-record "TTL" bytes carry EDNS flags: ignored, no veto, no bound.
+        let withOPT = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30),
+            includesOPTAdditional: true
+        )
+
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: shorterAuthorityRecord), 5)
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: zeroTTLAdditional))
+        XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: withOPT), 30)
+    }
+
+    func testNegativeResponseWithoutSOAIsNotCached() {
+        // NXDOMAIN whose authority holds only a non-SOA record: no negative TTL to honor.
+        let nxdomainNoSOA = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authorityTTLs: [300]
+        )
+        // An SOA in ADDITIONAL data is not an RFC 2308 anchor: authority-section only.
+        let additionalSOAOnly = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            additionalSOA: (ttl: 900, minimum: 30),
+            authorityTTLs: [300]
+        )
+
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: nxdomainNoSOA))
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: additionalSOAOnly))
+    }
+
+    func testNegativeCacheRejectsZeroTTLsAndMalformedSOA() {
+        let zeroRecordTTL = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 0, minimum: 30)
+        )
+        let zeroMinimum = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 0)
+        )
+        // RDLENGTH too short to hold the five 32-bit SOA fields.
+        let truncatedRDATA = Self.dnsResponse(
+            id: 0, domain: "example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30),
+            soaRDATAShortfall: 4
+        )
+
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: zeroRecordTTL))
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: zeroMinimum))
+        XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: truncatedRDATA))
+    }
+
+    func testNegativeEntryStoresReplaysAndExpires() throws {
+        let cache = DNSResponseCache()
+        let storedQuery = Self.dnsQuery(id: 0xAAAA, domain: "gone.example.com")
+        let askingQuery = Self.dnsQuery(id: 0x1234, domain: "gone.example.com")
+        let nxdomain = Self.dnsResponse(
+            id: 0xAAAA, domain: "gone.example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 900, minimum: 30)
+        )
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: storedQuery))
+
+        cache.store(nxdomain, for: key, now: now)
+
+        let hit = try XCTUnwrap(cache.cachedResponse(for: key, query: askingQuery, now: now))
+        XCTAssertEqual(hit[0], 0x12)
+        XCTAssertEqual(hit[1], 0x34)
+        // The replayed packet carries the CLAMPED TTLs (here min(900, 30) = 30), not the
+        // upstream SOA values - otherwise the downstream stub resolver would negative-
+        // cache the NXDOMAIN for the full upstream TTL, defeating the clamp.
+        XCTAssertEqual(
+            hit.dropFirst(2),
+            DNSWireMessage.cappingAnswerTTLs(in: nxdomain, to: 30).dropFirst(2)
+        )
+        XCTAssertNil(
+            cache.cachedResponse(for: key, query: askingQuery, now: now.addingTimeInterval(31)),
+            "A negative entry expires at its SOA-derived TTL."
+        )
+    }
+
+    func testNegativeReplayNeverCarriesTTLsAboveTheSixtySecondClamp() throws {
+        let cache = DNSResponseCache()
+        let query = Self.dnsQuery(id: 1, domain: "transient.example.com")
+        // Upstream pins the NXDOMAIN for an hour; the replayed packet must not.
+        let longNXDOMAIN = Self.dnsResponse(
+            id: 1, domain: "transient.example.com", rcode: 3, answerTTLs: [],
+            authoritySOA: (ttl: 3_600, minimum: 3_600)
+        )
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+
+        cache.store(longNXDOMAIN, for: key, now: now)
+
+        let hit = try XCTUnwrap(cache.cachedResponse(for: key, query: query, now: now))
+        XCTAssertEqual(
+            hit.dropFirst(2),
+            DNSWireMessage.cappingAnswerTTLs(in: longNXDOMAIN, to: 60).dropFirst(2)
+        )
+        XCTAssertNotEqual(
+            hit.dropFirst(2),
+            longNXDOMAIN.dropFirst(2),
+            "The hour-long upstream SOA TTL must have been rewritten before storage."
+        )
     }
 
     func testCacheTTLIgnoresOPTRecords() {
@@ -161,10 +343,11 @@ final class DNSResponseCacheTests: XCTestCase {
     func testUncacheableResponsesAreNotStored() throws {
         let cache = DNSResponseCache()
         let query = Self.dnsQuery(id: 1, domain: "example.com")
-        let servfailLike = Self.dnsResponse(id: 1, domain: "example.com", answerTTLs: [])
+        // Empty answers with no authority SOA: neither positively nor negatively cacheable.
+        let bareNODATA = Self.dnsResponse(id: 1, domain: "example.com", answerTTLs: [])
         let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
 
-        cache.store(servfailLike, for: key, now: now)
+        cache.store(bareNODATA, for: key, now: now)
 
         XCTAssertEqual(cache.count, 0)
         XCTAssertNil(cache.cachedResponse(for: key, query: query, now: now))
@@ -293,7 +476,11 @@ final class DNSResponseCacheTests: XCTestCase {
     private static func dnsResponse(
         id: UInt16,
         domain: String,
+        rcode: UInt16 = 0,
         answerTTLs: [UInt32],
+        authoritySOA: (ttl: UInt32, minimum: UInt32)? = nil,
+        additionalSOA: (ttl: UInt32, minimum: UInt32)? = nil,
+        soaRDATAShortfall: Int = 0,
         authorityTTLs: [UInt32] = [],
         additionalNonOPTTTLs: [UInt32] = [],
         includesOPTAdditional: Bool = false,
@@ -301,20 +488,37 @@ final class DNSResponseCacheTests: XCTestCase {
     ) -> Data {
         var data = Data()
         appendUInt16(id, to: &data)
-        appendUInt16(0x8180, to: &data)
+        appendUInt16(0x8180 | rcode, to: &data)
         appendUInt16(1, to: &data)
         appendUInt16(UInt16(answerTTLs.count) + (optAnswer ? 1 : 0), to: &data)
-        appendUInt16(UInt16(authorityTTLs.count), to: &data)
-        appendUInt16(UInt16(additionalNonOPTTTLs.count) + (includesOPTAdditional ? 1 : 0), to: &data)
+        appendUInt16(UInt16(authorityTTLs.count) + (authoritySOA == nil ? 0 : 1), to: &data)
+        appendUInt16(
+            UInt16(additionalNonOPTTTLs.count)
+                + (additionalSOA == nil ? 0 : 1)
+                + (includesOPTAdditional ? 1 : 0),
+            to: &data
+        )
         appendQuestion(domain: domain, to: &data)
 
-        for ttl in answerTTLs + authorityTTLs + additionalNonOPTTTLs {
-            data.append(contentsOf: [0xC0, 0x0C])
-            appendUInt16(1, to: &data)
-            appendUInt16(1, to: &data)
-            appendUInt32(ttl, to: &data)
-            appendUInt16(4, to: &data)
-            data.append(contentsOf: [1, 2, 3, 4])
+        for ttl in answerTTLs {
+            appendARecord(ttl: ttl, to: &data)
+        }
+
+        if let authoritySOA {
+            appendSOARecord(
+                ttl: authoritySOA.ttl,
+                minimum: authoritySOA.minimum,
+                rdataShortfall: soaRDATAShortfall,
+                to: &data
+            )
+        }
+
+        for ttl in authorityTTLs + additionalNonOPTTTLs {
+            appendARecord(ttl: ttl, to: &data)
+        }
+
+        if let additionalSOA {
+            appendSOARecord(ttl: additionalSOA.ttl, minimum: additionalSOA.minimum, to: &data)
         }
 
         if optAnswer {
@@ -326,6 +530,41 @@ final class DNSResponseCacheTests: XCTestCase {
         }
 
         return data
+    }
+
+    private static func appendARecord(ttl: UInt32, to data: inout Data) {
+        data.append(contentsOf: [0xC0, 0x0C])
+        appendUInt16(1, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt32(ttl, to: &data)
+        appendUInt16(4, to: &data)
+        data.append(contentsOf: [1, 2, 3, 4])
+    }
+
+    /// SOA in the authority section: compressed MNAME (question pointer), root
+    /// RNAME, then serial/refresh/retry/expire/minimum. `rdataShortfall`
+    /// truncates RDLENGTH below the real field length for malformed-wire cases.
+    private static func appendSOARecord(
+        ttl: UInt32,
+        minimum: UInt32,
+        rdataShortfall: Int = 0,
+        to data: inout Data
+    ) {
+        data.append(contentsOf: [0xC0, 0x0C])
+        appendUInt16(6, to: &data)
+        appendUInt16(1, to: &data)
+        appendUInt32(ttl, to: &data)
+        appendUInt16(UInt16(23 - rdataShortfall), to: &data)
+        data.append(contentsOf: [0xC0, 0x0C])
+        data.append(0x00)
+        appendUInt32(1, to: &data)
+        appendUInt32(7_200, to: &data)
+        appendUInt32(900, to: &data)
+        appendUInt32(1_209_600, to: &data)
+        appendUInt32(minimum, to: &data)
+        if rdataShortfall > 0 {
+            data.removeLast(rdataShortfall)
+        }
     }
 
     private static func appendOPTRecord(to data: inout Data) {

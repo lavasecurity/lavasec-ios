@@ -2,7 +2,7 @@ import XCTest
 
 final class SecuritySettingsSourceTests: XCTestCase {
     func testSecurityControllerUsesDeviceLocalPasscodeAndBiometrics() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
+        let controller = try readSource(.securityController)
 
         XCTAssertTrue(controller.contains("final class SecurityController"))
         XCTAssertTrue(controller.contains("LocalAuthentication"))
@@ -18,19 +18,19 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testBiometricToggleUsesConcreteDeviceBiometryLabelOnly() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let biometricKindBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let settings = try readSource(.settingsView)
+        let biometricKindBlock = try sourceBlock(
             in: controller,
             startingAt: "enum SecurityBiometricKind",
             endingBefore: "struct SecurityPasscodeAuthenticationRequest"
         )
-        let refreshBlock = try Self.sourceBlock(
+        let refreshBlock = try sourceBlock(
             in: controller,
             startingAt: "func refreshBiometricKind()",
             endingBefore: "private func authenticate"
         )
-        let securitySettingsBlock = try Self.sourceBlock(
+        let securitySettingsBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
@@ -52,9 +52,9 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testFaceIDHasUsageDescriptionAndRuntimeGuard() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let infoPlist = try Self.appSource(named: "Info.plist")
-        let infoPlistStrings = try Self.appSource(named: "InfoPlist.xcstrings")
+        let controller = try readSource(.securityController)
+        let infoPlist = try readSource(.appInfoPlist)
+        let infoPlistStrings = try readSource(.infoPlistStringsCatalog)
 
         XCTAssertTrue(infoPlist.contains("NSFaceIDUsageDescription"))
         XCTAssertTrue(infoPlist.contains("protected app surfaces"))
@@ -65,18 +65,18 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSecuritySettingsPageIsExposedAtSettingsRootBelowPrivacyData() throws {
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let rootProtectionBlock = try Self.sourceBlock(
+        let settings = try readSource(.settingsView)
+        let rootProtectionBlock = try sourceBlock(
             in: settings,
             startingAt: "LavaSectionGroup(\"Protection Choices\")",
             endingBefore: "LavaSectionGroup(\"Support\")"
         )
-        let privacyBlock = try Self.sourceBlock(
+        let privacyBlock = try sourceBlock(
             in: settings,
             startingAt: "struct PrivacyDataSettingsView: View",
             endingBefore: "private struct SecuritySettingsView: View"
         )
-        let securityBlock = try Self.sourceBlock(
+        let securityBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SecuritySettingsView: View",
             endingBefore: "private struct SecurityPasscodeSetupView"
@@ -123,8 +123,8 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSecuritySurfaceLabelsUseUpdateLanguage() throws {
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let securityBlock = try Self.sourceBlock(
+        let settings = try readSource(.settingsView)
+        let securityBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
@@ -137,9 +137,9 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testDisablingAuthenticationMethodsRequiresSameMethodAuthentication() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let securityBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let settings = try readSource(.settingsView)
+        let securityBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
@@ -150,27 +150,30 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(securityBlock.contains("security.requirePasscodeAuthentication(reason: \"Turn off Security passcode\")"))
         XCTAssertTrue(securityBlock.contains("security.requireBiometricAuthentication(reason: \"Turn off %@\".lavaLocalizedFormat(security.biometricToggleTitle))"))
         XCTAssertFalse(securityBlock.contains("requireCredentialAuthentication(reason: \"Turn off Security passcode\")"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(controller.contains("requireCredentialAuthentication"))
     }
 
     func testPasscodeScreensFillFullScreenAndUseNativeNumberPadFirstResponder() throws {
-        let securityController = try Self.appSource(named: "SecurityController.swift")
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let authenticationBlock = try Self.sourceBlock(
+        let securityController = try readSource(.securityController)
+        let settings = try readSource(.settingsView)
+        let authenticationBlock = try sourceBlock(
             in: securityController,
             startingAt: "struct SecurityPasscodeAuthenticationView: View",
             endingBefore: "struct SecurityPasscodeDigitsView"
         )
-        let hiddenFieldBlock = try Self.sourceBlock(
+        let hiddenFieldBlock = try sourceBlock(
             in: securityController,
-            startingAt: "struct SecurityHiddenPasscodeField",
-            endingBefore: "private extension Data"
+            startingAt: "struct SecurityHiddenPasscodeField"
         )
-        let setupPhaseBlock = try Self.sourceBlock(
+        let setupPhaseBlock = try sourceBlock(
             in: settings,
             startingAt: "private enum SecurityPasscodeSetupPhase",
             endingBefore: "private struct SecurityPasscodeSetupView"
         )
-        let setupBlock = try Self.sourceBlock(
+        let setupBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SecurityPasscodeSetupView: View",
             endingBefore: "private enum LocalLogSetting"
@@ -199,8 +202,8 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSettingsRoutesHaveScopedSecurityPolicies() throws {
-        let settings = try Self.appSource(named: "SettingsView.swift")
-        let routeBlock = try Self.sourceBlock(
+        let settings = try readSource(.settingsView)
+        let routeBlock = try sourceBlock(
             in: settings,
             startingAt: "enum SettingsRoute: Hashable",
             endingBefore: "struct SettingsView: View"
@@ -219,8 +222,8 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testRootGatesTabsAndProtectionActionsThroughSecurityController() throws {
-        let root = try Self.appSource(named: "RootView.swift")
-        let guardSource = try Self.appSource(named: "GuardView.swift")
+        let root = try readSource(.rootView)
+        let guardSource = try readSource(.guardView)
 
         XCTAssertTrue(root.contains("@EnvironmentObject private var security: SecurityController"))
         XCTAssertTrue(root.contains("guardedRootTabSelection"))
@@ -233,22 +236,22 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testActivityTabSelectsBeforeAuthenticationAndShowsInlineGate() throws {
-        let root = try Self.appSource(named: "RootView.swift")
-        let diagnostics = try Self.appSource(named: "DiagnosticsView.swift")
-        let tabSelectionBlock = try Self.sourceBlock(
+        let root = try readSource(.rootView)
+        let diagnostics = try readSource(.diagnosticsView)
+        let tabSelectionBlock = try sourceBlock(
             in: root,
             startingAt: "private var guardedRootTabSelection: Binding<LavaRootTab>",
             endingBefore: "private func selectRootTab"
         )
-        let selectRootTabBlock = try Self.sourceBlock(
+        let selectRootTabBlock = try sourceBlock(
             in: root,
             startingAt: "private func selectRootTab(_ tab: LavaRootTab) async",
             endingBefore: "private func openSettingsRoute"
         )
-        let activityBlock = try Self.sourceBlock(
+        let activityBlock = try sourceBlock(
             in: diagnostics,
             startingAt: "struct ActivityView: View",
-            endingBefore: "private struct ActivityOverviewPanel"
+            endingBefore: "private struct LocalLogsPrivacyFooter"
         )
 
         // The ungated root tab (Guard is .readOnly) selects synchronously in the
@@ -270,7 +273,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testPasscodeAuthenticationIsSingleFlight() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
+        let controller = try readSource(.securityController)
 
         XCTAssertTrue(controller.contains("private var isAuthenticatingAppUnlock = false"))
         XCTAssertTrue(controller.contains("guard !isAuthenticatingAppUnlock else"))
@@ -279,14 +282,14 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testAuthenticationCacheIsScopedToViewTurnsAndInvalidatedWhenProtectionChanges() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let root = try Self.appSource(named: "RootView.swift")
-        let authenticateBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let root = try readSource(.rootView)
+        let authenticateBlock = try sourceBlock(
             in: controller,
             startingAt: "private func authenticate(surface: SecurityProtectedSurface?, reason: String) async -> Bool",
             endingBefore: "private func evaluateBiometrics"
         )
-        let setProtectionBlock = try Self.sourceBlock(
+        let setProtectionBlock = try sourceBlock(
             in: controller,
             startingAt: "func setProtection(_ isProtected: Bool, for surface: SecurityProtectedSurface)",
             endingBefore: "func setPasscode"
@@ -300,14 +303,14 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testAppUnlockOnlyUsesForegroundLifecycleNotViewTurns() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let root = try Self.appSource(named: "RootView.swift")
-        let markAuthenticatedBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let root = try readSource(.rootView)
+        let markAuthenticatedBlock = try sourceBlock(
             in: controller,
             startingAt: "private func markAuthenticated(surface: SecurityProtectedSurface?)",
             endingBefore: "private func saveProtectedSurfaces"
         )
-        let scenePhaseBlock = try Self.sourceBlock(
+        let scenePhaseBlock = try sourceBlock(
             in: root,
             startingAt: ".onChange(of: scenePhase)",
             endingBefore: ".onReceive(NotificationCenter.default.publisher(for: .lavaOpenGuardFromNotification))"
@@ -326,21 +329,25 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(scenePhaseBlock.contains("case .background:"))
         XCTAssertTrue(scenePhaseBlock.contains("security.lockForBackgroundIfNeeded()"))
         XCTAssertFalse(scenePhaseBlock.contains("case .inactive, .background:"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(controller.contains("authenticateAppUnlockIfNeeded"))
     }
 
     func testEnablingAppUnlockTrustsCurrentForegroundSessionUntilBackground() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let setProtectionBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let setProtectionBlock = try sourceBlock(
             in: controller,
             startingAt: "func setProtection(_ isProtected: Bool, for surface: SecurityProtectedSurface)",
             endingBefore: "func setPasscode"
         )
-        let resetForegroundSessionBlock = try Self.sourceBlock(
+        let resetForegroundSessionBlock = try sourceBlock(
             in: controller,
             startingAt: "func resetForegroundSession()",
             endingBefore: "func resetViewAuthenticationTurn()"
         )
-        let authenticateAppUnlockBlock = try Self.sourceBlock(
+        let authenticateAppUnlockBlock = try sourceBlock(
             in: controller,
             startingAt: "func authenticateAppUnlockIfNeeded() async",
             endingBefore: "func refreshBiometricKind()"
@@ -353,9 +360,9 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testAppUnlockMasksInactiveSnapshotsWithoutForegroundPrompt() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let root = try Self.appSource(named: "RootView.swift")
-        let scenePhaseBlock = try Self.sourceBlock(
+        let controller = try readSource(.securityController)
+        let root = try readSource(.rootView)
+        let scenePhaseBlock = try sourceBlock(
             in: root,
             startingAt: ".onChange(of: scenePhase)",
             endingBefore: ".onReceive(NotificationCenter.default.publisher(for: .lavaOpenGuardFromNotification))"
@@ -369,13 +376,13 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(root.contains("SecurityPrivacyMaskOverlay"))
         XCTAssertTrue(scenePhaseBlock.contains("case .inactive:"))
         XCTAssertTrue(scenePhaseBlock.contains("security.showAppUnlockPrivacyMaskIfNeeded()"))
-        XCTAssertFalse(try Self.sourceBlock(in: scenePhaseBlock, startingAt: "case .inactive:", endingBefore: "case .background:").contains("authenticateAppUnlockIfNeeded()"))
+        XCTAssertFalse(try sourceBlock(in: scenePhaseBlock, startingAt: "case .inactive:", endingBefore: "case .background:").contains("authenticateAppUnlockIfNeeded()"))
         XCTAssertTrue(scenePhaseBlock.contains("security.hideAppUnlockPrivacyMask()"))
     }
 
     func testFilterAndDomainHistoryActionsUseFilterEditingSurface() throws {
-        let filters = try Self.appSource(named: "FiltersView.swift")
-        let diagnostics = try Self.appSource(named: "DiagnosticsView.swift")
+        let filters = try readSource(.filtersView)
+        let diagnostics = try readSource(.diagnosticsView)
 
         XCTAssertTrue(filters.contains("security.requireAuthentication(for: .filterEditing"))
         XCTAssertTrue(diagnostics.contains("security.requireFreshAuthentication(for: .filterEditing"))
@@ -384,10 +391,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testRepeatSensitiveActionsRequireFreshAuthentication() throws {
-        let controller = try Self.appSource(named: "SecurityController.swift")
-        let root = try Self.appSource(named: "GuardView.swift")
-        let filters = try Self.appSource(named: "FiltersView.swift")
-        let diagnostics = try Self.appSource(named: "DiagnosticsView.swift")
+        let controller = try readSource(.securityController)
+        let root = try readSource(.guardView)
+        let filters = try readSource(.filtersView)
+        let diagnostics = try readSource(.diagnosticsView)
 
         XCTAssertTrue(controller.contains("func requireFreshAuthentication(for surface: SecurityProtectedSurface, reason: String) async -> Bool"))
         XCTAssertTrue(root.contains("reason: \"Change Lava protection\""))
@@ -399,7 +406,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSecurityStateIsExcludedFromEncryptedBackupPayload() throws {
-        let backupPayload = try Self.coreSource(named: "BackupConfigurationPayload.swift")
+        let backupPayload = try readSource(.backupConfigurationPayload)
 
         XCTAssertFalse(backupPayload.contains("SecurityProtectedSurface"))
         XCTAssertFalse(backupPayload.contains("appSettings"))
@@ -407,50 +414,4 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(backupPayload.contains("biometric"))
     }
 
-    private static func appSource(named fileName: String) throws -> String {
-        try source(named: fileName, in: "LavaSecApp")
-    }
-
-    private static func coreSource(named fileName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent("Sources")
-            .appendingPathComponent("LavaSecCore")
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt start: String,
-        endingBefore end: String
-    ) throws -> String {
-        guard let startRange = source.range(of: start) else {
-            throw XCTSkip("Missing start marker \(start)")
-        }
-
-        if let endRange = source[startRange.lowerBound...].range(of: end) {
-            return String(source[startRange.lowerBound..<endRange.lowerBound])
-        }
-
-        return String(source[startRange.lowerBound...])
-    }
 }

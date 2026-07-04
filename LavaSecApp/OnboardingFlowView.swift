@@ -7,6 +7,7 @@ struct LavaOnboardingView: View {
     /// land them on the Settings tab instead of Guard.
     var onRequestOpenSettings: () -> Void = {}
     @EnvironmentObject private var viewModel: AppViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var page: OnboardingPage = .lava
     @State private var pageHistory: [OnboardingPage] = []
@@ -144,6 +145,7 @@ struct LavaOnboardingView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
                 .padding(.horizontal, 28)
                 .padding(.top, 86)
@@ -233,7 +235,11 @@ struct LavaOnboardingView: View {
             description: "This enforces the filter and does not route traffic to a server at all",
             contentPlacement: .centered
         ) {
+            // Decorative preview of the upcoming iOS system prompt — its fake "Allow"/"Don't
+            // Allow" buttons are not real controls, so hide it from assistive tech. The page
+            // heading + description already convey what the real prompt will ask.
             OnboardingVPNPermissionDialogIllustration()
+                .accessibilityHidden(true)
 
             if viewModel.vpnMessageIsError, let message = viewModel.vpnMessage {
                 Text(message)
@@ -251,7 +257,10 @@ struct LavaOnboardingView: View {
             description: "Turn on notifications in case Lava needs your help to unblock network issues",
             contentPlacement: .centered
         ) {
+            // Decorative preview of the iOS notification prompt (fake buttons); hide from
+            // assistive tech — the heading + description carry the meaning.
             OnboardingNotificationPromptCard()
+                .accessibilityHidden(true)
         }
     }
 
@@ -265,6 +274,7 @@ struct LavaOnboardingView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(LavaStyle.ink)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
 
             Text("We are happy to serve you!\nThe setup is complete. You can change everything later in Settings.")
                 .font(.title3)
@@ -302,7 +312,8 @@ struct LavaOnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!visitedPages.contains(dotPage))
-                .accessibilityLabel("Step \(dotPage.rawValue + 1)")
+                .accessibilityLabel("Step \(dotPage.rawValue + 1) of \(OnboardingPage.allCases.count)")
+                .accessibilityAddTraits(dotPage == page ? [.isSelected] : [])
             }
         }
     }
@@ -379,7 +390,10 @@ struct LavaOnboardingView: View {
         // (which call go(to:) directly) applies it too, not just the Continue button (Codex P2).
         applyCurrentStepChoiceIfNeeded()
 
-        if nextPage == .features {
+        // Reduce Motion: never leave the settled features layout — skipping the reset
+        // here (not just in prepareAnimations) avoids even a one-frame unsettled pass
+        // between the page change and the onChange-driven prepareAnimations call.
+        if nextPage == .features, !reduceMotion {
             featureTransitionElapsed = 0
         }
 
@@ -396,7 +410,7 @@ struct LavaOnboardingView: View {
             return
         }
 
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(pageChangeAnimation) {
             page = nextPage
         }
     }
@@ -408,9 +422,19 @@ struct LavaOnboardingView: View {
 
         applyCurrentStepChoiceIfNeeded()
         visitedPages.insert(previousPage)
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(pageChangeAnimation) {
             page = previousPage
         }
+    }
+
+    /// Reduce Motion: swap pages INSTANTLY (nil transaction). The design system's
+    /// reduced-motion fade (`LavaFlowTransition.animation`) is designed to pair with its
+    /// `lavaFlowTransition` modifier on the swapped content; this view has no transition
+    /// modifier, so a non-nil animation would hard-swap the page content while still
+    /// ANIMATING page-dependent layout (lava opacity, footer background, page-dot
+    /// widths) — residual motion, the opposite of the setting's intent.
+    private var pageChangeAnimation: Animation? {
+        reduceMotion ? nil : LavaFlowTransition.animation(reduceMotion: false)
     }
 
     /// Persist the choice made on the step we're leaving. Called from every navigation
@@ -461,6 +485,12 @@ struct LavaOnboardingView: View {
     private func prepareAnimations(for nextPage: OnboardingPage) {
         switch nextPage {
         case .features:
+            // Reduce Motion: skip the hero-uplift choreography (and its blink)
+            // and present the settled features layout directly.
+            guard !reduceMotion else {
+                featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
+                return
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                 guard page == .features else {
                     return
@@ -604,6 +634,7 @@ private struct OnboardingStepHeading: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.68)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
 
             Text(description.lavaLocalized)
                 .font(.title3)
@@ -679,6 +710,7 @@ private struct OnboardingProtectionLevelPanel: View {
                         Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                             .font(.title3)
                             .foregroundStyle(isOn ? LavaStyle.safeGreen : LavaStyle.secondaryText.opacity(0.35))
+                            .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(group.category.displayLabel.lavaLocalized)
@@ -694,6 +726,11 @@ private struct OnboardingProtectionLevelPanel: View {
                         Spacer(minLength: 0)
                     }
                     .opacity(isOn ? 1 : 0.5)
+                    // The included/excluded state was conveyed only by the glyph + dimming; give
+                    // VoiceOver an explicit On/Off value (icon hidden as decorative) so grayscale
+                    // and non-visual users get the same meaning.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(Text(isOn ? "On" : "Off"))
                 }
             }
         }
@@ -795,7 +832,7 @@ private struct OnboardingConnectionPanel: View {
                     }
                 }
 
-                Text("If your device's DNS can't be reached, allowed lookups go to %1$@ over an encrypted (DoH) connection, then return to your device's DNS automatically. %2$@ is a third-party resolver used only during recovery.".lavaLocalizedFormat(selectedProviderName, selectedProviderName))
+                Text("If your device's DNS can't be reached, allowed requests briefly use %1$@ over an encrypted connection, then switch back automatically. %2$@ is an outside provider, used only for recovery.".lavaLocalizedFormat(selectedProviderName, selectedProviderName))
                     .font(.footnote)
                     .foregroundStyle(LavaStyle.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1277,37 +1314,48 @@ private struct OnboardingAdditionalSetupSheet: View {
 private struct OnboardingLavaFloor: View {
     var cornerRadius: CGFloat = 28
     var intensity: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var startDate = Date.now
 
     var body: some View {
-        TimelineView(.periodic(from: startDate, by: 1.0 / 60.0)) { timeline in
-            let phase = OnboardingLavaWaveTimeline.phase(
-                at: timeline.date.timeIntervalSince(startDate)
-            )
-
-            ZStack(alignment: .bottom) {
-                LinearGradient(
-                    colors: [
-                        LavaStyle.lavaOrange.opacity(0.86),
-                        Color(red: 0.83, green: 0.08, blue: 0.02),
-                        Color(red: 0.48, green: 0.02, blue: 0.01)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                LavaWaveShape(phase: phase, amplitude: 18 * intensity, baseline: 0.18)
-                    .fill(Color(red: 1.0, green: 0.50, blue: 0.13).opacity(0.74))
-
-                LavaWaveShape(phase: -phase + .pi * 0.35, amplitude: 22 * intensity, baseline: 0.34)
-                    .fill(Color(red: 0.92, green: 0.20, blue: 0.04).opacity(0.78))
-
-                LavaWaveShape(phase: phase * 2 + .pi, amplitude: 14 * intensity, baseline: 0.48)
-                    .fill(Color(red: 0.55, green: 0.03, blue: 0.01).opacity(0.70))
+        Group {
+            if reduceMotion {
+                // Reduce Motion: hold the lava at the wave loop's first frame
+                // instead of advancing the 60fps timeline.
+                waves(phase: OnboardingLavaWaveTimeline.phase(at: 0))
+            } else {
+                TimelineView(.periodic(from: startDate, by: 1.0 / 60.0)) { timeline in
+                    waves(phase: OnboardingLavaWaveTimeline.phase(
+                        at: timeline.date.timeIntervalSince(startDate)
+                    ))
+                }
             }
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .accessibilityHidden(true)
+    }
+
+    private func waves(phase: Double) -> some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    LavaStyle.lavaOrange.opacity(0.86),
+                    Color(red: 0.83, green: 0.08, blue: 0.02),
+                    Color(red: 0.48, green: 0.02, blue: 0.01)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            LavaWaveShape(phase: phase, amplitude: 18 * intensity, baseline: 0.18)
+                .fill(Color(red: 1.0, green: 0.50, blue: 0.13).opacity(0.74))
+
+            LavaWaveShape(phase: -phase + .pi * 0.35, amplitude: 22 * intensity, baseline: 0.34)
+                .fill(Color(red: 0.92, green: 0.20, blue: 0.04).opacity(0.78))
+
+            LavaWaveShape(phase: phase * 2 + .pi, amplitude: 14 * intensity, baseline: 0.48)
+                .fill(Color(red: 0.55, green: 0.03, blue: 0.01).opacity(0.70))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 

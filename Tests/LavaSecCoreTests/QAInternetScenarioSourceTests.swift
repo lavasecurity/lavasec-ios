@@ -2,8 +2,8 @@ import XCTest
 
 final class QAInternetScenarioSourceTests: XCTestCase {
     func testPhoneQAMenuRendersAtomicInternetSectionsAndConsolidatedSuites() throws {
-        let source = try Self.source(named: "AdminQAView.swift", in: "LavaSecApp")
-        let phoneQABlock = try Self.sourceBlock(
+        let source = try readSource(.adminQAView)
+        let phoneQABlock = try sourceBlock(
             in: source,
             startingAt: "struct PhoneQAView: View",
             endingBefore: "private enum PhoneQAHapticPreview"
@@ -31,8 +31,8 @@ final class QAInternetScenarioSourceTests: XCTestCase {
     }
 
     func testViewModelAppliesInternetScenarioCatalogState() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let qaCommandBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let qaCommandBlock = try sourceBlock(
             in: source,
             startingAt: "#if DEBUG || LAVA_QA_TOOLS\n    func applyHostedQAProbeSet()",
             endingBefore: "func applyAdminQAVPNProfileAction"
@@ -50,11 +50,11 @@ final class QAInternetScenarioSourceTests: XCTestCase {
     }
 
     func testQABlocklistLoadsRebuildRulesAndSyncBeforePersisting() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
         // A QA load that assigns enabledBlocklistIDs must recompile blockRules and persist
         // in that order, or persistFilterChanges serializes the previous load's rules.
-        let loadBody = try Self.sourceBlock(
+        let loadBody = try sourceBlock(
             in: source,
             startingAt: "func applyQAInternetBlocklistLoad(_ load: QAInternetBlocklistLoad)",
             endingBefore: "func applyQAInternetScenarioSuite"
@@ -66,7 +66,7 @@ final class QAInternetScenarioSourceTests: XCTestCase {
         ])
         XCTAssertTrue(loadBody.contains("startQAInternetBlocklistSyncIfNeeded(for: load.enabledBlocklistIDs)"))
 
-        let suiteBody = try Self.sourceBlock(
+        let suiteBody = try sourceBlock(
             in: source,
             startingAt: "func applyQAInternetScenarioSuite(_ suite: QAInternetScenarioSuite)",
             endingBefore: "private func startQAInternetBlocklistSyncIfNeeded"
@@ -78,30 +78,6 @@ final class QAInternetScenarioSourceTests: XCTestCase {
             "persistFilterChanges()"
         ])
         XCTAssertTrue(suiteBody.contains("startQAInternetBlocklistSyncIfNeeded(for: scenario.blocklistLoad.enabledBlocklistIDs)"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 
     /// Asserts each marker appears, and in the given order, within `source`.

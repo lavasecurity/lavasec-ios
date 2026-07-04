@@ -974,47 +974,24 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     public static func defaultDataFetcher(url: URL) async throws -> Data {
-        // Stream the body to a temp file instead of buffering it in RAM. `data(from:)`
-        // fully materializes the response in memory before any size check, so a remote
-        // (or MITM / hostile custom-URL) oversized body could spike memory. (This fetcher
-        // is the app/foreground network path only — the extension compiles cache-only,
-        // `allowsNetwork: false`, and never invokes it — but bounding download memory in
-        // the app is still worthwhile.)
-        // `download(from:)` writes the body to disk as it arrives, so peak memory stays
-        // bounded regardless of body size; we only load the bytes into `Data` after
-        // confirming the on-disk size is within the cap, which preserves the downstream
-        // SHA-256 / acceptedHash verification.
+        // SEC-1 connect-time peer-IP validation. This is the app/foreground network path for
+        // BOTH the first-party catalog manifest and every (built-in or custom) blocklist
+        // source. The extension compiles cache-only (`allowsNetwork: false`) and never invokes
+        // it.
         //
-        // Scope note: this bounds *memory*. We don't abort mid-download on disk growth —
-        // the async `download(from:delegate:)` can't carry a download delegate without
-        // the `didFinishDownloadingTo` file-ownership footgun — so a hostile server can
-        // still write up to a full body to the sandboxed, transient temp dir before the
-        // size check rejects it. That residual is far weaker than the unbounded RAM
-        // buffering this replaces.
-        let (tempURL, response) = try await URLSession.shared.download(from: url)
-        defer { try? FileManager.default.removeItem(at: tempURL) }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BlocklistCatalogSyncError.invalidCatalog
-        }
-
-        guard 200..<300 ~= httpResponse.statusCode else {
-            throw BlocklistCatalogSyncError.invalidHTTPStatus(httpResponse.statusCode)
-        }
-
-        if let byteCount = downloadedFileByteCount(at: tempURL),
-           byteCount > maximumBlocklistBytes {
-            throw BlocklistDownloadSizeLimitExceeded(
-                byteSize: byteCount,
-                maximumByteCount: maximumBlocklistBytes
-            )
-        }
-
-        return try Data(contentsOf: tempURL)
-    }
-
-    static func downloadedFileByteCount(at url: URL) -> Int? {
-        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        // `PinnedPublicHTTPSFetcher.fetch` runs the fetch over an IP-PINNED `NWConnection`
+        // instead of `URLSession`: it re-validates every hop (initial URL + each redirect),
+        // resolves each host ONCE, requires every resolved address to be public, and binds the
+        // connection to a validated address — so a source or `Location` whose hostname
+        // DNS-resolves to a private/loopback/reserved target (the residual `URLSession` +
+        // `validatePublicSourceURL` left open, incl. DNS rebinding) is refused fail-closed.
+        // TLS keeps its full strength: SNI + certificate validation still run against the
+        // hostname, not the pinned IP.
+        //
+        // Memory stays bounded: the body is decoded incrementally and the download aborts the
+        // instant the decoded byte count exceeds `maximumBlocklistBytes` (the same downstream
+        // SHA-256 / acceptedHash verification runs on the returned bytes).
+        try await PinnedPublicHTTPSFetcher.fetch(url: url, maximumByteCount: maximumBlocklistBytes)
     }
 
     private func compile(

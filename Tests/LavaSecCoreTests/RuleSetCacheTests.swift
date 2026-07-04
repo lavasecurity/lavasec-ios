@@ -152,6 +152,49 @@ final class RuleSetCacheTests: XCTestCase {
         XCTAssertTrue(second.usedCachedSourceIDs.contains("source-a"))
     }
 
+    // A parser bump orphans the whole previous parsed-rules/v* tree and nothing else
+    // deletes it; the sweep must reap only superseded VERSION trees — never the current
+    // tree's entries and never sibling non-version directories.
+    func testSweepSupersededVersionTreesReapsOnlyOldVersions() throws {
+        let directory = try makeTemporaryDirectory()
+        let cache = RuleSetCache(cacheDirectoryURL: directory)
+        var ruleSet = DomainRuleSet()
+        try ruleSet.insert(domain: "ads.example.com", matchesSubdomains: true)
+        try cache.store(ruleSet, sourceID: "source-a", contentSHA256: sampleHash, parseFormat: .hosts, payloadByteSize: 10)
+
+        let parsedRulesURL = directory.appendingPathComponent("parsed-rules")
+        let supersededTree = parsedRulesURL.appendingPathComponent("v2/source-old")
+        try FileManager.default.createDirectory(at: supersededTree, withIntermediateDirectories: true)
+        try Data("orphaned".utf8).write(to: supersededTree.appendingPathComponent("entry.ruleset"))
+        let unrelatedSibling = parsedRulesURL.appendingPathComponent("scratch")
+        try FileManager.default.createDirectory(at: unrelatedSibling, withIntermediateDirectories: true)
+        // A v-PREFIXED but non-`v<digits>` sibling must survive — the sweep is a destructive
+        // removeItem and must only reap real version trees, not e.g. `vendor`/`versions`.
+        let vendorSibling = parsedRulesURL.appendingPathComponent("vendor")
+        try FileManager.default.createDirectory(at: vendorSibling, withIntermediateDirectories: true)
+
+        cache.sweepSupersededVersionTrees()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parsedRulesURL.appendingPathComponent("v2").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedSibling.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: vendorSibling.path), "a v-prefixed non-version dir must not be swept")
+        XCTAssertNotNil(
+            cache.load(sourceID: "source-a", contentSHA256: sampleHash, parseFormat: .hosts),
+            "The CURRENT version tree must survive the sweep."
+        )
+    }
+
+    func testIsSupersededVersionDirectoryMatchesOnlyOldVDigitsTrees() {
+        XCTAssertTrue(RuleSetCache.isSupersededVersionDirectory("v2", current: "v3"))
+        XCTAssertTrue(RuleSetCache.isSupersededVersionDirectory("v10", current: "v3"))
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("v3", current: "v3"), "the current tree is never swept")
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("vendor", current: "v3"), "v-prefixed non-numeric is not a version tree")
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("versions", current: "v3"))
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("v", current: "v3"), "bare v has no version number")
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("v2beta", current: "v3"), "trailing non-digits disqualify")
+        XCTAssertFalse(RuleSetCache.isSupersededVersionDirectory("scratch", current: "v3"))
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

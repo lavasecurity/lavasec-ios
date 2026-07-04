@@ -20,8 +20,8 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     private let writeMarker = "write(to: configurationURL"
 
     func testConfigurationIsWrittenOnlyByTheSingleSharedWriter() throws {
-        let appViewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let appViewModel = try readSource(.appViewModel)
+        let writer = try readSource(.sharedFilterStatePersistence)
 
         // The single owner of the shared configuration file must stay main-actor confined, so no
         // background-constructed model can race a foreground save through the published state.
@@ -46,7 +46,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         // Both foreground publishers must delegate to the shared writer (and only those two do so in
         // AppViewModel — a third foreground delegate would be a new write path to scrutinize).
         let delegateMarker = "SharedFilterStatePersistence.writeConfigurationAndLibrary("
-        let persistSharedState = try Self.sourceBlock(
+        let persistSharedState = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistSharedState(",
             endingBefore: "private func persistConfigurationOnly("
@@ -55,7 +55,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
             persistSharedState.components(separatedBy: delegateMarker).count - 1, 1,
             "persistSharedState must persist via exactly one shared-writer call."
         )
-        let persistConfigurationOnly = try Self.sourceBlock(
+        let persistConfigurationOnly = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistConfigurationOnly(",
             endingBefore: "private func syncActiveFilterFromConfiguration()"
@@ -79,8 +79,8 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// switch). AppViewModel must therefore contain ZERO raw library writes — the library is only ever written
     /// by the shared writer, at a bumped generation.
     func testLibraryHalfOfThePairIsAlsoSingleSourced() throws {
-        let appViewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let appViewModel = try readSource(.appViewModel)
+        let writer = try readSource(.sharedFilterStatePersistence)
         let libraryWriteMarker = "write(to: filterLibraryURL"
 
         XCTAssertTrue(
@@ -93,7 +93,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         )
         // The library-only edit path must NOT do an un-bumped library-only write: it delegates to
         // persistConfigurationOnly so the generation advances and the extension's fence can trip (Codex P1).
-        let persistFilterLibrary = try Self.sourceBlock(
+        let persistFilterLibrary = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistFilterLibrary(",
             endingBefore: "private func uploadEncryptedBackup("
@@ -109,7 +109,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
             writer.contains("public static func writeConfigurationAndLibrary("),
             "The shared pair writer must exist."
         )
-        let writerBody = try Self.sourceBlock(
+        let writerBody = try sourceBlock(
             in: writer,
             startingAt: "public static func writeConfigurationAndLibrary(",
             endingBefore: "public static func onDiskConfigurationGeneration("
@@ -125,9 +125,9 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// the extension's engine) must pass that lock — otherwise the two processes can interleave the
     /// generation read + file writes. Pin the lock wrap + that the foreground publishers engage it.
     func testCrossProcessCASLockWrapsTheCriticalSectionAndAllWritersEngageIt() throws {
-        let appViewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
-        let engine = try Self.source(named: "HeadlessFocusFilterSwitchEngine.swift", in: "Sources/LavaSecCore")
+        let appViewModel = try readSource(.appViewModel)
+        let writer = try readSource(.sharedFilterStatePersistence)
+        let engine = try readSource(.headlessFocusFilterSwitchEngine)
 
         // The writer wraps its read-generation-then-write critical section in the exclusive flock.
         XCTAssertTrue(writer.contains("crossProcessLockURL: URL? = nil"),
@@ -155,10 +155,10 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// and that it keys on the ACTIVE FILTER (so a concurrent library-only generation bump — a warm-token
     /// promote, which has no marker to recover an aborted flip — does not needlessly abort the flip).
     func testForegroundFlipIsFencedAgainstAConcurrentSwitch() throws {
-        let appViewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let appViewModel = try readSource(.appViewModel)
+        let writer = try readSource(.sharedFilterStatePersistence)
 
-        let persistSharedState = try Self.sourceBlock(
+        let persistSharedState = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistSharedState(",
             endingBefore: "private func persistConfigurationOnly("
@@ -174,31 +174,4 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     }
 
     // MARK: - Source introspection helpers
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        var sourceURL = packageRootURL
-        for component in directoryName.split(separator: "/") {
-            sourceURL.appendPathComponent(String(component))
-        }
-        sourceURL.appendPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
-    }
 }

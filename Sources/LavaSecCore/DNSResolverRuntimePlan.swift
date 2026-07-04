@@ -307,14 +307,31 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     /// wrapper changes (e.g. the encrypted fallback resolver, or — for a Device-DNS primary, which
     /// is this feature's scope — there is no device-DNS-fallback MODE to flip the effective transport).
     /// Used to detect a genuine primary-resolver switch vs a fallback-only runtime reset.
+    /// Canonical against the AUTOMATIC reorder only: `orderedResolverAddresses` flips the v4/v6
+    /// family ordering by network kind, so the SAME address set must not read as a different
+    /// identity across a wifi↔cellular flap — identity-scoped evidence (the LAV-87
+    /// rejected-response streak) keys on this value and must survive that churn. User-semantic
+    /// ordering is preserved: relative order WITHIN a family (a custom resolver's
+    /// primary/secondary swap changes try-order behavior) and endpoint-list order (never
+    /// touched by the network-kind reorder) still register as real identity changes that clear
+    /// identity-scoped evidence. The full `cacheIdentifier` stays fully order-SENSITIVE on
+    /// purpose: it is the runtime-reset no-op key, where any reorder is a real "connections
+    /// need rebuilding" signal.
     public var primaryCacheIdentifier: String {
         Self.cacheIdentifier(
             transport: transport,
-            plainAddresses: plainAddresses,
+            plainAddresses: Self.canonicalIdentityAddressOrder(plainAddresses),
             dohEndpoints: dohEndpoints,
             dotEndpoints: dotEndpoints,
             doqEndpoints: doqEndpoints
         )
+    }
+
+    /// Re-emits addresses in the fixed non-cellular family order (v4, v6, other) that
+    /// `orderedResolverAddresses` produces for wifi, preserving relative order within each
+    /// family — neutralizing exactly the cellular family flip and nothing else.
+    private static func canonicalIdentityAddressOrder(_ addresses: [String]) -> [String] {
+        orderedResolverAddresses(addresses, networkKind: .wifi)
     }
 
     private static func cacheIdentifier(

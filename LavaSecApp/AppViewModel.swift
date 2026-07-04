@@ -549,11 +549,17 @@ enum EncryptedBackupError: Error, LocalizedError {
     case invalidPasskeyUnlock
     case passkeyRestoreRequiresSignIn
     case supersededByConcurrentConfigurationChange
+    // The unlock secret was correct but the backup PAYLOAD is a newer schema this build can't
+    // decode (PST-5, Codex #218). Distinct from the invalid-unlock errors so the user is told to
+    // update the app, not that their device key / phrase / passkey is wrong.
+    case unsupportedBackupSchema
 
     var errorDescription: String? {
         switch self {
         case .supersededByConcurrentConfigurationChange:
             "Your filter changed while the backup was restoring. Try the restore again."
+        case .unsupportedBackupSchema:
+            "This backup was created by a newer version of Lava. Update the app to restore it."
         case .noBackupAvailable:
             "No encrypted backup is available on this device yet. Sign in is needed to download a server backup."
         case .noSavedDeviceSecret:
@@ -1015,10 +1021,11 @@ final class AppViewModel: ObservableObject {
     // row being deleted.
     private var isUploadingEncryptedBackup = false
     @Published private(set) var isAutomaticBackupEnabled = false
-    @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map {
+    @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map {
         LavaSecurityPlusOffer(
             plan: $0,
             displayPrice: $0.fallbackDisplayPrice,
+            commitmentDisplayPrice: nil,
             product: nil
         )
     }
@@ -1158,6 +1165,10 @@ final class AppViewModel: ObservableObject {
     private var lastProtectionStatusRefresh: Date?
     private var awaitsProtectionOnHaptic = false
     private var diagnosticsReadGate = FileModificationReadGate()
+    // A fine-grained prune was performed in memory but could NOT be written because the tunnel then
+    // owned diagnostics.json (stop-pending). Persist it on a later refresh once the app owns the file
+    // again, or the expired rows linger on disk until an unrelated write (Codex #225 / UX-4).
+    private var diagnosticsPrunePersistDeferred = false
     private var tunnelHealthReadGate = FileModificationReadGate()
     private var networkActivityLogReadGate = FileModificationReadGate()
 
@@ -1211,6 +1222,17 @@ final class AppViewModel: ObservableObject {
             loadEncryptedBackupState()
             loadTemporaryProtectionPause()
             scheduleTemporaryProtectionResume()
+            // One-shot disk maintenance: superseded parsed-rules version trees. A parser
+            // bump orphans the whole previous tree and nothing else deletes it (up to
+            // 2 entries x ~40 MB per large source). Foreground app only — the headless
+            // bg-refresh instance installs no side-effecting init work (see the comment
+            // above), and the extension deliberately avoids maintenance IO. Detached
+            // utility task so init never blocks on disk.
+            if let sweepCacheURL = catalogCacheURL {
+                Task.detached(priority: .utility) {
+                    RuleSetCache(cacheDirectoryURL: sweepCacheURL).sweepSupersededVersionTrees()
+                }
+            }
             liveActivityController.startObservingAuthorizationChanges { [weak self] _ in
                 self?.reconcileLiveActivity()
             }
@@ -1411,18 +1433,22 @@ final class AppViewModel: ObservableObject {
                     lavaSecurityPlusMessage = nil
                     lavaSecurityPlusMessageIsError = false
                 } else {
-                    lavaSecurityPlusMessage = "No active Lava Security Plus purchase was found."
+                    // Producer-side status strings localize AT ASSIGNMENT: the render is a
+                    // verbatim Text(variable) on the Upgrade page, which resolves no key
+                    // (the i18n round-3 render-path class), and interpolations must be
+                    // format keys at the producer.
+                    lavaSecurityPlusMessage = "No active Lava Security Plus purchase was found.".lavaLocalized
                     lavaSecurityPlusMessageIsError = true
                 }
             case .pending:
-                lavaSecurityPlusMessage = "The App Store purchase is pending approval."
+                lavaSecurityPlusMessage = "The App Store purchase is pending approval.".lavaLocalized
                 lavaSecurityPlusMessageIsError = false
             case .cancelled:
-                lavaSecurityPlusMessage = "Purchase cancelled"
+                lavaSecurityPlusMessage = "Purchase cancelled".lavaLocalized
                 lavaSecurityPlusMessageIsError = false
             }
         } catch {
-            lavaSecurityPlusMessage = "Could not complete purchase: \(error.localizedDescription)"
+            lavaSecurityPlusMessage = "Could not complete purchase: %@".lavaLocalizedFormat(error.localizedDescription)
             lavaSecurityPlusMessageIsError = true
         }
     }
@@ -1433,7 +1459,7 @@ final class AppViewModel: ObservableObject {
         }
 
         isPurchasingLavaSecurityPlus = true
-        lavaSecurityPlusMessage = "Checking the App Store for purchases."
+        lavaSecurityPlusMessage = "Checking the App Store for purchases.".lavaLocalized
         lavaSecurityPlusMessageIsError = false
         defer {
             isPurchasingLavaSecurityPlus = false
@@ -1444,11 +1470,11 @@ final class AppViewModel: ObservableObject {
             applyLavaSecurityPlusEntitlement(entitlement)
             await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
             lavaSecurityPlusMessage = entitlement.isActive
-                ? "Lava Security Plus is restored."
-                : "No active Lava Security Plus purchase was found."
+                ? "Lava Security Plus is restored.".lavaLocalized
+                : "No active Lava Security Plus purchase was found.".lavaLocalized
             lavaSecurityPlusMessageIsError = !entitlement.isActive
         } catch {
-            lavaSecurityPlusMessage = "Could not restore purchases: \(error.localizedDescription)"
+            lavaSecurityPlusMessage = "Could not restore purchases: %@".lavaLocalizedFormat(error.localizedDescription)
             lavaSecurityPlusMessageIsError = true
         }
     }
@@ -2280,10 +2306,10 @@ final class AppViewModel: ObservableObject {
 
     var deviceDNSFallbackDetailText: String {
         if #available(iOS 26.0, *) {
-            return "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back."
+            return "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can."
         }
 
-        return "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back. On iOS 17-25, this is best effort and might not always work depending on network conditions."
+        return "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can. On iOS 17–25 this is best effort."
     }
 
     var deviceDNSResolverDetailText: String {
@@ -2291,7 +2317,7 @@ final class AppViewModel: ObservableObject {
             return "Uses the DNS resolver from the current Wi-Fi or cellular network while Lava still filters locally."
         }
 
-        return "Uses the DNS resolver Lava can capture from the current Wi-Fi or cellular network. On iOS 17-25, this might not always work depending on network conditions."
+        return "Uses the DNS provider from your current Wi-Fi or cellular network. On iOS 17–25 this may not always work."
     }
 
     var filterFreshnessText: String {
@@ -2636,9 +2662,15 @@ final class AppViewModel: ObservableObject {
     }
 
     /// The active filter's edit draft, addressed by `activeFilterID` regardless of which filter the
-    /// detail page is showing. The full prepare+publish+reload apply (active My-filter save and
-    /// Domain History) operates on this, so it's correct even if a non-active detail page is still
-    /// mounted with a different `filterEditTargetID`.
+    /// detail page is showing. Domain History stages onto this directly (see
+    /// `stageDomainHistoryDomainAction`, which also forces `filterEditTargetID = nil`), and the full
+    /// prepare+publish+reload apply clears this on success. The apply itself READS through the
+    /// `filterEditDraft` proxy (keyed by `currentEditKey`), so it only lands on the active draft
+    /// because every call site reaches it with the detail context forced to the active filter
+    /// (`filterEditTargetID == nil`): FiltersView returns early for a non-active save, and Domain
+    /// History resets the target before staging. A future navigation refactor that reached the apply
+    /// with a non-nil target would read the wrong filter's draft here but still clear this one — pin
+    /// the apply's read (and its diff/validation baseline) to `activeFilterDraft` before allowing that.
     var activeFilterDraft: FilterEditDraft? {
         get { filterEditDrafts[activeFilterID] }
         set { filterEditDrafts[activeFilterID] = newValue }
@@ -3125,6 +3157,10 @@ final class AppViewModel: ObservableObject {
         // left, so a transient edit/Domain-History failure still offers "Try Again".
         pendingSwitchFilterID = nil
         filterPreparationFailureIsRetryable = true
+        // Reads the draft through the `filterEditDraft` proxy (keyed by `currentEditKey`). Every
+        // caller reaches here with the detail context forced to the active filter
+        // (`filterEditTargetID == nil`), so this is the active draft — the same entry the success
+        // path clears via `activeFilterDraft`. See `activeFilterDraft` before changing that invariant.
         guard let filterEditDraft else {
             return
         }
@@ -4302,7 +4338,7 @@ final class AppViewModel: ObservableObject {
                 actionStatus = isProtectionTemporarilyPaused ? "paused" : "noop"
             } catch {
                 actionStatus = "error"
-                vpnMessage = Self.vpnErrorMessage(prefix: "Could not pause protection", error: error)
+                vpnMessage = Self.vpnErrorMessage(prefix: "Could not pause protection".lavaLocalized, error: error)
                 vpnMessageIsError = true
             }
         }
@@ -4519,7 +4555,9 @@ final class AppViewModel: ObservableObject {
 
     func installLocalVPNProfileForOnboarding() async -> Bool {
         guard protectionActionOrchestrator.claim(.installProfile) else {
-            vpnMessage = "Finish the current VPN setup first."
+            // Rendered verbatim by the onboarding VPN step (Text(variable)) — localize at
+            // the producer (i18n round-3 render-path class).
+            vpnMessage = "Finish the current VPN setup first.".lavaLocalized
             vpnMessageIsError = false
             return false
         }
@@ -4533,7 +4571,7 @@ final class AppViewModel: ObservableObject {
         vpnMessageIsError = false
         return true
         #else
-        vpnMessage = "Preparing local VPN..."
+        vpnMessage = "Preparing local VPN...".lavaLocalized
         vpnMessageIsError = false
 
         do {
@@ -4549,7 +4587,7 @@ final class AppViewModel: ObservableObject {
             vpnMessageIsError = false
             return true
         } catch {
-            vpnMessage = Self.vpnErrorMessage(prefix: "Could not install VPN profile", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Could not install VPN profile".lavaLocalized, error: error)
             vpnMessageIsError = true
             return false
         }
@@ -5349,62 +5387,87 @@ final class AppViewModel: ObservableObject {
         clearAllLocalLogs()
     }
 
-    func clearDomainHistory() {
-        diagnostics.clearDomainHistory()
+    /// Returns whether the clear durably persisted. A write failure is caught here (surfacing an
+    /// error banner + failure haptic) rather than thrown, so callers that need to confirm the clear
+    /// to the user — e.g. a VoiceOver announcement — must gate on this result, not assume success.
+    @discardableResult
+    func clearDomainHistory() -> Bool {
+        // One timestamp for both the store's applied-marker and the control request, so
+        // the tunnel's force-apply gate reads `requestedAt > marker` = false (PST-1).
+        let clearedAt = Date()
+        diagnostics.clearDomainHistory(clearedAt: clearedAt)
 
         do {
-            try writeDiagnosticsClearControl(clearDomainHistory: true)
+            try writeDiagnosticsClearControl(clearDomainHistory: true, at: clearedAt)
             try persistDiagnostics()
             diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
-            vpnMessage = "Could not clear local history: \(error.localizedDescription)"
+            vpnMessage = "Could not clear local history: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
-    func clearLocalFilteringCounts() {
-        diagnostics.clearFilteringCounts()
+    /// Returns whether the clear durably persisted (see `clearDomainHistory`).
+    @discardableResult
+    func clearLocalFilteringCounts() -> Bool {
+        let clearedAt = Date()
+        diagnostics.clearFilteringCounts(startedAt: clearedAt)
 
         do {
-            try writeDiagnosticsClearControl(clearFilteringCounts: true)
+            try writeDiagnosticsClearControl(clearFilteringCounts: true, at: clearedAt)
             try persistDiagnostics()
             diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
-            vpnMessage = "Could not clear local filtering counts: \(error.localizedDescription)"
+            vpnMessage = "Could not clear local filtering counts: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
-    func clearAllLocalLogs() {
-        diagnostics.clearFilteringCounts()
-        diagnostics.clearDomainHistory()
+    /// Returns whether the primary diagnostics clear durably persisted (see `clearDomainHistory`).
+    @discardableResult
+    func clearAllLocalLogs() -> Bool {
+        let clearedAt = Date()
+        diagnostics.clearFilteringCounts(startedAt: clearedAt)
+        diagnostics.clearDomainHistory(clearedAt: clearedAt)
         clearNetworkActivityLog(notifyTunnel: false)
         clearLavaGuardProgress()
+        clearIncidentLedger()
+        clearDeviceDebugLog()
+        clearSelfReconnectGapMarkers()
 
         do {
-            try writeDiagnosticsClearControl(clearDomainHistory: true, clearFilteringCounts: true)
+            try writeDiagnosticsClearControl(clearDomainHistory: true, clearFilteringCounts: true, at: clearedAt)
             try persistDiagnostics()
             diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
                 await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
                 await self.sendTunnelMessage(LavaSecAppGroup.clearNetworkActivityLogMessage)
+                // The tunnel drains its deferred incident writes then clears, so a queued
+                // recordIncident can't resurrect the ledger the app just wiped (CON-1).
+                await self.sendTunnelMessage(LavaSecAppGroup.clearIncidentLedgerMessage)
             }
             ProtectionHapticFeedback.play(.actionSucceeded)
+            return true
         } catch {
-            vpnMessage = "Could not clear local logs: \(error.localizedDescription)"
+            vpnMessage = "Could not clear local logs: %@".lavaLocalizedFormat(error.localizedDescription)
             vpnMessageIsError = true
             ProtectionHapticFeedback.play(.actionFailed)
+            return false
         }
     }
 
@@ -5445,13 +5508,49 @@ final class AppViewModel: ObservableObject {
     // local, user-controlled diagnostic file, so a deep trace is the point.
     // Same redaction (BugReportDebugLogEntry keeps only allowlisted detail keys).
     private func loadDeviceDebugLogEntriesForExport() -> [BugReportDebugLogEntry] {
-        guard let url = LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename),
-              let data = try? Data(contentsOf: url)
-        else {
+        BugReportDebugLogEntry.parseJSONLines(
+            concatenating: deviceDebugLogGenerations(),
+            limit: 5_000
+        )
+    }
+
+    // The 8 MB rotation boundary can land between an incident and the report/export
+    // (LavaSecDeviceDebugLog.rotate keeps one previous generation for exactly this case);
+    // reading only the current file makes a just-rotated log look near-empty. Rotated
+    // generation first: the entry cap keeps the newest lines via suffix, and both callers
+    // bound the result by entry count, so the extra generation costs parse time only.
+    //
+    // A rotation can also land BETWEEN the two reads (the tunnel's appendLine moves
+    // current -> .1 at the size cap): reading .1 first and current second would then return
+    // the old rotated generation plus the brand-new current file, dropping the generation
+    // that held the incident window. rotate() replaces the .1 inode, and a rename preserves
+    // the moved file's own mtime — so the .1 file identity (inode) is the rotation signal:
+    // re-read when it changed mid-read, and after repeated churn fall back to the last
+    // (possibly gapped) read, which is still no worse than the pre-rotation-aware loader.
+    private func deviceDebugLogGenerations() -> [Data] {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
             return []
         }
+        let generationURLs = [
+            containerURL.appendingPathComponent(LavaSecAppGroup.vpnDebugLogRotatedFilename),
+            containerURL.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename),
+        ]
+        var generations: [Data] = []
+        for _ in 0..<3 {
+            let identityBefore = fileIdentity(at: generationURLs[0])
+            generations = generationURLs.compactMap { try? Data(contentsOf: $0) }
+            if fileIdentity(at: generationURLs[0]) == identityBefore {
+                break
+            }
+        }
+        return generations
+    }
 
-        return BugReportDebugLogEntry.parseJSONLines(data, limit: 5_000)
+    private func fileIdentity(at url: URL) -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
     }
 
     func refreshNetworkActivityLog(force: Bool = false) {
@@ -5488,11 +5587,14 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func clearNetworkActivityLog(notifyTunnel: Bool = true) {
+    /// Best-effort: the underlying clear surfaces no failure to the caller, so this always reports
+    /// success. Returns `Bool` for a uniform signature with the other clears (see `clearDomainHistory`).
+    @discardableResult
+    func clearNetworkActivityLog(notifyTunnel: Bool = true) -> Bool {
         guard let networkActivityLogURL else {
             networkActivityLogReadGate.reset()
             networkActivityLog = NetworkActivityLog()
-            return
+            return true
         }
 
         NetworkActivityLogPersistence.clear(at: networkActivityLogURL)
@@ -5503,11 +5605,16 @@ final class AppViewModel: ObservableObject {
                 await self.sendTunnelMessage(LavaSecAppGroup.clearNetworkActivityLogMessage)
             }
         }
+        return true
     }
 
-    func clearLavaGuardProgress() {
+    /// Best-effort: the underlying persist surfaces no failure to the caller, so this always reports
+    /// success (see `clearNetworkActivityLog`).
+    @discardableResult
+    func clearLavaGuardProgress() -> Bool {
         lavaGuardProgress.clearUsageProgress()
         persistLavaGuardProgress()
+        return true
     }
 
     func setKeepFilteringCounts(_ keepFilteringCounts: Bool, clearCounts: Bool = true) {
@@ -5864,6 +5971,8 @@ final class AppViewModel: ObservableObject {
             }
             do {
                 payload = try envelope.decryptWithKeychainSecret(deviceSecret)
+            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
+                throw EncryptedBackupError.unsupportedBackupSchema
             } catch {
                 throw EncryptedBackupError.invalidDeviceUnlock
             }
@@ -5871,6 +5980,8 @@ final class AppViewModel: ObservableObject {
         case .recoveryCode:
             do {
                 payload = try decryptWithNormalizedRecoveryPhrase(trimmedSecret, envelope: envelope)
+            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
+                throw EncryptedBackupError.unsupportedBackupSchema
             } catch {
                 throw EncryptedBackupError.invalidRecoveryPhrase
             }
@@ -5889,6 +6000,8 @@ final class AppViewModel: ObservableObject {
             let prfOutput = try await passkeyPRFOutputForRestore(envelope: envelope)
             do {
                 payload = try envelope.decryptWithPasskeyPRFOutput(prfOutput)
+            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
+                throw EncryptedBackupError.unsupportedBackupSchema
             } catch {
                 throw EncryptedBackupError.invalidPasskeyUnlock
             }
@@ -6132,12 +6245,19 @@ final class AppViewModel: ObservableObject {
         for candidate in candidates {
             do {
                 return try envelope.decryptWithAssistedRecoveryPhrase(candidate)
+            } catch let error as BackupConfigurationPayloadError {
+                // Reaching the payload decode means this candidate DID unwrap the envelope — the phrase
+                // is correct, the schema is just newer than we support. Rethrow immediately so a later
+                // wrong candidate's crypto error can't overwrite it and mislabel this as a bad phrase (PST-5).
+                throw error
             } catch {
                 lastError = error
             }
 
             do {
                 return try envelope.decryptWithRecoveryPhrase(candidate)
+            } catch let error as BackupConfigurationPayloadError {
+                throw error
             } catch {
                 lastError = error
             }
@@ -6172,6 +6292,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshDiagnostics() {
+        // The incident ledger ages on the same local-log lifecycle as the diagnostics
+        // store's fine-grained prune below (the tunnel's startup sweep never runs while
+        // the VPN is disabled). Two-phase corroborated — cannot delete off one reading.
+        sweepIncidentLedgerRetention()
         guard let diagnosticsURL else {
             diagnosticsReadGate.reset()
             return
@@ -6191,25 +6315,71 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        // While the tunnel is connected it OWNS the diagnostics file: it prunes on
+        // every debounced write and on its stop-flush, and those writes are NOT
+        // cross-process locked. The app therefore must not write a pruned copy back
+        // over the tunnel's live writes — a prune write-back landing between the
+        // tunnel's final stop-flush load and save would permanently lose the last
+        // few Domain History events (UX-4 / PST-3). It's safe to defer: the app
+        // still prunes IN MEMORY for display, and persists its prune once it owns the
+        // file (i.e. when protection is off, the only writer). No permanent on-disk
+        // staleness results, since the tunnel keeps the file pruned while connected.
+        //
+        // Ownership spans the whole NON-stopped lifecycle, NOT just .connected (Codex #218-class
+        // review): the finding's only PERMANENT lost-update is the tunnel's final stop-flush
+        // (cleanUpTunnelRuntimeAfterStop → persistDiagnosticsIfNeeded(force:true)) which runs while
+        // vpnStatus is .disconnecting. Guarding only .connected would close the transient
+        // steady-state clobber (the tunnel re-adds those from its in-memory store) and leave the
+        // harmful teardown one open. isProtectionStopPendingStatus is true for .connected /
+        // .connecting / .reasserting / .disconnecting and false for .disconnected / .invalid, so
+        // the app defers while the tunnel may still write and catches up as sole writer once stopped.
+        let tunnelOwnsDiagnosticsFile = isProtectionStopPendingStatus(vpnStatus)
+
         guard diagnosticsReadGate.shouldRead(modifiedAt: modifiedAt, force: shouldForceLocalLogClear) else {
-            // File unchanged, but the clock may have crossed the 7-day window while
-            // the app sat idle with no new DNS writes. Expire the in-memory store by
-            // time — independent of the file-change gate — so Top Domains and exports
-            // never show stale detail, and write the trim back to disk.
-            if diagnostics.pruneExpiredFineGrainedData() {
+            // File UNCHANGED since our last read, so the in-memory `diagnostics` still
+            // matches disk except for prunes we applied in memory but couldn't persist
+            // while the tunnel owned the file. Two reasons to write now, both safe only
+            // because in-memory == disk here (no tunnel writes to clobber):
+            //   1. A deferred prune from an earlier refresh (`diagnosticsPrunePersistDeferred`)
+            //      whose flag we carried until we regained ownership (Codex #225).
+            //   2. A fresh expiry: the clock may have crossed the 7-day window while the
+            //      app sat idle with no new DNS writes, so Top Domains/exports never show
+            //      stale detail.
+            // Persist only when the app owns the file (see `tunnelOwnsDiagnosticsFile`);
+            // otherwise remember the pending prune for a later refresh. We must NOT flush
+            // ahead of the read gate: if the tunnel had written the file, this stale
+            // in-memory copy would overwrite its final Domain History events (Codex P1 #225).
+            let prunedNow = diagnostics.pruneExpiredFineGrainedData()
+            if !tunnelOwnsDiagnosticsFile, diagnosticsPrunePersistDeferred || prunedNow {
                 try? persistDiagnostics()
                 diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
+                diagnosticsPrunePersistDeferred = false
+            } else if prunedNow {
+                // Pruned in memory but the tunnel owns the file — persist on a later refresh.
+                diagnosticsPrunePersistDeferred = true
             }
             return
         }
+
+        // File CHANGED (the tunnel wrote to it): the on-disk store is authoritative and
+        // supersedes any prune we deferred against the previous in-memory copy. Drop the
+        // flag; the fresh load below re-prunes expired rows and persists them once we own
+        // the file, so nothing lingers and no stale write-back can lose the tunnel's data.
+        diagnosticsPrunePersistDeferred = false
 
         var store = DiagnosticsPersistence.load(from: diagnosticsURL)
         store.pruneExpiredFineGrainedData()
         diagnosticsReadGate.markRead(modifiedAt: modifiedAt)
         // Persist when any fine-grained prune removed events — including one
         // `load` already performed in its day-rollover reset — so aged-out domain
-        // history does not linger in the file past the 7-day window.
-        var shouldPersistClearedLogs = store.consumePendingFineGrainedPrunePersist()
+        // history does not linger in the file past the 7-day window. Skip the
+        // prune-only write-back while the tunnel owns the file (the config-driven
+        // clears below still persist — they are coordinated with the tunnel via the
+        // diagnostics-control file + IPC, not an unsynchronized prune). The pending
+        // flag is always consumed (transient bookkeeping on this local store copy),
+        // then gated on ownership so it never drives a write while connected.
+        let prunePending = store.consumePendingFineGrainedPrunePersist()
+        var shouldPersistClearedLogs = prunePending && !tunnelOwnsDiagnosticsFile
 
         if !configuration.keepFilteringCounts, store.hasFilteringCountData {
             store.clearFilteringCounts()
@@ -6228,6 +6398,12 @@ final class AppViewModel: ObservableObject {
         if shouldPersistClearedLogs {
             try? persistDiagnostics()
             diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
+            diagnosticsPrunePersistDeferred = false
+        } else if prunePending {
+            // A prune couldn't be persisted because the tunnel owns the file — remember it so the
+            // top-of-function flush writes it once the app owns the file again (Codex #225). The
+            // pruned `store` is now live in `diagnostics`, so that flush persists the pruned view.
+            diagnosticsPrunePersistDeferred = true
         }
     }
 
@@ -7134,7 +7310,102 @@ final class AppViewModel: ObservableObject {
             // Privacy-safe Focus-switch diagnostic (LAV-100 Phase 4): the extension records the last
             // attempt's outcome to the shared app group, so a closed-app failure is debuggable from the
             // (Release) bug report without a device or the QA device log.
-            lastFocusSwitch: FocusSwitchDiagnostics.last(in: LavaSecAppGroup.sharedDefaults)
+            lastFocusSwitch: FocusSwitchDiagnostics.last(in: LavaSecAppGroup.sharedDefaults),
+            selfReconnectGap: loadSelfReconnectGapRecord(),
+            recentIncidents: loadRecentIncidentLedgerRecords()
+        )
+    }
+
+    /// Report view of the tunnel's incident ledger (OBS R2): the timeline that survives
+    /// the policy stores' by-design forgetting. The READ is a pure view — `recentRecords`
+    /// filters to the 7-day report window and never writes back, so a skewed clock at
+    /// report time cannot wipe evidence (COH-4). On-disk retention is the SEPARATE
+    /// corroborated sweep below, run first: a report can be the first ledger touch in
+    /// days when the VPN is off.
+    private func loadRecentIncidentLedgerRecords() -> [IncidentLedgerRecord] {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return []
+        }
+        sweepIncidentLedgerRetention()
+        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
+        return IncidentLedgerPersistence.load(from: ledgerURL).recentRecords()
+    }
+
+    /// App-side lifecycle hook for the ledger's two-phase retention sweep (arm → 24 h
+    /// corroborated confirm — see `IncidentLedger.sweepExpired`): with the VPN disabled
+    /// or simply never relaunched, tunnel starts stop happening, so the app must also
+    /// age the file or expired rows outlive the Local Logs 7-day promise on disk.
+    /// Skew-safe by construction — a single (possibly lying) clock reading can at most
+    /// ARM, never delete — so unlike the report read, running this anywhere is harmless.
+    private func sweepIncidentLedgerRetention() {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return
+        }
+        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
+        IncidentLedgerPersistence.sweepExpired(at: ledgerURL)
+    }
+
+    /// Clear-all-logs privacy contract: the ledger is a local log like the others, so the
+    /// user's clear wipes it too. The app's OWN removal here is the reliable one — blocking,
+    /// off the tunnel's DNS/teardown path. Because the tunnel also defers incident writes
+    /// onto its serial IO queue (CON-1), a queued pre-clear write could recreate the file, so
+    /// `clearAllLocalLogs` ALSO sends `clearIncidentLedgerMessage` — the tunnel drains that
+    /// queue, then best-effort `tryClear`s (non-blocking, so it can never stall the
+    /// self-reconnect teardown — Codex #200 P2). If that rare drop leaves a drained pre-clear
+    /// record behind, the corroborated retention sweep ages it out.
+    private func clearIncidentLedger() {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return
+        }
+        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
+        IncidentLedgerPersistence.clear(at: ledgerURL)
+    }
+
+    /// PST-6: the device debug log (`vpn-debug-log.jsonl` + its rotated `.1` generation) is
+    /// the store that carries the resolver endpoints (incl. custom DNS) and the network-change
+    /// timeline a post-clear export would otherwise still ship. Clear-all now wipes it too.
+    /// Both the app and the tunnel append via a single `O_APPEND` `write(2)` with no in-memory
+    /// buffer, so removing the files is race-safe: a concurrent or subsequent tunnel append
+    /// just `O_CREAT`s a fresh, post-clear file — no pre-clear line can be resurrected.
+    private func clearDeviceDebugLog() {
+        LavaSecDeviceDebugLog.reset()
+    }
+
+    /// PST-6: the LAV-92/93 self-reconnect gap markers (started / ended / count) are durable
+    /// observability written by the tunnel. They are observability-ONLY — the recovery/cap
+    /// policy never reads them — so the app clears them directly (last-writer-wins app-group
+    /// defaults, no deferred queue); the tunnel writes fresh markers on the next gap, and a
+    /// stray `ended` with no `started` is ignored by `loadSelfReconnectGapRecord`. Deliberately
+    /// NOT cleared: `selfReconnectAttemptTimes` (the cap/cooldown policy READS it — wiping it
+    /// would perturb the founder-frozen recovery control flow) and the tunnel-health snapshot
+    /// (operational fail-closed state, not carried in the local export, same frozen-control-flow
+    /// reason). Those hold no resolver endpoints or domains, so they are not a privacy leak.
+    private func clearSelfReconnectGapMarkers() {
+        let defaults = LavaSecAppGroup.sharedDefaults
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
+    }
+
+    /// Read-only view of the tunnel's durable self-reconnect gap markers (LAV-92/93): the
+    /// rate-limiter's attempt store forgets by design (productive credit + 600 s prune), so
+    /// these keys are the only record that survives to a late-filed report. Written by the
+    /// tunnel only; the app just reads.
+    private func loadSelfReconnectGapRecord() -> SelfReconnectGapRecord? {
+        let defaults = LavaSecAppGroup.sharedDefaults
+        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
+        guard startedAtRaw > 0 else {
+            return nil
+        }
+        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
+        return SelfReconnectGapRecord(
+            startedAt: Date(timeIntervalSince1970: startedAtRaw),
+            // Accept an end only if it is AFTER the start read alongside it: the tunnel's
+            // open/close are separate cross-process defaults writes, so a racy read (or an
+            // extension killed mid-open) can pair a new start with the PREVIOUS gap's end —
+            // a bogus "closed" gap that would mask a still-open outage. Stale end = open.
+            endedAt: endedAtRaw > startedAtRaw ? Date(timeIntervalSince1970: endedAtRaw) : nil,
+            cumulativeCount: defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
         )
     }
 
@@ -7355,13 +7626,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func loadBugReportDebugLogEntries() -> [BugReportDebugLogEntry] {
-        guard let url = LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename),
-              let data = try? Data(contentsOf: url)
-        else {
-            return []
-        }
-
-        return BugReportDebugLogEntry.parseJSONLines(data)
+        BugReportDebugLogEntry.parseJSONLines(concatenating: deviceDebugLogGenerations())
     }
 
     private func vpnStatusReportDescription(_ status: NEVPNStatus) -> String {
@@ -8097,7 +8362,7 @@ final class AppViewModel: ObservableObject {
             actionStatus = "error"
             endProtectionVPNSession()
             configuration.protectionEnabled = false
-            vpnMessage = Self.vpnErrorMessage(prefix: "Could not start protection", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Could not start protection".lavaLocalized, error: error)
             vpnMessageIsError = true
             await refreshProtectionStatus(force: true)
             if playsOutcomeHaptic {
@@ -8181,7 +8446,7 @@ final class AppViewModel: ObservableObject {
             actionStatus = "stopped"
         } catch {
             actionStatus = "error"
-            vpnMessage = Self.vpnErrorMessage(prefix: "Could not stop protection", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Could not stop protection".lavaLocalized, error: error)
             vpnMessageIsError = true
         }
     }
@@ -8225,7 +8490,7 @@ final class AppViewModel: ObservableObject {
             ])
             #endif
         } catch {
-            vpnMessage = Self.vpnErrorMessage(prefix: "Could not reconnect protection", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Could not reconnect protection".lavaLocalized, error: error)
             vpnMessageIsError = true
             if playsOutcomeHaptic {
                 playProtectionStartFailedHaptic()
@@ -8361,7 +8626,7 @@ final class AppViewModel: ObservableObject {
             actionStatus = "resumed"
         } catch {
             actionStatus = "error"
-            vpnMessage = Self.vpnErrorMessage(prefix: "Resumed protection, but could not refresh filter", error: error)
+            vpnMessage = Self.vpnErrorMessage(prefix: "Resumed protection, but could not refresh filter".lavaLocalized, error: error)
             vpnMessageIsError = true
         }
     }
@@ -9065,14 +9330,16 @@ final class AppViewModel: ObservableObject {
 
     private func writeDiagnosticsClearControl(
         clearDomainHistory: Bool = false,
-        clearFilteringCounts: Bool = false
+        clearFilteringCounts: Bool = false,
+        at now: Date = Date()
     ) throws {
         guard let diagnosticsControlURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
 
         let existingControl = DiagnosticsControlPersistence.load(from: diagnosticsControlURL)
-        let now = Date()
+        // `now` matches the timestamp stamped into the store's applied-marker by the
+        // paired clear call, so the tunnel's force-apply gate dedups exactly (PST-1).
         try DiagnosticsControlPersistence.save(
             DiagnosticsControl(
                 clearDomainHistoryRequestedAt: clearDomainHistory ? now : existingControl.clearDomainHistoryRequestedAt,
@@ -9559,7 +9826,8 @@ final class AppViewModel: ObservableObject {
         // exceeds the budget is therefore never background-warmed — the foreground reconcile (which has
         // no per-run cap) warms it instead, so it isn't starved.
         // Size the per-run budget to the user's ACTUAL tier, not the free ceiling: this warm substrate
-        // exists for the Plus-only Focus auto-switch, so measuring a Plus filter (cap 2M) against the
+        // backs Focus auto-switch (available to all tiers — the Plus paywall was dropped), and a Plus
+        // user's filter can be up to 2M rules, so measuring it against the
         // free 500K ceiling would skip every legitimately-large filter on every run — it would never
         // background-warm, defeating the feature for exactly the filters it targets (panel finding P2).
         let perRunRuleBudget = configuration.limits.maxFilterRules
@@ -10415,8 +10683,21 @@ final class AppViewModel: ObservableObject {
         // (a frequently-toggled advisory hint) and the library's already-stripped local cache
         // tokens, so a protection pause/resume or a compile-token restamp no longer churns the
         // marker. Compare against the currently-sealed payload (recovered via the same device secret).
-        if let currentPayload = try? envelope.decryptWithKeychainSecret(deviceSecret),
-           currentPayload.hasSameBackupContent(as: payload) {
+        // PST-5 (Codex #218): a NEWER app may have sealed a payload schema this build can't decode.
+        // decryptWithKeychainSecret then throws `unsupportedSchemaVersion`; if we swallowed that and
+        // fell through, resealingPayload would overwrite the newer local envelope with our schema-1
+        // payload and clear its upload marker — the exact downgrade-clobber the schema ceiling exists
+        // to prevent. Distinguish it and SKIP the reseal, leaving the newer envelope + marker intact.
+        // Other decode failures fall through as before (treat as changed content → re-seal fresh).
+        let currentPayload: BackupConfigurationPayload?
+        do {
+            currentPayload = try envelope.decryptWithKeychainSecret(deviceSecret)
+        } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
+            return
+        } catch {
+            currentPayload = nil
+        }
+        if let currentPayload, currentPayload.hasSameBackupContent(as: payload) {
             return
         }
         guard let resealed = try? envelope.resealingPayload(payload, deviceSecret: deviceSecret) else {
@@ -10807,11 +11088,19 @@ final class AppViewModel: ObservableObject {
     private static func vpnErrorMessage(prefix: String, error: Error) -> String {
         // User-facing, self-contained errors (e.g. the over-budget blocklist
         // message) are shown verbatim without the technical domain/code suffix.
+        // Composition goes through format KEYS so locales control the separator
+        // (French spacing, CJK full-width colon); production call sites pass an
+        // already-localized prefix, QA-only sites keep their raw English one.
         if let preparationError = error as? FilterSnapshotPreparationError {
-            return "\(prefix): \(preparationError.localizedDescription)"
+            return "%@: %@".lavaLocalizedFormat(prefix, preparationError.localizedDescription)
         }
         let nsError = error as NSError
-        return "\(prefix): \(nsError.localizedDescription) (\(nsError.domain) \(nsError.code))."
+        return "%@: %@ (%@ %d).".lavaLocalizedFormat(
+            prefix,
+            nsError.localizedDescription,
+            nsError.domain,
+            nsError.code
+        )
     }
 
 }

@@ -147,6 +147,64 @@ final class NetworkActivityLogTests: XCTestCase {
         try? FileManager.default.removeItem(at: directoryURL)
     }
 
+    func testDecodeIgnoresTamperedZeroCapAndAdoptsCurrentClampedDefault() throws {
+        // A tampered valid-JSON `maximumEntryCount == 0` (a zero-capacity ring)
+        // must NOT survive decode — it would brick the log (PST-4). The decoded
+        // log adopts the CURRENT default cap and can still hold entries.
+        let payload = """
+        {
+          "entries" : [],
+          "maximumEntryCount" : 0,
+          "duplicateCoalescingWindow" : -5
+        }
+        """
+        let data = try XCTUnwrap(payload.data(using: .utf8))
+        var loaded = try NetworkActivityLogPersistence.makeJSONDecoder()
+            .decode(NetworkActivityLog.self, from: data)
+
+        XCTAssertEqual(loaded.maximumEntryCount, NetworkActivityLog.defaultMaximumEntryCount)
+        XCTAssertEqual(loaded.duplicateCoalescingWindow, NetworkActivityLog.defaultDuplicateCoalescingWindow)
+
+        // Not bricked: a zero-cap ring would drop every append.
+        loaded.append(Self.entry(at: 100, event: .userAction(.turnProtectionOn)))
+        XCTAssertEqual(loaded.entries.count, 1)
+    }
+
+    func testDecodeIgnoresStaleSmallCapAndAdoptsCurrentDefault() throws {
+        // A cap frozen at an old (smaller) file-creation default must NOT stick —
+        // a later default change has to reach existing installs (PST-4).
+        let payload = """
+        {
+          "entries" : [],
+          "maximumEntryCount" : 5,
+          "duplicateCoalescingWindow" : 3
+        }
+        """
+        let data = try XCTUnwrap(payload.data(using: .utf8))
+        let loaded = try NetworkActivityLogPersistence.makeJSONDecoder()
+            .decode(NetworkActivityLog.self, from: data)
+
+        XCTAssertEqual(loaded.maximumEntryCount, NetworkActivityLog.defaultMaximumEntryCount)
+        XCTAssertNotEqual(loaded.maximumEntryCount, 5)
+        XCTAssertEqual(loaded.duplicateCoalescingWindow, NetworkActivityLog.defaultDuplicateCoalescingWindow)
+    }
+
+    func testEncodeOmitsCapFieldsFromPayload() throws {
+        // The caps are policy, not data — they are never written to disk (PST-4),
+        // so a decode always follows the current defaults.
+        let log = NetworkActivityLog(entries: [
+            Self.entry(at: 100, event: .userAction(.turnProtectionOn))
+        ])
+        let encoded = try NetworkActivityLogPersistence.makeJSONEncoder().encode(log)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+
+        XCTAssertNotNil(object["entries"])
+        XCTAssertNil(object["maximumEntryCount"])
+        XCTAssertNil(object["duplicateCoalescingWindow"])
+    }
+
     func testDisplayLinesUseTimestampEventAndLavaStateShape() {
         let timestamp = Self.localTime(month: 1, day: 6, hour: 13, minute: 32, second: 8)
         let entry = Self.entry(
@@ -258,18 +316,33 @@ final class NetworkActivityLogTests: XCTestCase {
         XCTAssertEqual(entry.eventLine, "Connectivity recovered: backed-off via device-dns")
     }
 
-    func testPersistenceAppendUsesExclusiveFileLock() throws {
-        let source = try Self.source(named: "NetworkActivityLog.swift")
-        let appendBlock = try Self.sourceBlock(
+    func testPersistenceAppendUsesNonBlockingBoundedFileLock() throws {
+        let source = try readSource(.networkActivityLog)
+        let appendBlock = try sourceBlock(
             in: source,
             startingAt: "public static func append(_ entry: NetworkActivityLogEntry, to url: URL)",
-            endingBefore: "public static func clear(at url: URL)"
+            endingBefore: "public static func tryAppend(_ entry: NetworkActivityLogEntry, to url: URL)"
         )
 
         XCTAssertTrue(source.contains("import Darwin"))
-        XCTAssertTrue(source.contains("private static func withExclusiveFileLock"))
         XCTAssertTrue(source.contains("flock("))
+        // CON-1: the app-facing `append` is BLOCKING (never drops a user-action write —
+        // Codex #200 P2), while the tunnel-only `tryAppend` is NON-BLOCKING (bounded retry
+        // + drop) so a suspended app holding the lock can't wedge the DNS-serving queue.
         XCTAssertTrue(appendBlock.contains("withExclusiveFileLock(for: url)"))
+        XCTAssertFalse(
+            appendBlock.contains("withBoundedExclusiveFileLock(for: url)"),
+            "the app-facing append must be blocking so user actions are never dropped"
+        )
+        let tryAppendBlock = try sourceBlock(
+            in: source,
+            startingAt: "public static func tryAppend(_ entry: NetworkActivityLogEntry, to url: URL) -> Bool",
+            endingBefore: "public static func clear(at url: URL)"
+        )
+        XCTAssertTrue(tryAppendBlock.contains("withBoundedExclusiveFileLock(for: url)"))
+        XCTAssertTrue(source.contains("flock(descriptor, LOCK_EX | LOCK_NB)"))
+        XCTAssertTrue(source.contains("private static func withBoundedExclusiveFileLock"))
+        XCTAssertTrue(source.contains("private static func withExclusiveFileLock"))
     }
 
     func testTimestampLineIncludesDateAndTruncatesToMinute() {
@@ -317,6 +390,53 @@ final class NetworkActivityLogTests: XCTestCase {
         XCTAssertFalse(entry.lavaStateLine.contains("weather.example"))
     }
 
+    // MARK: - CON-1 non-blocking writer
+
+    func testAppendDropsInsteadOfBlockingWhenTheLockIsHeld() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("net-activity-lock-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("network-activity.json")
+        let lockURL = url.appendingPathExtension("lock")
+
+        // Hold the exclusive lock the way a suspended app would (a separate open file
+        // description — flock excludes across descriptions even in-process).
+        let heldDescriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        XCTAssertGreaterThanOrEqual(heldDescriptor, 0)
+        XCTAssertEqual(flock(heldDescriptor, LOCK_EX), 0)
+        defer { flock(heldDescriptor, LOCK_UN); close(heldDescriptor) }
+
+        let started = Date()
+        // tryAppend = the TUNNEL writer (non-blocking + drop). The app's blocking `append`
+        // would deadlock against the held lock — that is exactly why the app uses the
+        // blocking variant (never drops user actions) and the tunnel uses tryAppend.
+        let wrote = NetworkActivityLogPersistence.tryAppend(
+            Self.entry(at: 100, event: .userAction(.turnProtectionOn)),
+            to: url
+        )
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertFalse(wrote, "a contended tryAppend drops instead of wedging the DNS-serving queue")
+        XCTAssertLessThan(elapsed, 1.0, "the acquire is bounded — DNS serving can never stall on a held lock")
+        // Lock-free read (blocking `loadPruned` would deadlock against the held lock).
+        XCTAssertTrue(NetworkActivityLogPersistence.load(from: url).entries.isEmpty, "nothing partial is written")
+    }
+
+    func testTryAppendWritesWhenTheLockIsFree() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("net-activity-free-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("network-activity.json")
+
+        XCTAssertTrue(NetworkActivityLogPersistence.tryAppend(Self.entry(at: 100, event: .userAction(.turnProtectionOn)), to: url))
+        // The blocking app-side append writes too (and never drops).
+        NetworkActivityLogPersistence.append(Self.entry(at: 101, event: .userAction(.changeResolver)), to: url)
+        // Lock-free load (loadPruned would drop the fixed 1970 timestamps as expired).
+        XCTAssertEqual(NetworkActivityLogPersistence.load(from: url).entries.count, 2)
+    }
+
     private static func entry(
         at timestamp: TimeInterval = 100,
         event: NetworkActivityEvent,
@@ -350,31 +470,6 @@ final class NetworkActivityLogTests: XCTestCase {
         components.minute = minute
         components.second = second
         return Calendar.current.date(from: components) ?? Date(timeIntervalSince1970: 0)
-    }
-
-    private static func source(named fileName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent("Sources")
-            .appendingPathComponent("LavaSecCore")
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 
     private static func lavaState(

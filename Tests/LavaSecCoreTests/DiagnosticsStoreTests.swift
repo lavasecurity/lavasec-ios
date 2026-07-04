@@ -88,6 +88,22 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertEqual(store.recentEvents(action: .block).map(\.domain), ["ads.example.com"])
     }
 
+    func testPausedAllowsAreExcludedFromTopDomainsRankingButKeptInHistoryAndCounts() {
+        var store = DiagnosticsStore()
+
+        // A domain forwarded only because protection was paused isn't a real filter match,
+        // so it shouldn't crowd out domains the filter actually evaluated in Top Domains...
+        store.record(domain: "paused.example.com", decision: .pausedAllow, keepDomainHistory: true)
+        store.record(domain: "allowed.example.com", decision: .defaultAllow, keepDomainHistory: true)
+
+        XCTAssertEqual(store.topDomains(action: .allow).map(\.domain), ["allowed.example.com"])
+
+        // ...but the query really was allowed through, so it still belongs in Domain History
+        // and the aggregate allow count.
+        XCTAssertEqual(store.recentEvents.map(\.domain).sorted(), ["allowed.example.com", "paused.example.com"])
+        XCTAssertEqual(store.summary.allowedCount, 2)
+    }
+
     func testClearingFilteringCountsDoesNotClearDomainHistory() throws {
         let calendar = Calendar(identifier: .gregorian)
         let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 5, day: 18, hour: 9)))
@@ -392,5 +408,156 @@ final class DiagnosticsStoreTests: XCTestCase {
         try Data("not-json".utf8).write(to: corruptURL)
 
         XCTAssertEqual(DiagnosticsPersistence.load(from: corruptURL).summary.totalCount, 0)
+    }
+
+    // MARK: - PST-1 durable clear applied-markers
+
+    /// Mirror of `PacketTunnelProvider.applyDiagnosticsControlIfNeeded`'s dedup gate: apply
+    /// a control clear only when it is strictly newer than the durable marker the store
+    /// already carries. Applying via the same store methods the tunnel uses lets the test
+    /// exercise the real stamping.
+    private func applyDiagnosticsControl(_ control: DiagnosticsControl, to store: inout DiagnosticsStore) {
+        if let requestedAt = control.clearDomainHistoryRequestedAt,
+           requestedAt > (store.lastAppliedDomainHistoryClearAt ?? .distantPast) {
+            store.clearDomainHistory(clearedAt: requestedAt)
+        }
+        if let requestedAt = control.clearFilteringCountsRequestedAt,
+           requestedAt > (store.lastAppliedFilteringCountsClearAt ?? .distantPast) {
+            store.clearFilteringCounts(startedAt: requestedAt)
+        }
+    }
+
+    func testClearStampsDurableAppliedMarkersThatSurviveEncodeDecode() throws {
+        let historyAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let countsAt = historyAt.addingTimeInterval(5)
+        var store = DiagnosticsStore()
+        store.clearDomainHistory(clearedAt: historyAt)
+        store.clearFilteringCounts(startedAt: countsAt)
+
+        XCTAssertEqual(store.lastAppliedDomainHistoryClearAt, historyAt)
+        XCTAssertEqual(store.lastAppliedFilteringCountsClearAt, countsAt)
+
+        let reloaded = try JSONDecoder().decode(DiagnosticsStore.self, from: JSONEncoder().encode(store))
+        XCTAssertEqual(reloaded.lastAppliedDomainHistoryClearAt, historyAt, "the marker is durable across a relaunch")
+        XCTAssertEqual(reloaded.lastAppliedFilteringCountsClearAt, countsAt)
+    }
+
+    func testClearDomainHistoryWithoutTimestampLeavesMarkerUntouched() {
+        let markerAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var store = DiagnosticsStore()
+        store.clearDomainHistory(clearedAt: markerAt)
+
+        // An internal force-off clear (no control request to dedup) must not disturb the
+        // marker, or it could spuriously advance past a pending control request.
+        store.clearDomainHistory()
+        XCTAssertEqual(store.lastAppliedDomainHistoryClearAt, markerAt)
+    }
+
+    func testForceApplyOnEveryLaunchDoesNotReWipePostClearData() throws {
+        // The PST-1 regression: one clear, then every relaunch force-applies the durable
+        // control request and re-wipes everything accumulated since. With the durable
+        // marker, the second launch's apply is a no-op.
+        let clearedAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let control = DiagnosticsControl(
+            clearDomainHistoryRequestedAt: clearedAt,
+            clearFilteringCountsRequestedAt: clearedAt
+        )
+
+        // Launch 1: the tunnel force-applies the clear, then the user accumulates fresh data.
+        var launch1 = DiagnosticsStore()
+        applyDiagnosticsControl(control, to: &launch1)
+        launch1.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        launch1.record(domain: "apple.com", decision: .defaultAllow, keepDomainHistory: true)
+        XCTAssertEqual(launch1.summary.totalCount, 2)
+        XCTAssertEqual(launch1.recentEvents.count, 2)
+
+        // Persist → relaunch: same durable control file, fresh process.
+        let launch2Data = try JSONEncoder().encode(launch1)
+        var launch2 = try JSONDecoder().decode(DiagnosticsStore.self, from: launch2Data)
+        applyDiagnosticsControl(control, to: &launch2)
+
+        XCTAssertEqual(launch2.summary.totalCount, 2, "the force-apply must not re-wipe post-clear counts")
+        XCTAssertEqual(launch2.recentEvents.count, 2, "…nor post-clear domain history")
+    }
+
+    func testANewerClearRequestStillAppliesAfterAPriorClear() throws {
+        let firstClear = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var store = DiagnosticsStore()
+        applyDiagnosticsControl(
+            DiagnosticsControl(clearDomainHistoryRequestedAt: firstClear, clearFilteringCountsRequestedAt: firstClear),
+            to: &store
+        )
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertEqual(store.recentEvents.count, 1)
+
+        // A genuinely newer clear (user taps Clear again) must apply.
+        let secondClear = firstClear.addingTimeInterval(3_600)
+        applyDiagnosticsControl(
+            DiagnosticsControl(clearDomainHistoryRequestedAt: secondClear, clearFilteringCountsRequestedAt: secondClear),
+            to: &store
+        )
+        XCTAssertTrue(store.recentEvents.isEmpty, "a newer clear request is applied")
+        XCTAssertEqual(store.lastAppliedDomainHistoryClearAt, secondClear)
+        XCTAssertEqual(store.lastAppliedFilteringCountsClearAt, secondClear)
+    }
+
+    func testRepeatedMidSessionApplyOfSameControlDoesNotReWipeAccumulatedData() throws {
+        // PST-7 defense-in-depth: the periodic (focus-config) poll now re-runs the marker-gated
+        // apply mid-session so a dropped IPC clear message is eventually picked up. Because the
+        // poll re-runs the SAME control every ~60s, the durable marker must make every apply after
+        // the first a no-op — otherwise the defense-in-depth tick would itself be a PST-1-style
+        // re-wipe of data the user accumulated since the clear (the exact reason force:false, not
+        // force:true, is mandatory).
+        let clearedAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let control = DiagnosticsControl(
+            clearDomainHistoryRequestedAt: clearedAt,
+            clearFilteringCountsRequestedAt: clearedAt
+        )
+
+        var store = DiagnosticsStore()
+        applyDiagnosticsControl(control, to: &store)
+        // The user accumulates fresh data after the clear was satisfied.
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        store.record(domain: "apple.com", decision: .defaultAllow, keepDomainHistory: true)
+        XCTAssertEqual(store.summary.totalCount, 2)
+        XCTAssertEqual(store.recentEvents.count, 2)
+
+        // Simulate many subsequent poll ticks re-running the same (unchanged) control.
+        for _ in 0..<10 {
+            applyDiagnosticsControl(control, to: &store)
+        }
+
+        XCTAssertEqual(store.summary.totalCount, 2, "repeated mid-session applies of the same clear must not re-wipe counts")
+        XCTAssertEqual(store.recentEvents.count, 2, "…nor post-clear domain history")
+        XCTAssertEqual(store.lastAppliedDomainHistoryClearAt, clearedAt, "the durable marker stays pinned to the satisfied clear")
+        XCTAssertEqual(store.lastAppliedFilteringCountsClearAt, clearedAt)
+    }
+
+    func testUpgradeBoundaryAppliesStaleControlExactlyOnce() throws {
+        // Existing install: a clear was requested pre-upgrade (durable control timestamp),
+        // but the store predates the marker field so it decodes nil. The stale request
+        // re-applies once, the marker pins it, and no later launch re-applies.
+        let clearedAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        let control = DiagnosticsControl(clearFilteringCountsRequestedAt: clearedAt)
+
+        var preUpgrade = DiagnosticsStore()
+        preUpgrade.record(domain: "apple.com", decision: .defaultAllow, keepDomainHistory: true)
+        // Simulate an old-schema file: no marker keys present.
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(preUpgrade)) as? [String: Any]
+        )
+        object.removeValue(forKey: "lastAppliedFilteringCountsClearAt")
+        object.removeValue(forKey: "lastAppliedDomainHistoryClearAt")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        var launch1 = try JSONDecoder().decode(DiagnosticsStore.self, from: legacyData)
+        XCTAssertNil(launch1.lastAppliedFilteringCountsClearAt)
+        applyDiagnosticsControl(control, to: &launch1)
+        XCTAssertEqual(launch1.lastAppliedFilteringCountsClearAt, clearedAt, "the stale request applies once and pins the marker")
+
+        launch1.record(domain: "one.example.com", decision: .defaultAllow, keepDomainHistory: false)
+        var launch2 = try JSONDecoder().decode(DiagnosticsStore.self, from: try JSONEncoder().encode(launch1))
+        applyDiagnosticsControl(control, to: &launch2)
+        XCTAssertEqual(launch2.summary.allowedCount, 1, "the second launch does not re-apply the now-pinned request")
     }
 }

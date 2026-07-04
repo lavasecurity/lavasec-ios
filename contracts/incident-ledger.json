@@ -1,0 +1,48 @@
+{
+  "$contract": "lava-worker-incident-ledger",
+  "version": "1.0.0",
+  "description": "Shared shape for incident-ledger rows the iOS client PRODUCES (IncidentLedgerRecord) and the Cloudflare worker VALIDATES on bug-report submission (sanitizeIncidentLedgerEntry). The two are hand-mirrored; a tightening on one side that is not mirrored on the other silently strips rows in prod — the exact observability OBS-R2 exists to guarantee. Both test suites LOAD this file, so a divergence fails CI. Reason cases are un-padded kebab labels — exactly what the producer emits; surrounding-whitespace handling is deliberately out of scope (the worker trims via getOptionalString, the Swift writer does not, but the producer never pads).",
+  "swift": "Sources/LavaSecCore/IncidentLedger.swift",
+  "typescript": "backend/worker/src/index.ts",
+  "reason": {
+    "pattern": "^[a-z][a-z0-9-]{0,99}$",
+    "maxLength": 100,
+    "accepted": [
+      "upstream-failed",
+      "dns-wedged",
+      "rejected-response",
+      "snapshot-unavailable",
+      "network-settled",
+      "a",
+      "x9-y8-z7"
+    ],
+    "rejected": [
+      "",
+      "Upstream-Failed",
+      "-leading-hyphen",
+      "9-leading-digit",
+      "has space",
+      "has.dot",
+      "has:colon",
+      "has/slash",
+      "secret-site.example",
+      "resolver-error: x"
+    ]
+  },
+  "reasonLengthCases": [
+    { "note": "exactly maxLength: 1 letter + 99 label chars", "length": 100, "accepted": true },
+    { "note": "one over maxLength", "length": 101, "accepted": false }
+  ],
+  "kinds": [
+    "self_reconnect_committed",
+    "self_reconnect_credited",
+    "wedge_detected",
+    "wedge_recovered",
+    "rejected_response_streak",
+    "device_dns_recapture_exhausted",
+    "fail_closed_entered",
+    "fail_closed_exited"
+  ],
+  "verifiedBy": ["smoke-probe", "forwarding"],
+  "maxEntries": 50
+}

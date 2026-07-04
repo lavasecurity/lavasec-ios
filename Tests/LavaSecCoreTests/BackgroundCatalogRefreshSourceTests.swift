@@ -12,7 +12,7 @@ import XCTest
 /// concurrent cross-process write), so they are locked in here.
 final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     func testBGTaskRunsSyncInBackgroundRefreshModeAndRegistersGatedScheduling() throws {
-        let app = try Self.source(named: "LavaSecApp.swift", in: "LavaSecApp")
+        let app = try readSource(.lavaSecApp)
 
         XCTAssertTrue(
             app.contains("await viewModel.syncCatalog(isBackgroundRefresh: true)"),
@@ -25,7 +25,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         )
         // Scheduling is OFF by default until the on-device pointer-swap gate passes:
         // scheduleNext must early-return unless the app-group opt-in flag is set.
-        let scheduleBlock = try Self.block(in: app, from: "static func scheduleNext() {", to: "static func handle(")
+        let scheduleBlock = try sourceBlock(in: app, startingAt: "static func scheduleNext() {", endingBefore: "static func handle(")
         XCTAssertTrue(
             scheduleBlock.contains("guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey)"),
             "Background scheduling must be gated behind the off-by-default opt-in flag."
@@ -36,14 +36,14 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testInfoPlistDeclaresProcessingModeAndTaskIdentifier() throws {
-        let plist = try Self.source(named: "Info.plist", in: "LavaSecApp")
+        let plist = try readSource(.appInfoPlist)
         XCTAssertTrue(plist.contains("<key>BGTaskSchedulerPermittedIdentifiers</key>"))
         XCTAssertTrue(plist.contains("<string>com.lavasec.catalog-refresh</string>"))
         XCTAssertTrue(plist.contains("<key>UIBackgroundModes</key>") && plist.contains("<string>processing</string>"))
     }
 
     func testSyncThreadsBackgroundFlagAndFreezesCustomListsInBackground() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
 
         XCTAssertTrue(
             viewModel.contains("func syncCatalog(isBackgroundRefresh: Bool = false) async"),
@@ -61,23 +61,27 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         )
         // The background branch hands off to the artifacts-only helper then finishes and
         // returns WITHOUT falling into the foreground persist path.
-        let branch = try Self.block(in: viewModel, from: "if isBackgroundRefresh {", to: "// Smart refresh:")
+        let branch = try sourceBlock(in: viewModel, startingAt: "if isBackgroundRefresh {", endingBefore: "// Smart refresh:")
         XCTAssertTrue(branch.contains("publishBackgroundRefreshArtifacts(operationID: operationID"))
         XCTAssertTrue(branch.contains("finishCatalogSyncTask()") && branch.contains("return"))
         XCTAssertFalse(
             branch.contains("persistSharedState("),
             "Background branch must not rewrite configuration.json via persistSharedState()."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(viewModel.contains("persistSharedState"))
     }
 
     func testBGTaskUsesHeadlessViewModelThatGatesSideEffectingInit() throws {
-        let app = try Self.source(named: "LavaSecApp.swift", in: "LavaSecApp")
+        let app = try readSource(.lavaSecApp)
         XCTAssertTrue(
             app.contains("AppViewModel(loadVPNState: false, headless: true)"),
             "The BGTask must construct a HEADLESS AppViewModel so init installs no shared-state-writing side effects."
         )
 
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
         XCTAssertTrue(
             viewModel.contains("init(loadVPNState: Bool = true, headless: Bool = false)"),
             "init must accept a headless flag (default false)."
@@ -85,10 +89,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         // The Plus-store entitlement listener (→ persistConfigurationOnly) and the
         // temporary-protection resume (→ resume protection) both write shared state from
         // the stale launch-time config, so both must be gated off behind `!headless`.
-        let initBlock = try Self.block(
+        let initBlock = try sourceBlock(
             in: viewModel,
-            from: "init(loadVPNState: Bool = true, headless: Bool = false) {",
-            to: "if loadVPNState {"
+            startingAt: "init(loadVPNState: Bool = true, headless: Bool = false) {",
+            endingBefore: "if loadVPNState {"
         )
         // Every side-effecting setup call must follow the !headless gate. This includes
         // the two that are not obviously writes: loadCustomizationPreferences (persists the
@@ -108,8 +112,8 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBGTaskHandlerRereadsOptInBeforeRunningWork() throws {
-        let app = try Self.source(named: "LavaSecApp.swift", in: "LavaSecApp")
-        let handle = try Self.block(in: app, from: "private static func handle(", to: "task.expirationHandler =")
+        let app = try readSource(.lavaSecApp)
+        let handle = try sourceBlock(in: app, startingAt: "private static func handle(", endingBefore: "task.expirationHandler =")
         // iOS can still deliver a BGProcessingTaskRequest that was pending when the opt-in
         // flipped OFF. The work task must re-read the flag and complete without constructing
         // or running the headless model — the flag is the off-switch for the unproven
@@ -123,10 +127,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundPublishStopsWhenBGTaskHasExpired() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
         // (1) A cancellation guard must precede entering the background publish, so an
         // expired BGTask does not stage/flip artifacts past the system deadline.
-        let branch = try Self.block(in: viewModel, from: "if isBackgroundRefresh {", to: "// Smart refresh:")
+        let branch = try sourceBlock(in: viewModel, startingAt: "if isBackgroundRefresh {", endingBefore: "// Smart refresh:")
         let cancelIdx = try XCTUnwrap(branch.range(of: "guard !Task.isCancelled else {")?.lowerBound,
                                       "Background branch must guard cancellation before publishing.")
         let publishIdx = try XCTUnwrap(branch.range(of: "publishBackgroundRefreshArtifacts(operationID: operationID")?.lowerBound)
@@ -134,10 +138,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
 
         // (2) The in-lock supersession closure (checked immediately before the pointer flip)
         // must also abort on expiration, so a task expiring mid-publish never flips.
-        let helper = try Self.block(
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
         XCTAssertTrue(
             helper.contains("if Task.isCancelled { return true }"),
@@ -146,10 +150,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundFlipAbortsIfLivePointerMovedSinceBasis() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
         // The base pointer must be captured BEFORE the sync (so a concurrent foreground
         // publish during the sync is observed as a move) and only for the background path.
-        let perform = try Self.block(in: viewModel, from: "private func performCatalogSync(operationID:", to: "private func publishBackgroundRefreshArtifacts(operationID:")
+        let perform = try sourceBlock(in: viewModel, startingAt: "private func performCatalogSync(operationID:", endingBefore: "private func publishBackgroundRefreshArtifacts(operationID:")
         XCTAssertTrue(
             perform.contains("let basePublishedPointerToken = isBackgroundRefresh ? currentPublishedArtifactPointerToken() : nil"),
             "Background must capture the published pointer token before syncing."
@@ -160,7 +164,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
 
         // The in-lock supersession closure must abort the flip when the live pointer no
         // longer matches that captured basis (catalog-rollback guard).
-        let helper = try Self.block(in: viewModel, from: "private func publishBackgroundRefreshArtifacts(operationID:", to: "private func didSnapshotIdentityChangeAfterSync()")
+        let helper = try sourceBlock(in: viewModel, startingAt: "private func publishBackgroundRefreshArtifacts(operationID:", endingBefore: "private func didSnapshotIdentityChangeAfterSync()")
         XCTAssertTrue(
             helper.contains("if currentPointerToken != basePublishedPointerToken { return true }"),
             "The background flip must abort if a concurrent publish moved the live pointer."
@@ -168,11 +172,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundPublishAbortsOnCustomFingerprintSkew() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let helper = try Self.block(
+        let viewModel = try readSource(.appViewModel)
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
         // Custom lists are cache-only; if a foreground refresh changed a fingerprint while we
         // synced, the cached bytes no longer match the reloaded identity → abort (the
@@ -188,7 +192,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testPublishServiceSkipsStagingWhenAlreadyCancelled() throws {
-        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
+        let service = try readSource(.filterSnapshotPreparationService)
         XCTAssertTrue(service.contains("case abortedCancelled"), "Service must expose a distinct cancelled outcome.")
         // The pre-staging guard must precede stageVersionedArtifacts (so an expired BGTask
         // does not encode/write the versioned dir past the deadline) and apply only to
@@ -200,11 +204,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundRefreshFailurePathBailsBeforeWritingSharedState() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let perform = try Self.block(
+        let viewModel = try readSource(.appViewModel)
+        let perform = try sourceBlock(
             in: viewModel,
-            from: "private func performCatalogSync(operationID:",
-            to: "private func publishBackgroundRefreshArtifacts(operationID:"
+            startingAt: "private func performCatalogSync(operationID:",
+            endingBefore: "private func publishBackgroundRefreshArtifacts(operationID:"
         )
         // On a NON-cancellation sync error the foreground recovery restores from cache
         // (loadCachedCatalogAfterSyncFailure → persistSharedState) and then the tail arms
@@ -222,11 +226,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundPublishHelperIsArtifactsOnlyDegradeAbortAndSupersessionGuarded() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let helper = try Self.block(
+        let viewModel = try readSource(.appViewModel)
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
 
         // Hybrid: re-read live config, coverage-guard, then publish artifacts-only.
@@ -246,10 +250,15 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
             helper.contains("shouldAttemptProtectionRestore = true"),
             "Background publish must not arm protection restore."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(viewModel.contains("persistSharedState"))
+        XCTAssertTrue(viewModel.contains("shouldAttemptProtectionRestore"))
     }
 
     func testPublishServiceSupportsDegradeAbortAndSupersession() throws {
-        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
+        let service = try readSource(.filterSnapshotPreparationService)
         XCTAssertTrue(service.contains("enum PublishLockMode"))
         XCTAssertTrue(service.contains("case tryOrAbort"))
         // The supersession check receives the live pointer token so a degrade-abort caller
@@ -266,22 +275,22 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testConfigurationGenerationStampExistsAndForegroundWritersBumpIt() throws {
-        let config = try Self.source(named: "AppConfiguration.swift", in: "Sources/LavaSecCore")
+        let config = try readSource(.appConfiguration)
         XCTAssertTrue(config.contains("public var configurationGeneration: Int"))
 
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
         // Both foreground writers persist via the single shared writer, which advances the token
         // monotonically — so it cannot reset/collide across a backup restore that replaces the in-memory
         // configuration with a default-0 token, and the two publishers can't drift from the headless switch.
-        let sharedBlock = try Self.block(in: viewModel, from: "private func persistSharedState(", to: "private func persistConfigurationOnly(")
+        let sharedBlock = try sourceBlock(in: viewModel, startingAt: "private func persistSharedState(", endingBefore: "private func persistConfigurationOnly(")
         XCTAssertTrue(sharedBlock.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
                       "persistSharedState must persist via the shared writer (which advances the supersession token).")
-        let configOnlyBlock = try Self.block(in: viewModel, from: "private func persistConfigurationOnly(", to: "private func syncActiveFilterFromConfiguration()")
+        let configOnlyBlock = try sourceBlock(in: viewModel, startingAt: "private func persistConfigurationOnly(", endingBefore: "private func syncActiveFilterFromConfiguration()")
         XCTAssertTrue(configOnlyBlock.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
                       "persistConfigurationOnly must persist via the shared writer.")
         // The shared writer derives the next token from the live ON-DISK value, so it stays monotonic
         // across a restore that resets the in-memory configuration to 0.
-        let writer = try Self.source(named: "SharedFilterStatePersistence.swift", in: "Sources/LavaSecCore")
+        let writer = try readSource(.sharedFilterStatePersistence)
         XCTAssertTrue(writer.contains("max(configuration.configurationGeneration, onDiskConfigurationGeneration(at: configurationURL)) + 1"))
         XCTAssertTrue(writer.contains("public static func onDiskConfigurationGeneration("))
         // The old raw bump must be gone (it reset to 1 after a restore).
@@ -290,11 +299,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testBackgroundPublishBuildsSnapshotOffMainActorFromReloadedConfig() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let helper = try Self.block(
+        let viewModel = try readSource(.appViewModel)
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
         // The heavy merge + filterSnapshot must run OFF the main actor (detached task) so a
         // BGTask expiration handler (queued on .main) can preempt before the deadline.
@@ -317,19 +326,23 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
 
         // The builder is a nonisolated static (runs off the main actor) and merges from the
         // cached rule sets exactly once.
-        let builder = try Self.block(
+        let builder = try sourceBlock(
             in: viewModel,
-            from: "nonisolated static func buildBackgroundPreparedSnapshot(",
-            to: "private struct ProtectionStartupSnapshot"
+            startingAt: "nonisolated static func buildBackgroundPreparedSnapshot(",
+            endingBefore: "private struct ProtectionStartupSnapshot"
         )
         XCTAssertTrue(builder.contains("mergedBlockRules(") && builder.contains("cachedBlockRuleSets"),
                       "Builder must merge the reloaded enabled set from the cached rule sets.")
         XCTAssertEqual(builder.components(separatedBy: "FilterSnapshotPreparationService.mergedBlockRules").count - 1, 1,
                        "Builder must merge exactly once (no redundant double-merge).")
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(viewModel.contains("preparedSnapshotForCurrentConfiguration"))
     }
 
     func testBackgroundDefersCatalogCommitAndPublishesItAtomically() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
         // The background sync defers the latest.json commit (foreground commits inline), so the
         // shared catalog can't run ahead of the pointer on an abort.
         XCTAssertTrue(
@@ -341,10 +354,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
 
         // The background publish commits latest.json via commitBeforeFlip — atomic with the flip,
         // gated by a CAS against the pre-sync baseline — and surfaces a veto terminal.
-        let helper = try Self.block(
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
         XCTAssertTrue(helper.contains("commitBeforeFlip:"), "Background publish must pass a commitBeforeFlip.")
         XCTAssertTrue(helper.contains("BlocklistCatalogRepository.latestCatalogURL(in: catalogCacheURL)"))
@@ -363,7 +376,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         }
 
         // sync() gates BOTH latest.json writes behind commitsLatestCatalog.
-        let sync = try Self.source(named: "BlocklistCatalogSync.swift", in: "Sources/LavaSecCore")
+        let sync = try readSource(.blocklistCatalogSync)
         XCTAssertTrue(sync.contains("commitsLatestCatalog: Bool = true"))
         XCTAssertTrue(sync.contains("if commitsLatestCatalog, loadedCatalog.shouldCache"))
         XCTAssertTrue(sync.contains("if commitsLatestCatalog, !loadedCatalog.shouldCache"))
@@ -376,13 +389,13 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         // detect that reseed and abort, or it would flip published artifacts to Balanced while
         // app-configuration.json (and its generation) still describe the pre-upgrade filter — a
         // silent flip the generation guard cannot catch (no config was written).
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModel = try readSource(.appViewModel)
 
         // loadOrMigrateFilterLibrary records whether it accepted the on-disk library or reseeded.
-        let load = try Self.block(
+        let load = try sourceBlock(
             in: viewModel,
-            from: "private func loadOrMigrateFilterLibrary()",
-            to: "private func reconcileLoadedLibraryGenerationIfNeeded()"
+            startingAt: "private func loadOrMigrateFilterLibrary()",
+            endingBefore: "private func reconcileLoadedLibraryGenerationIfNeeded()"
         )
         XCTAssertTrue(load.contains("didReseedFilterLibraryOnLastLoad = false"),
                       "Accepting the on-disk library must clear the reseed flag.")
@@ -396,10 +409,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
 
         // The background publish aborts on the reseed, before building any snapshot, and after the
         // config reload that determines the reseed.
-        let helper = try Self.block(
+        let helper = try sourceBlock(
             in: viewModel,
-            from: "private func publishBackgroundRefreshArtifacts(operationID:",
-            to: "private func didSnapshotIdentityChangeAfterSync()"
+            startingAt: "private func publishBackgroundRefreshArtifacts(operationID:",
+            endingBefore: "private func didSnapshotIdentityChangeAfterSync()"
         )
         XCTAssertTrue(helper.contains("\"bg-premigration\""),
                       "Background publish must surface a premigration terminal, not silently publish.")
@@ -413,7 +426,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testPublishServiceCommitsBeforeFlipUnderLock() throws {
-        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
+        let service = try readSource(.filterSnapshotPreparationService)
         XCTAssertTrue(service.contains("commitBeforeFlip: (@Sendable () throws -> Void)?"),
                       "persistArtifacts must accept a commitBeforeFlip hook.")
         // It must run inside the lock, AFTER the supersession check and BEFORE the pointer flip,
@@ -426,8 +439,8 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testForegroundWritesConfigBeforeFlippingArtifactPointer() throws {
-        let viewModel = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let block = try Self.block(in: viewModel, from: "private func persistSharedState(", to: "private func persistConfigurationOnly(")
+        let viewModel = try readSource(.appViewModel)
+        let block = try sourceBlock(in: viewModel, startingAt: "private func persistSharedState(", endingBefore: "private func persistConfigurationOnly(")
         // The config write now goes through the shared writer; that call must precede the artifact
         // pointer flip (persistPreparedSnapshotArtifacts) so config (the advanced generation) leads the
         // pointer and a background writer never observes a flip ahead of the bump.
@@ -440,41 +453,21 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
     }
 
     func testGarbageCollectionHasGraceRetentionAndAbortPathDoesNotGC() throws {
-        let versioned = try Self.source(named: "FilterArtifactStoreVersioned.swift", in: "Sources/LavaSecCore")
+        let versioned = try readSource(.filterArtifactStoreVersioned)
         XCTAssertTrue(versioned.contains("graceInterval") && versioned.contains("contentModificationDate"),
                       "GC must never reap a freshly-staged peer dir (mtime/grace retention).")
 
-        let service = try Self.source(named: "FilterSnapshotPreparationService.swift", in: "Sources/LavaSecCore")
-        let abortBranch = try Self.block(in: service, from: "if let supersededWhileLocked, supersededWhileLocked(previousToken)", to: "return .abortedSuperseded")
+        let service = try readSource(.filterSnapshotPreparationService)
+        let abortBranch = try sourceBlock(in: service, startingAt: "if let supersededWhileLocked, supersededWhileLocked(previousToken)", endingBefore: "return .abortedSuperseded")
         XCTAssertFalse(
             abortBranch.contains("collectVersionedGarbage"),
             "The supersession-abort path must not GC (it could evict a dir a live reader is mid-pass on, having published nothing)."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(versioned.contains("collectVersionedGarbage"))
     }
 
     // MARK: - Helpers
-
-    private static func block(in source: String, from start: String, to end: String) throws -> String {
-        let startRange = try XCTUnwrap(source.range(of: start), "missing anchor: \(start)")
-        let endRange = try XCTUnwrap(
-            source.range(of: end, range: startRange.upperBound ..< source.endIndex),
-            "missing end anchor: \(end)"
-        )
-        return String(source[startRange.lowerBound ..< endRange.lowerBound])
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        var sourceURL = packageRootURL
-        for component in directoryName.split(separator: "/") {
-            sourceURL.appendPathComponent(String(component))
-        }
-        sourceURL.appendPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
 }

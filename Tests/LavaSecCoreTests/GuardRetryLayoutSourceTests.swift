@@ -2,7 +2,7 @@ import XCTest
 
 final class GuardRetryLayoutSourceTests: XCTestCase {
     func testReconnectStateDoesNotAddSecondaryActionRow() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
+        let rootViewSource = try readSource(.rootView)
 
         XCTAssertFalse(
             rootViewSource.contains("showsProtectionTurnOffSecondaryAction"),
@@ -15,7 +15,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testReconnectStateDoesNotAddDuplicatePanelMessage() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let appViewModelSource = try readSource(.appViewModel)
 
         XCTAssertFalse(
             appViewModelSource.contains("VPN is still on, but DNS is not responding after the connection changed."),
@@ -24,7 +24,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardViewRefreshesTunnelHealthWhileVisible() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
+        let rootViewSource = try readSource(.guardView)
 
         XCTAssertTrue(rootViewSource.contains("private func refreshGuardProtectionState() async"))
         XCTAssertTrue(rootViewSource.contains("await viewModel.sampleTunnelHealth()"))
@@ -32,8 +32,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testConcernedMascotExpressionDoesNotUseAngryBrows() throws {
-        let guardianSource = try Self.guardianSource()
-        let guardianBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let guardianBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "struct SoftShieldGuardian: View",
             endingBefore: "private enum LavaGuardianStyle"
@@ -44,8 +44,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotEyesMorphInsteadOfCrossFadingSeparateEyeLayers() throws {
-        let guardianSource = try Self.guardianSource()
-        let guardianBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let guardianBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "struct SoftShieldGuardian: View",
             endingBefore: "private enum LavaGuardianStyle"
@@ -62,8 +62,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotRunsAtomicBlinkInsideSingleWakeAction() throws {
-        let guardianSource = try Self.guardianSource()
-        let guardianBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let guardianBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "struct SoftShieldGuardian: View",
             endingBefore: "private enum LavaGuardianStyle"
@@ -80,8 +80,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotGratefulEyesGetSlightlyThickerHappyGeometry() throws {
-        let guardianSource = try Self.guardianSource()
-        let eyePoseBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let eyePoseBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private func eyePose(for side: GuardianEyeSide, frame: GuardianMascotFrame)",
             endingBefore: "private enum LavaGuardianStyle"
@@ -91,18 +91,18 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotAwakeToGratefulLengthensBeforeCompressingClosedEye() throws {
-        let guardianSource = try Self.guardianSource()
-        let eyePoseBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let eyePoseBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private func eyePose(for side: GuardianEyeSide, frame: GuardianMascotFrame)",
             endingBefore: "private enum LavaGuardianStyle"
         )
-        let morphedEyesBlock = try Self.sourceBlock(
+        let morphedEyesBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private func morphedEyes(_ frame: GuardianMascotFrame)",
             endingBefore: "private func guardianEye"
         )
-        let morphingEyeBlock = try Self.sourceBlock(
+        let morphingEyeBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private struct MorphingGuardianEyeShape: Shape",
             endingBefore: "private func clampUnit"
@@ -123,8 +123,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotWakeFilledEyesDropSleepyAndWinkCurveBeforeOpening() throws {
-        let guardianSource = try Self.guardianSource()
-        let eyePoseBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let eyePoseBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private func eyePose(for side: GuardianEyeSide, frame: GuardianMascotFrame)",
             endingBefore: "private enum LavaGuardianStyle"
@@ -137,8 +137,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotAnimationDemoExercisesGratefulReturnToAwake() throws {
-        let rootViewSource = try Self.source(named: "DeveloperPreviewViews.swift", in: "LavaSecApp")
-        let demoSequenceBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.developerPreviewViews)
+        let demoSequenceBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "let sequence: [(GuardianMascotState, String, UInt64)] = [",
             endingBefore: "for (state, label, delay) in sequence"
@@ -151,8 +151,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotEyeGlyphUsesOneContinuousStrokeFamilyAcrossSleepingBoundary() throws {
-        let guardianSource = try Self.guardianSource()
-        let morphingEyeBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let morphingEyeBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private struct MorphingGuardianEyeShape: Shape",
             endingBefore: "private func clampUnit"
@@ -168,8 +168,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotHappyCloseBendsClosedEyeStrokeContinuously() throws {
-        let guardianSource = try Self.guardianSource()
-        let morphingEyeBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let morphingEyeBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private struct MorphingGuardianEyeShape: Shape",
             endingBefore: "private func clampUnit"
@@ -182,8 +182,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotWakeEyesThickenFasterThanTheyOpen() throws {
-        let guardianSource = try Self.guardianSource()
-        let morphingEyeBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let morphingEyeBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private struct MorphingGuardianEyeShape: Shape",
             endingBefore: "private func clampUnit"
@@ -197,8 +197,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testMascotClosedEyesPreserveOriginalRoundedStrokeGeometry() throws {
-        let guardianSource = try Self.guardianSource()
-        let morphingEyeBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let morphingEyeBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "private struct MorphingGuardianEyeShape: Shape",
             endingBefore: "private func clampUnit"
@@ -213,8 +213,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardFilterStatusDoesNotTreatUnloadedRulesAsIssue() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let issueBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let issueBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "private var guardFiltersHaveIssue: Bool",
             endingBefore: "private var guardFilterSnapshotUsable: Bool"
@@ -226,8 +226,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionStatusPanelTopAlignsHeroContent() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let statusPanelBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.guardView)
+        let statusPanelBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct ProtectionStatusPanel: View",
             endingBefore: "private var guardianState"
@@ -237,14 +237,14 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testGuardStatusPanelKeepsIntrinsicHeightAboveFlowPanel() throws {
-        let guardViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let scaffoldSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let guardViewBlock = try Self.sourceBlock(
+        let guardViewSource = try readSource(.guardView)
+        let scaffoldSource = try readSource(.lavaScaffold)
+        let guardViewBlock = try sourceBlock(
             in: guardViewSource,
             startingAt: "struct GuardView: View",
             endingBefore: "private func refreshGuardProtectionState() async"
         )
-        let primaryTabBlock = try Self.sourceBlock(
+        let primaryTabBlock = try sourceBlock(
             in: scaffoldSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
@@ -258,32 +258,32 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testPrimaryTabsUseNativeTitleScrollAndRefreshModes() throws {
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let guardViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let guardViewBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.lavaScaffold)
+        let guardViewSource = try readSource(.guardView)
+        let filtersSource = try readSource(.filtersView)
+        let activitySource = try readSource(.diagnosticsView)
+        let settingsSource = try readSource(.settingsView)
+        let guardViewBlock = try sourceBlock(
             in: guardViewSource,
             startingAt: "struct GuardView: View",
             endingBefore: "private func refreshGuardProtectionState() async"
         )
-        let primaryTabBlock = try Self.sourceBlock(
+        let primaryTabBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
         )
-        let filtersBlock = try Self.sourceBlock(
+        let filtersBlock = try sourceBlock(
             in: filtersSource,
             startingAt: "struct FiltersView: View",
             endingBefore: "private struct FiltersOverviewPanel"
         )
-        let activityBlock = try Self.sourceBlock(
+        let activityBlock = try sourceBlock(
             in: activitySource,
             startingAt: "struct ActivityView: View",
             endingBefore: "private struct ActivityDateScopeButton"
         )
-        let settingsBlock = try Self.sourceBlock(
+        let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct AccountSettingsView"
@@ -327,27 +327,27 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testRootTabReselectRequestsPrimaryScrollToTop() throws {
-        let rootViewSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
-        let scaffoldSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let rootViewBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.rootView)
+        let scaffoldSource = try readSource(.lavaScaffold)
+        let filtersSource = try readSource(.filtersView)
+        let activitySource = try readSource(.diagnosticsView)
+        let settingsSource = try readSource(.settingsView)
+        let rootViewBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct RootView: View",
             endingBefore: "private struct BugReportSheetView"
         )
-        let tabSelectionBlock = try Self.sourceBlock(
+        let tabSelectionBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "private var guardedRootTabSelection: Binding<LavaRootTab>",
             endingBefore: "private func selectRootTab"
         )
-        let screenContentBlock = try Self.sourceBlock(
+        let screenContentBlock = try sourceBlock(
             in: scaffoldSource,
             startingAt: "struct LavaScreenContent<Content: View>",
             endingBefore: "struct LavaSheetScaffold"
         )
-        let primaryTabBlock = try Self.sourceBlock(
+        let primaryTabBlock = try sourceBlock(
             in: scaffoldSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
@@ -376,19 +376,19 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDateSelectorUsesClickableToolbarAccessory() throws {
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let primaryTabBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.lavaScaffold)
+        let activitySource = try readSource(.diagnosticsView)
+        let primaryTabBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>",
             endingBefore: "extension LavaPrimaryTabScreenContent where TitleAccessory == EmptyView"
         )
-        let activityBlock = try Self.sourceBlock(
+        let activityBlock = try sourceBlock(
             in: activitySource,
             startingAt: "struct ActivityView: View",
             endingBefore: "private struct ActivityDateScopeButton"
         )
-        let overviewInvocation = try Self.sourceBlock(
+        let overviewInvocation = try sourceBlock(
             in: activityBlock,
             startingAt: "overview: {",
             endingBefore: "content: {"
@@ -408,8 +408,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityLocalLogSubpagesStartWithLargeNavigationTitles() throws {
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let chromeBlock = try Self.sourceBlock(
+        let activitySource = try readSource(.diagnosticsView)
+        let chromeBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct LocalLogSubpageChrome",
             endingBefore: "private extension View"
@@ -421,18 +421,18 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDateControlsUseNeutralPillAndSingleCellSelectionShape() throws {
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let scopePillBlock = try Self.sourceBlock(
+        let activitySource = try readSource(.diagnosticsView)
+        let scopePillBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateScopePill",
             endingBefore: "private struct ActivityDateScopeButtonStyle"
         )
-        let todayButtonBlock = try Self.sourceBlock(
+        let todayButtonBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateTodayButton",
             endingBefore: "private struct ActivityDateRangeCalendarMonth"
         )
-        let calendarDayBlock = try Self.sourceBlock(
+        let calendarDayBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateRangeCalendarDay",
             endingBefore: "private enum DomainHistoryFilter"
@@ -460,8 +460,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDateEndpointButtonsUseRectangularPressShape() throws {
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let endpointButtonBlock = try Self.sourceBlock(
+        let activitySource = try readSource(.diagnosticsView)
+        let endpointButtonBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateEndpointButton",
             endingBefore: "private struct ActivityDateTodayButton"
@@ -472,11 +472,15 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertTrue(endpointButtonBlock.contains("RoundedRectangle(cornerRadius: 12, style: .continuous)"))
         XCTAssertFalse(endpointButtonBlock.contains(".buttonStyle(ActivityDateScopeButtonStyle())"))
         XCTAssertFalse(endpointButtonBlock.contains("Capsule(style: .continuous)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(activitySource.contains("ActivityDateScopeButtonStyle"))
     }
 
     func testActivityDatePickerUsesCloseGlyphInsteadOfCancelText() throws {
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let pickerBlock = try Self.sourceBlock(
+        let activitySource = try readSource(.diagnosticsView)
+        let pickerBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateRangePickerSheet",
             endingBefore: "private struct ActivityDateEndpointButton"
@@ -488,8 +492,8 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDatePickerCompletesRangeFromPickedStartInEitherDirection() throws {
-        let activitySource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let selectDateBlock = try Self.sourceBlock(
+        let activitySource = try readSource(.diagnosticsView)
+        let selectDateBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private func selectDate(_ date: Date)",
             endingBefore: "private struct ActivityDateEndpointButton"
@@ -504,9 +508,9 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testRootTabsSharePrimaryTitleChrome() throws {
-        let rootViewSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let settingsSource = try Self.source(named: "SettingsView.swift", in: "LavaSecApp")
-        let settingsBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.lavaScaffold)
+        let settingsSource = try readSource(.settingsView)
+        let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct AccountSettingsView"
@@ -523,13 +527,13 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionPrimaryActionContextMenuUsesConstrainedPreviewSource() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let statusPanelBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.guardView)
+        let statusPanelBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct ProtectionStatusPanel: View",
             endingBefore: "private var guardianState"
         )
-        let actionButtonBlock = try Self.sourceBlock(
+        let actionButtonBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "private struct ProtectionPrimaryActionButton: View",
             endingBefore: "enum GuardDestination"
@@ -554,17 +558,21 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
                 in: actionButtonBlock
             )
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(rootViewSource.contains("showsTemporaryProtectionPauseControls"))
     }
 
     func testProtectionStatusPanelOffersTemporaryPauseContextMenuAndHint() throws {
-        let rootViewSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let statusPanelBlock = try Self.sourceBlock(
+        let rootViewSource = try readSource(.guardView)
+        let appViewModelSource = try readSource(.appViewModel)
+        let statusPanelBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "struct ProtectionStatusPanel: View",
             endingBefore: "private var guardianState"
         )
-        let actionButtonBlock = try Self.sourceBlock(
+        let actionButtonBlock = try sourceBlock(
             in: rootViewSource,
             startingAt: "private struct ProtectionPrimaryActionButton: View",
             endingBefore: "enum GuardDestination"
@@ -593,42 +601,13 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testProtectionStatusPanelUsesPausedCopyAndResumePrimaryAction() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let appViewModelSource = try readSource(.appViewModel)
 
         XCTAssertTrue(appViewModelSource.contains("return \"Paused\""))
         XCTAssertTrue(appViewModelSource.contains("return \"Lava will try to resume at %@\".lavaLocalizedFormat(formattedTemporaryProtectionResumeTime)"))
         XCTAssertTrue(appViewModelSource.contains("return \"Resume Now\""))
         XCTAssertFalse(appViewModelSource.contains("return \"Protection paused\""))
         XCTAssertFalse(appViewModelSource.contains("Lava will try to resume at \\(formattedTemporaryProtectionResumeTime)."))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func guardianSource() throws -> String {
-        try source(named: "SoftShieldGuardian.swift", in: "Shared")
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
     }
 
     private static func index(of needle: String, in source: String) throws -> String.Index {

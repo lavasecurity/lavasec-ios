@@ -7,8 +7,8 @@ final class ShareableFiltersSourceTests: XCTestCase {
     // MARK: Filters screen entry points
 
     func testFiltersScreenOffersShareAndImportRows() throws {
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let screen = try Self.sourceBlock(
+        let filtersSource = try readSource(.filtersView)
+        let screen = try sourceBlock(
             in: filtersSource,
             startingAt: "private var filtersScreen: some View",
             endingBefore: "private struct FiltersOverviewPanel"
@@ -41,7 +41,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
     // MARK: Share sheet — masked QR + copyable code
 
     func testShareSheetMasksQRAndOffersCopyableCode() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let source = try readSource(.shareableFiltersUI)
 
         // QR is hidden until explicitly revealed.
         XCTAssertTrue(source.contains("@State private var isQRRevealed = false"))
@@ -57,7 +57,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
     // MARK: Import flow — code entry + scanner
 
     func testImportFlowHasFreeformCodeEntryAndScanner() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let source = try readSource(.shareableFiltersUI)
 
         // Freeform scaffold entry with a Continue button and chevron back / skip.
         XCTAssertTrue(source.contains("struct ImportFiltersFlow: View"))
@@ -81,12 +81,12 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testImportIsAdditiveWithAddNewAndReplacePaths() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let ui = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
+        let ui = try readSource(.shareableFiltersUI)
 
         // Add-as-new is library-only (append + persistLibraryOnlyChange), gated on canCreateFilter
         // + a unique name, and never touches the active config / tunnel.
-        let addNew = try Self.sourceBlock(
+        let addNew = try sourceBlock(
             in: app,
             startingAt: "func addImportedShareableConfigurationAsNewFilter(",
             endingBefore: "func replaceFilterWithImportedShareableConfiguration("
@@ -103,7 +103,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
         // Replace forks: the active filter uses the full apply path (reload); a non-active filter
         // is replaced library-only (mutateFilter + token invalidation + persistLibraryOnlyChange).
-        let replace = try Self.sourceBlock(
+        let replace = try sourceBlock(
             in: app,
             startingAt: "func replaceFilterWithImportedShareableConfiguration(",
             endingBefore: "private static func filterPreparationFailureMessage("
@@ -123,7 +123,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(ui.contains("if allowsAddingNewFilter {"))
         XCTAssertTrue(ui.contains("Use this filter"))
         XCTAssertTrue(ui.contains("func replaceActive("))
-        let onboarding = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
+        let onboarding = try readSource(.onboardingFlowView)
         XCTAssertEqual(onboarding.components(separatedBy: "allowsAddingNewFilter: false").count - 1, 2,
                        "Both onboarding import entry points (enter/scan) must disable add-as-new.")
 
@@ -135,20 +135,26 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(ui.contains("struct ImportChooseReplaceTargetView"))
         XCTAssertTrue(ui.contains("case nameNew(ShareableFilterConfiguration)"))
         XCTAssertTrue(ui.contains("case chooseReplace(ShareableFilterConfiguration)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(app.contains("importPlan"))
+        XCTAssertTrue(app.contains("prepareFilterSnapshot"))
+        XCTAssertTrue(app.contains("persistSharedState"))
     }
 
     func testFilterNamesAreUniqueAcrossCreateRenameImport() throws {
-        let app = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let app = try readSource(.appViewModel)
 
         XCTAssertTrue(app.contains("func isFilterNameAvailable(_ name: String, excluding excludedID: String? = nil) -> Bool"))
         // Create rejects a duplicate explicit name; rename rejects a duplicate (excluding itself).
-        let create = try Self.sourceBlock(
+        let create = try sourceBlock(
             in: app,
             startingAt: "func createFilter(name: String, duplicatingFilterID: String? = nil) -> String? {",
             endingBefore: "private func persistLibraryOnlyChange("
         )
         XCTAssertTrue(create.contains("guard isFilterNameAvailable(trimmed) else { return nil }"))
-        let rename = try Self.sourceBlock(
+        let rename = try sourceBlock(
             in: app,
             startingAt: "func renameFilter(id: String, to name: String) {",
             endingBefore: "func deleteFilter("
@@ -156,13 +162,13 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(rename.contains("isFilterNameAvailable(trimmed, excluding: id)"))
 
         // The create/rename sheets disable their confirm action on a duplicate name.
-        let filtersView = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let filtersView = try readSource(.filtersView)
         XCTAssertTrue(filtersView.contains("viewModel.isFilterNameAvailable($0, excluding: filter.id)"))
         XCTAssertTrue(filtersView.contains("private var isDuplicate: Bool"))
     }
 
     func testScannerHandlesMultiLensAndAdjustableFocus() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let source = try readSource(.shareableFiltersUI)
 
         // Multi-lens virtual device so the system can switch lenses for close focus.
         XCTAssertTrue(source.contains("AVCaptureDevice.DiscoverySession"))
@@ -178,18 +184,18 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testShareSheetGuardsOversizedQRCodes() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let source = try readSource(.shareableFiltersUI)
         XCTAssertTrue(source.contains("This setup is too large for a QR code"))
     }
 
     func testCodecCompressesPayload() throws {
-        let source = try Self.source(named: "ShareableFilterConfiguration.swift", in: "Sources/LavaSecCore")
+        let source = try readSource(.shareableFilterConfiguration)
         XCTAssertTrue(source.contains("compressed(using: .zlib)"))
         XCTAssertTrue(source.contains("boundedInflate("))
     }
 
     func testCodecBoundsUntrustedPayloadSize() throws {
-        let source = try Self.source(named: "ShareableFilterConfiguration.swift", in: "Sources/LavaSecCore")
+        let source = try readSource(.shareableFilterConfiguration)
         XCTAssertTrue(source.contains("case payloadTooLarge"))
         XCTAssertTrue(source.contains("maxEncodedCodeLength"))
         XCTAssertTrue(source.contains("maxInflatedPayloadBytes"))
@@ -198,16 +204,16 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testImportApplyIsGatedBehindFilterEditingAuth() throws {
-        let uiSource = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let uiSource = try readSource(.shareableFiltersUI)
         XCTAssertTrue(uiSource.contains("var authorizeImport: () async -> Bool"))
         XCTAssertTrue(uiSource.contains("guard await authorizeImport() else"))
 
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let filtersSource = try readSource(.filtersView)
         XCTAssertTrue(filtersSource.contains("requireFreshAuthentication(for: .filterEditing"))
     }
 
     func testScannerSurfacesCameraDeniedRecovery() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let source = try readSource(.shareableFiltersUI)
         XCTAssertTrue(source.contains("onCameraAuthorizationDenied"))
         XCTAssertTrue(source.contains("Camera access is off"))
         XCTAssertTrue(source.contains("UIApplication.openSettingsURLString"))
@@ -217,8 +223,8 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testImportPreviewWarnsAndListsUnsupportedEntries() throws {
-        let source = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
-        let preview = try Self.sourceBlock(
+        let source = try readSource(.shareableFiltersUI)
+        let preview = try sourceBlock(
             in: source,
             startingAt: "private struct ImportPreviewView: View",
             endingBefore: "private struct ImportContentRow"
@@ -249,7 +255,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testViewModelComputesRobustImportPlan() throws {
-        let viewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let viewModelSource = try readSource(.appViewModel)
         XCTAssertTrue(viewModelSource.contains("func importPlan(for shared: ShareableFilterConfiguration) -> ShareableFilterImportPlan"))
         XCTAssertTrue(viewModelSource.contains("allowsCustomBlocklists: configuration.limits.allowsCustomBlocklists"))
         XCTAssertTrue(viewModelSource.contains("maxBlockedDomains: configuration.limits.maxBlockedDomains"))
@@ -268,7 +274,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
         // The import flow carries the EXACT previewed plan (importPlan(for:) convenience) into both
         // apply methods, so the preview and the applied result never diverge.
-        let uiSource = try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+        let uiSource = try readSource(.shareableFiltersUI)
         XCTAssertTrue(uiSource.contains("let applied = viewModel.importPlan(for: config).applied"))
         XCTAssertTrue(uiSource.contains("addImportedShareableConfigurationAsNewFilter(applied, name: name)"))
         XCTAssertTrue(uiSource.contains("replaceFilterWithImportedShareableConfiguration("))
@@ -278,14 +284,14 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testInfoPlistDeclaresCameraUsage() throws {
-        let plist = try Self.source(named: "Info.plist", in: "LavaSecApp")
+        let plist = try readSource(.appInfoPlist)
         XCTAssertTrue(plist.contains("NSCameraUsageDescription"))
     }
 
     // MARK: Onboarding — fine-tune step removed, additional setup added
 
     func testOnboardingRemovesCustomizeStep() throws {
-        let source = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
+        let source = try readSource(.onboardingFlowView)
 
         XCTAssertFalse(source.contains("case customize"))
         XCTAssertFalse(source.contains("private var customizePage"))
@@ -299,11 +305,15 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("OnboardingPrimaryButton(title: \"Use These Settings\")"))
         // Its recommended defaults are now applied silently as setup wraps up.
         XCTAssertTrue(source.contains("if nextPage == .done {\n            viewModel.applyOnboardingRecommendedDefaults(protectionLevel: protectionLevel)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("OnboardingPrimaryButton"))
     }
 
     func testOnboardingDoneOffersGuardAndImportLivesInHeader() throws {
-        let source = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let footer = try Self.sourceBlock(
+        let source = try readSource(.onboardingFlowView)
+        let footer = try sourceBlock(
             in: source,
             startingAt: "private var footerButtons: some View",
             endingBefore: "private var activeDotColor"
@@ -315,18 +325,22 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(footer.contains("OnboardingPrimaryButton(title: \"Open Guard\")"))
         XCTAssertFalse(footer.contains("OnboardingSecondaryButton(title: \"Additional setup\")"))
 
-        let topBar = try Self.sourceBlock(
+        let topBar = try sourceBlock(
             in: source,
             startingAt: "private var topBar: some View",
             endingBefore: "@ViewBuilder"
         )
         XCTAssertTrue(topBar.contains("Text(\"Import a filter\")"))
         XCTAssertTrue(topBar.contains("isShowingAdditionalSetup = true"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("OnboardingSecondaryButton"))
     }
 
     func testAdditionalSetupSheetOffersThreeOptionsIncludingSettings() throws {
-        let source = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let sheet = try Self.sourceBlock(
+        let source = try readSource(.onboardingFlowView)
+        let sheet = try sourceBlock(
             in: source,
             startingAt: "private struct OnboardingAdditionalSetupSheet: View",
             endingBefore: "private struct OnboardingLavaFloor"
@@ -340,8 +354,8 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testRootViewRoutesGoToSettingsThroughAuthGatedOpener() throws {
-        let source = try Self.source(named: "RootView.swift", in: "LavaSecApp")
-        let onboardingSheet = try Self.sourceBlock(
+        let source = try readSource(.rootView)
+        let onboardingSheet = try sourceBlock(
             in: source,
             startingAt: "LavaOnboardingView(",
             endingBefore: ".onAppear"
@@ -352,12 +366,16 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(onboardingSheet.contains("onRequestOpenSettings:"))
         XCTAssertTrue(onboardingSheet.contains("openSettingsRoot()"))
         XCTAssertFalse(onboardingSheet.contains("selectedRootTab = .settings"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("selectedRootTab"))
     }
 
     // MARK: View model wiring
 
     func testViewModelExposesShareAndImportEntryPoints() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
         XCTAssertTrue(source.contains("var shareableFilterConfigurationCode: String"))
         XCTAssertTrue(source.contains("func applyImportedShareableConfiguration("))
@@ -365,29 +383,4 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     // MARK: Helpers
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
-    }
 }

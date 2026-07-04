@@ -33,6 +33,38 @@ public struct RuleSetCache: Sendable {
             .appendingPathComponent("v\(BlocklistParsingRules.rulesVersion)")
     }
 
+    /// Best-effort removal of superseded `parsed-rules/v*` version trees. A parser bump
+    /// orphans the whole previous tree (see init) and nothing else ever deletes it — after
+    /// the v2→v3 bump that is up to 2 entries × ~40 MB per large source, dead on disk
+    /// forever. Safe against concurrent readers: every reader constructs its path from the
+    /// compiled-in CURRENT version, so a reader of an old tree cannot exist. Call from the
+    /// APP side only — the extension deliberately avoids maintenance IO.
+    public func sweepSupersededVersionTrees() {
+        let parsedRulesURL = directoryURL.deletingLastPathComponent()
+        let currentVersionDirectory = directoryURL.lastPathComponent
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: parsedRulesURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            return
+        }
+        for entry in entries where Self.isSupersededVersionDirectory(entry.lastPathComponent, current: currentVersionDirectory) {
+            try? FileManager.default.removeItem(at: entry)
+        }
+    }
+
+    /// Match ONLY a superseded `v<digits>` version tree — the exact pattern `directoryURL` uses.
+    /// This is a destructive `removeItem`, so the filter validates the numeric remainder rather
+    /// than a bare `hasPrefix("v")`: a future sibling like `vendor`/`versions` under `parsed-rules/`
+    /// must never be swept even though none exists today.
+    static func isSupersededVersionDirectory(_ name: String, current: String) -> Bool {
+        guard name != current, name.hasPrefix("v") else {
+            return false
+        }
+        let remainder = name.dropFirst()
+        return !remainder.isEmpty && remainder.allSatisfy(\.isNumber)
+    }
+
     public func load(sourceID: String, contentSHA256: String, parseFormat: BlocklistFormat) -> Entry? {
         let url = entryURL(sourceID: sourceID, contentSHA256: contentSHA256, parseFormat: parseFormat)
         guard let data = try? Data(contentsOf: url) else {

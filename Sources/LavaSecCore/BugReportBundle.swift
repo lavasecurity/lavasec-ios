@@ -339,6 +339,25 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         }
     }
 
+    /// Parses a log split across file generations (rotated first, current last): joins the
+    /// chunks in order with a newline guard at each boundary — a rotation can land mid-write,
+    /// and without the guard the last rotated line and the first current line would fuse into
+    /// one unparseable line. Ordering matters: the entry cap keeps the newest entries via
+    /// `suffix`, so older generations must come first.
+    public static func parseJSONLines(
+        concatenating chunks: [Data],
+        limit: Int = 40
+    ) -> [BugReportDebugLogEntry] {
+        var combined = Data()
+        for chunk in chunks where !chunk.isEmpty {
+            if let last = combined.last, last != UInt8(ascii: "\n") {
+                combined.append(UInt8(ascii: "\n"))
+            }
+            combined.append(chunk)
+        }
+        return parseJSONLines(combined, limit: limit)
+    }
+
     public static func parseJSONLines(_ data: Data, limit: Int = 40) -> [BugReportDebugLogEntry] {
         let text = String(decoding: data, as: UTF8.self)
         let entries = text
@@ -442,10 +461,23 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "errorCode",
         "errorDescription",
         "errorDomain",
+        // Age of the corroborating evidence at a routine dns-smoke-probe skip (#196): lets a
+        // field report confirm the skip fired inside the ≤300 s honesty-budget window rather
+        // than on stale evidence. A millisecond count, never a domain (COH-3, Codex mirror
+        // of the worker detail allowlist).
+        "evidenceAgeMs",
         "evidenceCount",
         "failure",
         "fallbackModeActive",
         "fingerprint",
+        // Duration of a closed self-reconnect gap (self-reconnect-gap-closed) — a
+        // millisecond count, never a domain.
+        "gapMs",
+        // Whether that gap's end was FLOORED because the wall clock stepped backward past the
+        // recorded start (COH-2) — a Bool, never a domain. Without this in the allowlist the
+        // exported report drops the flag and shows only the synthetic gapMs=1000, so support
+        // can't tell the duration was floored rather than measured (Codex #219).
+        "clockAnomaly",
         "guardrailRuleCount",
         "isEnabled",
         "isSatisfied",
@@ -563,6 +595,28 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
 /// It exists so a "reconnecting on its own" / "protected but no internet" report carries the
 /// INCIDENT instead of only the symptom: the cluster's reports had `has_recent_dns_events = false`
 /// and a debug-log window flooded by live-activity reconciles (LAV-94 B).
+/// Durable self-reconnect gap evidence (LAV-92/93), read app-side from the shared app group.
+/// The gap starts at the teardown commit and ends at the next tunnel launch (the process is
+/// serving again); `endedAt` is nil while a gap is still open (Connect-On-Demand has not
+/// relaunched the tunnel yet). `cumulativeCount` counts committed teardowns for the install's
+/// lifetime — frequency evidence the rate-limiter's crediting deliberately erases.
+public struct SelfReconnectGapRecord: Equatable, Sendable {
+    public let startedAt: Date
+    public let endedAt: Date?
+    public let cumulativeCount: Int
+
+    public init(startedAt: Date, endedAt: Date?, cumulativeCount: Int) {
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.cumulativeCount = cumulativeCount
+    }
+
+    /// Duration of the recorded gap, defined only once it closed.
+    public var gapMilliseconds: Int? {
+        endedAt.map { max(0, Int(($0.timeIntervalSince(startedAt) * 1_000).rounded())) }
+    }
+}
+
 public struct BugReportIncidentSummary: Equatable, Sendable {
     /// Bound on the surfaced timeline so a long-running session can't bloat the payload.
     public static let maxSelfReconnectTimes = 20
@@ -584,14 +638,43 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
     public let lastResolverRuntimeResetReason: String?
     public let resolverRuntimeResetCount: Int
     public let lastResolverIdentityChangeAt: Date?
+    /// Fail-closed serve trace (session-scoped, from TunnelHealthSnapshot). Kept out of
+    /// user-facing counts (#164); surfaced here so a fail-closed window is distinguishable
+    /// from "no incident" in a field report.
+    public let failClosedServedQueryCount: Int
+    public let lastFailClosedAt: Date?
+    public let lastFailClosedReason: String?
     /// The most recent Focus-driven switch attempt (LAV-100 Phase 4). Diagnostic-only, privacy-safe; lets a
     /// closed-app Focus failure be localized on internal TestFlight without a device or the QA device log.
     public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
+    /// Durable gap evidence (LAV-92/93) — survives the productive credit and the 600 s prune.
+    public let selfReconnectGap: SelfReconnectGapRecord?
+    /// Whether the recorded gap is ONGOING (still open — protection has been down the whole
+    /// time, however long) or ENDED within the last 24 h (a 3-day outage that ended an hour
+    /// ago is fresh evidence). `hasContent` keys on this, not on the record's existence: the
+    /// record never expires (that is its job), and a long-closed install-lifetime record
+    /// flipping `has_incident_summary` true forever would be the same misleading-true failure
+    /// the always-persisted Focus record has.
+    public let hasRecentSelfReconnectGap: Bool
+    /// OBS R2: the append-only incident ledger timeline (oldest-first, already bounded
+    /// to 50 records / 7 days by the store). Decoupled from the policy stores, so a
+    /// report filed 30 minutes after a thrash finally carries the timestamped incident.
+    public let recentIncidents: [IncidentLedgerRecord]
+    /// Like the gap: `hasContent` keys on RECENCY (any ledger record < 24 h old), not
+    /// on the file's existence — week-old records are context, not a live incident.
+    public let hasRecentLedgerIncident: Bool
+    /// The Focus record never expires (that is its job as a diagnostic of the LAST
+    /// switch), so its bare existence must not flip `has_incident_summary` forever —
+    /// the misleading-true failure the 2026-07 review flagged (OBS-1). Recency-gated
+    /// like the gap and the ledger.
+    public let hasRecentFocusSwitch: Bool
 
     public init(
         health: TunnelHealthSnapshot,
         selfReconnectTimes: [Date],
         lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        selfReconnectGap: SelfReconnectGapRecord? = nil,
+        recentIncidents: [IncidentLedgerRecord] = [],
         now: Date = Date()
     ) {
         // Prune to the tunnel's active attempt window FIRST. The persisted defaults array is
@@ -619,7 +702,27 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
         self.lastResolverRuntimeResetReason = health.lastResolverRuntimeResetReason
         self.resolverRuntimeResetCount = health.resolverRuntimeResetCount
         self.lastResolverIdentityChangeAt = health.lastResolverIdentityChangeAt
+        self.failClosedServedQueryCount = health.failClosedServedQueryCount
+        self.lastFailClosedAt = health.lastFailClosedAt
+        self.lastFailClosedReason = health.lastFailClosedReason
         self.lastFocusSwitch = lastFocusSwitch
+        self.selfReconnectGap = selfReconnectGap
+        self.hasRecentSelfReconnectGap = selfReconnectGap.map { gap in
+            // Recency keys on the gap's END: an open gap references `now` (ongoing evidence,
+            // however old its start), a closed one stays recent for 24 h after it ended.
+            now.timeIntervalSince(gap.endedAt ?? now) <= 24 * 60 * 60
+        } ?? false
+        self.recentIncidents = Array(recentIncidents.suffix(IncidentLedger.maximumRecordCount))
+        // Compute the recency flag over the STORED (truncated) set so it provably matches the
+        // incidents actually carried in the report — never a dropped-prefix record. In practice
+        // the ledger is chronological and pre-capped at `maximumRecordCount`, so this is a no-op,
+        // but it removes the unfiltered-vs-suffix asymmetry the reviewer flagged.
+        self.hasRecentLedgerIncident = self.recentIncidents.contains { record in
+            now.timeIntervalSince(record.at) <= 24 * 60 * 60
+        }
+        self.hasRecentFocusSwitch = lastFocusSwitch.map { record in
+            now.timeIntervalSince(record.at) <= 24 * 60 * 60
+        } ?? false
     }
 
     public var selfReconnectCount: Int {
@@ -640,10 +743,23 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             || consecutiveRejectedSmokeResponseCount > 0
             || lastEncryptedFallbackSuccessAt != nil
             || resolverRuntimeResetCount > 0
+            // A fail-closed window can be the ONLY evidence in a report (queries suppressed,
+            // no self-reconnect fired because escalation is deliberately suppressed while the
+            // snapshot is unavailable) — count it so the flag stays honest for that class.
+            || failClosedServedQueryCount > 0
+            // A RECENT gap (started < 24 h ago) is real incident evidence even after the
+            // credit/prune erased the attempt timeline; the never-expiring record itself
+            // deliberately does not flip the flag (see hasRecentSelfReconnectGap).
+            || hasRecentSelfReconnectGap
             // A closed-app Focus switch can be the ONLY evidence in a report (e.g. it failed/deferred with no
             // DNS failures or self-reconnects). Count it so `has_incident_summary` is honest and backend triage
-            // keyed off that flag doesn't skip the very diagnostic this surfaces (Codex round 7).
-            || lastFocusSwitch != nil
+            // keyed off that flag doesn't skip the very diagnostic this surfaces (Codex round 7) — but only
+            // while RECENT: the record never expires, and an install-lifetime record flipping the flag
+            // forever is the misleading-true failure the 2026-07 review flagged (OBS-1).
+            || hasRecentFocusSwitch
+            // The ledger timeline follows the same recency rule (< 24 h). Older records still
+            // SHIP (context for triage) — they just don't claim a live incident.
+            || hasRecentLedgerIncident
     }
 
     public var dictionary: [String: Any] {
@@ -653,7 +769,8 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             "consecutive_dns_smoke_probe_failure_count": consecutiveDNSSmokeProbeFailureCount,
             "consecutive_rejected_smoke_response_count": consecutiveRejectedSmokeResponseCount,
             "network_change_count": networkChangeCount,
-            "resolver_runtime_reset_count": resolverRuntimeResetCount
+            "resolver_runtime_reset_count": resolverRuntimeResetCount,
+            "fail_closed_served_query_count": failClosedServedQueryCount
         ]
 
         if !selfReconnectTimes.isEmpty {
@@ -677,6 +794,38 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             body["last_resolver_runtime_reset_reason"] = lastResolverRuntimeResetReason
         }
         Self.set(&body, "last_resolver_identity_change_at", lastResolverIdentityChangeAt)
+        Self.set(&body, "last_fail_closed_at", lastFailClosedAt)
+        if let lastFailClosedReason {
+            body["last_fail_closed_reason"] = lastFailClosedReason
+        }
+
+        if let selfReconnectGap {
+            body["self_reconnect_gap_count"] = selfReconnectGap.cumulativeCount
+            Self.set(&body, "last_self_reconnect_gap_started_at", selfReconnectGap.startedAt)
+            Self.set(&body, "last_self_reconnect_gap_ended_at", selfReconnectGap.endedAt)
+            if let gapMilliseconds = selfReconnectGap.gapMilliseconds {
+                body["last_self_reconnect_gap_ms"] = gapMilliseconds
+            }
+        }
+
+        if !recentIncidents.isEmpty {
+            body["recent_incidents"] = recentIncidents.map { record in
+                var entry: [String: Any] = [
+                    "at": SharedDateFormatting.iso8601.string(from: record.at),
+                    "kind": record.kind.rawValue
+                ]
+                if let reason = record.reason {
+                    entry["reason"] = reason
+                }
+                if let durationMs = record.durationMs {
+                    entry["duration_ms"] = durationMs
+                }
+                if let verifiedBy = record.verifiedBy {
+                    entry["verified_by"] = verifiedBy
+                }
+                return entry
+            }
+        }
 
         if let lastFocusSwitch {
             var focus: [String: Any] = [
@@ -726,6 +875,12 @@ public struct BugReportBundle: Sendable {
     /// The last Focus-driven switch attempt (LAV-100 Phase 4), read app-side from the shared app group.
     /// Diagnostic-only; folded into `incident`.
     public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
+    /// Durable self-reconnect gap evidence (LAV-92/93), read app-side from the shared app group.
+    /// Diagnostic-only; folded into `incident`.
+    public let selfReconnectGap: SelfReconnectGapRecord?
+    /// OBS R2 incident-ledger timeline, read app-side from the shared app group.
+    /// Diagnostic-only; folded into `incident`.
+    public let recentIncidents: [IncidentLedgerRecord]
 
     public init(
         reportID: UUID = UUID(),
@@ -738,7 +893,9 @@ public struct BugReportBundle: Sendable {
         localHistoryEnabled: Bool,
         debugLogEntries: [BugReportDebugLogEntry],
         selfReconnectTimes: [Date] = [],
-        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil
+        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        selfReconnectGap: SelfReconnectGapRecord? = nil,
+        recentIncidents: [IncidentLedgerRecord] = []
     ) {
         self.reportID = reportID
         self.context = context
@@ -751,11 +908,19 @@ public struct BugReportBundle: Sendable {
         self.debugLogEntries = debugLogEntries
         self.selfReconnectTimes = selfReconnectTimes
         self.lastFocusSwitch = lastFocusSwitch
+        self.selfReconnectGap = selfReconnectGap
+        self.recentIncidents = recentIncidents
     }
 
     /// The redacted recovery/escalation envelope surfaced in the report (LAV-94 B).
     public var incident: BugReportIncidentSummary {
-        BugReportIncidentSummary(health: vpn.health, selfReconnectTimes: selfReconnectTimes, lastFocusSwitch: lastFocusSwitch)
+        BugReportIncidentSummary(
+            health: vpn.health,
+            selfReconnectTimes: selfReconnectTimes,
+            lastFocusSwitch: lastFocusSwitch,
+            selfReconnectGap: selfReconnectGap,
+            recentIncidents: recentIncidents
+        )
     }
 
     public var previewSections: [BugReportPreviewSection] {
@@ -968,7 +1133,18 @@ public struct BugReportBundle: Sendable {
                 "Encrypted fallback last served",
                 incident.lastEncryptedFallbackSuccessAt.map(Self.displayDate) ?? "Not serving"
             ),
-            item("runtime_resets", "Resolver runtime resets", "\(incident.resolverRuntimeResetCount)")
+            item("runtime_resets", "Resolver runtime resets", "\(incident.resolverRuntimeResetCount)"),
+            item(
+                "self_reconnect_gap",
+                "Last protection gap",
+                incident.selfReconnectGap.map { gap in
+                    if let gapMilliseconds = gap.gapMilliseconds {
+                        "\(Self.displayDate(gap.startedAt)) (\(gapMilliseconds) ms)"
+                    } else {
+                        "\(Self.displayDate(gap.startedAt)) (still open)"
+                    }
+                } ?? "None recorded"
+            )
         ]
 
         if let resetReason = incident.lastResolverRuntimeResetReason {

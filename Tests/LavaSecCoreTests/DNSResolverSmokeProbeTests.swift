@@ -81,6 +81,34 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         XCTAssertFalse(DNSResolverSmokeProbe.acceptsResolutionResponse(response, matching: query))
     }
 
+    func testSmokeProbeRejectsMalformedResourceRecords() {
+        // A matching NOERROR reply whose RR data is truncated is downgraded to SERVFAIL for the
+        // client (completeForward), so a direct probe must NOT accept it — accepting would clear
+        // the smoke/rejected streaks and stamp a degraded resolver healthy (LAV-87 regression).
+        let txid: UInt16 = 0x4C56
+        let query = DNSResolverSmokeProbe.query(transactionID: txid)
+        let question = query.dropFirst(12)
+        var malformed = Data()
+        Self.appendUInt16(txid, to: &malformed)     // transaction id (matches the query)
+        Self.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
+        Self.appendUInt16(1, to: &malformed)        // QDCOUNT
+        Self.appendUInt16(1, to: &malformed)        // ANCOUNT = 1
+        Self.appendUInt16(0, to: &malformed)        // NSCOUNT
+        Self.appendUInt16(0, to: &malformed)        // ARCOUNT
+        malformed.append(question)                   // same question → passes the match guard
+        malformed.append(contentsOf: [0xC0, 0x0C])  // compressed name pointer
+        Self.appendUInt16(1, to: &malformed)        // type A
+        Self.appendUInt16(1, to: &malformed)        // class IN
+        Self.appendUInt32(60, to: &malformed)       // ttl
+        Self.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
+        malformed.append(93)                         // … but only 1 of 4 rdata bytes present
+
+        XCTAssertFalse(
+            DNSResolverSmokeProbe.acceptsResolutionResponse(malformed, matching: query),
+            "a matching NOERROR reply with truncated RR data is not an accepted probe answer"
+        )
+    }
+
     func testSmokeProbeRejectsWrongTransactionOrQuestion() {
         let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
         let otherQuery = DNSResolverSmokeProbe.query(transactionID: 0x4C56, domain: "iana.org")
@@ -130,6 +158,121 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(query))
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(nil))
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(Data([0x00, 0x01])))
+    }
+
+    func testIndicatesAcceptedAnswerRequiresNOERRORWithAnswers() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        // The NRG-3a probe-skip evidence class: exactly the probe's acceptance verdict
+        // (NOERROR + answers). Everything a hijacking or degraded resolver can emit —
+        // REFUSED, SERVFAIL, NXDOMAIN, an answerless NODATA, a non-response — must NOT
+        // count, or organic replies could suppress routine probes while the resolver
+        // is misbehaving (the LAV-87 regression the review warned against).
+        let answered = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let noData = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 0)
+        let nxdomain = Self.response(for: query, transactionID: 0x4C56, flags: 0x8183, answerCount: 0)
+        let servfail = Self.response(for: query, transactionID: 0x4C56, flags: 0x8002, answerCount: 0)
+        let refused = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 0)
+        // A REFUSED that claims answers is still rcode 5 — never accepted.
+        let refusedWithAnswers = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 1)
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesAcceptedAnswer(answered))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(noData))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(nxdomain))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(servfail))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(refused))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(refusedWithAnswers))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(query), "a bare query (QR unset) is not evidence")
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(nil))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(Data([0x00, 0x01])))
+    }
+
+    func testIndicatesServedAnswerMatchesCompleteForwardBar() {
+        // The shared "the client got a usable answer" bar: `completeForward` forwards this reply
+        // as-is (not a synthesized SERVFAIL). TRUE for a well-formed NOERROR answer AND a
+        // well-formed authoritative NXDOMAIN/NODATA (the primary is serving). FALSE for
+        // SERVFAIL/REFUSED and for ANY malformed reply — including a malformed NEGATIVE whose
+        // authority section is truncated (the case a NOERROR-answer-only check missed).
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        let question = query.dropFirst(12)
+
+        let wellFormedAnswer = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let wellFormedNxdomain = Self.response(for: query, transactionID: 0x4C56, flags: 0x8183, answerCount: 0)
+        let wellFormedNoData = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 0)
+        let servfail = Self.response(for: query, transactionID: 0x4C56, flags: 0x8002, answerCount: 0)
+        let refused = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 0)
+
+        // Malformed POSITIVE: NOERROR + ANCOUNT=1 with truncated rdata.
+        var malformedAnswer = Data()
+        Self.appendUInt16(0x4C56, to: &malformedAnswer)
+        Self.appendUInt16(0x8180, to: &malformedAnswer)               // NOERROR
+        Self.appendUInt16(1, to: &malformedAnswer); Self.appendUInt16(1, to: &malformedAnswer)   // QD=1 AN=1
+        Self.appendUInt16(0, to: &malformedAnswer); Self.appendUInt16(0, to: &malformedAnswer)
+        malformedAnswer.append(question)
+        malformedAnswer.append(contentsOf: [0xC0, 0x0C])
+        Self.appendUInt16(1, to: &malformedAnswer); Self.appendUInt16(1, to: &malformedAnswer)   // A, IN
+        Self.appendUInt32(60, to: &malformedAnswer)
+        Self.appendUInt16(4, to: &malformedAnswer)                    // RDLENGTH=4 …
+        malformedAnswer.append(93)                                     // … only 1 of 4 rdata bytes
+
+        // Malformed NEGATIVE: NXDOMAIN + NSCOUNT=1 with a truncated authority RR. ANCOUNT=0, so a
+        // NOERROR-answer-only malformed check would MISS it, but completeForward still SERVFAILs it.
+        var malformedNegative = Data()
+        Self.appendUInt16(0x4C56, to: &malformedNegative)
+        Self.appendUInt16(0x8183, to: &malformedNegative)             // NXDOMAIN
+        Self.appendUInt16(1, to: &malformedNegative); Self.appendUInt16(0, to: &malformedNegative) // QD=1 AN=0
+        Self.appendUInt16(1, to: &malformedNegative); Self.appendUInt16(0, to: &malformedNegative) // NS=1 AR=0
+        malformedNegative.append(question)
+        malformedNegative.append(contentsOf: [0xC0, 0x0C])            // authority name pointer
+        Self.appendUInt16(6, to: &malformedNegative); Self.appendUInt16(1, to: &malformedNegative) // SOA, IN
+        Self.appendUInt32(60, to: &malformedNegative)
+        Self.appendUInt16(20, to: &malformedNegative)                 // RDLENGTH=20 …
+        malformedNegative.append(0x00)                                 // … only 1 rdata byte
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesServedAnswer(wellFormedAnswer))
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesServedAnswer(wellFormedNxdomain), "well-formed NXDOMAIN is the primary serving")
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesServedAnswer(wellFormedNoData), "well-formed NODATA is the primary serving")
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(servfail))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(refused))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(malformedAnswer), "malformed positive → client SERVFAIL")
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(malformedNegative), "malformed negative → client SERVFAIL (the missed case)")
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(nil))
+    }
+
+    func testIndicatesAcceptedAnswerRejectsMalformedResourceRecords() {
+        // A NOERROR reply that claims an answer but whose RR data is truncated is downgraded
+        // to SERVFAIL for the client by `completeForward`/`hasWellFormedResourceRecords`, so it
+        // must NOT stamp accepted-primary evidence — otherwise a degraded resolver could keep
+        // periodic probes skipped (NRG-3a) while clients receive SERVFAILs.
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        let question = query.dropFirst(12)
+        var malformed = Data()
+        Self.appendUInt16(0x4C56, to: &malformed)   // transaction id
+        Self.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
+        Self.appendUInt16(1, to: &malformed)        // QDCOUNT
+        Self.appendUInt16(1, to: &malformed)        // ANCOUNT = 1 (claims an answer)
+        Self.appendUInt16(0, to: &malformed)        // NSCOUNT
+        Self.appendUInt16(0, to: &malformed)        // ARCOUNT
+        malformed.append(question)
+        malformed.append(contentsOf: [0xC0, 0x0C])  // compressed name pointer to the question
+        Self.appendUInt16(1, to: &malformed)        // type A
+        Self.appendUInt16(1, to: &malformed)        // class IN
+        Self.appendUInt32(60, to: &malformed)       // ttl
+        Self.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
+        malformed.append(93)                         // … but only 1 of 4 rdata bytes present
+
+        XCTAssertFalse(
+            DNSResolverSmokeProbe.indicatesAcceptedAnswer(malformed),
+            "NOERROR+answers with truncated RR data (SERVFAIL-downgraded for the client) is not accepted evidence"
+        )
+    }
+
+    func testIndicatesAcceptedAnswerIsSliceSafeForNonZeroStartIndexData() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        let answered = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let padded = Data([0xFF, 0xFF]) + answered
+        let slice = padded.dropFirst(2)
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesAcceptedAnswer(slice))
     }
 
     private static func response(

@@ -48,6 +48,62 @@ public enum DNSResolverSmokeProbe {
         return data
     }
 
+    /// The probe's acceptance verdict for a response whose query identity was already
+    /// verified at the transport layer (organic forwarding traffic): a genuine NOERROR
+    /// answer carrying records. Shares `acceptsResolutionResponse`'s exact rcode/answer
+    /// semantics minus the transaction-ID/question match, so the periodic probe skip
+    /// (NRG-3a) keys on the SAME evidence class as an accepted probe — a REFUSED,
+    /// SERVFAIL, NXDOMAIN, or answerless reply never counts, which is what keeps a
+    /// hijacking resolver from suppressing routine probes (LAV-87 fail-closed).
+    public static func indicatesAcceptedAnswer(_ response: Data?) -> Bool {
+        guard let response = response.map({ zeroBased($0) }) else {
+            return false
+        }
+        guard response.count >= 12 else {
+            return false
+        }
+
+        let responseFlags = readUInt16(response, at: 2)
+        let isResponse = responseFlags & 0x8000 != 0
+        let responseCode = responseFlags & 0x000F
+        let answerCount = readUInt16(response, at: 6)
+        guard isResponse, responseCode == 0, answerCount > 0 else {
+            return false
+        }
+        // Match the forwarding path's client-facing bar (`completeForward`): a NOERROR reply
+        // whose resource records are malformed/truncated is downgraded to a synthesized
+        // SERVFAIL before it reaches the client, so it must not stamp accepted-primary
+        // evidence either. Otherwise organic malformed-RR traffic would keep periodic smoke
+        // probes skipped (NRG-3a) while clients are actually receiving SERVFAILs — masking a
+        // degraded resolver and freezing the LAV-87 escalation.
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
+    }
+
+    /// Whether the primary delivered a USABLE answer to the client — i.e. `completeForward`
+    /// forwards this reply as-is instead of downgrading it to a synthesized SERVFAIL. That is
+    /// exactly: a well-formed reply (ALL RR sections parse — the same
+    /// `DNSWireMessage.hasWellFormedResourceRecords` bar `completeForward` applies over answer +
+    /// authority + additional) whose rcode is NOT SERVFAIL/REFUSED. A well-formed NOERROR answer
+    /// AND a well-formed authoritative NXDOMAIN/NODATA both qualify (the primary is proven
+    /// serving). A SERVFAIL/REFUSED rcode, OR any malformed reply — including a malformed
+    /// NEGATIVE reply whose authority/additional section is truncated — does NOT: the client
+    /// sees a SERVFAIL, so the primary is misbehaving now.
+    ///
+    /// This is the shared bar for BOTH crediting primary recovery (`lastPrimaryUpstreamSuccessAt`
+    /// + the smoke-failure-streak clear) and revoking probe-skip evidence
+    /// (`lastAcceptedPrimaryEvidenceAt`): a client-facing SERVFAIL by ANY of those routes must
+    /// not count as the primary serving. It intentionally does NOT touch
+    /// `indicatesResolverFailure`, which additionally gates encrypted-fallback engagement.
+    public static func indicatesServedAnswer(_ response: Data?) -> Bool {
+        guard let response else {
+            return false
+        }
+        guard !indicatesResolverFailure(response) else {
+            return false
+        }
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
+    }
+
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {
         guard let response = response.map({ zeroBased($0) }) else {
             return false
@@ -74,7 +130,16 @@ public enum DNSResolverSmokeProbe {
             return false
         }
 
-        return query[queryQuestionRange] == response[responseQuestionRange]
+        guard query[queryQuestionRange] == response[responseQuestionRange] else {
+            return false
+        }
+        // Same client-facing bar as the organic-evidence path and `completeForward`: a NOERROR
+        // reply whose resource records are malformed/truncated is downgraded to SERVFAIL before
+        // clients see it, so a direct probe must not accept it as a healthy answer — doing so
+        // would clear the smoke/rejected streaks and stamp a degraded resolver healthy, defeating
+        // the LAV-87 escalation. This reuses the exact validator the forwarding path already
+        // applies, so it adds no new false-reject surface for legitimate responses.
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
     /// Forwarding-path classifier (NOT for smoke probes): does this resolver reply

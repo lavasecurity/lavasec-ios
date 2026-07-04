@@ -2,16 +2,15 @@ import XCTest
 
 final class LavaCondensedListLayoutSourceTests: XCTestCase {
     func testMetadataLineReservesStableHeightForStatusPills() throws {
-        let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")
-        let itemBlock = try Self.sourceBlock(
+        let listSource = try readSource(.lavaCondensedList)
+        let itemBlock = try sourceBlock(
             in: listSource,
             startingAt: "struct LavaCondensedListItem<Leading: View>: View",
             endingBefore: "extension LavaCondensedListItem"
         )
-        let pillBlock = try Self.sourceBlock(
+        let pillBlock = try sourceBlock(
             in: listSource,
-            startingAt: "private struct LavaCondensedStatusPill: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct LavaCondensedStatusPill: View"
         )
 
         XCTAssertTrue(listSource.contains("private enum LavaCondensedListMetrics"))
@@ -27,8 +26,8 @@ final class LavaCondensedListLayoutSourceTests: XCTestCase {
     }
 
     func testInactiveRowsDoNotDrawThroughLongBlocklistTitles() throws {
-        let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")
-        let itemBlock = try Self.sourceBlock(
+        let listSource = try readSource(.lavaCondensedList)
+        let itemBlock = try sourceBlock(
             in: listSource,
             startingAt: "struct LavaCondensedListItem<Leading: View>: View",
             endingBefore: "extension LavaCondensedListItem"
@@ -38,33 +37,5 @@ final class LavaCondensedListLayoutSourceTests: XCTestCase {
             itemBlock.contains(".strikethrough("),
             "Pending-removal rows already use dimming and a status pill; strikethrough clips long blocklist names."
         )
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

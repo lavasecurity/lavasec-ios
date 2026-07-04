@@ -7,11 +7,11 @@ import XCTest
 // as SettingsFeedbackSourceTests.
 final class BugReportAttestSourceTests: XCTestCase {
     func testSubmitAttachesAppAttestHeadersAndFriendlyRateLimitCopy() throws {
-        let source = try Self.appViewModelSource()
+        let source = try readSource(.appViewModel)
         // Covers submitBugReport plus its attestation helpers (acquireAppAttestation,
         // fetchAppAttestChallenge) — they all sit before startLavaSecurityPlusStore — so
         // every assertion below is scoped to the submit-and-attest surface, not the whole file.
-        let submitAndAttestBlock = try Self.block(
+        let submitAndAttestBlock = try sourceBlock(
             in: source,
             startingAt: "private func submitBugReport(",
             endingBefore: "private func startLavaSecurityPlusStore"
@@ -37,8 +37,8 @@ final class BugReportAttestSourceTests: XCTestCase {
     }
 
     func testAppAttestClientUsesDeviceCheckAndDegradesGracefully() throws {
-        let source = try Self.appViewModelSource()
-        let clientBlock = try Self.block(
+        let source = try readSource(.appViewModel)
+        let clientBlock = try sourceBlock(
             in: source,
             startingAt: "private enum AppAttestClient",
             // Bound the block to the enum itself — the comment on the line right after its
@@ -69,30 +69,4 @@ final class BugReportAttestSourceTests: XCTestCase {
     }
 
     // MARK: - helpers
-
-    private static func appViewModelSource() throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent("LavaSecApp")
-            .appendingPathComponent("AppViewModel.swift")
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func block(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
-    }
 }

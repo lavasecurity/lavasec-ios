@@ -2,8 +2,8 @@ import XCTest
 
 final class LavaSheetScaffoldSourceTests: XCTestCase {
     func testSheetScaffoldUsesNativeSafeAreaBarsForFooters() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let scaffoldBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let scaffoldBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
             endingBefore: "extension LavaSheetScaffold where Header == EmptyView, Footer == EmptyView"
@@ -17,11 +17,15 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
         XCTAssertTrue(scaffoldBlock.contains("scrollEdgeEffectStyle(.soft, for: .bottom)"))
         XCTAssertTrue(scaffoldBlock.contains(".background(.regularMaterial)"))
         XCTAssertFalse(scaffoldBlock.contains("VStack(spacing: spacing) {\n                header\n                sheetContent\n                footer"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(rootSource.contains("sheetContent"))
     }
 
     func testSheetScaffoldGivesScrollContentNativeBarBreathingRoom() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let scaffoldBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let scaffoldBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
             endingBefore: "extension LavaSheetScaffold where Header == EmptyView, Footer == EmptyView"
@@ -35,8 +39,8 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
     }
 
     func testSheetScaffoldKeepsIOSSixteenPresentationBackgroundFallback() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let scaffoldBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let scaffoldBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
             endingBefore: "extension LavaSheetScaffold where Header == EmptyView, Footer == EmptyView"
@@ -48,18 +52,18 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
     }
 
     func testSheetScaffoldUnifiesTopHeaderAndNavigationMaterial() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let scaffoldBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let scaffoldBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View",
             endingBefore: "extension LavaSheetScaffold where Header == EmptyView, Footer == EmptyView"
         )
-        let headerBlock = try Self.sourceBlock(
+        let headerBlock = try sourceBlock(
             in: scaffoldBlock,
             startingAt: "private var headerBar: some View",
             endingBefore: "private var footerBar: some View"
         )
-        let toolbarModifierBlock = try Self.sourceBlock(
+        let toolbarModifierBlock = try sourceBlock(
             in: rootSource,
             startingAt: "private struct LavaSheetNavigationToolbarBackground",
             endingBefore: "enum LavaToolbarMetrics"
@@ -76,14 +80,14 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
 
     func testAllBottomSheetCallSitesUseSharedSheetScaffold() throws {
         let appSources = [
-            try Self.source(named: "BackupRestoreView.swift", in: "LavaSecApp"),
-            try Self.source(named: "BackupSetupView.swift", in: "LavaSecApp"),
-            try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp"),
-            try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp"),
-            try Self.source(named: "FiltersView.swift", in: "LavaSecApp"),
-            try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp"),
-            try Self.source(named: "SettingsView.swift", in: "LavaSecApp"),
-            try Self.source(named: "ShareableFiltersUI.swift", in: "LavaSecApp")
+            try readSource(.backupRestoreView),
+            try readSource(.backupSetupView),
+            try readSource(.diagnosticsView),
+            try readSource(.filterReviewFlowView),
+            try readSource(.filtersView),
+            try readSource(.onboardingFlowView),
+            try readSource(.settingsView),
+            try readSource(.shareableFiltersUI)
         ].joined(separator: "\n")
 
         XCTAssertEqual(
@@ -91,34 +95,6 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
             22
         )
         XCTAssertFalse(appSources.contains("safeAreaBar(edge: .bottom"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }
 
