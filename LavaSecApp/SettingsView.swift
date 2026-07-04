@@ -1263,10 +1263,11 @@ private struct UpgradeSettingsView: View {
             return viewModel.lavaSecurityPlusOffers
         }
 
-        return LavaSecurityPlusPolicy.recommendedOfferOrder.map {
+        return LavaSecurityPlusPolicy.fallbackOfferOrder.map {
             LavaSecurityPlusOffer(
                 plan: $0,
                 displayPrice: $0.fallbackDisplayPrice,
+                commitmentDisplayPrice: nil,
                 product: nil
             )
         }
@@ -1276,6 +1277,8 @@ private struct UpgradeSettingsView: View {
         switch kind {
         case .yearly:
             "\"We are saving 37%! This has the best value.\""
+        case .yearlyPaidMonthly:
+            "\"If we commit for 12 months, each month is cheaper.\""
         case .monthly:
             "\"We already saved this by unplugging appliances.\""
         }
@@ -1378,7 +1381,7 @@ private struct UpgradeSettingsView: View {
 private struct UpgradeLegalFooter: View {
     var body: some View {
         VStack(spacing: 8) {
-            Text("Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings.")
+            Text("Monthly and yearly are auto-renewable subscriptions. Yearly, paid monthly bills monthly with a 12-month commitment; cancellation affects renewal after the commitment according to App Store terms. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends. Manage subscriptions in Apple Account settings.")
                 .lavaQuietNoteText()
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1489,6 +1492,7 @@ private struct UpgradePlanComparisonView: View {
         ("Allowed domains", "\(FeatureLimits.free.maxAllowedDomains)", .text("\(FeatureLimits.paid.maxAllowedDomains)")),
         ("Blocked domains", "\(FeatureLimits.free.maxBlockedDomains)", .text("\(FeatureLimits.paid.maxBlockedDomains)")),
         ("All Lava Guards", nil, .unlocked),
+        ("Family Sharing", nil, .unlocked),
         ("Custom blocklists", nil, .unlocked),
         ("Custom DNS", nil, .unlocked)
     ]
@@ -1584,13 +1588,25 @@ private struct UpgradePlanOfferRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(offer.displayPrice)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(LavaStyle.safeGreen)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .layoutPriority(1)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(offer.displayPrice)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(LavaStyle.safeGreen)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    if offer.plan.kind == .yearlyPaidMonthly,
+                       let commitmentDisplayPrice = offer.commitmentDisplayPrice {
+                        Text("%@ total".lavaLocalizedFormat(commitmentDisplayPrice))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                }
+                .layoutPriority(1)
             }
         }
     }
@@ -2152,7 +2168,7 @@ struct DNSResolverSettingsView: View {
             tier: .technical,
             intro: LavaInfoPanel(
                 title: "How websites get found",
-                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone — only change it if you know you want to.",
+                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone, so we recommend keeping it.",
                 systemImage: "network"
             )
         ) {

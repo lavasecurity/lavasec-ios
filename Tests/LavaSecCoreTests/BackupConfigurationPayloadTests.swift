@@ -210,6 +210,84 @@ final class BackupConfigurationPayloadTests: XCTestCase {
         XCTAssertTrue(configuration.customBlocklists.isEmpty)
     }
 
+    func testFutureSchemaVersionPayloadIsRejectedBeforeAnyRestore() throws {
+        // A vN+1 backup restored on a vN device must be REFUSED at decode time. If it were
+        // accepted, `restoredConfiguration()` would decode a lossy subset and a later re-seal
+        // would upload a downgraded schema-1 envelope OVER the newer single-envelope backup,
+        // permanently clobbering it. So decode itself has to throw before any state mutation.
+        let futureSchema = BackupConfigurationPayload.currentSupportedSchemaVersion + 1
+        let data = Data("""
+        {
+          "schemaVersion": \(futureSchema),
+          "enabledBlocklistIDs": [],
+          "allowedDomains": [],
+          "blockedDomains": [],
+          "resolverPresetID": "google-public-dns",
+          "fallbackToDeviceDNS": true,
+          "keepFilteringCounts": true,
+          "keepDomainDiagnostics": false,
+          "keepNetworkActivity": true,
+          "protectionEnabledHint": false,
+          "someFutureField": "ignored"
+        }
+        """.utf8)
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(BackupConfigurationPayload.self, from: data)
+        ) { error in
+            XCTAssertEqual(
+                error as? BackupConfigurationPayloadError,
+                .unsupportedSchemaVersion(futureSchema)
+            )
+        }
+    }
+
+    func testCurrentSchemaVersionPayloadStillDecodesAndRestores() throws {
+        // The ceiling must accept the current (and by extension older) schema — the reject
+        // is strictly `schemaVersion > currentSupportedSchemaVersion`, never `==` or below.
+        let data = Data("""
+        {
+          "schemaVersion": \(BackupConfigurationPayload.currentSupportedSchemaVersion),
+          "enabledBlocklistIDs": ["blocklistproject-basic"],
+          "allowedDomains": ["school.example"],
+          "blockedDomains": ["casino.example"],
+          "resolverPresetID": "google-public-dns",
+          "fallbackToDeviceDNS": true,
+          "keepFilteringCounts": true,
+          "keepDomainDiagnostics": false,
+          "keepNetworkActivity": true,
+          "protectionEnabledHint": true
+        }
+        """.utf8)
+
+        let payload = try JSONDecoder().decode(BackupConfigurationPayload.self, from: data)
+        XCTAssertEqual(payload.schemaVersion, BackupConfigurationPayload.currentSupportedSchemaVersion)
+
+        let restored = payload.restoredConfiguration()
+        XCTAssertEqual(restored.enabledBlocklistIDs, ["blocklistproject-basic"])
+        XCTAssertEqual(restored.blockedDomains, ["casino.example"])
+        XCTAssertTrue(restored.protectionEnabled)
+    }
+
+    func testMissingSchemaVersionDefaultsToOneAndRestores() throws {
+        // A legacy payload with no `schemaVersion` key defaults to 1, which is <= the ceiling,
+        // so it must still restore rather than be treated as an unknown/future schema.
+        let data = Data("""
+        {
+          "enabledBlocklistIDs": ["blocklistproject-basic"],
+          "allowedDomains": [],
+          "blockedDomains": [],
+          "resolverPresetID": "google-public-dns",
+          "keepDomainDiagnostics": false,
+          "protectionEnabledHint": true
+        }
+        """.utf8)
+
+        let payload = try JSONDecoder().decode(BackupConfigurationPayload.self, from: data)
+        XCTAssertEqual(payload.schemaVersion, 1)
+        XCTAssertEqual(payload.restoredConfiguration().enabledBlocklistIDs, ["blocklistproject-basic"])
+    }
+
     func testBackupNeverIncludesDownloadedCustomBlocklistContents() throws {
         let customSource = try CustomBlocklistSource(
             id: "custom-sensitive",

@@ -9,7 +9,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - The App Intent
 
     func testIntentConformsToSetFocusFilterIntentWithOptionalParameter() throws {
-        let source = try Self.source(named: "FocusFilterIntent.swift", in: "LavaSecIntents")
+        let source = try readSource(.focusFilterIntent)
 
         XCTAssertTrue(source.contains("struct LavaFocusFilterIntent: SetFocusFilterIntent {"),
                       "The intent must conform to SetFocusFilterIntent (the Focus mechanism), not a plain AppIntent.")
@@ -23,8 +23,8 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     }
 
     func testPerformIsANoOpOnDeactivationThenDrivesHeadlessSwitch() throws {
-        let source = try Self.source(named: "FocusFilterIntent.swift", in: "LavaSecIntents")
-        let perform = try Self.sourceBlock(
+        let source = try readSource(.focusFilterIntent)
+        let perform = try sourceBlock(
             in: source,
             startingAt: "func perform() async throws -> some IntentResult {",
             endingBefore: "}\n}"
@@ -35,7 +35,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         // switch (panel P1). A filter is sticky; the foreground reconcile's guards handle stale markers.
         XCTAssertTrue(perform.contains("guard let filter else {"),
                       "perform() must branch on the nil parameter (Focus deactivation).")
-        let nilBranch = try Self.sourceBlock(in: perform, startingAt: "guard let filter else {", endingBefore: "}")
+        let nilBranch = try sourceBlock(in: perform, startingAt: "guard let filter else {", endingBefore: "}")
         XCTAssertFalse(nilBranch.contains("cancelDeferredSwitchOnFocusOff"),
                        "The nil (Focus-off) branch must NOT cancel a marker (it can't attribute it to a Focus).")
         XCTAssertFalse(nilBranch.contains("performSwitch"),
@@ -49,7 +49,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
                       "perform() must drive the switch through FocusSwitchEnvironment.performSwitch (the shared engine).")
 
         // The unsafe focus-off cancel must be gone from the shared environment factory too.
-        let envFactory = try Self.source(named: "FocusSwitchEnvironment.swift", in: "Shared")
+        let envFactory = try readSource(.focusSwitchEnvironment)
         XCTAssertFalse(envFactory.contains("func cancelDeferredSwitchOnFocusOff"),
                        "FocusSwitchEnvironment must no longer expose a focus-off cancel.")
     }
@@ -59,20 +59,20 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     /// `@main AppIntentsExtension` principal, the ExtensionKit extension point in Info.plist, and the
     /// pbxproj target/embed wiring (LAV-100 Phase 4 P4a).
     func testIntentIsHostedInAnExtensionKitAppIntentsExtension() throws {
-        let principal = try Self.source(named: "LavaSecIntentsExtension.swift", in: "LavaSecIntents")
+        let principal = try readSource(.lavaSecIntentsExtension)
         XCTAssertTrue(principal.contains("@main"), "The extension needs a @main principal.")
         XCTAssertTrue(principal.contains("struct LavaSecIntentsExtension: AppIntentsExtension {"),
                       "The principal must conform to AppIntentsExtension (App Intents, not SiriKit).")
         XCTAssertTrue(principal.contains("import ExtensionFoundation"),
                       "The App Intents extension principal imports ExtensionFoundation (ExtensionKit).")
 
-        let infoPlist = try Self.source(named: "Info.plist", in: "LavaSecIntents")
+        let infoPlist = try readSource(.intentsInfoPlist)
         XCTAssertTrue(infoPlist.contains("EXAppExtensionAttributes"),
                       "The extension uses ExtensionKit packaging (EXAppExtensionAttributes), not NSExtension.")
         XCTAssertTrue(infoPlist.contains("com.apple.appintents-extension"),
                       "The extension point must be com.apple.appintents-extension (App Intents), not com.apple.intents-service (SiriKit).")
 
-        let pbxproj = try Self.source(named: "project.pbxproj", in: "LavaSec.xcodeproj")
+        let pbxproj = try readSource(.xcodeProject)
         XCTAssertTrue(pbxproj.contains("productType = \"com.apple.product-type.extensionkit-extension\""),
                       "LavaSecIntents must be an extensionkit-extension product type.")
         XCTAssertTrue(pbxproj.contains("/* Embed ExtensionKit Extensions */"),
@@ -85,7 +85,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - The AppEntity + query
 
     func testEntityQueryReadsLibraryHeadlesslyAndUsesConstStatics() throws {
-        let source = try Self.source(named: "FocusFilterIntent.swift", in: "LavaSecIntents")
+        let source = try readSource(.focusFilterIntent)
 
         // `static let` (not `var`): the AppIntents metadata processor records the AppEntity — and from it
         // the parameter→query link — only from CONST bindings (a `var` produces "no record of the query
@@ -110,11 +110,11 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - The filters-list signpost (moon glyph) + how-to
 
     func testMoonGlyphShowsHowToForAllTiersBesideTheEditPencil() throws {
-        let source = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let source = try readSource(.filtersView)
 
         // The glyph sits in the non-editing primaryAction group with the edit pencil, so it's hidden in
         // edit mode; declared first so it renders to the LEFT of the pencil.
-        let group = try Self.sourceBlock(
+        let group = try sourceBlock(
             in: source,
             startingAt: "ToolbarItemGroup(placement: .primaryAction) {",
             endingBefore: ".navigationDestination("
@@ -124,7 +124,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         XCTAssertLessThan(moonIdx, pencilIdx, "The moon glyph must be declared before (left of) the edit pencil.")
 
         // No paywall: Focus auto-switch is free for all tiers, so the glyph shows the how-to to everyone.
-        let moonButton = try Self.sourceBlock(
+        let moonButton = try sourceBlock(
             in: group,
             startingAt: "systemName: \"moon\"",
             endingBefore: "NativeToolbarIconButton(systemName: \"square.and.pencil\""
@@ -135,13 +135,18 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
                        "The moon glyph must NOT paywall — Focus auto-switch is free for all tiers.")
         XCTAssertFalse(moonButton.contains("hasLavaSecurityPlus"),
                        "The moon glyph must not Plus-gate.")
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("isShowingPaywall"))
+        XCTAssertTrue(source.contains("hasLavaSecurityPlus"))
     }
 
     func testHowToSheetGuidesFocusSetupViaStepsNotAMisroutingSettingsButton() throws {
-        let source = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
+        let source = try readSource(.filtersView)
         XCTAssertTrue(source.contains(".sheet(isPresented: $isShowingFocusInfo) {"),
                       "The how-to sheet must be presented from the moon glyph's state.")
-        let sheet = try Self.sourceBlock(
+        let sheet = try sourceBlock(
             in: source,
             startingAt: "private struct FocusFilterHowToSheet: View {",
             endingBefore: "private struct FiltersOverviewPanel: View {"
@@ -160,7 +165,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - Build wiring (root cause of the original metadata-export failure)
 
     func testConstValueProtocolsIncludeQueryProtocols() throws {
-        let pbxproj = try Self.source(named: "project.pbxproj", in: "LavaSec.xcodeproj")
+        let pbxproj = try readSource(.xcodeProject)
         // The project overrode Xcode's default SWIFT_EMIT_CONST_VALUE_PROTOCOLS with a narrow list that
         // dropped EntityQuery/DynamicOptionsProvider — without them the AppIntents metadata processor
         // can't record an AppEntity's query ("no record of the query can be found"). Pin both so a future
@@ -175,28 +180,4 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     }
 
     // MARK: - Source introspection helpers
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let packageRootURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        var sourceURL = packageRootURL
-        for component in directoryName.split(separator: "/") {
-            sourceURL.appendPathComponent(String(component))
-        }
-        sourceURL.appendPathComponent(fileName)
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
-    }
 }

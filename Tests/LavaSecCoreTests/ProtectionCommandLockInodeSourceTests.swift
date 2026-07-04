@@ -8,7 +8,7 @@ import XCTest
 /// command channel. The lock must open the file with `open(O_CREAT)` only.
 final class ProtectionCommandLockInodeSourceTests: XCTestCase {
     func testCommandLockOpensWithoutReplacingTheInode() throws {
-        let source = try Self.source(named: "LavaProtectionCommandService.swift", in: "Shared")
+        let source = try readSource(.lavaProtectionCommandService)
 
         XCTAssertTrue(
             source.contains("open(lockURL.path, O_CREAT | O_RDWR"),
@@ -21,17 +21,4 @@ final class ProtectionCommandLockInodeSourceTests: XCTestCase {
     }
 
     // MARK: - Source introspection helpers
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
 }

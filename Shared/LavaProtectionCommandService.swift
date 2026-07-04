@@ -427,6 +427,16 @@ enum LavaProtectionCommandService {
             "until": ISO8601DateFormatter().string(from: state.pausedUntil)
         ])
 
+        // Ship-safe audit of every pause write (unlike log(), which is DEBUG-only)
+        // so a spontaneous-pause field report can be correlated against the read-
+        // path sanity ceiling: the store clamps any pausedUntil more than the
+        // longest selectable pause ahead of now back to protection-ON.
+        LavaSecDeviceDebugLog.append(component: "live-activity-intent", event: "pause-written", details: [
+            "duration": String(Int(duration)),
+            "until": ISO8601DateFormatter().string(from: state.pausedUntil),
+            "maxDurationSeconds": String(Int(LiveActivityPausePreference.duration(forMinutes: LiveActivityPausePreference.maximumMinutes)))
+        ])
+
         return LavaProtectionCommandOutcome(
             activityUpdate: LavaProtectionLiveActivityUpdate(
                 revision: result.revision,
@@ -517,6 +527,22 @@ enum LavaProtectionCommandService {
             log("activity-update-skipped-stale", details: [
                 "revision": String(update.revision),
                 "currentRevision": String(currentRevision),
+                "reason": update.reason
+            ])
+            return
+        }
+
+        // A `.paused` update must not apply if the pause it announced is no longer in effect —
+        // resumed, expired, or (UX-2, Codex #208) sanity-cap DISCARDED after a backward clock
+        // step between when pause() scheduled this detached update and now. The discard mints no
+        // revision (it is an observation), so a stale `.paused` still passes the revision guard
+        // above; without this positive check it could apply AFTER the protection-ON reconcile and
+        // strand the Dynamic Island paused while the store and filtering are already back on.
+        // currentPauseState() re-reads the source of truth (session-bound, non-expired,
+        // within-cap), so it is robust to ordering, not just to a stale revision.
+        if update.protectionState == .paused, (try? pauseStore.currentPauseState()) == nil {
+            log("activity-update-skipped-vanished-pause", details: [
+                "revision": String(update.revision),
                 "reason": update.reason
             ])
             return

@@ -104,8 +104,8 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testApplyingOnboardingDefaultsStartsBlocklistSyncWhenRulesAreMissing() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let defaultsBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let defaultsBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func applyOnboardingRecommendedDefaults(",
             endingBefore: "func selectOnboardingBlocklists"
@@ -117,8 +117,8 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testFeaturePageDoesNotMountRowsUntilTransitionAllowsLayout() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let guardScenePage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let guardScenePage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var guardScenePage: some View",
             endingBefore: "private var vpnPage"
@@ -132,8 +132,8 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testGuardIntroAndFeaturesShareOneSceneViewIdentity() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let currentPage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let currentPage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var currentPage: some View",
             endingBefore: "private var internetIsLavaPage"
@@ -144,8 +144,8 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testOnboardingTopBarDoesNotRenderCenterTitleAfterFirstPage() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let topBar = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let topBar = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var topBar: some View",
             endingBefore: "@ViewBuilder"
@@ -155,13 +155,13 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testIntroCopyKeepsInternetFocusAndLocalLoggingRowIsDirect() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let lavaPage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let lavaPage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var internetIsLavaPage: some View",
             endingBefore: "private var guardScenePage"
         )
-        let guardScenePage = try Self.sourceBlock(
+        let guardScenePage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var guardScenePage: some View",
             endingBefore: "private var vpnPage"
@@ -175,29 +175,29 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testGuardHeroBlinksAfterFeatureUpliftCompletes() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let viewStateBlock = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let viewStateBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "struct LavaOnboardingView: View",
             endingBefore: "var body: some View"
         )
-        let guardScenePage = try Self.sourceBlock(
+        let guardScenePage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var guardScenePage: some View",
             endingBefore: "private var vpnPage"
         )
-        let animationBlock = try Self.sourceBlock(
+        let animationBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private func prepareAnimations(for nextPage: OnboardingPage)",
             endingBefore: "private enum OnboardingPage"
         )
-        let heroBlock = try Self.sourceBlock(
+        let heroBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingGuardHero: View",
             endingBefore: "private struct OnboardingStepLayout"
         )
-        let guardianSource = try Self.source(named: "SoftShieldGuardian.swift", in: "Shared")
-        let guardianBlock = try Self.sourceBlock(
+        let guardianSource = try readSource(.softShieldGuardian)
+        let guardianBlock = try sourceBlock(
             in: guardianSource,
             startingAt: "struct SoftShieldGuardian: View",
             endingBefore: "private struct SoftShieldGuardianContent"
@@ -214,18 +214,18 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testPermissionPromptIllustrationsAreCenteredInStepBody() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let vpnPage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let vpnPage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var vpnPage: some View",
             endingBefore: "private var notificationsPage"
         )
-        let notificationsPage = try Self.sourceBlock(
+        let notificationsPage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var notificationsPage: some View",
             endingBefore: "private var donePage"
         )
-        let stepLayout = try Self.sourceBlock(
+        let stepLayout = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingStepLayout<Content: View>: View",
             endingBefore: "private struct OnboardingStepHeading"
@@ -239,13 +239,13 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testReadyPageAnimatesMascotFromAwakeToGratefulAndBackToAwake() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let donePage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let donePage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var donePage: some View",
             endingBefore: "private var footer"
         )
-        let readyMascot = try Self.sourceBlock(
+        let readyMascot = try sourceBlock(
             in: onboardingSource,
             startingAt: "private struct OnboardingReadyMascot: View",
             endingBefore: "private struct OnboardingStepLayout"
@@ -265,14 +265,14 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testOnboardingVPNInstallDoesNotShowIOSPermissionHintMessage() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let vpnPage = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let vpnPage = try sourceBlock(
             in: onboardingSource,
             startingAt: "private var vpnPage: some View",
             endingBefore: "private var notificationsPage"
         )
-        let viewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let onboardingInstallBlock = try Self.sourceBlock(
+        let viewModelSource = try readSource(.appViewModel)
+        let onboardingInstallBlock = try sourceBlock(
             in: viewModelSource,
             startingAt: "func installLocalVPNProfileForOnboarding() async -> Bool",
             endingBefore: "func requestProtectionNotificationAuthorizationForOnboarding() async -> Bool"
@@ -284,8 +284,8 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testFeatureNavigationResetsTransitionBeforeShowingFeaturePage() throws {
-        let onboardingSource = try Self.source(named: "OnboardingFlowView.swift", in: "LavaSecApp")
-        let navigationBlock = try Self.sourceBlock(
+        let onboardingSource = try readSource(.onboardingFlowView)
+        let navigationBlock = try sourceBlock(
             in: onboardingSource,
             startingAt: "private func go(to nextPage: OnboardingPage)",
             endingBefore: "private func goBack"
@@ -296,30 +296,5 @@ final class OnboardingAnimationTests: XCTestCase {
 
         XCTAssertLessThan(resetRange.lowerBound, showPageRange.lowerBound)
         XCTAssertTrue(navigationBlock.contains("guard page != .guardIntro || nextPage != .features else"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
     }
 }

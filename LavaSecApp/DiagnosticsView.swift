@@ -1355,8 +1355,8 @@ private struct DomainHistoryRow: View {
             metadata: rowDetailText,
             titleLineLimit: 2
         ) {
-            Image(systemName: event.decision.action == .block ? "hand.raised.circle.fill" : "arrow.right.circle.fill")
-                .foregroundStyle(event.decision.action == .block ? LavaStyle.lavaOrange : LavaStyle.safeGreen)
+            Image(systemName: rowIconName)
+                .foregroundStyle(rowIconColor)
                 .font(.title3)
                 .frame(width: 28)
         }
@@ -1381,6 +1381,21 @@ private struct DomainHistoryRow: View {
 
     private var rowDetailText: String {
         "\(event.decision.reason.domainHistoryLabel.lavaLocalized) · \(event.timestampLine)"
+    }
+
+    // Paused-allows get the same "protection paused" glyph/tint used elsewhere in the app
+    // (AppViewModel.protectionSymbolName, the sleeping-shield mascot) instead of the usual
+    // per-action allow/block styling, so they read as "let through," not "normally allowed."
+    private var rowIconName: String {
+        event.decision.reason == .pausedAllow
+            ? "pause.circle.fill"
+            : (event.decision.action == .block ? "hand.raised.circle.fill" : "arrow.right.circle.fill")
+    }
+
+    private var rowIconColor: Color {
+        event.decision.reason == .pausedAllow
+            ? LavaStyle.guardianSleepGray
+            : (event.decision.action == .block ? LavaStyle.lavaOrange : LavaStyle.safeGreen)
     }
 }
 
@@ -1589,6 +1604,7 @@ private extension FilterDecisionReason {
         case .blocklist: return "Blocklist"
         case .threatGuardrail: return "Threat Guardrail"
         case .invalidDomain: return "Invalid domain"
+        case .pausedAllow: return "Allowed on Pause"
         // Fail-closed blocks are dropped from Domain History, so this is reached only via
         // historical/exported/bug-report rendering — keep it honest rather than "Blocklist".
         case .protectionUnavailable: return "Failed safe"

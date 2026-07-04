@@ -131,6 +131,72 @@
         }
       }
     },
+    "%@ total": {
+      "comment": "Total commitment price label for the yearly paid monthly subscription row. Preserve the placeholder.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ total"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ gesamt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ en total"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ au total"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ in totale"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "合計 %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "총 %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ no total"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总计 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "總計 %@"
+          }
+        }
+      }
+    },
     " (%@)": {
       "comment": "Interpolated detail-suffix wrapper (GuardView Text(\" (\\(detailSuffix))\")). Punctuation/placeholder only; identical in every locale.",
       "extractionState": "manual",
@@ -587,6 +653,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "「拔掉電器插頭，我們早就省下這筆錢了。」"
+          }
+        }
+      }
+    },
+    "\"If we commit for 12 months, each month is cheaper.\"": {
+      "comment": "Jokey plan pitch (testimonial) for the yearly paid monthly subscription offer.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\"If we commit for 12 months, each month is cheaper.\""
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„Wenn wir uns für 12 Monate festlegen, ist jeder Monat günstiger.“"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "«Si nos comprometemos por 12 meses, cada mes sale más barato.»"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« Si on s’engage pour 12 mois, chaque mois coûte moins cher. »"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "«Se ci impegniamo per 12 mesi, ogni mese costa meno.»"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「12か月続ける約束なら、毎月が安くなります。」"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“12개월로 약속하면 매달 더 저렴해요.”"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“Se nos comprometermos por 12 meses, cada mês fica mais barato.”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「如果我们承诺 12 个月，每个月都会更便宜。」"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「如果我們承諾 12 個月，每個月都會更便宜。」"
           }
         }
       }
@@ -7709,6 +7841,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Le eccezioni consentite lasciano passare un sito anche quando una lista di blocco lo intercetterebbe."
+          }
+        }
+      }
+    },
+    "Allowed on Pause": {
+      "comment": "Domain History / Top Domains source label for a domain forwarded only because protection is temporarily paused — not a normal allow decision (contrast with Default/Allowlist). Distinct so the user can tell “let through because paused” apart from “cleared the filter normally.”",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed on Pause"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausiert zugelassen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitido en pausa"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisé en pause"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consentito in pausa"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止のため許可"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일시중지 허용"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitido na pausa"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂停放行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫停放行"
           }
         }
       }
@@ -17279,68 +17477,68 @@
         }
       }
     },
-    "DNS is how your phone finds a website's address. Our default is safe for almost everyone — only change it if you know you want to.": {
+    "DNS is how your phone finds a website's address. Our default is safe for almost everyone, so we recommend keeping it.": {
       "comment": "DNS Resolver screen intro panel explaining DNS in plain language.",
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Über DNS findet dein Telefon die Adresse einer Website. Unsere Voreinstellung ist für fast alle sicher – ändere sie nur, wenn du es bewusst willst."
+            "value": "Über DNS findet dein Telefon die Adresse einer Website. Unsere Voreinstellung ist für fast alle sicher, wir empfehlen daher, sie beizubehalten."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS is how your phone finds a website's address. Our default is safe for almost everyone — only change it if you know you want to."
+            "value": "DNS is how your phone finds a website's address. Our default is safe for almost everyone, so we recommend keeping it."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "El DNS es como tu teléfono encuentra la dirección de un sitio. Nuestra opción por defecto es segura para casi todos; cámbiala solo si sabes lo que quieres."
+            "value": "El DNS es como tu teléfono encuentra la dirección de un sitio. Nuestra opción por defecto es segura para casi todos, así que recomendamos mantenerla."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le DNS, c'est la façon dont votre téléphone trouve l'adresse d'un site. Notre choix par défaut convient à presque tout le monde — ne le changez que si vous savez le vouloir."
+            "value": "Le DNS, c'est la façon dont votre téléphone trouve l'adresse d'un site. Notre choix par défaut convient à presque tout le monde, nous recommandons donc de le conserver."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Il DNS è il modo in cui il telefono trova l'indirizzo di un sito. La nostra scelta predefinita è sicura per quasi tutti: cambiala solo se sai di volerlo."
+            "value": "Il DNS è il modo in cui il telefono trova l'indirizzo di un sito. La nostra scelta predefinita è sicura per quasi tutti, quindi ti consigliamo di mantenerla."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS は、iPhone がサイトの住所を調べる仕組みです。初期設定はほとんどの人にとって安全です。変えたいと自分でわかっているときだけ変更してください。"
+            "value": "DNS は、iPhone がサイトの住所を調べる仕組みです。初期設定はほとんどの人にとって安全なので、そのままのご利用をおすすめします。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS는 휴대폰이 웹사이트 주소를 찾는 방식이에요. 기본값은 거의 모두에게 안전하니, 정말 바꾸고 싶을 때만 바꾸세요."
+            "value": "DNS는 휴대폰이 웹사이트 주소를 찾는 방식이에요. 기본값은 거의 모두에게 안전하므로 그대로 두시길 권장해요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O DNS é como o seu telefone encontra o endereço de um site. Nosso padrão é seguro para quase todo mundo — só mude se tiver certeza de que quer."
+            "value": "O DNS é como o seu telefone encontra o endereço de um site. Nosso padrão é seguro para quase todo mundo, então recomendamos mantê-lo."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS 是手机查找网站地址的方式。我们的默认设置对几乎所有人都安全 —— 除非你确定要改，否则无需改动。"
+            "value": "DNS 是手机查找网站地址的方式。我们的默认设置对几乎所有人都安全，建议保持默认。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS 是你手機查出網站位址的方式。預設值對幾乎所有人都安全 —— 確定要改再改。"
+            "value": "DNS 是你手機查出網站位址的方式。預設值對幾乎所有人都安全，建議保持預設。"
           }
         }
       }
@@ -23343,6 +23541,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "篩選已開啟，正使用裝置的 DNS，因為所選的 DNS 供應商目前無法使用"
+          }
+        }
+      }
+    },
+    "Family Sharing": {
+      "comment": "Benefit row label in the Lava Security Plus comparison table.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family Sharing"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Familienfreigabe"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartir en familia"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partage familial"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In famiglia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファミリー共有"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가족 공유"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartilhamento Familiar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "家人共享"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "家人共享"
           }
         }
       }
@@ -31128,6 +31392,72 @@
         }
       }
     },
+    "Lower monthly payment": {
+      "comment": "Subtitle for the Yearly, paid monthly subscription offer.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lower monthly payment"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niedrigere Monatszahlung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pago mensual más bajo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paiement mensuel réduit"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pagamento mensile più basso"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月々の支払いを抑える"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "더 낮은 월 결제"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pagamento mensal menor"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每月支付更少"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每月付款更低"
+          }
+        }
+      }
+    },
     "Live Activities": {
       "comment": "Localization-gap backfill (wrapper-localized; was hardcoded in SettingsView.swift).",
       "extractionState": "manual",
@@ -32777,68 +33107,68 @@
         }
       }
     },
-    "Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings.": {
+    "Monthly and yearly are auto-renewable subscriptions. Yearly, paid monthly bills monthly with a 12-month commitment; cancellation affects renewal after the commitment according to App Store terms. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends. Manage subscriptions in Apple Account settings.": {
       "comment": "Localization-gap backfill (was hardcoded in SettingsView.swift).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Monthly and yearly are auto-renewable subscriptions. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends — manage or cancel anytime in your Apple Account settings."
+            "value": "Monthly and yearly are auto-renewable subscriptions. Yearly, paid monthly bills monthly with a 12-month commitment; cancellation affects renewal after the commitment according to App Store terms. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends. Manage subscriptions in Apple Account settings."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Monats- und Jahresabos verlängern sich automatisch. Der Betrag wird beim Kauf über dein Apple-Konto abgebucht und verlängert sich automatisch, sofern du nicht mindestens 24 Stunden vor Ablauf kündigst – verwalten oder kündigen kannst du jederzeit in deinen Apple-Konto-Einstellungen."
+            "value": "Monats- und Jahresabos verlängern sich automatisch. Jährlich, monatlich bezahlt wird monatlich mit einer 12-monatigen Verpflichtung abgerechnet; eine Kündigung wirkt sich gemäß den App Store-Bedingungen auf die Verlängerung nach der Verpflichtung aus. Der Betrag wird beim Kauf über dein Apple-Konto abgebucht und verlängert sich automatisch, sofern du nicht mindestens 24 Stunden vor Ablauf deaktivierst. Abos kannst du in den Apple-Konto-Einstellungen verwalten."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Las opciones mensual y anual son suscripciones de renovación automática. El pago se carga en tu Cuenta de Apple en el momento de la compra y se renueva automáticamente, salvo que la desactives al menos 24 horas antes de que termine el periodo. Puedes gestionarla o cancelarla cuando quieras en los ajustes de tu Cuenta de Apple."
+            "value": "Las suscripciones mensual y anual se renuevan automáticamente. La opción anual pagada mensualmente se cobra cada mes con un compromiso de 12 meses; la cancelación afecta la renovación después del compromiso según los términos del App Store. El pago se carga en tu Cuenta de Apple al comprar y se renueva automáticamente salvo que se desactive al menos 24 horas antes de que termine el periodo. Gestiona las suscripciones en los ajustes de tu Cuenta de Apple."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les offres mensuelle et annuelle sont des abonnements à renouvellement automatique. Le paiement est prélevé sur votre compte Apple lors de l’achat et se renouvelle automatiquement, sauf si vous le désactivez au moins 24 heures avant la fin de la période — gérez ou résiliez à tout moment dans les réglages de votre compte Apple."
+            "value": "Les abonnements mensuel et annuel se renouvellent automatiquement. L’option annuelle payée mensuellement est facturée chaque mois avec un engagement de 12 mois ; la résiliation affecte le renouvellement après l’engagement selon les conditions de l’App Store. Le paiement est prélevé sur votre compte Apple lors de l’achat et se renouvelle automatiquement sauf désactivation au moins 24 heures avant la fin de la période. Gérez les abonnements dans les réglages de votre compte Apple."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mensile e annuale sono abbonamenti con rinnovo automatico. Il pagamento viene addebitato sul tuo Account Apple al momento dell'acquisto e si rinnova automaticamente, a meno che non venga disattivato almeno 24 ore prima della fine del periodo — gestiscilo o annullalo quando vuoi nelle impostazioni del tuo Account Apple."
+            "value": "Gli abbonamenti mensile e annuale si rinnovano automaticamente. L’opzione annuale pagata mensilmente viene addebitata ogni mese con un impegno di 12 mesi; l’annullamento influisce sul rinnovo dopo l’impegno secondo i termini dell’App Store. Il pagamento viene addebitato sull’Account Apple al momento dell’acquisto e si rinnova automaticamente, salvo disattivazione almeno 24 ore prima della fine del periodo. Gestisci gli abbonamenti nelle impostazioni dell’Account Apple."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "月額と年額は自動更新サブスクリプションです。料金は購入時に Apple アカウントに請求され、期間終了の24時間以上前にオフにしない限り自動更新されます。管理や解約は Apple アカウントの設定でいつでも行えます。"
+            "value": "月額と年額は自動更新サブスクリプションです。「年額（月払い）」は12か月の契約として毎月請求されます。解約はApp Storeの条件に従って契約終了後の更新に影響します。料金は購入時にAppleアカウントに請求され、期間終了の24時間以上前にオフにしない限り自動更新されます。サブスクリプションはAppleアカウント設定で管理できます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "월간·연간은 자동 갱신 구독이에요. 구매 시 Apple 계정으로 결제되며, 기간 종료 24시간 전까지 끄지 않으면 자동으로 갱신돼요. Apple 계정 설정에서 언제든 관리하거나 해지할 수 있어요."
+            "value": "월간 및 연간 구독은 자동 갱신됩니다. 연간 월별 결제는 12개월 약정으로 매월 청구되며, 해지는 App Store 약관에 따라 약정 이후의 갱신에 적용됩니다. 결제는 구입 시 Apple 계정으로 청구되고, 기간 종료 24시간 전까지 끄지 않으면 자동으로 갱신됩니다. Apple 계정 설정에서 구독을 관리하세요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "As assinaturas mensal e anual são de renovação automática. A cobrança é feita na sua Conta Apple no momento da compra e renova automaticamente, a menos que seja desativada pelo menos 24 horas antes do fim do período — gerencie ou cancele quando quiser nos ajustes da sua Conta Apple."
+            "value": "As assinaturas mensal e anual são renovadas automaticamente. A opção anual paga mensalmente é cobrada todo mês com compromisso de 12 meses; o cancelamento afeta a renovação após o compromisso conforme os termos da App Store. A cobrança é feita na sua Conta Apple no momento da compra e renova automaticamente, a menos que seja desativada pelo menos 24 horas antes do fim do período. Gerencie assinaturas nos ajustes da Conta Apple."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "月度和年度均为自动续期订阅。购买时会从你的 Apple 账户扣款，并自动续期，除非在当期结束前至少 24 小时关闭 —— 你可随时在 Apple 账户设置中管理或取消。"
+            "value": "月度和年度订阅会自动续期。“年度，按月支付”会按月收费，并包含 12 个月承诺；取消会根据 App Store 条款影响承诺结束后的续期。购买时会从你的 Apple 账户扣款，除非在当前周期结束前至少 24 小时关闭，否则会自动续期。可在 Apple 账户设置中管理订阅。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "月繳與年繳皆為自動續訂的訂閱。費用會在購買時向你的 Apple 帳號收取，並自動續訂，除非你在期間結束前至少 24 小時關閉——你可隨時在 Apple 帳號設定中管理或取消。"
+            "value": "月繳與年繳訂閱會自動續訂。「年繳，按月支付」會按月收費，並包含 12 個月承諾；取消會依 App Store 條款影響承諾結束後的續訂。購買時會向你的 Apple 帳號收費，除非在目前期間結束前至少 24 小時關閉，否則會自動續訂。你可在 Apple 帳號設定中管理訂閱。"
           }
         }
       }
@@ -59752,6 +60082,72 @@
         }
       }
     },
+    "Yearly, paid monthly": {
+      "comment": "Subscription plan label: yearly plan billed monthly with a 12-month commitment.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yearly, paid monthly"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jährlich, monatlich bezahlt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anual, pago mensual"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuel, paiement mensuel"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuale, pagamento mensile"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年額・月払い"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연간, 월별 결제"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anual, pago mensalmente"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年度，按月支付"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年度，按月付款"
+          }
+        }
+      }
+    },
     "You already have a filter with that name.": {
       "comment": "Localization-gap backfill (was hardcoded in FiltersView.swift, ShareableFiltersUI.swift).",
       "extractionState": "manual",
@@ -61988,6 +62384,1326 @@
           "stringUnit": {
             "state": "translated",
             "value": "→"
+          }
+        }
+      }
+    },
+    "No active Lava Security Plus purchase was found.": {
+      "comment": "Purchase-flow status (UI-1): producer-side string rendered via Text(variable) on the Upgrade page, so it is localized at assignment.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No active Lava Security Plus purchase was found."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es wurde kein aktiver Lava Security Plus-Kauf gefunden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se encontró ninguna compra activa de Lava Security Plus."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun achat Lava Security Plus actif n’a été trouvé."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun acquisto attivo di Lava Security Plus trovato."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効なLava Security Plusの購入が見つかりませんでした。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활성화된 Lava Security Plus 구입을 찾을 수 없습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma compra ativa do Lava Security Plus foi encontrada."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到有效的 Lava Security Plus 购买项目。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到有效的 Lava Security Plus 購買項目。"
+          }
+        }
+      }
+    },
+    "The App Store purchase is pending approval.": {
+      "comment": "Purchase-flow status (UI-1): StoreKit .pending outcome (e.g. Ask to Buy).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The App Store purchase is pending approval."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der App Store-Kauf wartet auf Genehmigung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La compra del App Store está pendiente de aprobación."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’achat sur l’App Store est en attente d’approbation."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L'acquisto sull'App Store è in attesa di approvazione."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Storeの購入は承認待ちです。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Store 구입이 승인 대기 중입니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A compra na App Store está aguardando aprovação."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Store 购买项目正在等待批准。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Store 購買項目正在等待核准。"
+          }
+        }
+      }
+    },
+    "Purchase cancelled": {
+      "comment": "Purchase-flow status (UI-1): user dismissed the StoreKit sheet.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purchase cancelled"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kauf abgebrochen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compra cancelada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Achat annulé"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acquisto annullato"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "購入をキャンセルしました"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구입이 취소되었습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compra cancelada"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消购买"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消購買"
+          }
+        }
+      }
+    },
+    "Could not complete purchase: %@": {
+      "comment": "Purchase-flow error (UI-1): format key at the producer; %@ is the underlying error's localizedDescription.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not complete purchase: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kauf konnte nicht abgeschlossen werden: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo completar la compra: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de finaliser l’achat : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile completare l'acquisto: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "購入を完了できませんでした：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구입을 완료할 수 없습니다: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível concluir a compra: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法完成购买：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法完成購買：%@"
+          }
+        }
+      }
+    },
+    "Checking the App Store for purchases.": {
+      "comment": "Purchase-flow progress (UI-1): shown while restorePurchases runs.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the App Store for purchases."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Käufe werden im App Store überprüft."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprobando compras en el App Store."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification des achats sur l’App Store."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifica degli acquisti sull'App Store."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Storeで購入を確認しています。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Store에서 구입 내역을 확인하는 중입니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificando compras na App Store."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在 App Store 中检查购买项目。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在 App Store 中檢查購買項目。"
+          }
+        }
+      }
+    },
+    "Lava Security Plus is restored.": {
+      "comment": "Purchase-flow status (UI-1): successful restore.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus is restored."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus wurde wiederhergestellt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus se ha restaurado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus a été restauré."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus è stato ripristinato."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plusを復元しました。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus가 복원되었습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Lava Security Plus foi restaurado."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus 已恢复。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security Plus 已復原。"
+          }
+        }
+      }
+    },
+    "Could not restore purchases: %@": {
+      "comment": "Purchase-flow error (UI-1): format key at the producer; %@ is the underlying error's localizedDescription.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not restore purchases: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Käufe konnten nicht wiederhergestellt werden: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron restaurar las compras: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de restaurer les achats : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile ripristinare gli acquisti: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "購入を復元できませんでした：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구입을 복원할 수 없습니다: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível restaurar as compras: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法恢复购买项目：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法復原購買項目：%@"
+          }
+        }
+      }
+    },
+    "Finish the current VPN setup first.": {
+      "comment": "Onboarding VPN step (UI-1): a second install tap while one is in flight.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish the current VPN setup first."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließe zuerst die laufende VPN-Einrichtung ab."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termina primero la configuración de VPN en curso."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termine d’abord la configuration VPN en cours."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completa prima la configurazione VPN in corso."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先に進行中のVPN設定を完了してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "먼저 진행 중인 VPN 설정을 완료하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conclua primeiro a configuração de VPN em andamento."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先完成当前的 VPN 设置。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先完成目前的 VPN 設定。"
+          }
+        }
+      }
+    },
+    "Preparing local VPN...": {
+      "comment": "Onboarding VPN step (UI-1): progress while the tunnel manager is created.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing local VPN..."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokales VPN wird vorbereitet…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparando la VPN local…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparation du VPN local…"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparazione della VPN locale…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカルVPNを準備しています…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로컬 VPN을 준비하는 중…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparando a VPN local…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备本地 VPN…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在準備本機 VPN…"
+          }
+        }
+      }
+    },
+    "Could not install VPN profile": {
+      "comment": "Error prefix (UI-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not install VPN profile"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN-Profil konnte nicht installiert werden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo instalar el perfil de VPN"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’installer le profil VPN"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile installare il profilo VPN"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPNプロファイルをインストールできませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 프로파일을 설치할 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível instalar o perfil de VPN"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法安装 VPN 描述文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法安裝 VPN 描述檔"
+          }
+        }
+      }
+    },
+    "Could not pause protection": {
+      "comment": "Error prefix (UI-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not pause protection"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz konnte nicht pausiert werden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo pausar la protección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de suspendre la protection"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile mettere in pausa la protezione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を一時停止できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호를 일시 중지할 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível pausar a proteção"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法暂停防护"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法暫停防護"
+          }
+        }
+      }
+    },
+    "%@: %@": {
+      "comment": "Error composition (UI-1): '<prefix>: <error description>' — locales control the separator (French spacing, CJK full-width colon).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@"
+          }
+        }
+      }
+    },
+    "%@: %@ (%@ %d).": {
+      "comment": "Error composition with technical suffix (UI-1): '<prefix>: <description> (<domain> <code>).' — the parenthetical stays technical in every locale.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ : %@ (%@ %d)."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@ (%@ %d)。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@ (%@ %d)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@ (%@ %d)。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@：%@ (%@ %d)。"
+          }
+        }
+      }
+    },
+    "Could not start protection": {
+      "comment": "Error prefix (UX-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz konnte nicht gestartet werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not start protection"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo iniciar la protección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de démarrer la protection"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile avviare la protezione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を開始できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호를 시작할 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível iniciar a proteção"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法启动防护"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法啟動防護"
+          }
+        }
+      }
+    },
+    "Could not stop protection": {
+      "comment": "Error prefix (UX-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz konnte nicht gestoppt werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not stop protection"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo detener la protección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’arrêter la protection"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile arrestare la protezione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を停止できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호를 중지할 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível parar a proteção"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法停止防护"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法停止防護"
+          }
+        }
+      }
+    },
+    "Could not reconnect protection": {
+      "comment": "Error prefix (UX-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz konnte nicht wieder verbunden werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reconnect protection"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo volver a conectar la protección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de reconnecter la protection"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile riconnettere la protezione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を再接続できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호를 다시 연결할 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível reconectar a proteção"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法重新连接防护"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法重新連線防護"
+          }
+        }
+      }
+    },
+    "Resumed protection, but could not refresh filter": {
+      "comment": "Error prefix (UX-1): composed with the underlying error via the '%@: %@' format keys in vpnErrorMessage.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz fortgesetzt, aber Filter konnte nicht aktualisiert werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resumed protection, but could not refresh filter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se reanudó la protección, pero no se pudo actualizar el filtro"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection reprise, mais impossible d’actualiser le filtre"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protezione ripresa, ma impossibile aggiornare il filtro"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を再開しましたが、フィルターを更新できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호를 다시 시작했지만 필터를 새로 고칠 수 없습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proteção retomada, mas não foi possível atualizar o filtro"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已恢复防护，但无法刷新过滤器"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已恢復防護，但無法重新整理篩選器"
+          }
+        }
+      }
+    },
+    "Could not clear local history: %@": {
+      "comment": "Error message (UX-1): shown when clearing local Domain History fails; %@ is the underlying error description.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokaler Verlauf konnte nicht gelöscht werden: %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not clear local history: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo borrar el historial local: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’effacer l’historique local : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile cancellare la cronologia locale: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカル履歴を消去できませんでした：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로컬 기록을 지울 수 없습니다: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível apagar o histórico local: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法清除本地历史记录：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法清除本機歷史記錄：%@"
+          }
+        }
+      }
+    },
+    "Could not clear local filtering counts: %@": {
+      "comment": "Error message (UX-1): shown when clearing local filtering counts fails; %@ is the underlying error description.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokale Filterzählungen konnten nicht gelöscht werden: %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not clear local filtering counts: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron borrar los recuentos de filtrado locales: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’effacer les décomptes de filtrage locaux : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile cancellare i conteggi di filtraggio locali: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカルのフィルタリング件数を消去できませんでした：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로컬 필터링 횟수를 지울 수 없습니다: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível apagar as contagens de filtragem locais: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法清除本地过滤计数：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法清除本機篩選計數：%@"
+          }
+        }
+      }
+    },
+    "Could not clear local logs: %@": {
+      "comment": "Error message (UX-1): shown when clearing all local logs fails; %@ is the underlying error description.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokale Protokolle konnten nicht gelöscht werden: %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not clear local logs: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron borrar los registros locales: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’effacer les journaux locaux : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile cancellare i registri locali: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローカルログを消去できませんでした：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로컬 로그를 지울 수 없습니다: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível apagar os registros locais: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法清除本地日志：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法清除本機記錄檔：%@"
           }
         }
       }

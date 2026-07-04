@@ -2,8 +2,8 @@ import XCTest
 
 final class ActivityLocalLogSourceTests: XCTestCase {
     func testNetworkActivityUsesLargeNavigationTitleLikeDomainHistory() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let networkBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let networkBlock = try sourceBlock(
             in: source,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
@@ -13,21 +13,25 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private struct LocalLogSubpageChrome"))
         XCTAssertTrue(networkBlock.contains(".localLogSubpageChrome("))
         XCTAssertTrue(networkBlock.contains("title: \"Network Activity\""))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaScreenContent"))
     }
 
     func testDomainHistoryAndNetworkActivityExposeTopRightClearActions() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let chromeBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let chromeBlock = try sourceBlock(
             in: source,
             startingAt: "private struct LocalLogSubpageChrome",
             endingBefore: "struct NetworkActivityLogView: View"
         )
-        let networkBlock = try Self.sourceBlock(
+        let networkBlock = try sourceBlock(
             in: source,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
-        let domainBlock = try Self.sourceBlock(
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -46,8 +50,8 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryDoesNotKeepBottomManageClearSection() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -55,11 +59,15 @@ final class ActivityLocalLogSourceTests: XCTestCase {
 
         XCTAssertFalse(domainBlock.contains("LavaSectionGroup(\"Manage\")"))
         XCTAssertFalse(domainBlock.contains("title: \"Clear local domain history\""))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("LavaSectionGroup"))
     }
 
     func testDomainHistorySearchLivesInContentInsteadOfNavigationDrawer() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -71,14 +79,14 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryDoesNotShowLongPressHintFinePrint() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
-        let historyTypeSection = try Self.sourceBlock(
+        let historyTypeSection = try sourceBlock(
             in: domainBlock,
             startingAt: "LavaSectionGroup(\"Show\")",
             endingBefore: "LavaSectionGroup(\n                selectedFilter.rawValue"
@@ -89,13 +97,13 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryEmptyRowsAvoidTerminalPeriods() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainFilterBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainFilterBlock = try sourceBlock(
             in: source,
             startingAt: "private enum DomainHistoryFilter",
             endingBefore: "private struct DomainHistoryDomainActionAlert"
         )
-        let domainBlock = try Self.sourceBlock(
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -110,13 +118,13 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryAndNetworkActivityUsePagedVisibleRows() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let networkBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let networkBlock = try sourceBlock(
             in: source,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
-        let domainBlock = try Self.sourceBlock(
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -139,11 +147,10 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryRowsUseSharedTimestampLine() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let rowBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let rowBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryRow: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct DomainHistoryRow: View"
         )
 
         XCTAssertTrue(rowBlock.contains("event.timestampLine"))
@@ -151,14 +158,14 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testNetworkActivityPullRefreshAlwaysAllowsBounce() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let screenContentBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let screenContentBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaScreenContent<Content: View>: View",
             endingBefore: "struct LavaSheetScaffold"
         )
-        let diagnosticsSource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let networkBlock = try Self.sourceBlock(
+        let diagnosticsSource = try readSource(.diagnosticsView)
+        let networkBlock = try sourceBlock(
             in: diagnosticsSource,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct ActivityDateScopeButton"
@@ -172,8 +179,8 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testScrollablePullRefreshDoesNotInstallCompetingDragRecognizer() throws {
-        let rootSource = try Self.source(named: "LavaScaffold.swift", in: "LavaSecApp/LavaDesignSystem")
-        let screenContentBlock = try Self.sourceBlock(
+        let rootSource = try readSource(.lavaScaffold)
+        let screenContentBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaScreenContent<Content: View>: View",
             endingBefore: "struct LavaSheetScaffold"
@@ -189,16 +196,15 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryRowsExposeContextMenuDomainActions() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let domainBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
-        let rowBlock = try Self.sourceBlock(
+        let rowBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryRow: View",
-            endingBefore: "*** end ***"
+            startingAt: "private struct DomainHistoryRow: View"
         )
 
         XCTAssertTrue(domainBlock.contains("activeReviewSheet = .domainHistory"))
@@ -218,10 +224,10 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryUsesSharedFilterReviewAndPreparationScreens() throws {
-        let diagnosticsSource = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let filtersSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let sharedReviewSource = try Self.source(named: "FilterReviewFlowView.swift", in: "LavaSecApp")
-        let domainBlock = try Self.sourceBlock(
+        let diagnosticsSource = try readSource(.diagnosticsView)
+        let filtersSource = try readSource(.filtersView)
+        let sharedReviewSource = try readSource(.filterReviewFlowView)
+        let domainBlock = try sourceBlock(
             in: diagnosticsSource,
             startingAt: "private struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
@@ -237,13 +243,13 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testNetworkActivityRecordsFilterConfigurationChanges() throws {
-        let appViewModelSource = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let applyDraftBlock = try Self.sourceBlock(
+        let appViewModelSource = try readSource(.appViewModel)
+        let applyDraftBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func prepareAndApplyFilterDraft(",
             endingBefore: "private static func filterPreparationFailureMessage"
         )
-        let persistFilterChangesBlock = try Self.sourceBlock(
+        let persistFilterChangesBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "private func persistFilterChanges()",
             endingBefore: "private func loadPersistedConfiguration"
@@ -255,8 +261,8 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testNetworkActivityThemeHandlesConnectedLifecycleEvent() throws {
-        let source = try Self.source(named: "DiagnosticsView.swift", in: "LavaSecApp")
-        let themeBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let themeBlock = try sourceBlock(
             in: source,
             startingAt: "private extension NetworkActivityEvent",
             endingBefore: "private struct ActivityDateRange"
@@ -264,33 +270,5 @@ final class ActivityLocalLogSourceTests: XCTestCase {
 
         XCTAssertTrue(themeBlock.contains("case .protectionConnected:"))
         XCTAssertTrue(themeBlock.contains("case .networkSettingsReapplyFailed:"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        guard endMarker != "*** end ***" else {
-            return String(suffix)
-        }
-
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

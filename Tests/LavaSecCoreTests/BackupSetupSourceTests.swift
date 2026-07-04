@@ -2,9 +2,9 @@ import XCTest
 
 final class BackupSetupSourceTests: XCTestCase {
     func testSetupUsesPasswordlessDeviceSecretFlow() throws {
-        let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
-        let keychainSource = try Self.readAppSource("LavaSecApp/BackupKeychainStore.swift")
+        let setupSource = try readSource(.backupSetupView)
+        let viewModelSource = try readSource(.appViewModel)
+        let keychainSource = try readSource(.backupKeychainStore)
 
         XCTAssertTrue(setupSource.contains("BackupRecoveryPhrase.generate()"))
         XCTAssertTrue(setupSource.contains("try await viewModel.registerBackupPasskey()"))
@@ -20,8 +20,8 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeySetupSplitsRegistrationAndValidationIntoSteps() throws {
-        let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let setupSource = try readSource(.backupSetupView)
+        let viewModelSource = try readSource(.appViewModel)
 
         // The two authenticator ceremonies are split across explicit steps: registration on
         // "Set up with Passkey", then a separate "Validate the passkey" step that captures PRF.
@@ -37,7 +37,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testRestoreUsesSavedDeviceSecretAndRecoveryPhraseFallback() throws {
-        let source = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let source = try readSource(.appViewModel)
 
         XCTAssertTrue(source.contains("case .deviceKey"))
         XCTAssertTrue(source.contains("backupKeychainStore.loadDeviceSecret()"))
@@ -46,7 +46,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testSetupOffersExplicitPasskeyChoice() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertTrue(source.contains("Set up with Passkey"))
         XCTAssertTrue(source.contains("Set up without Passkey"))
@@ -56,7 +56,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeyCopyReferencesSelectedPasswordManager() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertTrue(source.contains("Saved in your password manager to restore on a new device"))
         // The passkey path is zero-knowledge now: copy must not imply Lava assists decryption.
@@ -65,14 +65,19 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testRecoveryPhraseCopyIsNotRequiredToAdvance() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertFalse(source.contains("case .recoveryPhrase:\n            copiedRecoveryPhrase"))
         XCTAssertTrue(source.contains("savedRecoveryPhrase && understandsNoRecovery"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("copiedRecoveryPhrase"))
+        XCTAssertTrue(source.contains("recoveryPhrase"))
     }
 
     func testRecoveryPhraseCopyUsesLocalOnlyExpiringPasteboard() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertTrue(source.contains("UIPasteboard.OptionsKey.localOnly"))
         XCTAssertTrue(source.contains("UIPasteboard.OptionsKey.expirationDate"))
@@ -81,10 +86,14 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("Copied for 2 minutes"))
         XCTAssertFalse(source.contains("addingTimeInterval(120)"))
         XCTAssertFalse(source.contains("UIPasteboard.general.string = recoveryPhrase"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("recoveryPhrase"))
     }
 
     func testSetupCopyAvoidsDeviceKeyLabel() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertTrue(source.contains("title: \"This device\""))
         XCTAssertTrue(source.contains("local unlock"))
@@ -94,7 +103,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testOverviewCopyAndFactRowsMatchSettingsScale() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         // The flow is a full bottom sheet now, so the title sits in the sheet's
         // chevron-back header (step.title) rather than a pushed navigation bar.
@@ -108,7 +117,7 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("Set up passwordless backup"))
         XCTAssertFalse(source.contains("Lava saves a local unlock on this device. New-device restore uses your recovery phrase plus a Lava-held recovery share."))
 
-        let factRowBlock = try Self.sourceBlock(
+        let factRowBlock = try sourceBlock(
             in: source,
             startingAt: "private struct BackupSetupFactRow: View",
             endingBefore: "private struct BackupRecoveryPhraseWord: View"
@@ -120,7 +129,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testConfirmCopyAvoidsTerminalPeriodsAndClarifiesRecoveryLimits() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
+        let source = try readSource(.backupSetupView)
 
         XCTAssertTrue(source.contains("New-device restore can use a Passkey or this recovery phrase with your signed-in Lava account"))
         XCTAssertTrue(source.contains("title: \"I saved the recovery phrase\""))
@@ -130,7 +139,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testBackupKeychainStorageIsDeviceLocal() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupKeychainStore.swift")
+        let source = try readSource(.backupKeychainStore)
 
         // Backup secrets persist through the shared GenericKeychainStore, which
         // centralizes the device-local accessibility flag (after-first-unlock,
@@ -142,9 +151,9 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeyChoiceButtonsUseMatchingHeights() throws {
-        let setupSource = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let componentsSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
-        let tokensSource = try Self.readAppSource("LavaSecApp/LavaDesignSystem/LavaTokens.swift")
+        let setupSource = try readSource(.backupSetupView)
+        let componentsSource = try readSource(.lavaComponents)
+        let tokensSource = try readSource(.lavaTokens)
 
         // Heights are no longer hand-set per call site: one shared design-system
         // token drives the panel/standalone/secondary action button styles so
@@ -158,7 +167,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeySetupUsesIOSPlatformCredentialProvider() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
+        let source = try readSource(.backupPasskeyCoordinator)
 
         XCTAssertTrue(source.contains("ASAuthorizationPlatformPublicKeyCredentialProvider"))
         XCTAssertTrue(source.contains("relyingPartyIdentifier: BackupPasskeyConfiguration.relyingPartyIdentifier"))
@@ -167,8 +176,8 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeySetupUsesPRFDerivedSlotNotServerEscrow() throws {
-        let coordinatorSource = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let coordinatorSource = try readSource(.backupPasskeyCoordinator)
+        let viewModelSource = try readSource(.appViewModel)
 
         // The passkey slot is derived from the authenticator PRF / hmac-secret output (iOS 18+),
         // not a server-stored secret. The coordinator requests PRF at registration and reads the
@@ -187,20 +196,28 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(viewModelSource.contains("pendingBackupPasskeyCredentialID"))
         XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
         XCTAssertFalse(viewModelSource.contains("BackupPasskeyRecoveryService"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(coordinatorSource.contains("supportsPRF"))
     }
 
     func testRecoveryUsesServerShareInsteadOfStandalonePhraseSlot() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let source = try readSource(.backupPasskeyCoordinator)
+        let viewModelSource = try readSource(.appViewModel)
 
         XCTAssertFalse(source.contains("This password manager cannot use Passkey for Lava backup yet."))
         XCTAssertTrue(viewModelSource.contains("decryptWithAssistedRecoveryPhrase"))
         XCTAssertTrue(viewModelSource.contains("serverRecoveryShare"))
         XCTAssertFalse(viewModelSource.contains("decryptWithPasskeySecret(trimmedSecret)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(viewModelSource.contains("trimmedSecret"))
     }
 
     func testPasskeyEscrowServiceIsRemoved() throws {
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let viewModelSource = try readSource(.appViewModel)
 
         // The server-escrow path is gone: no recovery-secret storage, no recovery service.
         XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
@@ -215,7 +232,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeyAssociationFailuresUseActionableCopy() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
+        let source = try readSource(.backupPasskeyCoordinator)
 
         XCTAssertTrue(source.contains("webCredentialsAssociationUnavailable"))
         XCTAssertTrue(source.contains("webcredentials association"))
@@ -224,7 +241,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeyAuthorizationErrorsUseFriendlyCopy() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupPasskeyCoordinator.swift")
+        let source = try readSource(.backupPasskeyCoordinator)
 
         XCTAssertTrue(source.contains("case canceled"))
         XCTAssertTrue(source.contains("Passkey was canceled."))
@@ -239,7 +256,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testPasskeyDomainAssociationIsDeclared() throws {
-        let entitlements = try Self.readAppSource("LavaSecApp/LavaSecApp.entitlements")
+        let entitlements = try readSource(.appEntitlements)
 
         // The iOS half of the passkey / webcredentials association. The server half
         // (the apple-app-site-association file + _headers) now lives in lavasec-web
@@ -248,7 +265,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testBundleIdentifiersMatchProductionAndQAApplePlan() throws {
-        let project = try Self.readAppSource("LavaSec.xcodeproj/project.pbxproj")
+        let project = try readSource(.xcodeProject)
 
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;"))
         XCTAssertTrue(project.contains("PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;"))
@@ -263,8 +280,8 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testSetupFlowIsFullSheetWithFooterActions() throws {
-        let source = try Self.readAppSource("LavaSecApp/BackupSetupView.swift")
-        let settings = try Self.readAppSource("LavaSecApp/SettingsView.swift")
+        let source = try readSource(.backupSetupView)
+        let settings = try readSource(.settingsView)
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // not pushed onto the settings navigation stack.
@@ -278,11 +295,15 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private var overviewActions: some View"))
         XCTAssertTrue(source.contains("private var validatePasskeyActions: some View"))
         XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: headerBack)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("BackupSetupView"))
     }
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {
-        let settingsSource = try Self.readAppSource("LavaSecApp/SettingsView.swift")
-        let viewModelSource = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let settingsSource = try readSource(.settingsView)
+        let viewModelSource = try readSource(.appViewModel)
 
         XCTAssertTrue(settingsSource.contains("viewModel.isEncryptedBackupConfigured"))
         XCTAssertTrue(settingsSource.contains("Back Up Now"))
@@ -291,34 +312,14 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testSignedInBackupCopyShowsPendingSetupBeforeBackupExists() throws {
-        let source = try Self.readAppSource("LavaSecApp/AppViewModel.swift")
+        let source = try readSource(.appViewModel)
         // The view model still routes its summary through the signed-in-aware
         // copy; the copy itself moved with EncryptedBackupState into LavaSecCore
         // (asserted behaviorally in EncryptedBackupStateTests).
-        let stateSource = try Self.readAppSource("Sources/LavaSecCore/EncryptedBackupState.swift")
+        let stateSource = try readSource(.encryptedBackupState)
 
         XCTAssertTrue(source.contains("encryptedBackupState.displayText(isAccountSignedIn: isAccountSignedIn)"))
         XCTAssertTrue(stateSource.contains("Pending setup"))
         XCTAssertTrue(stateSource.contains("Set up encrypted backup for this account."))
-    }
-
-    private static func readAppSource(_ relativePath: String) throws -> String {
-        let current = URL(fileURLWithPath: #filePath)
-        let packageRoot = current
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let fileURL = packageRoot.appendingPathComponent(relativePath)
-        return try String(contentsOf: fileURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let startRange = try XCTUnwrap(source.range(of: startMarker))
-        let endRange = try XCTUnwrap(source.range(of: endMarker, range: startRange.upperBound..<source.endIndex))
-        return String(source[startRange.lowerBound..<endRange.lowerBound])
     }
 }

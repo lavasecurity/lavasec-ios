@@ -48,6 +48,28 @@ public enum DNSResolverSmokeProbe {
         return data
     }
 
+    /// The probe's acceptance verdict for a response whose query identity was already
+    /// verified at the transport layer (organic forwarding traffic): a genuine NOERROR
+    /// answer carrying records. Shares `acceptsResolutionResponse`'s exact rcode/answer
+    /// semantics minus the transaction-ID/question match, so the periodic probe skip
+    /// (NRG-3a) keys on the SAME evidence class as an accepted probe — a REFUSED,
+    /// SERVFAIL, NXDOMAIN, or answerless reply never counts, which is what keeps a
+    /// hijacking resolver from suppressing routine probes (LAV-87 fail-closed).
+    public static func indicatesAcceptedAnswer(_ response: Data?) -> Bool {
+        guard let response = response.map({ zeroBased($0) }) else {
+            return false
+        }
+        guard response.count >= 12 else {
+            return false
+        }
+
+        let responseFlags = readUInt16(response, at: 2)
+        let isResponse = responseFlags & 0x8000 != 0
+        let responseCode = responseFlags & 0x000F
+        let answerCount = readUInt16(response, at: 6)
+        return isResponse && responseCode == 0 && answerCount > 0
+    }
+
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {
         guard let response = response.map({ zeroBased($0) }) else {
             return false

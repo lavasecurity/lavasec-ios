@@ -71,12 +71,7 @@ final class WarmFilterSnapshotLoaderTests: XCTestCase {
     /// as source text because the ALLOW cases (lapsed / disabled-only / catalog-only) and the REJECT case both
     /// surface as nil here without an on-disk artifact fixture.
     func testWarmReuseGuardGatesOnAllowsRefreshAndEnabledCustomIDs() throws {
-        let source = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/LavaSecCore/WarmFilterSnapshotLoader.swift"),
-            encoding: .utf8
-        )
+        let source = try readSource(.warmFilterSnapshotLoader)
         XCTAssertTrue(
             source.contains("if configuration.limits.allowsCustomBlocklists,")
                 && source.contains("configuration.customBlocklists.contains(where: { configuration.enabledBlocklistIDs.contains($0.id) })"),

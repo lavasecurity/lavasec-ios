@@ -132,6 +132,41 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesResolverFailure(Data([0x00, 0x01])))
     }
 
+    func testIndicatesAcceptedAnswerRequiresNOERRORWithAnswers() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        // The NRG-3a probe-skip evidence class: exactly the probe's acceptance verdict
+        // (NOERROR + answers). Everything a hijacking or degraded resolver can emit —
+        // REFUSED, SERVFAIL, NXDOMAIN, an answerless NODATA, a non-response — must NOT
+        // count, or organic replies could suppress routine probes while the resolver
+        // is misbehaving (the LAV-87 regression the review warned against).
+        let answered = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let noData = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 0)
+        let nxdomain = Self.response(for: query, transactionID: 0x4C56, flags: 0x8183, answerCount: 0)
+        let servfail = Self.response(for: query, transactionID: 0x4C56, flags: 0x8002, answerCount: 0)
+        let refused = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 0)
+        // A REFUSED that claims answers is still rcode 5 — never accepted.
+        let refusedWithAnswers = Self.response(for: query, transactionID: 0x4C56, flags: 0x8005, answerCount: 1)
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesAcceptedAnswer(answered))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(noData))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(nxdomain))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(servfail))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(refused))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(refusedWithAnswers))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(query), "a bare query (QR unset) is not evidence")
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(nil))
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesAcceptedAnswer(Data([0x00, 0x01])))
+    }
+
+    func testIndicatesAcceptedAnswerIsSliceSafeForNonZeroStartIndexData() {
+        let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
+        let answered = Self.response(for: query, transactionID: 0x4C56, flags: 0x8180, answerCount: 1)
+        let padded = Data([0xFF, 0xFF]) + answered
+        let slice = padded.dropFirst(2)
+
+        XCTAssertTrue(DNSResolverSmokeProbe.indicatesAcceptedAnswer(slice))
+    }
+
     private static func response(
         for query: Data,
         transactionID: UInt16,

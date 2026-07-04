@@ -33,6 +33,28 @@ public struct RuleSetCache: Sendable {
             .appendingPathComponent("v\(BlocklistParsingRules.rulesVersion)")
     }
 
+    /// Best-effort removal of superseded `parsed-rules/v*` version trees. A parser bump
+    /// orphans the whole previous tree (see init) and nothing else ever deletes it — after
+    /// the v2→v3 bump that is up to 2 entries × ~40 MB per large source, dead on disk
+    /// forever. Safe against concurrent readers: every reader constructs its path from the
+    /// compiled-in CURRENT version, so a reader of an old tree cannot exist. Call from the
+    /// APP side only — the extension deliberately avoids maintenance IO.
+    public func sweepSupersededVersionTrees() {
+        let parsedRulesURL = directoryURL.deletingLastPathComponent()
+        let currentVersionDirectory = directoryURL.lastPathComponent
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: parsedRulesURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            return
+        }
+        for entry in entries
+            where entry.lastPathComponent.hasPrefix("v")
+            && entry.lastPathComponent != currentVersionDirectory {
+            try? FileManager.default.removeItem(at: entry)
+        }
+    }
+
     public func load(sourceID: String, contentSHA256: String, parseFormat: BlocklistFormat) -> Entry? {
         let url = entryURL(sourceID: sourceID, contentSHA256: contentSHA256, parseFormat: parseFormat)
         guard let data = try? Data(contentsOf: url) else {

@@ -183,6 +183,16 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
     public let maximumEntryCount: Int
     public let duplicateCoalescingWindow: TimeInterval
 
+    // Only the entries are persisted. The caps are NOT encoded (PST-4): they are
+    // policy, not data — a persisted value would freeze the caps at file-creation
+    // time (a later default change would never reach existing installs) and a
+    // tampered `cap == 0` would silently brick the log (a zero-capacity ring). On
+    // decode we always adopt the CURRENT defaults, re-running the memberwise init's
+    // `max(…)` clamps and the sort + trim.
+    private enum CodingKeys: String, CodingKey {
+        case entries
+    }
+
     public init(
         entries: [NetworkActivityLogEntry] = [],
         maximumEntryCount: Int = Self.defaultMaximumEntryCount,
@@ -192,6 +202,19 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         self.duplicateCoalescingWindow = max(0, duplicateCoalescingWindow)
         self.entries = entries.sorted { $0.timestamp > $1.timestamp }
         trimToMaximumEntryCount()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedEntries = try container.decodeIfPresent([NetworkActivityLogEntry].self, forKey: .entries) ?? []
+        // Route through the memberwise init so the current defaults, clamps, sort,
+        // and trim all apply — never trust a persisted (or tampered) cap.
+        self.init(entries: decodedEntries)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entries, forKey: .entries)
     }
 
     /// Age cap mirroring the fine-grained local-log retention window. Network
@@ -272,8 +295,33 @@ public enum NetworkActivityLogPersistence {
         try data.write(to: url, options: [.atomic])
     }
 
+    /// Longest a non-blocking writer retries a contended lock before dropping the write
+    /// (CON-1): ~5 ms worst case (5 × 1 ms), then drop.
+    static let writerLockMaxAttempts = 5
+    static let writerLockRetryBackoffMicroseconds: UInt32 = 1_000
+
+    /// BLOCKING append — used by the APP for foreground user actions and the connected
+    /// event (`AppViewModel.appendNetworkActivity`). A user action must never be silently
+    /// dropped, so this waits for the lock. The app is NOT on the DNS-serving path, so a
+    /// rare brief wait is a minor UI hiccup, not a stall — and even if the app holds the
+    /// lock while suspended, the tunnel uses `tryAppend` and still can't wedge DNS (CON-1).
     public static func append(_ entry: NetworkActivityLogEntry, to url: URL) {
         withExclusiveFileLock(for: url) {
+            var log = load(from: url)
+            log.append(entry)
+            try? save(log, to: url)
+        }
+    }
+
+    /// NON-BLOCKING append — used ONLY by the tunnel hot path (CON-1). Acquired with a
+    /// bounded retry and DROP on persistent contention: the tunnel appends from the
+    /// DNS-serving queue while the app holds the SAME app-group lock on its main actor, so
+    /// a blocking acquire could wedge every DNS query if iOS suspended the app
+    /// mid-critical-section. A dropped diagnostic entry is acceptable — nothing in the
+    /// fail-closed/recovery path reads this file. Returns whether the entry was written.
+    @discardableResult
+    public static func tryAppend(_ entry: NetworkActivityLogEntry, to url: URL) -> Bool {
+        withBoundedExclusiveFileLock(for: url) {
             var log = load(from: url)
             log.append(entry)
             try? save(log, to: url)
@@ -347,6 +395,40 @@ public enum NetworkActivityLogPersistence {
             flock(descriptor, LOCK_UN)
         }
         return work()
+    }
+
+    /// Non-blocking, bounded-retry, drop-on-contention acquire for tunnel-side writers
+    /// (CON-1). Never waits indefinitely on a lock a suspended app holds: tries
+    /// `LOCK_EX | LOCK_NB` up to `writerLockMaxAttempts`, with a `writerLockRetry`
+    /// backoff between tries, then DROPS (does not run `work`). On open-failure it also
+    /// drops rather than degrade-open — an unlocked read-modify-write could corrupt a
+    /// concurrent reader. Returns whether `work` ran.
+    @discardableResult
+    private static func withBoundedExclusiveFileLock(for url: URL, perform work: () -> Void) -> Bool {
+        let directoryURL = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let lockURL = url.appendingPathExtension("lock")
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            return false
+        }
+        defer {
+            close(descriptor)
+        }
+
+        var attempt = 0
+        while true {
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+                defer { flock(descriptor, LOCK_UN) }
+                work()
+                return true
+            }
+            attempt += 1
+            if attempt >= writerLockMaxAttempts {
+                return false
+            }
+            usleep(writerLockRetryBackoffMicroseconds)
+        }
     }
 }
 

@@ -5,7 +5,7 @@ import XCTest
 /// components name roles, not Apple glyph strings.
 final class LavaIconRoleSourceTests: XCTestCase {
     func testIconRoleTableResolvesToCurrentGlyphs() throws {
-        let icon = try source("LavaSecApp/LavaDesignSystem/LavaIcon.swift")
+        let icon = try readSource(.lavaIcon)
         XCTAssertTrue(icon.contains("var sfSymbolName: String"))
         // Tab roles must still resolve to today's symbols.
         for (role, symbol) in [("guardShield", "shield.fill"),
@@ -18,20 +18,12 @@ final class LavaIconRoleSourceTests: XCTestCase {
     }
 
     func testSharedComponentsAndTabsNameRolesNotSymbolStrings() throws {
-        let components = try source("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
+        let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("let icon: LavaIconRole?"))
         XCTAssertTrue(components.contains("Image(systemName: icon.sfSymbolName)"))
 
-        let root = try source("LavaSecApp/RootView.swift")
+        let root = try readSource(.rootView)
         XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
         XCTAssertFalse(root.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
-    }
-
-    private func source(_ relativePath: String) throws -> String {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        return try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }
 }

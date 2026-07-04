@@ -286,6 +286,35 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertNil(entries[1].details["options"])
     }
 
+    // An 8 MB rotation can land between an incident and the report: the loaders read the
+    // rotated generation + the current file, and the concatenating parser must survive a
+    // rotation that cut mid-line (no trailing newline on the rotated chunk) without fusing
+    // the boundary lines, while the entry cap still keeps the NEWEST entries.
+    func testDebugLogParserConcatenatesGenerationsAcrossRotationBoundary() throws {
+        let rotated = Data("""
+        {"component":"tunnel","event":"self-reconnect","timestamp":"2026-05-18T01:02:03Z"}
+        {"component":"tunnel","event":"self-reconnect-credited","timestamp":"2026-05-18T01:04:03Z"}
+        """.utf8) // no trailing newline: rotation cut mid-write
+        let current = Data("""
+        {"component":"tunnel","event":"network-path-changed","timestamp":"2026-05-18T01:05:03Z","kind":"wifi"}
+        """.utf8)
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(concatenating: [rotated, current], limit: 10)
+
+        XCTAssertEqual(entries.count, 3)
+        XCTAssertEqual(entries[0].event, "self-reconnect")
+        XCTAssertEqual(entries[1].event, "self-reconnect-credited")
+        XCTAssertEqual(entries[2].event, "network-path-changed")
+
+        // The cap keeps the newest entries, so the rotated (older) generation must come first.
+        let capped = BugReportDebugLogEntry.parseJSONLines(concatenating: [rotated, current], limit: 2)
+        XCTAssertEqual(capped.map(\.event), ["self-reconnect-credited", "network-path-changed"])
+
+        // Empty generations (no rotated file yet) are skipped without a phantom boundary line.
+        let currentOnly = BugReportDebugLogEntry.parseJSONLines(concatenating: [Data(), current], limit: 10)
+        XCTAssertEqual(currentOnly.count, 1)
+    }
+
     func testDebugLogParserKeepsSafeQAConnectivityDetails() throws {
         let jsonLines = """
         {"component":"tunnel","event":"qa-connectivity-assessment","timestamp":"2026-05-18T01:04:03Z","severity":"needsReconnect","primaryAction":"reconnect","lastFailureReason":"timeout","lastResolverTransport":"plainDNS","upstreamSuccessCount":"9","upstreamFailureCount":"3","upstreamTimeoutCount":"3","dnsSmokeProbeFailureCount":"1","deviceDNSFallbackActivationCount":"0","resolverRuntimeResetCount":"2","lastUpstreamFailureAt":"2026-05-18T01:04:00Z","privateDomain":"checkout.example"}
@@ -351,6 +380,42 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertEqual(entries[3].details["error"], "POSIXErrorCode(rawValue: 54): Connection reset by peer")
         XCTAssertEqual(entries[3].details["endpoint"], "dns.example:8853")
         XCTAssertNil(entries[3].details["privateDomain"])
+    }
+
+    func testDebugLogParserKeepsSelfReconnectGapCloseDetails() throws {
+        // COH-2 (Codex #219): a self-reconnect-gap-closed entry carries gapMs AND, when the wall
+        // clock stepped backward past the recorded start, clockAnomaly=true (the end was FLOORED,
+        // not measured). Both must survive redaction so support can tell a floored gap from a real
+        // one; neither is a domain.
+        let jsonLines = """
+        {"component":"tunnel","event":"self-reconnect-gap-closed","timestamp":"2026-05-18T01:06:00Z","gapMs":"1000","clockAnomaly":"true","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].event, "self-reconnect-gap-closed")
+        XCTAssertEqual(entries[0].details["gapMs"], "1000")
+        XCTAssertEqual(entries[0].details["clockAnomaly"], "true")
+        XCTAssertNil(entries[0].details["privateDomain"], "a domain on the same entry must still be stripped")
+    }
+
+    func testDebugLogParserKeepsProbeSkipEvidenceAge() throws {
+        // COH-3 (Codex mirror of the worker allowlist): a dns-smoke-probe-skipped entry carries
+        // evidenceAgeMs — how old the corroborating evidence was when the routine probe was
+        // skipped. It must survive redaction so a field report can confirm the skip fired inside
+        // the <=300 s honesty-budget window (#196); it is a millisecond count, never a domain.
+        let jsonLines = """
+        {"component":"tunnel","event":"dns-smoke-probe-skipped","timestamp":"2026-05-18T01:07:00Z","reason":"periodic-health-check","evidenceAgeMs":"1234","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].event, "dns-smoke-probe-skipped")
+        XCTAssertEqual(entries[0].details["evidenceAgeMs"], "1234")
+        XCTAssertEqual(entries[0].details["reason"], "periodic-health-check")
+        XCTAssertNil(entries[0].details["privateDomain"], "a domain on the same entry must still be stripped")
     }
 
     func testDebugLogParserKeepsWedgeRecoveryDiagnosticDetails() throws {
@@ -659,6 +724,34 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertNil(body["incident"], "No incident envelope is sent unless diagnostics are attached.")
     }
 
+    // A fail-closed window can be the ONLY evidence in a report: queries are suppressed and
+    // self-reconnect escalation is deliberately suppressed while the snapshot is unavailable,
+    // so no other incident counter moves. The flag must stay honest for that class, and the
+    // trace must never look like blocking (it is not in filtering counts — #164).
+    func testIncidentSummaryCarriesFailClosedTrace() throws {
+        let failClosedAt = Date(timeIntervalSinceReferenceDate: 800_800_000)
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                details: "Everything stopped loading for a minute.",
+                includeDiagnostics: true
+            ),
+            health: TunnelHealthSnapshot(
+                failClosedServedQueryCount: 42,
+                lastFailClosedAt: failClosedAt,
+                lastFailClosedReason: "snapshot-unavailable"
+            )
+        )
+
+        let body = bundle.makeRequestBody()
+        XCTAssertEqual(body["has_incident_summary"] as? Bool, true)
+        let incident = try XCTUnwrap(body["incident"] as? [String: Any])
+        XCTAssertEqual(incident["fail_closed_served_query_count"] as? Int, 42)
+        XCTAssertNotNil(incident["last_fail_closed_at"])
+        XCTAssertEqual(incident["last_fail_closed_reason"] as? String, "snapshot-unavailable")
+        XCTAssertEqual(incident["self_reconnect_count"] as? Int, 0)
+    }
+
     func testIncidentSummaryHasNoContentOnAHealthyTunnel() {
         let incident = BugReportIncidentSummary(
             health: TunnelHealthSnapshot(networkKind: .wifi),
@@ -667,20 +760,153 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertFalse(incident.hasContent, "A clean snapshot with no failures or reconnects has nothing to report.")
     }
 
-    func testIncidentSummaryFocusSwitchAloneCountsAsContent() {
-        // A closed-app Focus switch can be the ONLY evidence in a report (e.g. it failed/deferred with no DNS
-        // failures or self-reconnects). It must flag has_incident_summary so backend/support triage keyed off
-        // that flag doesn't skip the very Focus diagnostic this surfaces (Codex round 7).
-        let incident = BugReportIncidentSummary(
+    // The gap record is the DURABLE self-reconnect evidence (LAV-92/93): the credit deletes
+    // the recovered attempt and the report prunes to the 600 s window, so a report filed 30
+    // minutes after "it reconnected on its own" otherwise arrives evidence-free. A RECENT gap
+    // must flip has_incident_summary; the never-expiring record alone must NOT (the
+    // misleading-true class the always-persisted Focus record has).
+    func testIncidentSummaryRecentGapCountsAsContentButStaleGapDoesNot() throws {
+        let now = Date(timeIntervalSinceReferenceDate: 800_900_000)
+        let recentGap = SelfReconnectGapRecord(
+            startedAt: now.addingTimeInterval(-30 * 60),
+            endedAt: now.addingTimeInterval(-30 * 60 + 4.2),
+            cumulativeCount: 3
+        )
+        let recent = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [], // credited/pruned away — the gap is the only evidence
+            selfReconnectGap: recentGap,
+            now: now
+        )
+        XCTAssertTrue(recent.hasContent, "A 30-minute-old gap is real incident evidence.")
+        let body = recent.dictionary
+        XCTAssertEqual(body["self_reconnect_gap_count"] as? Int, 3)
+        XCTAssertNotNil(body["last_self_reconnect_gap_started_at"])
+        XCTAssertNotNil(body["last_self_reconnect_gap_ended_at"])
+        XCTAssertEqual(body["last_self_reconnect_gap_ms"] as? Int, 4_200)
+
+        let stale = BugReportIncidentSummary(
             health: TunnelHealthSnapshot(networkKind: .wifi),
             selfReconnectTimes: [],
-            lastFocusSwitch: FocusSwitchDiagnosticRecord(
-                outcome: "deferred",
-                targetFilterID: "filter-extra",
-                at: Date(timeIntervalSinceReferenceDate: 800_720_000)
-            )
+            selfReconnectGap: SelfReconnectGapRecord(
+                startedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+                endedAt: now.addingTimeInterval(-3 * 24 * 60 * 60 + 4),
+                cumulativeCount: 3
+            ),
+            now: now
         )
-        XCTAssertTrue(incident.hasContent, "A Focus-switch diagnostic alone must count as incident content.")
+        XCTAssertFalse(stale.hasContent, "A long-CLOSED record must not flip the flag forever.")
+        XCTAssertNotNil(
+            stale.dictionary["self_reconnect_gap_count"],
+            "The stale record still ships its fields — staleness is data, not a reason to hide it."
+        )
+
+        // Recency keys on the gap's END, not its start: a 3-day outage that ended an hour
+        // ago is fresh evidence.
+        let longOutageJustEnded = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            selfReconnectGap: SelfReconnectGapRecord(
+                startedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+                endedAt: now.addingTimeInterval(-60 * 60),
+                cumulativeCount: 2
+            ),
+            now: now
+        )
+        XCTAssertTrue(longOutageJustEnded.hasContent)
+
+        // A still-open gap (relaunch pending) has no end/duration yet — and is ONGOING
+        // evidence no matter how long ago it started (Connect-On-Demand never relaunched).
+        let openGap = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            selfReconnectGap: SelfReconnectGapRecord(
+                startedAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+                endedAt: nil,
+                cumulativeCount: 1
+            ),
+            now: now
+        )
+        XCTAssertNil(openGap.dictionary["last_self_reconnect_gap_ended_at"])
+        XCTAssertNil(openGap.dictionary["last_self_reconnect_gap_ms"])
+        XCTAssertTrue(openGap.hasContent, "An open gap is ongoing evidence, however old its start.")
+    }
+
+    func testIncidentSummaryFocusSwitchAloneCountsAsContentOnlyWhileRecent() throws {
+        // A closed-app Focus switch can be the ONLY evidence in a report (e.g. it failed/deferred with no DNS
+        // failures or self-reconnects). It must flag has_incident_summary so backend/support triage keyed off
+        // that flag doesn't skip the very Focus diagnostic this surfaces (Codex round 7) — but the record
+        // never expires, so its bare existence must not flip the flag FOREVER (OBS-1's misleading-true
+        // failure): recency-gated at 24 h, like the gap and the incident ledger.
+        let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let record = FocusSwitchDiagnosticRecord(
+            outcome: "deferred",
+            targetFilterID: "filter-extra",
+            at: now.addingTimeInterval(-60 * 60)
+        )
+        let recent = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            lastFocusSwitch: record,
+            now: now
+        )
+        XCTAssertTrue(recent.hasContent, "A recent Focus-switch diagnostic alone must count as incident content.")
+
+        let stale = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            lastFocusSwitch: record,
+            now: now.addingTimeInterval(3 * 24 * 60 * 60)
+        )
+        XCTAssertFalse(
+            stale.hasContent,
+            "An install-lifetime Focus record must not claim a live incident forever."
+        )
+        // The record itself still SHIPS either way — recency only gates the flag.
+        let staleBody = stale.dictionary
+        XCTAssertNotNil(staleBody["focus_last_switch"], "A stale Focus record is still context for triage.")
+    }
+
+    func testIncidentSummaryLedgerTimelineShipsAndGatesContentOnRecency() throws {
+        // OBS R2: the ledger is the record that SURVIVES the policy stores' by-design
+        // forgetting — a report filed 30 minutes after a thrash carries the timeline.
+        let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let committed = IncidentLedgerRecord(
+            at: now.addingTimeInterval(-31 * 60),
+            kind: .selfReconnectCommitted,
+            reason: "upstream-failed"
+        )
+        let credited = IncidentLedgerRecord(
+            at: now.addingTimeInterval(-28 * 60),
+            kind: .selfReconnectCredited,
+            durationMs: 180_000
+        )
+        let summary = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],  // credited/pruned away — the ledger is the only evidence
+            recentIncidents: [committed, credited],
+            now: now
+        )
+
+        XCTAssertTrue(summary.hasContent, "a 30-minute-stale thrash must still claim an incident")
+        let body = summary.dictionary
+        let entries = try XCTUnwrap(body["recent_incidents"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0]["kind"] as? String, "self_reconnect_committed")
+        XCTAssertEqual(entries[0]["reason"] as? String, "upstream-failed")
+        XCTAssertEqual(entries[1]["kind"] as? String, "self_reconnect_credited")
+        XCTAssertEqual(entries[1]["duration_ms"] as? Int, 180_000)
+        XCTAssertNotNil(entries[0]["at"] as? String)
+
+        // Week-old records still SHIP (triage context) but no longer claim a live incident.
+        let stale = BugReportIncidentSummary(
+            health: TunnelHealthSnapshot(networkKind: .wifi),
+            selfReconnectTimes: [],
+            recentIncidents: [committed, credited],
+            now: now.addingTimeInterval(3 * 24 * 60 * 60)
+        )
+        XCTAssertFalse(stale.hasContent)
+        XCTAssertNotNil(stale.dictionary["recent_incidents"])
     }
 
     func testIncidentSummaryCarriesNoResolvedDomains() throws {

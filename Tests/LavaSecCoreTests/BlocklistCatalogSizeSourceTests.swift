@@ -9,13 +9,13 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
     }
 
     func testCatalogRowsUsePlainDomainCountWithLeadingSizeBucketPill() throws {
-        let filtersViewSource = try Self.source(named: "FiltersView.swift", in: "LavaSecApp")
-        let catalogListBlock = try Self.sourceBlock(
+        let filtersViewSource = try readSource(.filtersView)
+        let catalogListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "BlocklistPickerList(",
             endingBefore: ".blocklistJumpAnchor(id: section.id)"
         )
-        let pickerTextStackBlock = try Self.sourceBlock(
+        let pickerTextStackBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistPickerTextStack: View",
             endingBefore: "private struct BlocklistPickerStatusPill"
@@ -31,8 +31,8 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
     }
 
     func testCondensedListRendersMetadataPrefixStatusBeforePlainMetadata() throws {
-        let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")
-        let metadataRowBlock = try Self.sourceBlock(
+        let listSource = try readSource(.lavaCondensedList)
+        let metadataRowBlock = try sourceBlock(
             in: listSource,
             startingAt: "HStack(spacing: 8)",
             endingBefore: ".fixedSize(horizontal: false, vertical: true)"
@@ -47,8 +47,8 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
     }
 
     func testBlocklistSizeStatusUsesBucketAbbreviationInsteadOfDomainCount() throws {
-        let listSource = try Self.source(named: "LavaCondensedList.swift", in: "LavaSecApp")
-        let statusBlock = try Self.sourceBlock(
+        let listSource = try readSource(.lavaCondensedList)
+        let statusBlock = try sourceBlock(
             in: listSource,
             startingAt: "static func blocklistSize",
             endingBefore: "struct LavaCondensedTrailingAction"
@@ -56,30 +56,5 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
 
         XCTAssertTrue(statusBlock.contains("bucket.abbreviation"))
         XCTAssertFalse(statusBlock.contains("\"%@ domains\""))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-
-        return String(suffix[..<end])
     }
 }
