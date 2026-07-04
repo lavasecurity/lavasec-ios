@@ -331,6 +331,17 @@ final class PinnedPublicHTTPSFetcherTests: XCTestCase {
         XCTAssertEqual(String(data: decoder.output, encoding: .utf8), "HELLO")
     }
 
+    func testIdentityDecoderZeroLengthCompletesAtHeadersWithoutFeed() throws {
+        // A declared zero-length body (`Content-Length: 0`, or an empty 200/204) is complete the
+        // instant headers are parsed — no body bytes will ever arrive to feed. `beginBody` only
+        // feeds `leftover` when it is non-empty, so this MUST hold at construction. Without it, an
+        // empty response on a keep-alive connection (Content-Length: 0 but no `Connection: close`,
+        // so no EOF) would leave the parser waiting out the idle timeout instead of completing.
+        let decoder = IdentityResponseBodyDecoder(expectedLength: 0, maximumByteCount: 1_000)
+        XCTAssertTrue(decoder.isComplete, "zero-length body is complete at headers, before any feed or EOF")
+        XCTAssertTrue(decoder.output.isEmpty)
+    }
+
     func testIdentityDecoderWithoutLengthCompletesAtEOF() throws {
         var decoder = IdentityResponseBodyDecoder(expectedLength: nil, maximumByteCount: 1_000)
         try decoder.feed(Data("abc".utf8))

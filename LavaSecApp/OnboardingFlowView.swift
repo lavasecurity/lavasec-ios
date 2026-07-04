@@ -815,7 +815,7 @@ private struct OnboardingConnectionPanel: View {
                     }
                 }
 
-                Text("If your device's DNS can't be reached, allowed lookups go to %1$@ over an encrypted (DoH) connection, then return to your device's DNS automatically. %2$@ is a third-party resolver used only during recovery.".lavaLocalizedFormat(selectedProviderName, selectedProviderName))
+                Text("If your device's DNS can't be reached, allowed requests briefly use %1$@ over an encrypted connection, then switch back automatically. %2$@ is an outside provider, used only for recovery.".lavaLocalizedFormat(selectedProviderName, selectedProviderName))
                     .font(.footnote)
                     .foregroundStyle(LavaStyle.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)

@@ -877,8 +877,19 @@ struct IdentityResponseBodyDecoder: HTTPResponseBodyDecoder {
         // A negative / malformed `Content-Length` (e.g. `-1`) must never become a real length:
         // it would make `feed` trap on `offsetBy: <negative>`. Drop it and read to EOF instead
         // (still bounded by `Connection: close` + the byte cap).
-        self.expectedLength = expectedLength.flatMap { $0 >= 0 ? $0 : nil }
+        let normalizedLength = expectedLength.flatMap { $0 >= 0 ? $0 : nil }
+        self.expectedLength = normalizedLength
         self.maximumByteCount = maximumByteCount
+        // A declared zero-length body (`Content-Length: 0`, or an empty 200/204) is already
+        // complete the instant the headers are parsed — there are no body bytes to wait for.
+        // `beginBody` only feeds `leftover` when it is non-empty, so without this an empty body
+        // would never be fed and `isComplete` would stay false. On a keep-alive connection that
+        // frames the empty body purely by `Content-Length` (no `Connection: close`, so no EOF),
+        // the parser would then wait out the idle timeout and fail the fetch instead of returning
+        // the empty response.
+        if normalizedLength == 0 {
+            isComplete = true
+        }
     }
 
     mutating func feed(_ data: Data) throws {

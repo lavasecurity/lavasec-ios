@@ -18335,68 +18335,68 @@
         }
       }
     },
-    "Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, the online copy can't be recovered.": {
+    "Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, it's gone for good.": {
       "comment": "Account & Backup: caveat under the two destructive backup options, disambiguating 'Delete online backup copy' (keeps backup on this device) from 'Turn off & delete backup' (stops backups too).",
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "„Online-Backup-Kopie löschen“ entfernt die Server-Kopie, lässt Backups aber an. „Backup ausschalten und löschen“ stoppt sie ganz. In beiden Fällen ist die Online-Kopie weg."
+            "value": "„Online-Backup-Kopie löschen“ entfernt die Server-Kopie, lässt Backups aber an. „Backup ausschalten und löschen“ stoppt sie ganz. So oder so ist sie weg."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, the online copy can't be recovered."
+            "value": "Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, it's gone for good."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "«Eliminar la copia en línea» borra la copia del servidor, pero mantiene las copias de seguridad activas. «Desactivar y eliminar» también las detiene. En ambos casos, la copia en línea no se puede recuperar."
+            "value": "«Eliminar la copia en línea» borra la copia del servidor, pero mantiene las copias activas. «Desactivar y eliminar» también las detiene. En ambos casos, se pierde para siempre."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "« Supprimer la copie en ligne » retire la copie du serveur mais laisse la sauvegarde active. « Désactiver et supprimer » l’arrête aussi. Dans les deux cas, la copie en ligne est irrécupérable."
+            "value": "« Supprimer la copie en ligne » retire la copie du serveur mais garde la sauvegarde active. « Désactiver et supprimer » l'arrête aussi. Dans les deux cas, c'est définitif."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "«Elimina la copia di backup online» rimuove la copia sui server ma lascia attivo il backup. «Disattiva ed elimina il backup» ferma anche quello. In ogni caso, la copia online non si può recuperare."
+            "value": "«Elimina la copia online» rimuove la copia sul server ma lascia attivo il backup. «Disattiva ed elimina» ferma anche quello. In ogni caso, è persa per sempre."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「オンラインバックアップのコピーを削除」はサーバー上のコピーだけ消し、バックアップは続きます。「バックアップをオフにして削除」は両方止めます。どちらの場合もオンラインのコピーは復元できません。"
+            "value": "「オンラインバックアップのコピーを削除」はサーバー上のコピーだけ消し、バックアップは続きます。「バックアップをオフにして削除」は両方止めます。どちらも元に戻せません。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "「온라인 백업 사본 삭제」는 서버 사본만 지우고 백업은 켜진 채로 둬요. 「백업 끄고 삭제」는 백업도 멈춰요. 어느 쪽이든 온라인 사본은 복구할 수 없어요."
+            "value": "「온라인 백업 사본 삭제」는 서버 사본만 지우고 백업은 켜 둡니다. 「백업 끄고 삭제」는 백업도 멈춥니다. 어느 쪽이든 영구히 사라집니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "\"Excluir cópia de backup on-line\" apaga a cópia do servidor, mas mantém o backup ativo. \"Desativar e excluir backup\" também os interrompe. Em ambos os casos, a cópia on-line não pode ser recuperada."
+            "value": "\"Excluir cópia de backup on-line\" apaga a cópia do servidor, mas mantém o backup ativo. \"Desativar e excluir backup\" também para tudo. Nos dois casos, é para sempre."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "“删除在线备份副本”只删除服务器上的副本，备份仍保持开启；“关闭并删除备份”则会一并停止备份。无论哪种方式，在线副本都无法找回。"
+            "value": "“删除在线备份副本”只删除服务器上的副本，备份仍保持开启；“关闭并删除备份”会一并停止。无论哪种，都无法找回。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "「刪除線上備份副本」會移除伺服器上的副本，但備份仍維持開啟。「關閉並刪除備份」則會一併停止備份。無論哪一種，線上副本都無法復原。"
+            "value": "「刪除線上備份副本」只刪除伺服器上的副本，備份仍保持開啟；「關閉並刪除備份」會一併停止。無論哪一種，都無法復原。"
           }
         }
       }
@@ -26185,134 +26185,134 @@
         }
       }
     },
-    "If your device's DNS can't be reached, allowed lookups go to %1$@ over an encrypted (DoH) connection, then return to your device's DNS automatically. %2$@ is a third-party resolver used only during recovery.": {
+    "If your device's DNS can't be reached, allowed requests briefly use %1$@ over an encrypted connection, then switch back automatically. %2$@ is an outside provider, used only for recovery.": {
       "comment": "OnboardingFlowView:798; selectedProviderName is allow-listed brand (both args same value). Producer edited in codeEdits.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "If your device's DNS can't be reached, allowed lookups go to %1$@ over an encrypted (DoH) connection, then return to your device's DNS automatically. %2$@ is a third-party resolver used only during recovery."
+            "value": "If your device's DNS can't be reached, allowed requests briefly use %1$@ over an encrypted connection, then switch back automatically. %2$@ is an outside provider, used only for recovery."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wenn das DNS deines Geräts nicht erreichbar ist, gehen erlaubte Abfragen über eine verschlüsselte (DoH-)Verbindung an %1$@ und kehren dann automatisch zum DNS deines Geräts zurück. %2$@ ist ein Drittanbieter-Resolver, der nur während der Wiederherstellung verwendet wird."
+            "value": "Wenn das DNS deines Geräts nicht erreichbar ist, laufen erlaubte Anfragen kurz über %1$@ per verschlüsselter Verbindung und wechseln dann automatisch zurück. %2$@ ist ein externer Anbieter, nur zur Wiederherstellung."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Si no se puede acceder al DNS de tu dispositivo, las consultas permitidas van a %1$@ a través de una conexión cifrada (DoH) y luego vuelven automáticamente al DNS de tu dispositivo. %2$@ es un resolvedor de terceros que solo se usa durante la recuperación."
+            "value": "Si no se puede acceder al DNS de tu dispositivo, las solicitudes permitidas usan %1$@ brevemente por una conexión cifrada y luego vuelven automáticamente. %2$@ es un proveedor externo, solo para la recuperación."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Si le DNS de ton appareil est injoignable, les requêtes autorisées passent par %1$@ via une connexion chiffrée (DoH), puis reviennent automatiquement au DNS de ton appareil. %2$@ est un résolveur tiers utilisé uniquement pendant la récupération."
+            "value": "Si le DNS de votre appareil est injoignable, les requêtes autorisées passent brièvement par %1$@ via une connexion chiffrée, puis reviennent automatiquement. %2$@ est un fournisseur externe, utilisé seulement pour la récupération."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Se il DNS del dispositivo non è raggiungibile, le ricerche consentite passano a %1$@ tramite una connessione cifrata (DoH), per poi tornare automaticamente al DNS del dispositivo. %2$@ è un resolver di terze parti usato solo durante il ripristino."
+            "value": "Se il DNS del dispositivo non è raggiungibile, le richieste consentite usano brevemente %1$@ tramite una connessione cifrata, poi tornano indietro da sole. %2$@ è un provider esterno, usato solo per il ripristino."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "デバイスのDNSに接続できない場合、許可された名前解決は暗号化された接続（DoH）で%1$@に送られ、その後自動的にデバイスのDNSに戻ります。%2$@は復旧中のみ使用されるサードパーティのリゾルバです。"
+            "value": "デバイスのDNSに接続できない場合、許可されたリクエストは一時的に暗号化された接続で%1$@を使い、その後自動で元に戻ります。%2$@は復旧時のみ使う外部プロバイダです。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "기기의 DNS에 연결할 수 없으면 허용된 조회는 암호화된(DoH) 연결을 통해 %1$@(으)로 전달된 후 자동으로 기기의 DNS로 돌아갑니다. %2$@은(는) 복구 중에만 사용되는 서드파티 리졸버입니다."
+            "value": "기기의 DNS에 연결할 수 없으면 허용된 요청이 잠시 암호화된 연결로 %1$@을(를) 거친 뒤 자동으로 되돌아갑니다. %2$@은(는) 복구할 때만 쓰는 외부 제공업체입니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Se o DNS do seu dispositivo não puder ser acessado, as consultas permitidas vão para o %1$@ por uma conexão criptografada (DoH) e depois voltam automaticamente para o DNS do seu dispositivo. O %2$@ é um resolvedor de terceiros usado apenas durante a recuperação."
+            "value": "Se o DNS do seu dispositivo não puder ser acessado, as solicitações permitidas usam o %1$@ por um instante em conexão criptografada e depois voltam sozinhas. O %2$@ é um provedor externo, usado só na recuperação."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果无法连接到设备的 DNS，允许的查询将通过加密（DoH）连接发送至 %1$@，随后自动恢复使用设备的 DNS。%2$@ 是仅在恢复期间使用的第三方解析器。"
+            "value": "如果无法连接到设备的 DNS，放行的请求会短暂通过加密连接使用 %1$@，随后自动切回。%2$@ 是仅在恢复时使用的外部提供商。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果無法連上你裝置的 DNS，獲允許的查詢會透過加密（DoH）連線送往 %1$@，之後再自動切回你裝置的 DNS。%2$@ 是僅在復原期間使用的第三方解析器。"
+            "value": "如果無法連上你裝置的 DNS，獲允許的請求會短暫透過加密連線使用 %1$@，之後自動切回。%2$@ 是僅在復原時使用的外部供應商。"
           }
         }
       }
     },
-    "If your device's DNS stops responding, Lava routes allowed lookups through a chosen alternative resolver, then returns to your device's DNS automatically.": {
+    "If your device's DNS stops responding, Lava sends allowed requests to a backup DNS provider, then switches back automatically.": {
       "comment": "Detail under the 'Fallback to alternative DNS' toggle (Device-DNS primary).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "If your device's DNS stops responding, Lava routes allowed lookups through a chosen alternative resolver, then returns to your device's DNS automatically."
+            "value": "If your device's DNS stops responding, Lava sends allowed requests to a backup DNS provider, then switches back automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wenn das DNS deines Geräts nicht mehr reagiert, leitet Lava erlaubte Anfragen über einen ausgewählten alternativen Resolver und kehrt dann automatisch zum DNS deines Geräts zurück."
+            "value": "Wenn das DNS deines Geräts nicht mehr reagiert, sendet Lava erlaubte Anfragen an einen Ersatz-DNS-Anbieter und wechselt dann automatisch zurück."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Si el DNS de tu dispositivo deja de responder, Lava dirige las consultas permitidas a través de un resolver alternativo que elijas y luego vuelve al DNS de tu dispositivo automáticamente."
+            "value": "Si el DNS de tu dispositivo deja de responder, Lava envía las solicitudes permitidas a un proveedor de DNS de respaldo y luego vuelve automáticamente."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Si le DNS de ton appareil ne répond plus, Lava achemine les requêtes autorisées via un résolveur de secours choisi, puis revient automatiquement au DNS de ton appareil."
+            "value": "Si le DNS de votre appareil ne répond plus, Lava envoie les requêtes autorisées vers un fournisseur DNS de secours, puis revient automatiquement."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Se il DNS del tuo dispositivo smette di rispondere, Lava instrada le ricerche consentite tramite un resolver alternativo a tua scelta, per poi tornare automaticamente al DNS del dispositivo."
+            "value": "Se il DNS del tuo dispositivo smette di rispondere, Lava invia le richieste consentite a un provider DNS di riserva e poi torna indietro da solo."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "デバイスの DNS が応答しなくなると、Lava は許可された名前解決を選択した代替リゾルバ経由で行い、その後自動でデバイスの DNS に戻ります。"
+            "value": "デバイスのDNSが応答しなくなると、Lavaは許可されたリクエストを予備のDNSプロバイダに送り、その後自動で元に戻します。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "기기의 DNS가 응답을 멈추면 Lava는 허용된 조회를 선택한 대체 리졸버로 전달하고, 이후 자동으로 기기의 DNS로 돌아갑니다."
+            "value": "기기의 DNS가 응답하지 않으면 Lava는 허용된 요청을 예비 DNS 제공업체로 보내고, 이후 자동으로 되돌아갑니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Se o DNS do seu dispositivo parar de responder, o Lava roteia as consultas permitidas por um resolvedor alternativo escolhido e depois volta para o DNS do dispositivo automaticamente."
+            "value": "Se o DNS do seu dispositivo para de responder, o Lava envia as solicitações permitidas para um provedor de DNS reserva e depois volta automaticamente."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果设备的 DNS 停止响应，Lava 会改用你选定的备用解析器处理放行的查询，之后再自动切回设备的 DNS。"
+            "value": "如果设备的 DNS 停止响应，Lava 会把放行的请求发送到备用 DNS 提供商，随后自动切回。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "如果你裝置的 DNS 停止回應，Lava 會將允許的查詢改用你選擇的備援解析器，之後再自動切回裝置的 DNS。"
+            "value": "如果裝置的 DNS 停止回應，Lava 會把允許的請求送往備用 DNS 提供商，之後自動切回。"
           }
         }
       }
@@ -31722,68 +31722,68 @@
         }
       }
     },
-    "Local counts of how Lava reaches the internet — no website names. They track when lookups worked, failed, retried, or briefly fell back to your phone's settings.": {
+    "Local counts of how Lava reaches the internet — no site names. Tracks when requests worked, failed, retried, or briefly used your phone's settings.": {
       "comment": "Nerd Stats: footer under the Tunnel Health section. Plain-language, scannable summary of what the diagnostic counters mean; reassures that no website names are stored.",
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lokale Zähler dazu, wie Lava ins Internet kommt – keine Website-Namen. Sie zeigen, wann Abfragen klappten, fehlschlugen, wiederholt wurden oder kurz auf die Einstellungen deines Telefons zurückgingen."
+            "value": "Lokale Zähler dazu, wie Lava ins Internet kommt – keine Website-Namen. Zeigt, wann Anfragen klappten, fehlschlugen, wiederholt wurden oder kurz die Einstellungen deines Telefons nutzten."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Local counts of how Lava reaches the internet — no website names. They track when lookups worked, failed, retried, or briefly fell back to your phone's settings."
+            "value": "Local counts of how Lava reaches the internet — no site names. Tracks when requests worked, failed, retried, or briefly used your phone's settings."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recuentos locales de cómo se conecta Lava a internet, sin nombres de sitios. Registran cuándo las búsquedas funcionaron, fallaron, se reintentaron o pasaron un momento a los ajustes de tu teléfono."
+            "value": "Recuentos locales de cómo Lava llega a internet, sin nombres de sitios. Registra cuándo las solicitudes funcionaron, fallaron, se reintentaron o usaron un momento los ajustes de tu teléfono."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Comptages locaux de la façon dont Lava accède à internet — aucun nom de site. Ils suivent les recherches réussies, échouées, réessayées ou brièvement basculées vers les réglages de votre téléphone."
+            "value": "Comptages locaux de la façon dont Lava accède à internet — aucun nom de site. Indique quand les requêtes ont réussi, échoué, été réessayées ou brièvement utilisé les réglages de votre téléphone."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Conteggi locali di come Lava raggiunge internet — nessun nome di sito. Indicano quando le ricerche sono riuscite, fallite, ripetute o tornate per un attimo alle impostazioni del telefono."
+            "value": "Conteggi locali di come Lava raggiunge internet — nessun nome di sito. Indica quando le richieste sono riuscite, fallite, ripetute o hanno usato per un attimo le impostazioni del telefono."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava がインターネットにどうつながったかのローカル集計で、サイト名は含みません。照会の成功・失敗・再試行や、一時的に端末の設定に戻った回数を示します。"
+            "value": "Lavaがどうインターネットにつながったかのローカル集計で、サイト名は含みません。リクエストの成功・失敗・再試行や、一時的に端末の設定を使った回数を示します。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava가 인터넷에 어떻게 연결하는지 보여 주는 로컬 집계예요. 사이트 이름은 없어요. 조회가 성공·실패·재시도되거나 휴대폰 설정으로 잠깐 되돌아간 횟수를 세요."
+            "value": "Lava가 인터넷에 어떻게 연결하는지 보여 주는 로컬 집계로, 사이트 이름은 없습니다. 요청의 성공·실패·재시도나 잠깐 휴대폰 설정을 사용한 횟수를 표시합니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Totais locais de como a Lava acessa a internet — sem nomes de sites. Mostram quando as buscas funcionaram, falharam, foram repetidas ou recorreram por um instante aos ajustes do seu telefone."
+            "value": "Totais locais de como o Lava acessa a internet — sem nomes de sites. Mostra quando as solicitações funcionaram, falharam, foram repetidas ou usaram por um instante os ajustes do seu telefone."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava 连接互联网方式的本地计数，不含网站名。它们记录查询成功、失败、重试，或短暂切回手机设置的次数。"
+            "value": "Lava 连接互联网方式的本地计数，不含网站名。记录请求成功、失败、重试，或短暂使用手机设置的次数。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava 連上網路方式的本機計數——不含網站名稱。它們記錄查詢成功、失敗、重試，或短暫切回手機設定的次數。"
+            "value": "Lava 連上網路方式的本機計數——不含網站名稱。記錄請求成功、失敗、重試，或短暫使用手機設定的次數。"
           }
         }
       }
@@ -33107,68 +33107,68 @@
         }
       }
     },
-    "Monthly and yearly are auto-renewable subscriptions. Yearly, paid monthly bills monthly with a 12-month commitment; cancellation affects renewal after the commitment according to App Store terms. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends. Manage subscriptions in Apple Account settings.": {
+    "Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment; after that, cancelling affects the next renewal per App Store terms. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings.": {
       "comment": "Localization-gap backfill (was hardcoded in SettingsView.swift).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Monthly and yearly are auto-renewable subscriptions. Yearly, paid monthly bills monthly with a 12-month commitment; cancellation affects renewal after the commitment according to App Store terms. Payment is charged to your Apple Account at purchase and renews automatically unless turned off at least 24 hours before the period ends. Manage subscriptions in Apple Account settings."
+            "value": "Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment; after that, cancelling affects the next renewal per App Store terms. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Monats- und Jahresabos verlängern sich automatisch. Jährlich, monatlich bezahlt wird monatlich mit einer 12-monatigen Verpflichtung abgerechnet; eine Kündigung wirkt sich gemäß den App Store-Bedingungen auf die Verlängerung nach der Verpflichtung aus. Der Betrag wird beim Kauf über dein Apple-Konto abgebucht und verlängert sich automatisch, sofern du nicht mindestens 24 Stunden vor Ablauf deaktivierst. Abos kannst du in den Apple-Konto-Einstellungen verwalten."
+            "value": "Monats- und Jahresabos verlängern sich automatisch. Jährlich, monatlich bezahlt wird monatlich mit 12-monatiger Verpflichtung abgerechnet; danach wirkt sich eine Kündigung gemäß App Store-Bedingungen auf die nächste Verlängerung aus. Der Betrag wird beim Kauf über dein Apple-Konto abgebucht und verlängert sich, sofern du nicht mindestens 24 Stunden vor Periodenende deaktivierst. Verwalten oder kündigen in den Apple-Konto-Einstellungen."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Las suscripciones mensual y anual se renuevan automáticamente. La opción anual pagada mensualmente se cobra cada mes con un compromiso de 12 meses; la cancelación afecta la renovación después del compromiso según los términos del App Store. El pago se carga en tu Cuenta de Apple al comprar y se renueva automáticamente salvo que se desactive al menos 24 horas antes de que termine el periodo. Gestiona las suscripciones en los ajustes de tu Cuenta de Apple."
+            "value": "Las suscripciones mensual y anual se renuevan automáticamente. La anual pagada mensualmente se cobra cada mes con un compromiso de 12 meses; después, cancelar afecta la siguiente renovación según los términos del App Store. El pago se carga en tu Cuenta de Apple al comprar y se renueva salvo que se desactive al menos 24 horas antes de que termine el periodo. Gestiona o cancela en los ajustes de tu Cuenta de Apple."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les abonnements mensuel et annuel se renouvellent automatiquement. L’option annuelle payée mensuellement est facturée chaque mois avec un engagement de 12 mois ; la résiliation affecte le renouvellement après l’engagement selon les conditions de l’App Store. Le paiement est prélevé sur votre compte Apple lors de l’achat et se renouvelle automatiquement sauf désactivation au moins 24 heures avant la fin de la période. Gérez les abonnements dans les réglages de votre compte Apple."
+            "value": "Les abonnements mensuel et annuel se renouvellent automatiquement. L'annuel payé mensuellement est facturé chaque mois avec un engagement de 12 mois ; ensuite, la résiliation affecte le renouvellement suivant selon les conditions de l'App Store. Le paiement est prélevé sur votre compte Apple à l'achat et se renouvelle sauf désactivation au moins 24 heures avant la fin de la période. Gérez ou résiliez dans les réglages de votre compte Apple."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gli abbonamenti mensile e annuale si rinnovano automaticamente. L’opzione annuale pagata mensilmente viene addebitata ogni mese con un impegno di 12 mesi; l’annullamento influisce sul rinnovo dopo l’impegno secondo i termini dell’App Store. Il pagamento viene addebitato sull’Account Apple al momento dell’acquisto e si rinnova automaticamente, salvo disattivazione almeno 24 ore prima della fine del periodo. Gestisci gli abbonamenti nelle impostazioni dell’Account Apple."
+            "value": "Gli abbonamenti mensile e annuale si rinnovano automaticamente. L'annuale pagato mensilmente è addebitato ogni mese con un impegno di 12 mesi; poi l'annullamento influisce sul rinnovo successivo secondo i termini dell'App Store. Il pagamento è addebitato sull'Account Apple all'acquisto e si rinnova salvo disattivazione almeno 24 ore prima della fine del periodo. Gestisci o annulla nelle impostazioni dell'Account Apple."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "月額と年額は自動更新サブスクリプションです。「年額（月払い）」は12か月の契約として毎月請求されます。解約はApp Storeの条件に従って契約終了後の更新に影響します。料金は購入時にAppleアカウントに請求され、期間終了の24時間以上前にオフにしない限り自動更新されます。サブスクリプションはAppleアカウント設定で管理できます。"
+            "value": "月額と年額は自動更新サブスクリプションです。「年額（月払い）」は12か月契約として毎月請求され、以降の解約はApp Storeの条件に従い次回の更新に適用されます。料金は購入時にAppleアカウントへ請求され、期間終了の24時間以上前にオフにしない限り自動更新されます。管理・解約はAppleアカウント設定で行えます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "월간 및 연간 구독은 자동 갱신됩니다. 연간 월별 결제는 12개월 약정으로 매월 청구되며, 해지는 App Store 약관에 따라 약정 이후의 갱신에 적용됩니다. 결제는 구입 시 Apple 계정으로 청구되고, 기간 종료 24시간 전까지 끄지 않으면 자동으로 갱신됩니다. Apple 계정 설정에서 구독을 관리하세요."
+            "value": "월간 및 연간 구독은 자동 갱신됩니다. 연간 월별 결제는 12개월 약정으로 매월 청구되며, 이후 해지는 App Store 약관에 따라 다음 갱신에 적용됩니다. 결제는 구입 시 Apple 계정으로 청구되고, 기간 종료 24시간 전까지 끄지 않으면 자동 갱신됩니다. Apple 계정 설정에서 관리하거나 해지하세요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "As assinaturas mensal e anual são renovadas automaticamente. A opção anual paga mensalmente é cobrada todo mês com compromisso de 12 meses; o cancelamento afeta a renovação após o compromisso conforme os termos da App Store. A cobrança é feita na sua Conta Apple no momento da compra e renova automaticamente, a menos que seja desativada pelo menos 24 horas antes do fim do período. Gerencie assinaturas nos ajustes da Conta Apple."
+            "value": "As assinaturas mensal e anual são renovadas automaticamente. A anual paga mensalmente é cobrada todo mês com compromisso de 12 meses; depois, cancelar afeta a próxima renovação conforme os termos da App Store. A cobrança é feita na sua Conta Apple na compra e renova, a menos que seja desativada pelo menos 24 horas antes do fim do período. Gerencie ou cancele nos ajustes da Conta Apple."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "月度和年度订阅会自动续期。“年度，按月支付”会按月收费，并包含 12 个月承诺；取消会根据 App Store 条款影响承诺结束后的续期。购买时会从你的 Apple 账户扣款，除非在当前周期结束前至少 24 小时关闭，否则会自动续期。可在 Apple 账户设置中管理订阅。"
+            "value": "月度和年度订阅会自动续期。“年度（按月支付）”按月收费，含 12 个月承诺；之后取消将按 App Store 条款影响下次续期。购买时从你的 Apple 账户扣款，除非在周期结束前至少 24 小时关闭，否则自动续期。可在 Apple 账户设置中管理或取消。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "月繳與年繳訂閱會自動續訂。「年繳，按月支付」會按月收費，並包含 12 個月承諾；取消會依 App Store 條款影響承諾結束後的續訂。購買時會向你的 Apple 帳號收費，除非在目前期間結束前至少 24 小時關閉，否則會自動續訂。你可在 Apple 帳號設定中管理訂閱。"
+            "value": "月繳與年繳訂閱會自動續訂。「年繳（按月支付）」按月收費，含 12 個月承諾；之後取消將依 App Store 條款影響下次續訂。購買時向你的 Apple 帳號收費，除非在期間結束前至少 24 小時關閉，否則自動續訂。可在 Apple 帳號設定中管理或取消。"
           }
         }
       }
@@ -52303,68 +52303,68 @@
         }
       }
     },
-    "This permanently deletes the encrypted backup stored for your account. It cannot be recovered. Encrypted backup stays on for this device and will upload a fresh copy on the next backup.": {
+    "Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time.": {
       "comment": "Localization gap backfill (render-path round 3).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This permanently deletes the encrypted backup stored for your account. It cannot be recovered. Encrypted backup stays on for this device and will upload a fresh copy on the next backup."
+            "value": "Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dadurch wird das für deinen Account gespeicherte verschlüsselte Backup dauerhaft gelöscht. Es kann nicht wiederhergestellt werden. Das verschlüsselte Backup bleibt für dieses Gerät aktiv und lädt beim nächsten Backup eine neue Kopie hoch."
+            "value": "Löscht das verschlüsselte Backup deines Accounts dauerhaft – nicht rückgängig zu machen. Backup bleibt an und lädt beim nächsten Mal eine neue Kopie hoch."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esto elimina de forma permanente la copia cifrada guardada para tu cuenta. No se puede recuperar. La copia cifrada permanece activada en este dispositivo y subirá una copia nueva en la próxima copia de seguridad."
+            "value": "Elimina de forma permanente la copia cifrada de tu cuenta; no se puede deshacer. La copia sigue activada y subirá una nueva la próxima vez."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cette action supprime définitivement la sauvegarde chiffrée enregistrée pour ton compte. Elle est irrécupérable. La sauvegarde chiffrée reste activée sur cet appareil et enverra une nouvelle copie lors de la prochaine sauvegarde."
+            "value": "Supprime définitivement la sauvegarde chiffrée de votre compte — action irréversible. La sauvegarde reste activée et enverra une nouvelle copie la prochaine fois."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Questa operazione elimina definitivamente il backup cifrato salvato per il tuo account. Non potrà essere recuperato. Il backup cifrato resta attivo su questo dispositivo e caricherà una nuova copia al backup successivo."
+            "value": "Elimina definitivamente il backup cifrato del tuo account: non è reversibile. Il backup resta attivo e caricherà una nuova copia la prossima volta."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アカウントに保存されている暗号化バックアップを完全に削除します。復元することはできません。暗号化バックアップはこのデバイスでオンのまま維持され、次回のバックアップ時に新しいコピーがアップロードされます。"
+            "value": "アカウントの暗号化バックアップを完全に削除します（元に戻せません）。バックアップはオンのままで、次回新しいコピーをアップロードします。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "계정에 저장된 암호화된 백업이 영구적으로 삭제됩니다. 복구할 수 없습니다. 암호화된 백업은 이 기기에서 계속 켜져 있으며, 다음 백업 때 새 사본이 업로드됩니다."
+            "value": "계정의 암호화된 백업을 영구적으로 삭제합니다. 되돌릴 수 없습니다. 백업은 켜진 채로 유지되며 다음번에 새 사본을 올립니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Isso apaga permanentemente o backup criptografado armazenado para a sua conta. Ele não pode ser recuperado. O backup criptografado continua ativado neste dispositivo e enviará uma nova cópia no próximo backup."
+            "value": "Apaga permanentemente o backup criptografado da sua conta — não dá para desfazer. O backup continua ativado e envia uma nova cópia na próxima vez."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这将永久删除为你的账户存储的加密备份，且无法恢复。此设备的加密备份仍将保持开启，并会在下次备份时上传一份新副本。"
+            "value": "永久删除你账户的加密备份，无法撤销。备份仍保持开启，下次会上传一份新副本。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "這會永久刪除為你的帳號儲存的加密備份，且無法復原。加密備份在此裝置上仍保持開啟，並會在下次備份時上傳新的副本。"
+            "value": "永久刪除你帳號的加密備份，無法復原。備份仍保持開啟，下次會上傳一份新副本。"
           }
         }
       }
@@ -53158,68 +53158,68 @@
         }
       }
     },
-    "This turns off encrypted backup on this device and permanently deletes the copy stored for your account. It cannot be recovered. You can set up a new backup later.": {
+    "Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later.": {
       "comment": "Localization gap backfill (render-path round 3).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This turns off encrypted backup on this device and permanently deletes the copy stored for your account. It cannot be recovered. You can set up a new backup later."
+            "value": "Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dadurch wird das verschlüsselte Backup auf diesem Gerät deaktiviert und die für deinen Account gespeicherte Kopie dauerhaft gelöscht. Sie kann nicht wiederhergestellt werden. Du kannst später ein neues Backup einrichten."
+            "value": "Deaktiviert das Backup auf diesem Gerät und löscht die Kopie deines Accounts dauerhaft. Nicht rückgängig zu machen – du kannst später ein neues Backup einrichten."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esto desactiva la copia cifrada en este dispositivo y elimina de forma permanente la copia guardada para tu cuenta. No se puede recuperar. Puedes configurar una copia nueva más tarde."
+            "value": "Desactiva la copia en este dispositivo y elimina de forma permanente la de tu cuenta. No se puede deshacer; puedes crear una nueva más tarde."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cette action désactive la sauvegarde chiffrée sur cet appareil et supprime définitivement la copie enregistrée pour ton compte. Elle est irrécupérable. Tu pourras configurer une nouvelle sauvegarde plus tard."
+            "value": "Désactive la sauvegarde sur cet appareil et supprime définitivement la copie de votre compte. Action irréversible — vous pourrez en configurer une nouvelle plus tard."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Questa operazione disattiva il backup cifrato su questo dispositivo ed elimina definitivamente la copia salvata per il tuo account. Non potrà essere recuperata. Potrai configurare un nuovo backup più tardi."
+            "value": "Disattiva il backup su questo dispositivo ed elimina definitivamente la copia del tuo account. Non reversibile: potrai crearne uno nuovo più tardi."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このデバイスで暗号化バックアップをオフにし、アカウントに保存されているコピーを完全に削除します。復元することはできません。後で新しいバックアップを設定できます。"
+            "value": "このデバイスのバックアップをオフにし、アカウントのコピーを完全に削除します。元に戻せません。あとで新しいバックアップを設定できます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 기기에서 암호화된 백업이 꺼지고, 계정에 저장된 사본이 영구적으로 삭제됩니다. 복구할 수 없습니다. 나중에 새 백업을 설정할 수 있습니다."
+            "value": "이 기기의 백업을 끄고 계정의 사본을 영구적으로 삭제합니다. 되돌릴 수 없으며, 나중에 새 백업을 설정할 수 있습니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Isso desativa o backup criptografado neste dispositivo e apaga permanentemente a cópia armazenada para a sua conta. Ela não pode ser recuperada. Você pode configurar um novo backup depois."
+            "value": "Desativa o backup neste dispositivo e apaga permanentemente a cópia da sua conta. Não dá para desfazer — você pode criar um novo depois."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "这将关闭此设备上的加密备份，并永久删除为你的账户存储的副本，且无法恢复。你之后可以重新设置备份。"
+            "value": "关闭此设备上的备份，并永久删除你账户的副本。此操作无法撤销，你之后可以重新设置备份。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "這會關閉此裝置上的加密備份，並永久刪除為你的帳號儲存的副本，且無法復原。你可以稍後設定新的備份。"
+            "value": "關閉此裝置上的備份，並永久刪除你帳號的副本。此操作無法復原，你可以稍後重新設定備份。"
           }
         }
       }
@@ -58039,68 +58039,68 @@
         }
       }
     },
-    "Uses the DNS resolver Lava can capture from the current Wi-Fi or cellular network. On iOS 17-25, this might not always work depending on network conditions.": {
+    "Uses the DNS provider from your current Wi-Fi or cellular network. On iOS 17–25 this may not always work.": {
       "comment": "deviceDNSResolverDetailText pre-iOS-26 branch; SettingsView:2161. Catalog-only.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Uses the DNS resolver Lava can capture from the current Wi-Fi or cellular network. On iOS 17-25, this might not always work depending on network conditions."
+            "value": "Uses the DNS provider from your current Wi-Fi or cellular network. On iOS 17–25 this may not always work."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verwendet den DNS-Resolver, den Lava aus dem aktuellen WLAN oder Mobilfunknetz erfassen kann. Unter iOS 17–25 funktioniert dies je nach Netzwerkbedingungen möglicherweise nicht immer."
+            "value": "Verwendet den DNS-Anbieter aus deinem aktuellen WLAN oder Mobilfunknetz. Unter iOS 17–25 klappt das nicht immer."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Usa el resolvedor de DNS que Lava puede capturar de la red Wi-Fi o de datos móviles actual. En iOS 17-25, esto podría no funcionar siempre según las condiciones de la red."
+            "value": "Usa el proveedor de DNS de tu red Wi-Fi o de datos actual. En iOS 17-25 puede que no siempre funcione."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Utilise le résolveur DNS que Lava peut capturer sur le réseau Wi-Fi ou cellulaire actuel. Sur iOS 17 à 25, cela peut ne pas toujours fonctionner selon les conditions du réseau."
+            "value": "Utilise le fournisseur DNS de votre réseau Wi-Fi ou cellulaire actuel. Sur iOS 17-25, cela ne fonctionne pas toujours."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Usa il resolver DNS che Lava riesce a rilevare dalla rete Wi-Fi o cellulare attuale. Su iOS 17-25 potrebbe non funzionare sempre, a seconda delle condizioni di rete."
+            "value": "Usa il provider DNS della tua rete Wi-Fi o cellulare attuale. Su iOS 17-25 potrebbe non funzionare sempre."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "現在のWi-Fiまたはモバイル通信ネットワークからLavaが取得できるDNSリゾルバを使用します。iOS 17〜25では、ネットワークの状況によっては正しく動作しないことがあります。"
+            "value": "現在のWi-Fiまたはモバイル通信ネットワークのDNSプロバイダを使用します。iOS 17〜25では常に動作するとは限りません。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava가 현재 Wi-Fi 또는 셀룰러 네트워크에서 캡처할 수 있는 DNS 리졸버를 사용합니다. iOS 17~25에서는 네트워크 상태에 따라 항상 작동하지 않을 수 있습니다."
+            "value": "현재 Wi-Fi 또는 셀룰러 네트워크의 DNS 제공업체를 사용합니다. iOS 17~25에서는 항상 작동하지는 않습니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Usa o resolvedor DNS que o Lava consegue capturar da rede Wi-Fi ou de celular atual. No iOS 17-25, isso pode não funcionar sempre, dependendo das condições da rede."
+            "value": "Usa o provedor de DNS da sua rede Wi-Fi ou de celular atual. No iOS 17-25, pode não funcionar sempre."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 Lava 可从当前 Wi-Fi 或蜂窝网络捕获的 DNS 解析器。在 iOS 17-25 上，此功能可能因网络情况而无法始终生效。"
+            "value": "使用当前 Wi-Fi 或蜂窝网络的 DNS 提供商。在 iOS 17-25 上不一定始终有效。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 Lava 從目前 Wi-Fi 或行動網路擷取到的 DNS 解析器。在 iOS 17 至 25 上，這視網路狀況而定，可能無法一直正常運作。"
+            "value": "使用目前 Wi-Fi 或行動網路的 DNS 提供商。在 iOS 17 至 25 上不一定總是有效。"
           }
         }
       }
@@ -59621,134 +59621,134 @@
         }
       }
     },
-    "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back.": {
+    "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can.": {
       "comment": "Detail under the 'Fallback to Device DNS' toggle (iOS 26+).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back."
+            "value": "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wenn der ausgewählte Resolver wiederholt Probleme hat, kann Lava für erlaubte Anfragen vorübergehend das Geräte-DNS nutzen und dann häufiger prüfen, um zurückzuwechseln."
+            "value": "Wenn dein DNS-Anbieter wiederholt ausfällt, nutzt Lava vorübergehend das Geräte-DNS für erlaubte Anfragen und wechselt zurück, sobald es geht."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cuando el resolver seleccionado tiene problemas repetidos, Lava puede usar temporalmente el DNS del dispositivo para las consultas permitidas y luego comprobar con más frecuencia para volver a cambiar."
+            "value": "Si tu proveedor de DNS falla repetidamente, Lava usa temporalmente el DNS del dispositivo para las solicitudes permitidas y vuelve en cuanto puede."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quand le résolveur sélectionné rencontre des problèmes répétés, Lava peut utiliser temporairement le DNS de l'appareil pour les requêtes autorisées, puis vérifier plus souvent pour revenir au résolveur."
+            "value": "Si votre fournisseur DNS échoue à répétition, Lava utilise temporairement le DNS de l'appareil pour les requêtes autorisées, puis revient dès que possible."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quando il resolver selezionato ha problemi ripetuti, Lava può usare temporaneamente il DNS del dispositivo per le ricerche consentite e poi sondare più spesso per tornare indietro."
+            "value": "Se il tuo provider DNS continua a non rispondere, Lava usa temporaneamente il DNS del dispositivo per le richieste consentite e torna appena può."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "選択したリゾルバで問題が続くと、Lava は許可された名前解決を一時的にデバイス DNS で行い、より頻繁に確認して元に戻します。"
+            "value": "選択したDNSプロバイダが繰り返し失敗すると、Lavaは許可されたリクエストに一時的にデバイスDNSを使い、可能になり次第戻します。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "선택한 리졸버에 문제가 반복되면 Lava는 허용된 조회에 기기 DNS를 임시로 사용하고, 더 자주 확인하여 다시 전환합니다."
+            "value": "DNS 제공업체가 반복해서 실패하면 Lava는 허용된 요청에 기기 DNS를 잠시 사용하고, 가능해지면 다시 전환합니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quando o resolvedor selecionado apresenta problemas repetidos, o Lava pode usar o DNS do Dispositivo temporariamente para as consultas permitidas e depois verificar com mais frequência para voltar."
+            "value": "Se o seu provedor de DNS falha várias vezes, o Lava usa o DNS do dispositivo temporariamente para as solicitações permitidas e volta assim que dá."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当所选解析器多次出现问题时，Lava 可以临时使用设备 DNS 处理放行的查询，并更频繁地探测以便切回。"
+            "value": "如果所选 DNS 提供商反复出问题，Lava 会临时用设备 DNS 处理放行的请求，并在可行时切回。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當所選解析器一再出問題時，Lava 可暫時改用裝置 DNS 處理允許的查詢，並更頻繁地探測以便切回。"
+            "value": "如果所選 DNS 提供商一再出問題，Lava 會暫時用裝置 DNS 處理允許的請求，並在可行時切回。"
           }
         }
       }
     },
-    "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back. On iOS 17-25, this is best effort and might not always work depending on network conditions.": {
+    "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can. On iOS 17–25 this is best effort.": {
       "comment": "Detail under the 'Fallback to Device DNS' toggle (iOS 17-25 variant).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When the selected resolver has repeated trouble, Lava can temporarily use Device DNS for allowed lookups and then probe more often to switch back. On iOS 17-25, this is best effort and might not always work depending on network conditions."
+            "value": "If your DNS provider keeps failing, Lava temporarily uses Device DNS for allowed requests, then switches back when it can. On iOS 17–25 this is best effort."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wenn der ausgewählte Resolver wiederholt Probleme hat, kann Lava für erlaubte Anfragen vorübergehend das Geräte-DNS nutzen und dann häufiger prüfen, um zurückzuwechseln. Unter iOS 17–25 ist das nach bestem Bemühen und funktioniert je nach Netzwerkbedingungen nicht immer."
+            "value": "Wenn dein DNS-Anbieter wiederholt ausfällt, nutzt Lava vorübergehend das Geräte-DNS für erlaubte Anfragen und wechselt zurück, sobald es geht. Unter iOS 17–25 nach bestem Bemühen."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cuando el resolver seleccionado tiene problemas repetidos, Lava puede usar temporalmente el DNS del dispositivo para las consultas permitidas y luego comprobar con más frecuencia para volver a cambiar. En iOS 17-25, esto se hace en la medida de lo posible y puede que no siempre funcione según las condiciones de la red."
+            "value": "Si tu proveedor de DNS falla repetidamente, Lava usa temporalmente el DNS del dispositivo para las solicitudes permitidas y vuelve en cuanto puede. En iOS 17-25 se hace en la medida de lo posible."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quand le résolveur sélectionné rencontre des problèmes répétés, Lava peut utiliser temporairement le DNS de l'appareil pour les requêtes autorisées, puis vérifier plus souvent pour revenir au résolveur. Sur iOS 17 à 25, c'est au mieux possible et ça peut ne pas toujours fonctionner selon les conditions réseau."
+            "value": "Si votre fournisseur DNS échoue à répétition, Lava utilise temporairement le DNS de l'appareil pour les requêtes autorisées, puis revient dès que possible. Sur iOS 17-25, au mieux possible."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quando il resolver selezionato ha problemi ripetuti, Lava può usare temporaneamente il DNS del dispositivo per le ricerche consentite e poi sondare più spesso per tornare indietro. Su iOS 17-25 questa funzione è al meglio delle possibilità e potrebbe non funzionare sempre, a seconda delle condizioni di rete."
+            "value": "Se il tuo provider DNS continua a non rispondere, Lava usa temporaneamente il DNS del dispositivo per le richieste consentite e torna appena può. Su iOS 17-25 è al meglio delle possibilità."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "選択したリゾルバで問題が続くと、Lava は許可された名前解決を一時的にデバイス DNS で行い、より頻繁に確認して元に戻します。iOS 17〜25 ではベストエフォートで動作し、ネットワークの状況によってはうまく動かないことがあります。"
+            "value": "選択したDNSプロバイダが繰り返し失敗すると、Lavaは許可されたリクエストに一時的にデバイスDNSを使い、可能になり次第戻します。iOS 17〜25ではベストエフォートです。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "선택한 리졸버에 문제가 반복되면 Lava는 허용된 조회에 기기 DNS를 임시로 사용하고, 더 자주 확인하여 다시 전환합니다. iOS 17~25에서는 최선의 노력으로 작동하며, 네트워크 상태에 따라 항상 작동하지 않을 수 있습니다."
+            "value": "DNS 제공업체가 반복해서 실패하면 Lava는 허용된 요청에 기기 DNS를 잠시 사용하고, 가능해지면 다시 전환합니다. iOS 17~25에서는 최선의 노력으로 작동합니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quando o resolvedor selecionado apresenta problemas repetidos, o Lava pode usar o DNS do Dispositivo temporariamente para as consultas permitidas e depois verificar com mais frequência para voltar. No iOS 17 a 25, isso é feito da melhor forma possível e pode nem sempre funcionar, dependendo das condições da rede."
+            "value": "Se o seu provedor de DNS falha várias vezes, o Lava usa o DNS do dispositivo temporariamente para as solicitações permitidas e volta assim que dá. No iOS 17-25, isso é feito da melhor forma possível."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当所选解析器多次出现问题时，Lava 可以临时使用设备 DNS 处理放行的查询，并更频繁地探测以便切回。在 iOS 17-25 上，这是尽力而为的，视网络状况可能并不总是有效。"
+            "value": "如果所选 DNS 提供商反复出问题，Lava 会临时用设备 DNS 处理放行的请求，并在可行时切回。在 iOS 17-25 上为尽力而为。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當所選解析器一再出問題時，Lava 可暫時改用裝置 DNS 處理允許的查詢，並更頻繁地探測以便切回。在 iOS 17 至 25 上，這項功能盡力而為，並可能因網路狀況而不一定生效。"
+            "value": "如果所選 DNS 提供商一再出問題，Lava 會暫時用裝置 DNS 處理允許的請求，並在可行時切回。在 iOS 17 至 25 上為盡力而為。"
           }
         }
       }

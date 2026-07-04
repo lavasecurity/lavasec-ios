@@ -154,8 +154,8 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(settingsSource.contains("If we commit for 12 months, each month is cheaper."))
-        XCTAssertTrue(settingsSource.contains("Yearly, paid monthly bills monthly with a 12-month commitment"))
-        XCTAssertTrue(settingsSource.contains("cancellation affects renewal after the commitment"))
+        XCTAssertTrue(settingsSource.contains("billed monthly on a 12-month commitment"))
+        XCTAssertTrue(settingsSource.contains("cancelling affects the next renewal"))
         XCTAssertTrue(settingsSource.contains("case .yearlyPaidMonthly"))
         XCTAssertTrue(settingsSource.contains("Text(offer.displayPrice)"))
         XCTAssertTrue(settingsSource.contains("Text(\"%@ total\".lavaLocalizedFormat(commitmentDisplayPrice))"))

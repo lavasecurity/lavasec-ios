@@ -20,10 +20,10 @@ import LavaSecCore
 // Making the parameter optional is REQUIRED: a non-optional parameter is only delivered on activation,
 // so the deactivation edge would silently reuse the last value.
 //
-// The security gates (Plus-only + OFF whenever "require auth to edit filters" is on) and every switch
-// semantic live in the engine, reached through `FocusSwitchEnvironment.performSwitch`. perform() runs
-// unattended in the background and cannot prompt for authentication, so a gated-out switch is a silent
-// no-op — never a partial or unauthenticated change.
+// The security gate (OFF whenever "require auth to edit filters" is on — Focus auto-switch is available
+// to all tiers, no Plus paywall) and every switch semantic live in the engine, reached through
+// `FocusSwitchEnvironment.performSwitch`. perform() runs unattended in the background and cannot prompt
+// for authentication, so a gated-out switch is a silent no-op — never a partial or unauthenticated change.
 
 struct LavaFocusFilterIntent: SetFocusFilterIntent {
     nonisolated(unsafe) static var title: LocalizedStringResource = "Lava Filter"
@@ -87,9 +87,9 @@ struct LavaFilterEntity: AppEntity {
 struct LavaFilterEntityQuery: EntityQuery {
     // Reads the on-disk filter library directly (no `AppViewModel`): the query runs in whatever process
     // the system picks for the Settings picker / background switch, so it must not depend on the app's
-    // foreground object graph. Every hosted filter is listed; the Plus + auth-to-edit gate is enforced
-    // at switch time inside the engine, the single security boundary — not here, so a lapsed-Plus user's
-    // configured choice is preserved (and silently no-ops) rather than vanishing from Settings.
+    // foreground object graph. Every hosted filter is listed; the auth-to-edit gate is enforced at switch
+    // time inside the engine, the single security boundary — not here, so an auth-locked user's configured
+    // choice is preserved (and silently no-ops) rather than vanishing from Settings.
     //
     // Plain `EntityQuery` with an explicit `suggestedEntities()` (not `EnumerableEntityQuery`): the
     // latter's default `entities(for:)`/`results()` don't synthesize a query record the AppIntents
