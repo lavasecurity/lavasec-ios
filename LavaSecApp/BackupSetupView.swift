@@ -84,6 +84,7 @@ struct BackupSetupView: View {
                 .foregroundStyle(LavaStyle.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .accessibilityAddTraits(.isHeader)
 
             Spacer()
 
@@ -533,6 +534,7 @@ private struct BackupSetupFactRow: View {
                 .font(.headline)
                 .foregroundStyle(LavaStyle.safeGreen)
                 .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title.lavaLocalized)
@@ -545,6 +547,7 @@ private struct BackupSetupFactRow: View {
 
             Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -572,6 +575,7 @@ private struct BackupRecoveryPhraseWord: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -149,6 +149,7 @@ struct FilterReviewChangeRow: View {
                 .font(.body.weight(.bold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
 
             Text(localizesTitle ? title.lavaLocalized : title)
                 .font(.body.weight(.semibold))
@@ -162,6 +163,12 @@ struct FilterReviewChangeRow: View {
         .padding(.vertical, 12)
         .frame(minHeight: 56)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The +/- glyph is the only visual add/remove cue and is color-tinted, so expose the
+        // action as a stable localized label ("Added"/"Removed") with the item name as the value —
+        // otherwise VoiceOver would read only the name and lose the add-vs-remove distinction.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(symbol == "+" ? "Added" : "Removed"))
+        .accessibilityValue(Text(localizesTitle ? title.lavaLocalized : title))
     }
 
     private var systemImage: String {
@@ -198,6 +205,7 @@ struct FilterPreparationScreen: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                             .foregroundStyle(LavaStyle.safeGreen)
+                            .accessibilityHidden(true)
                         PreparationTickerTitle("Success")
                     } else {
                         SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
@@ -212,11 +220,13 @@ struct FilterPreparationScreen: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                         .foregroundStyle(LavaStyle.lavaOrange)
+                        .accessibilityHidden(true)
 
                     VStack(spacing: 10) {
                         Text("We couldn't update your filter")
                             .font(.title.bold())
                             .multilineTextAlignment(.center)
+                            .accessibilityAddTraits(.isHeader)
                         Text(message.lavaLocalized)
                             .lavaBodySupportingText()
                             .multilineTextAlignment(.center)

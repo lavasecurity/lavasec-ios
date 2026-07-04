@@ -132,6 +132,16 @@ struct ProtectionStatusPanel: View {
         }
         .padding(18)
         .lavaPanelBackground()
+        .onChange(of: viewModel.protectionTitle + " " + viewModel.protectionSubtitle) { _, _ in
+            // Announce the settled protection state to VoiceOver. Key on the FULL accessible value
+            // (title + subtitle): the title alone maps healthy AND DNS-fallback both to "Protected",
+            // so keying on it would miss fallback/recovery transitions where only the subtitle moves.
+            // `.onChange` fires only on a DISTINCT value, so the Guard screen's 5-second poll (which
+            // re-reads the same state) does not re-announce — only a real transition speaks.
+            LavaAccessibilityAnnouncer.announce(
+                viewModel.protectionTitle.lavaLocalized + ". " + viewModel.protectionSubtitle.lavaLocalized
+            )
+        }
     }
 
     private var guardianState: GuardianMascotState {

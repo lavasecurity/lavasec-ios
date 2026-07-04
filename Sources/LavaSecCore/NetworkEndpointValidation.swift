@@ -223,6 +223,18 @@ private enum IPAddressScope: Equatable {
             // Borrow the embedded scope, mirroring DeviceDNSFallbackPolicy's low-32-bit
             // treatment of the same prefix.
             self = IPAddressScope(ipv4Octets: Array(bytes[12...15])).withVersion(.ipv6)
+        } else if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b,
+                  bytes[4] == 0x00, bytes[5] == 0x01 {
+            // NAT64 LOCAL-USE prefix (64:ff9b:1::/48, RFC 8215): reserved for a site's own
+            // IPv4/IPv6 translation, so on a network that routes it this literal resolves to
+            // whatever the LOCAL translator maps — the embedded IPv4 (at a prefix-dependent
+            // offset) is untrustworthy, and even an embedded-public-looking address could be
+            // locally remapped into private space. Unlike the globally-defined /96 there is no
+            // trustworthy "public" address here. Classify as PRIVATE, not reserved: that fails
+            // the isPublicAddress fetch gate so PinnedPublicHTTPSFetcher never pins/connects to
+            // it (SSRF / DNS-rebinding defense), while keeping it a usable local resolver —
+            // matching DeviceDNSFallbackPolicy, which keeps 64:ff9b:1:: reachable via CLAT.
+            self = .privateAddress(.ipv6)
         } else if bytes[0..<12].allSatisfy({ $0 == 0 }) {
             // IPv4-compatible IPv6 (::a.b.c.d, RFC 4291 §2.5.5.1 — deprecated): the high 96 bits
             // are zero with NO 0xffff mapped marker. `::` (unspecified) and `::1` (loopback) are

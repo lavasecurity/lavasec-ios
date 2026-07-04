@@ -176,6 +176,13 @@ final class NetworkEndpointValidationTests: XCTestCase {
             ("64:ff9b::10.0.0.1", .privateAddress, "NAT64-mapped RFC1918 classifies as private"),
             ("64:ff9b::127.0.0.1", .unusable, "NAT64-mapped loopback classifies as loopback"),
             ("64:ff9b:0:1::8.8.8.8", .publicAddress, "outside the /96 (nonzero middle bits) stays plain IPv6"),
+
+            // NAT64 LOCAL-USE prefix 64:ff9b:1::/48 (RFC 8215): a local translator maps it to
+            // arbitrary (possibly private) IPv4, so it must never be a PUBLIC fetch target —
+            // classify PRIVATE (fails isPublicAddress) but stays a usable local resolver.
+            ("64:ff9b:1::c0a8:0101", .privateAddress, "NAT64 local-use /48 wrapping 192.168.1.1 — non-public"),
+            ("64:ff9b:1::8.8.8.8", .privateAddress, "NAT64 local-use /48 is local even with a public-looking embed"),
+            ("64:ff9b:1::1", .privateAddress, "NAT64 local-use /48 base address — non-public, usable resolver"),
         ]
 
         for (host, expected, note) in cases {

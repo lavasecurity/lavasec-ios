@@ -83,6 +83,7 @@ struct BackupRestoreView: View {
                 .foregroundStyle(LavaStyle.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .accessibilityAddTraits(.isHeader)
 
             Spacer()
 
@@ -297,6 +298,7 @@ private struct BackupRecoveryWordField: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.secondary)
                 .frame(width: 18, alignment: .trailing)
+                .accessibilityHidden(true)
 
             TextField("Word %lld".lavaLocalizedFormat(number), text: $word)
                 .focused($focusedField, equals: fieldIndex)

@@ -130,6 +130,10 @@ private struct LavaLiveActivityExpandedView: View {
                     shieldStyle: state.shieldStyle
                 )
                 .frame(width: 82, height: 86)
+                // Decorative mascot: the protection state is already carried by the title
+                // text below and the Dynamic Island status glyph, so keep the duplicate
+                // out of VoiceOver rather than announcing an unlabeled image.
+                .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(expandedTitle(for: protectionState))
@@ -137,6 +141,9 @@ private struct LavaLiveActivityExpandedView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
+                        // The title is this surface's protection-state readout; expose it as a
+                        // header so VoiceOver announces the state as the heading of the activity.
+                        .accessibilityAddTraits(.isHeader)
 
                     // Action row. The Dynamic Island is reliable for user-initiated
                     // actions (a tap wakes the app to run the intent) even though it
@@ -184,6 +191,9 @@ private struct LavaLiveActivityExpandedView: View {
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaGreen)
         .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
+        // Speak the localized pause-for-minutes title as the button's VoiceOver label so the
+        // primary control reads clearly and its decorative pause glyph isn't announced.
+        .accessibilityLabel(title)
     }
 
     @ViewBuilder

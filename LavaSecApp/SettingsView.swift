@@ -2253,6 +2253,13 @@ struct DNSResolverSettingsView: View {
                             }
                             .buttonStyle(.plain)
                             .tint(LavaStyle.safeGreen)
+                            // Provider-selection VoiceOver semantics (WS-S): lead with the
+                            // provider name as the accessibility label and carry the
+                            // transport-address summary as the value, so VoiceOver announces
+                            // the provider identity first instead of a name+address run-on.
+                            // Selection itself stays on LavaSelectableRow's .isSelected trait.
+                            .accessibilityLabel(preset.displayName.lavaLocalized)
+                            .accessibilityValue(metadata(for: preset).lavaLocalized)
 
                             LavaCondensedDivider(leadingInset: 16)
                         }
@@ -2268,6 +2275,8 @@ struct DNSResolverSettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .tint(LavaStyle.safeGreen)
+                        .accessibilityLabel("Custom DNS".lavaLocalized)
+                        .accessibilityValue(customResolverMetadata.lavaLocalized)
                     }
                 }
 

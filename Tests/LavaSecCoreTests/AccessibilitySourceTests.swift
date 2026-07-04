@@ -269,4 +269,30 @@ final class AccessibilitySourceTests: XCTestCase {
             "SettingsNavigationRow must hide both its leading tile glyph and the trailing chevron from accessibility."
         )
     }
+
+    // MARK: SecurityController — full-screen security overlays (WS-R)
+
+    func testSecurityLockOverlayIsModal() throws {
+        let block = try sourceBlock(
+            in: try readSource(.securityController),
+            startingAt: "struct SecurityLockOverlay",
+            endingBefore: "struct SecurityPrivacyMaskOverlay"
+        )
+        XCTAssertTrue(
+            block.contains(".accessibilityAddTraits(.isModal)"),
+            "The app-unlock lock overlay must be a modal accessibility container so VoiceOver can't reach the masked content behind it."
+        )
+    }
+
+    func testSecurityPrivacyMaskOverlayIsModal() throws {
+        let block = try sourceBlock(
+            in: try readSource(.securityController),
+            startingAt: "struct SecurityPrivacyMaskOverlay",
+            endingBefore: "struct SecurityPasscodeAuthenticationView"
+        )
+        XCTAssertTrue(
+            block.contains(".accessibilityAddTraits(.isModal)"),
+            "The privacy-mask overlay must be a modal accessibility container."
+        )
+    }
 }

@@ -79,31 +79,29 @@ public enum DNSResolverSmokeProbe {
         return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
-    /// The organic-evidence REVOCATION counterpart to `indicatesAcceptedAnswer`: a reply that
-    /// claims answers (`NOERROR` + `ANCOUNT > 0`) but whose resource records are
-    /// malformed/truncated. `completeForward` downgrades exactly this to a synthesized SERVFAIL
-    /// for the client, so the resolver is misbehaving NOW — like SERVFAIL/REFUSED, it must
-    /// REVOKE any stale accepted-primary evidence, not merely withhold a fresh stamp, or a
-    /// timestamp from an earlier good answer would keep the next periodic probe skipped while
-    /// clients receive SERVFAILs. Distinct from `indicatesResolverFailure` on purpose: that
-    /// classifier ALSO drives encrypted-fallback engagement (keyed on SERVFAIL/REFUSED rcodes),
-    /// which this malformed-but-NOERROR case deliberately does NOT change.
-    public static func indicatesMalformedAnswer(_ response: Data?) -> Bool {
-        guard let response = response.map({ zeroBased($0) }) else {
+    /// Whether the primary delivered a USABLE answer to the client — i.e. `completeForward`
+    /// forwards this reply as-is instead of downgrading it to a synthesized SERVFAIL. That is
+    /// exactly: a well-formed reply (ALL RR sections parse — the same
+    /// `DNSWireMessage.hasWellFormedResourceRecords` bar `completeForward` applies over answer +
+    /// authority + additional) whose rcode is NOT SERVFAIL/REFUSED. A well-formed NOERROR answer
+    /// AND a well-formed authoritative NXDOMAIN/NODATA both qualify (the primary is proven
+    /// serving). A SERVFAIL/REFUSED rcode, OR any malformed reply — including a malformed
+    /// NEGATIVE reply whose authority/additional section is truncated — does NOT: the client
+    /// sees a SERVFAIL, so the primary is misbehaving now.
+    ///
+    /// This is the shared bar for BOTH crediting primary recovery (`lastPrimaryUpstreamSuccessAt`
+    /// + the smoke-failure-streak clear) and revoking probe-skip evidence
+    /// (`lastAcceptedPrimaryEvidenceAt`): a client-facing SERVFAIL by ANY of those routes must
+    /// not count as the primary serving. It intentionally does NOT touch
+    /// `indicatesResolverFailure`, which additionally gates encrypted-fallback engagement.
+    public static func indicatesServedAnswer(_ response: Data?) -> Bool {
+        guard let response else {
             return false
         }
-        guard response.count >= 12 else {
+        guard !indicatesResolverFailure(response) else {
             return false
         }
-
-        let responseFlags = readUInt16(response, at: 2)
-        let isResponse = responseFlags & 0x8000 != 0
-        let responseCode = responseFlags & 0x000F
-        let answerCount = readUInt16(response, at: 6)
-        guard isResponse, responseCode == 0, answerCount > 0 else {
-            return false
-        }
-        return !DNSWireMessage.hasWellFormedResourceRecords(response)
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {

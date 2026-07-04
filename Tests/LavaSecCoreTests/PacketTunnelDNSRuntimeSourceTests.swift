@@ -3346,6 +3346,64 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             primaryTimestampIndex,
             "the primary-success timestamp must be gated on neither Device-DNS fallback nor fallback mode having carried the query"
         )
+        // Codex P1: the recovery-crediting lines (primary-success timestamp + smoke-failure
+        // streak clear) must ALSO be gated on a LEGITIMATE primary answer — a SERVFAIL/REFUSED
+        // rcode OR any malformed reply (answer OR authority/additional truncated) is NOT the
+        // primary serving (completeForward synthesizes a SERVFAIL for the client), so crediting it
+        // would let a resolver returning failures between smoke probes suppress the reconnect
+        // escalation. The gate is `indicatesServedAnswer` — the exact completeForward bar (not a
+        // failure rcode AND all-RR well-formed) — so legitimate NXDOMAIN/NODATA still count as
+        // healthy, NOT indicatesAcceptedAnswer.
+        let legitGateIndex = try XCTUnwrap(
+            successBranch.range(of: "let primaryServedLegitimateAnswer =")
+        ).lowerBound
+        // The gate binding is exactly `indicatesServedAnswer` (the completeForward bar), not
+        // `indicatesAcceptedAnswer` (which would drop legitimate NXDOMAIN/NODATA from "healthy").
+        let gateBinding = try sourceBlock(
+            in: successBranch,
+            startingAt: "let primaryServedLegitimateAnswer =",
+            endingBefore: "if primaryServedLegitimateAnswer {"
+        )
+        XCTAssertTrue(
+            gateBinding.contains("DNSResolverSmokeProbe.indicatesServedAnswer(result.response)"),
+            "the recovery-crediting gate must use the completeForward served-answer bar"
+        )
+        XCTAssertFalse(
+            gateBinding.contains("indicatesAcceptedAnswer"),
+            "the gate must be the served-answer bar, NOT indicatesAcceptedAnswer (would drop NXDOMAIN/NODATA)"
+        )
+        XCTAssertLessThan(
+            guardIndex,
+            legitGateIndex,
+            "the legitimate-answer gate sits inside the primary-only branch"
+        )
+        XCTAssertLessThan(
+            legitGateIndex,
+            primaryTimestampIndex,
+            "the primary-success timestamp must be gated on a legitimate primary answer, not any reply"
+        )
+        let streakClearIndex = try XCTUnwrap(
+            successBranch.range(of: "health.consecutiveDNSSmokeProbeFailureCount = 0")
+        ).lowerBound
+        XCTAssertLessThan(
+            legitGateIndex,
+            streakClearIndex,
+            "the smoke-failure-streak clear must also be gated on a legitimate primary answer"
+        )
+        // The fallback-COVERAGE clear must be UNGATED — it records that the fallback isn't the
+        // active carrier (this query went to the primary, `!usedEncryptedFallback`), which holds
+        // even on a failing primary reply. Re-gating it lets a stale, ceiling-less
+        // `isUsingEncryptedFallback` mask a failing primary and suppress the reconnect (Codex P1).
+        // A closing brace must separate the (gated) streak clear from the (ungated) fallback clear.
+        let streakToFallback = try sourceBlock(
+            in: successBranch,
+            startingAt: "health.consecutiveDNSSmokeProbeFailureCount = 0",
+            endingBefore: "health.lastEncryptedFallbackSuccessAt = nil"
+        )
+        XCTAssertTrue(
+            streakToFallback.contains("}"),
+            "the fallback-coverage clear must sit OUTSIDE the primaryServedLegitimateAnswer gate"
+        )
     }
 
     func testEncryptedFallbackHostnameIsBootstrapped() throws {
@@ -3608,14 +3666,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(genuinePrimaryBlock.contains("health.lastPrimaryUpstreamSuccessAt = now"))
         XCTAssertTrue(genuinePrimaryBlock.contains("if DNSResolverSmokeProbe.indicatesAcceptedAnswer(result.response) {"))
         XCTAssertTrue(genuinePrimaryBlock.contains("lastAcceptedPrimaryEvidenceAt = now"))
-        // A rejected reply REVOKES evidence: the resolver just proved it is misbehaving,
-        // so pre-failure evidence must not delay the LAV-87 probe by another interval
-        // (Codex round 2). A malformed-RR NOERROR reply revokes for the same reason — it is
-        // SERVFAIL-downgraded for the client (completeForward) but invisible to
-        // indicatesResolverFailure (SERVFAIL/REFUSED rcodes only, which also gates the
-        // encrypted fallback and must not widen), so it gets its own classifier in the branch.
-        XCTAssertTrue(genuinePrimaryBlock.contains("} else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response)"))
-        XCTAssertTrue(genuinePrimaryBlock.contains("|| DNSResolverSmokeProbe.indicatesMalformedAnswer(result.response) {"))
+        // Any reply the CLIENT sees as a SERVFAIL revokes evidence: the resolver just proved it
+        // is misbehaving, so pre-failure evidence must not delay the LAV-87 probe by another
+        // interval (Codex round 2/final). That is exactly `!indicatesServedAnswer` — the same
+        // completeForward bar as the recovery gate above (a SERVFAIL/REFUSED rcode OR any
+        // malformed reply, INCLUDING a malformed negative whose authority/additional section is
+        // truncated) — so a well-formed NXDOMAIN/NODATA neither stamps nor revokes.
+        XCTAssertTrue(genuinePrimaryBlock.contains("} else if !DNSResolverSmokeProbe.indicatesServedAnswer(result.response) {"))
 
         // Evidence never survives a runtime reset (2 clear sites) or any query the
         // configured primary failed to serve: a rejected primary reply, an outright

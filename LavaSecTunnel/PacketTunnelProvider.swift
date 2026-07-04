@@ -4138,26 +4138,40 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 // while DNS still depends on the fallback.
                 let resolvedThroughFallbackMode = result.transport == .deviceDNS && wasDeviceDNSFallbackModeActive
                 if !result.deviceDNSFallbackSucceeded, !resolvedThroughFallbackMode {
-                    health.lastPrimaryUpstreamSuccessAt = now
+                    // A LEGITIMATE primary answer — NOERROR-with-answers OR an authoritative
+                    // negative (NXDOMAIN / NODATA) — proves the configured primary is alive and
+                    // serving, so it credits primary recovery. A SERVFAIL/REFUSED or malformed-RR
+                    // NOERROR reply does NOT: `completeForward` synthesizes a SERVFAIL for the
+                    // client, so crediting it here would let a resolver returning failures between
+                    // smoke probes suppress the failed-probe / rejected-response escalation —
+                    // `hasUncoveredFailedSmokeProbe` reads `lastPrimaryUpstreamSuccessAt`, and the
+                    // reconnect threshold reads `consecutiveDNSSmokeProbeFailureCount` — while
+                    // clients keep receiving SERVFAILs (Codex P1). `indicatesServedAnswer` is the
+                    // exact `completeForward` bar — not a SERVFAIL/REFUSED rcode AND all RR
+                    // sections well-formed — so legitimate NXDOMAIN/NODATA still count as healthy
+                    // (no false-reconnect regression) while a SERVFAIL/REFUSED or a malformed
+                    // reply, INCLUDING a malformed negative whose authority/additional section is
+                    // truncated, does not. `didResolve` guarantees `result.response != nil` here.
+                    let primaryServedLegitimateAnswer =
+                        DNSResolverSmokeProbe.indicatesServedAnswer(result.response)
+                    if primaryServedLegitimateAnswer {
+                        health.lastPrimaryUpstreamSuccessAt = now
+                    }
                     // NRG-3a: only an answer passing the probe's OWN acceptance check
                     // (NOERROR + answers with WELL-FORMED RRs; the transport already
-                    // verified the query identity) counts as probe-equivalent evidence.
+                    // verified the query identity) counts as probe-equivalent evidence — STAMP.
                     // `didResolve` alone must not — a hijacking resolver's REFUSED/SERVFAIL
-                    // reply reaches this branch too (see the LAV-87 NB below), and evidence
-                    // from it would let the hijacker suppress routine probes. A rejected
-                    // reply moreover REVOKES existing evidence (Codex round 2): the resolver
-                    // just proved it is misbehaving NOW, so pre-failure evidence must not let
-                    // the next routine tick skip the very probe that advances the LAV-87
-                    // escalation. A NOERROR reply with MALFORMED RRs revokes for the same
-                    // reason — `completeForward` synthesizes a SERVFAIL for the client, so it
-                    // is the resolver misbehaving now, but its NOERROR rcode is invisible to
-                    // `indicatesResolverFailure` (SERVFAIL/REFUSED only, which also gates the
-                    // encrypted fallback and must not widen here). Legitimate NODATA/NXDOMAIN
-                    // answers neither stamp nor revoke.
+                    // reply reaches this branch too (see the LAV-87 NB below). And any reply the
+                    // client sees as a SERVFAIL — a SERVFAIL/REFUSED rcode OR a malformed reply
+                    // (answer OR authority/additional truncated, which `completeForward` downgrades)
+                    // — REVOKES existing evidence (Codex round 2/final): the resolver just proved it
+                    // is misbehaving NOW, so pre-failure evidence must not let the next routine tick
+                    // skip the very probe that advances the LAV-87 escalation. `indicatesServedAnswer`
+                    // is the same `completeForward` bar as the recovery gate above, so a legitimate
+                    // well-formed NODATA/NXDOMAIN neither stamps nor revokes.
                     if DNSResolverSmokeProbe.indicatesAcceptedAnswer(result.response) {
                         lastAcceptedPrimaryEvidenceAt = now
-                    } else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response)
-                        || DNSResolverSmokeProbe.indicatesMalformedAnswer(result.response) {
+                    } else if !DNSResolverSmokeProbe.indicatesServedAnswer(result.response) {
                         lastAcceptedPrimaryEvidenceAt = nil
                     }
                     // A genuine primary answer also proves the primary's health, so it
@@ -4165,12 +4179,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     // probe failures separated by healthy primary traffic would
                     // accumulate to the reconnect threshold and falsely prompt a
                     // reconnect. Gated by the same primary-only condition so a
-                    // fallback-carried success never resets it.
-                    health.consecutiveDNSSmokeProbeFailureCount = 0
-                    // The primary is carrying DNS again, so the encrypted fallback is no
-                    // longer covering — clear its serving timestamp so a stale-but-fresh
-                    // success from before this recovery can't cover a new outage's probe
-                    // (which postdates both). Mirrors the smoke-probe-recovery clear above.
+                    // fallback-carried success never resets it — AND by
+                    // `primaryServedLegitimateAnswer` so a SERVFAIL/REFUSED/malformed reply
+                    // (which is NOT the primary serving) can't reset the escalation streak.
+                    if primaryServedLegitimateAnswer {
+                        health.consecutiveDNSSmokeProbeFailureCount = 0
+                    }
+                    // The encrypted fallback did NOT carry THIS query (we're in the
+                    // !usedEncryptedFallback branch), so it is not covering — clear its serving
+                    // timestamp on ANY non-fallback primary reply, INCLUDING a failing one
+                    // (Codex P1). `isUsingEncryptedFallback` has no freshness ceiling, so a stale
+                    // fallback-success from an earlier carried query would otherwise make a later
+                    // timeout/receive-failed smoke probe look covered and suppress the reconnect.
+                    // Deliberately NOT gated on `primaryServedLegitimateAnswer` (unlike the
+                    // primary-success stamp / streak clear above): those credit primary RECOVERY,
+                    // which a SERVFAIL is not; this only records that the fallback isn't the
+                    // active carrier, which holds regardless of the primary's rcode.
                     health.lastEncryptedFallbackSuccessAt = nil
                     // NB (LAV-87): the rejected-response streak is deliberately NOT cleared
                     // here. `didResolve` is `response != nil`, so a hijacking resolver's

@@ -537,6 +537,7 @@ struct SecurityLockOverlay: View {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
+                    .accessibilityHidden(true)
 
                 Text("Lava Locked")
                     .font(.title.bold())
@@ -547,6 +548,9 @@ struct SecurityLockOverlay: View {
             }
         }
         .accessibilityIdentifier("securityLockOverlay")
+        // The unlock gate covers the whole UI — trap VoiceOver inside it so the masked
+        // content behind can't be reached until the app is unlocked.
+        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -561,12 +565,14 @@ struct SecurityPrivacyMaskOverlay: View {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: LavaIconSize.hero, weight: .semibold))
                     .foregroundStyle(LavaStyle.safeGreen)
+                    .accessibilityHidden(true)
 
                 Text("Lava Security")
                     .font(.title2.bold())
             }
         }
         .accessibilityIdentifier("securityPrivacyMaskOverlay")
+        .accessibilityAddTraits(.isModal)
     }
 }
 
