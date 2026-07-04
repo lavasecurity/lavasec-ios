@@ -19,6 +19,10 @@ enum LavaSecAppGroup {
     static let diagnosticsFilename = "diagnostics.json"
     static let diagnosticsControlFilename = "diagnostics-control.json"
     static let networkActivityLogFilename = "network-activity-log.json"
+    /// OBS R2: the append-only incident ledger — tunnel-writes, app-reads-at-report-time.
+    /// Decoupled from the rate-limiter's policy stores (which forget by design); nothing
+    /// in the recovery/cap policy reads this file.
+    static let incidentLedgerFilename = "incident-ledger.json"
     static let catalogCacheDirectoryName = "catalog-cache"
     static let reloadSnapshotMessage = "reload-snapshot"
     static let reloadProtectionPauseMessage = "reload-protection-pause"
@@ -26,8 +30,21 @@ enum LavaSecAppGroup {
     static let clearDiagnosticsMessage = "clear-diagnostics"
     static let clearFilteringCountsMessage = "clear-filtering-counts"
     static let clearNetworkActivityLogMessage = "clear-network-activity-log"
+    static let clearIncidentLedgerMessage = "clear-incident-ledger"
     static let flushTunnelHealthMessage = "flush-tunnel-health"
     static let vpnDebugLogFilename = "vpn-debug-log.jsonl"
+    /// The single previous generation kept by `LavaSecDeviceDebugLog.rotate` (same
+    /// `+ ".1"` convention as its `rotatedURL(for:)`). Report/export loaders read it so an
+    /// 8 MB rotation landing between an incident and the report can't hide the incident.
+    static let vpnDebugLogRotatedFilename = vpnDebugLogFilename + ".1"
+    /// Cross-process advisory lock serializing `LavaSecDeviceDebugLog.rotate` (PST-2/CON-5).
+    /// App + tunnel + every NWConnection queue append to the same log; without this, two
+    /// processes crossing the 8 MB cap at once double-rotate — writer B's removeItem deletes
+    /// writer A's fresh `.1` and installs a near-empty file over it, destroying the rotated
+    /// generation the report/export loaders read under incident load. A dedicated `.lock`
+    /// sibling (not any of the config/command locks) so log rotation never blocks — or is
+    /// blocked by — a filter publish or a protection command.
+    static let vpnDebugLogRotationLockFilename = vpnDebugLogFilename + ".rotate.lock"
     static let protectionNotificationRouteUserInfoKey = "lavaRoute"
     static let protectionNotificationGuardRouteValue = "guard"
     static let protectionNotificationRequestIdentifierPrefix = "com.lavasec.protection."
@@ -66,6 +83,16 @@ enum LavaSecAppGroup {
     // path. The tunnel's own `selfReconnectAttemptsDefaultsKey` literal is locked to this value by
     // a source test (PacketTunnelDNSRuntimeSourceTests) so the two can never drift.
     static let selfReconnectAttemptTimesDefaultsKey = "tunnel.selfReconnectAttemptTimes"
+    // Durable self-reconnect GAP evidence (LAV-92/93 observability). The attempt store above
+    // forgets BY DESIGN (productive credit deletes the recovered attempt; the report prunes to
+    // the 600 s policy window), so these carry the field-visible record instead: GapStartedAt
+    // is stamped at teardown commit; GapEndedAt at the NEXT tunnel launch (the process is
+    // serving again — the honest Guard-off window, however long the relaunch took); GapCount
+    // is the cumulative committed-teardown count. Written by the tunnel only (epoch seconds /
+    // integer); the app READS them into the bug report's incident summary.
+    static let selfReconnectGapStartedAtDefaultsKey = "tunnel.selfReconnectGapStartedAt"
+    static let selfReconnectGapEndedAtDefaultsKey = "tunnel.selfReconnectGapEndedAt"
+    static let selfReconnectGapCountDefaultsKey = "tunnel.selfReconnectGapCount"
     // Aliased to the LavaSecCore stores so the app, tunnel, intents, and the
     // stores can never drift on key strings.
     static let protectionActiveSessionIDDefaultsKey = ProtectionSessionStore.Keys.activeSessionID
@@ -241,10 +268,55 @@ enum LavaSecDeviceDebugLog {
         return descriptor >= 0 ? descriptor : nil
     }
 
+    // Serializes rotation among THIS process's threads. On Darwin an `flock` taken via a separate
+    // descriptor in the SAME process does not reliably conflict (see FilterPublishLockTests), so the
+    // cross-process advisory lock below does NOT exclude two threads of this process — e.g. concurrent
+    // DoH/DoT/DoQ debug-logger callbacks both crossing the cap. This non-blocking in-process lock is
+    // the same-process half of the exclusion (Codex #212).
+    private static let rotationInProcessLock = NSLock()
+
+    // The app and tunnel (and every NWConnection queue) can cross the cap at the same
+    // instant. Without exclusion, two rotations race: writer B's removeItem deletes writer A's
+    // freshly-rotated `.1` and moveItem installs a near-empty file over it, destroying the rotated
+    // generation the report/export loaders (#183) read under incident load. `rotate` runs under TWO
+    // non-blocking guards, so it excludes both same-process threads and other processes:
+    //   - IN-PROCESS: `rotationInProcessLock.try()` — the cross-process flock alone can't exclude
+    //     same-process threads on Darwin (Codex #212). If another thread here holds it, that thread is
+    //     already rotating — skip.
+    //   - CROSS-PROCESS: a NON-BLOCKING exclusive advisory lock (`flock(LOCK_EX | LOCK_NB)`, via
+    //     `FilterPublishLock.withTryExclusiveLock`). If contended, another process is rotating — skip.
+    // Both guards are try-only: this runs on the tunnel's DNS-serving path (CON-1), so a rotation must
+    // NEVER block a writer — a skipped rotation just retries on the next append.
+    //   - After acquiring the locks, RE-FSTAT the log: the over-cap size was read (in appendLine)
+    //     BEFORE we held them, so a writer serialized AHEAD of us may have already rotated, leaving a
+    //     fresh (below-cap) file. Skip if it is no longer over cap — the re-check is what prevents the
+    //     double-rotate that deletes the fresh generation.
     private static func rotate(_ url: URL) {
-        let rotated = rotatedURL(for: url)
-        try? FileManager.default.removeItem(at: rotated)
-        try? FileManager.default.moveItem(at: url, to: rotated)
+        // In-process guard FIRST: non-blocking, so a second thread that is already rotating here makes
+        // this call skip rather than run a concurrent removeItem/moveItem (Codex #212).
+        guard rotationInProcessLock.`try`() else { return }
+        defer { rotationInProcessLock.unlock() }
+
+        // `withTryExclusiveLock` returns `Void?` (nil when contended / lock unavailable); the
+        // rotation is best-effort so the outcome is deliberately discarded.
+        _ = FilterPublishLock.withTryExclusiveLock(at: rotationLockURL) {
+            // Re-check under the lock: the over-cap size was read (in appendLine) BEFORE we held
+            // the lock, so a writer serialized ahead of us may have already rotated, leaving a
+            // fresh (below-cap) file we must leave alone.
+            guard let descriptor = openForAppend(url) else {
+                return
+            }
+            var info = stat()
+            let stillOverCap = fstat(descriptor, &info) == 0 && info.st_size >= Int64(maxLogFileBytes)
+            close(descriptor)
+            guard stillOverCap else {
+                return
+            }
+
+            let rotated = rotatedURL(for: url)
+            try? FileManager.default.removeItem(at: rotated)
+            try? FileManager.default.moveItem(at: url, to: rotated)
+        }
     }
 
     private static func rotatedURL(for url: URL) -> URL {
@@ -254,5 +326,13 @@ enum LavaSecDeviceDebugLog {
 
     private static var logURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename)
+    }
+
+    // Sibling of the log in the app-group container so app + tunnel + intents contend on
+    // the same inode (`nil` when the container is unavailable → rotation degrades-open, same
+    // as the append itself). Never one of the config/command locks: log rotation must not
+    // block a filter publish or protection command, or be blocked by one.
+    private static var rotationLockURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogRotationLockFilename)
     }
 }

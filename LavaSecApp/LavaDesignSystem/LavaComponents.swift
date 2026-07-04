@@ -31,6 +31,7 @@ struct LavaNavigationRow<Destination: View>: View {
                         .foregroundStyle(LavaStyle.safeGreen)
                         .frame(width: 34, height: 34)
                         .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.iconBadgeCornerRadius))
+                        .accessibilityHidden(true)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -48,6 +49,7 @@ struct LavaNavigationRow<Destination: View>: View {
                 Image(systemName: "chevron.right")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -339,6 +341,7 @@ struct LavaDetailRow: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title.lavaLocalized)
@@ -354,6 +357,7 @@ struct LavaDetailRow: View {
 
             Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -372,6 +376,7 @@ struct LavaMetricPill: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 54)
+        .accessibilityElement(children: .combine)
         .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius))
     }
 }
@@ -422,6 +427,7 @@ struct LavaOverviewMetricBlock: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 74)
+        .accessibilityElement(children: .combine)
     }
 }
 

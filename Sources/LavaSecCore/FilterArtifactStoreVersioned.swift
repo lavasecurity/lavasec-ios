@@ -195,6 +195,18 @@ extension FilterArtifactStore {
     /// writer's in-flight token is never reaped out from under it.
     public static let versionedGarbageGraceInterval: TimeInterval = 120
 
+    /// Grace window for WARM-dir GC (`collectWarmArtifactGarbage`), deliberately much longer
+    /// than `versionedGarbageGraceInterval`: warm GC's only job is reclaiming superseded warm
+    /// directories, where promptness is worthless. A same-filter republish overwrites
+    /// `lastCompiledToken` with the NEW token before the flip, so the just-superseded
+    /// previous pointer dir is in NO warm-GC retain set — past a short grace, a
+    /// draft-save-triggered warm GC could reap it while a slow lock-free tunnel pass
+    /// (pointer resolved, files not yet opened) sits between resolve and open, narrowing the
+    /// publish GC's keep-previous "survives a single supersession" posture to a redundant
+    /// cold rebuild. The long grace restores that protection without a pointer-schema change
+    /// (`FilterArtifactPointer` has no previousToken field to retain instead).
+    public static let warmGarbageGraceInterval: TimeInterval = 600
+
     /// Delete every versioned directory except the retained tokens. The caller passes
     /// the live token plus the immediately-previous one, so a reader mid-pass on the
     /// just-superseded directory still finds its files — this survives a SINGLE

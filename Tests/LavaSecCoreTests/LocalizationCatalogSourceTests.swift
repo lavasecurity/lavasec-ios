@@ -1,8 +1,23 @@
 import XCTest
 
 final class LocalizationCatalogSourceTests: XCTestCase {
+    /// Must stay in sync with the project's supported locales
+    /// (see Sources/LavaSecCore/Resources/*.lproj).
+    private static let expectedAppLocales: Set<String> = [
+        "de",
+        "en",
+        "es",
+        "fr",
+        "it",
+        "ja",
+        "ko",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant"
+    ]
+
     func testLocalizableCatalogDoesNotMarkManualKeysStale() throws {
-        let catalog = try Self.catalog(named: "Localizable.xcstrings")
+        let catalog = try Self.catalog(.localizableStringsCatalog)
         let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
         let staleKeys = strings
             .filter { $0.value["extractionState"] as? String == "stale" }
@@ -15,16 +30,31 @@ final class LocalizationCatalogSourceTests: XCTestCase {
         )
     }
 
-    private static func catalog(named fileName: String) throws -> [String: Any] {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let catalogURL = packageRootURL
-            .appendingPathComponent("LavaSecApp")
-            .appendingPathComponent(fileName)
-        let data = try Data(contentsOf: catalogURL)
+    func testPlusBillingOptionCatalogIncludesDynamicPaywallKeys() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+
+        for key in [
+            "Yearly, paid monthly",
+            "Lower monthly payment",
+            "\"If we commit for 12 months, each month is cheaper.\"",
+            "Family Sharing",
+            "%@ total"
+        ] {
+            let localizations = try XCTUnwrap(
+                strings[key]?["localizations"] as? [String: Any],
+                "Missing localization catalog key: \(key)"
+            )
+            XCTAssertEqual(
+                Set(localizations.keys),
+                Self.expectedAppLocales,
+                "Localization key \(key) must include every app locale because the generic string coverage script cannot see dynamic lavaLocalized paywall keys."
+            )
+        }
+    }
+
+    private static func catalog(_ sourceFile: SourceFile) throws -> [String: Any] {
+        let data = try Data(contentsOf: sourceFileURL(sourceFile))
 
         return try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]

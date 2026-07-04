@@ -24,6 +24,38 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
         )
     }
 
+    func testPrimaryIdentityIsStableAcrossDeviceDNSFallbackModeFlip() {
+        // COH-1: an encrypted primary's `primaryCacheIdentifier` must not change when device-DNS
+        // fallback MODE flips — the rejected-response streak is keyed on it, so a moving identity
+        // re-scopes the streak and pins the LAV-87 escalation (a second DNS-1 channel).
+        func primaryIdentity(fallbackModeActive: Bool, modeInsensitive: Bool) -> String {
+            DNSResolverRuntimePlan.make(
+                resolver: .cloudflareDoH,
+                fallbackToDeviceDNS: true,
+                deviceDNSAddresses: ["192.168.1.1"],
+                networkKind: .wifi,
+                deviceDNSFallbackModeActive: fallbackModeActive,
+                ignoresDeviceDNSFallbackMode: modeInsensitive
+            ).primaryCacheIdentifier
+        }
+
+        // Mode-SENSITIVE (the plain view): the flip DOES move the primary identity — the effective
+        // transport becomes `.deviceDNS`. This is exactly why the streak sites must not use it.
+        XCTAssertNotEqual(
+            primaryIdentity(fallbackModeActive: false, modeInsensitive: false),
+            primaryIdentity(fallbackModeActive: true, modeInsensitive: false),
+            "Under fallback mode the effective transport flips to device DNS, changing the plain primary identity."
+        )
+
+        // Mode-INSENSITIVE (what the rejected-streak count + change-detect sites use): the primary
+        // identity is pinned to the configured encrypted upstream and survives the flip.
+        XCTAssertEqual(
+            primaryIdentity(fallbackModeActive: false, modeInsensitive: true),
+            primaryIdentity(fallbackModeActive: true, modeInsensitive: true),
+            "ignoresDeviceDNSFallbackMode pins the primary identity to the configured upstream across a mode flip (COH-1)."
+        )
+    }
+
     func testDeviceDNSRejectionTriggerOnlyWhenResolverWedged() {
         // Healthy device resolver: a SERVFAIL/REFUSED reply is an authoritative
         // verdict, so the rejection path stays off (only no-response falls back).
@@ -270,5 +302,75 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
             deviceDNSFallbackModeActive: false
         )
         XCTAssertNotEqual(withEncryptedFallback.primaryCacheIdentifier, differentPrimary.primaryCacheIdentifier)
+    }
+
+    // (LAV-87) `orderedResolverAddresses` flips v4/v6 ordering by network kind, so the SAME
+    // primary address set must not read as a different identity across a wifi↔cellular flap —
+    // the rejected-response streak keys on this value and must survive exactly that churn.
+    func testPrimaryCacheIdentifierIsOrderInsensitiveAcrossNetworkKinds() {
+        let addresses = ["9.9.9.9", "2620:fe::fe"]
+        let wifi = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: addresses,
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        let cellular = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: addresses,
+            networkKind: .cellular,
+            deviceDNSFallbackModeActive: false
+        )
+        // wifi orders v4-first, cellular v6-first — the connection ordering really does differ...
+        XCTAssertNotEqual(wifi.plainAddresses, cellular.plainAddresses)
+        // ...but the primary IDENTITY must not.
+        XCTAssertEqual(wifi.primaryCacheIdentifier, cellular.primaryCacheIdentifier)
+    }
+
+    // Only the AUTOMATIC family flip is neutralized: a user swapping primary/secondary
+    // addresses within a family changes try-order behavior, so it must register as a real
+    // identity change (clearing identity-scoped evidence like the rejected streak) — carrying
+    // the old primary's rejection evidence onto a newly promoted primary would trigger a false
+    // reconnect after a single further rejection (Codex P2 on this PR).
+    func testPrimaryCacheIdentifierPreservesUserAddressOrderWithinFamily() {
+        let primaryFirst = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: ["9.9.9.9", "149.112.112.112"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        let secondaryFirst = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: ["149.112.112.112", "9.9.9.9"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        XCTAssertNotEqual(primaryFirst.primaryCacheIdentifier, secondaryFirst.primaryCacheIdentifier)
+    }
+
+    // The count-site scenario: an encrypted primary with the device fallback enabled (the
+    // default). Captured-address churn moves the FULL runtime identifier (it must — it is the
+    // runtime-reset no-op key) but never the primary identity the rejected streak is scoped to.
+    func testDeviceFallbackAddressChurnMovesRuntimeIdentifierButNotPrimaryIdentity() {
+        let before = DNSResolverRuntimePlan.make(
+            resolver: .cloudflareDoH,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        let after = DNSResolverRuntimePlan.make(
+            resolver: .cloudflareDoH,
+            fallbackToDeviceDNS: true,
+            deviceDNSAddresses: ["10.0.0.1"], // a handoff recaptured different device addresses
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false
+        )
+        XCTAssertNotEqual(before.cacheIdentifier, after.cacheIdentifier)
+        XCTAssertEqual(before.primaryCacheIdentifier, after.primaryCacheIdentifier)
     }
 }

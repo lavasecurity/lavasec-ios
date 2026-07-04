@@ -29,6 +29,7 @@ const allowedUntranslatedValues = new Set([
   "VPN",
   "LavaSec",
   "Lava Guard",
+  "Lava Filter",
   "Feedback",
   "Provider",
   "Social media",
@@ -51,6 +52,8 @@ const allowedUntranslatedValues = new Set([
   " (%@)",
   "%1$@ %2$@",
   "%@. %@",
+  "%@: %@",
+  "%@: %@ (%@ %d).",
   "OK",
   "→",
   "iOS",
@@ -216,6 +219,115 @@ for (const catalogPath of catalogs) {
     for (const key of requiredReleaseKeys) {
       if (!catalog.strings?.[key]) {
         fail(`${key}: missing release app localization key`);
+      }
+    }
+  }
+}
+
+// LavaSecCore ships widget/Live-Activity/tunnel-notification strings as legacy .strings files
+// (loaded via Bundle.module), one .lproj per locale. Those catalogs live outside the two app
+// xcstrings checked above, so without this pass a core key added EN-only would clear every gate.
+// Enforce key-set parity against the English base + flag values byte-identical to English as
+// likely-untranslated, reusing allowedUntranslatedValues so intentional brand/format strings pass.
+const coreResourcesDir = path.join(iosRoot, "Sources", "LavaSecCore", "Resources");
+// Grammar: "<key>" = "<value>"; — backslash escapes are kept intact so an escaped quote inside a
+// value doesn't prematurely close the match. Comment/blank lines simply don't match.
+const stringsEntryPattern = /^\s*"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/;
+
+const parseStringsFile = (filePath) => {
+  const entries = new Map();
+  for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
+    const match = line.match(stringsEntryPattern);
+    if (match) {
+      entries.set(match[1], match[2]);
+    }
+  }
+  return entries;
+};
+
+const coreStringsByLocale = new Map();
+for (const locale of requiredLocales) {
+  const filePath = path.join(coreResourcesDir, `${locale}.lproj`, "Localizable.strings");
+  if (!fs.existsSync(filePath)) {
+    fail(`LavaSecCore ${locale}.lproj/Localizable.strings is missing`);
+    continue;
+  }
+  coreStringsByLocale.set(locale, parseStringsFile(filePath));
+}
+
+const coreBase = coreStringsByLocale.get("en");
+if (coreBase) {
+  for (const locale of requiredLocales.filter((item) => item !== "en")) {
+    const entries = coreStringsByLocale.get(locale);
+    if (!entries) {
+      continue; // missing-file already reported above
+    }
+
+    for (const key of coreBase.keys()) {
+      if (!entries.has(key)) {
+        fail(`LavaSecCore ${locale}.lproj: missing key ${key}`);
+      }
+    }
+    for (const key of entries.keys()) {
+      if (!coreBase.has(key)) {
+        fail(`LavaSecCore ${locale}.lproj: extra key not in English base: ${key}`);
+      }
+    }
+
+    for (const [key, value] of entries) {
+      const english = coreBase.get(key);
+      if (english !== undefined && value === english && !allowedUntranslatedValues.has(english)) {
+        fail(`LavaSecCore ${locale}.lproj: ${key} still matches English source`);
+      }
+    }
+  }
+}
+
+// LavaSecIntents (the Focus App Intents extension) ships its own xcstrings, deliberately excluded
+// from the `catalogs` list above because it must NOT carry the app-only requiredReleaseKeys. It
+// still needs full per-locale coverage, so gate every key the same way as the app catalogs:
+// present in all locales, translated/reviewed, non-empty.
+const intentsCatalogPath = path.join(iosRoot, "LavaSecIntents", "Localizable.xcstrings");
+if (!fs.existsSync(intentsCatalogPath)) {
+  fail(`${path.relative(iosRoot, intentsCatalogPath)} is missing`);
+} else {
+  let intentsCatalog = null;
+  try {
+    intentsCatalog = JSON.parse(fs.readFileSync(intentsCatalogPath, "utf8"));
+  } catch (error) {
+    fail(`${path.relative(iosRoot, intentsCatalogPath)} is not valid JSON: ${error.message}`);
+  }
+
+  if (intentsCatalog) {
+    if (intentsCatalog.sourceLanguage !== "en") {
+      fail(`${path.relative(iosRoot, intentsCatalogPath)} must use en as sourceLanguage`);
+    }
+
+    for (const [key, value] of Object.entries(intentsCatalog.strings || {})) {
+      for (const locale of requiredLocales) {
+        const unit = value.localizations?.[locale]?.stringUnit;
+        if (!unit) {
+          fail(`LavaSecIntents ${key}: missing ${locale} localization`);
+          continue;
+        }
+
+        if (!["translated", "reviewed"].includes(unit.state)) {
+          fail(`LavaSecIntents ${key}: ${locale} must be translated or reviewed`);
+        }
+
+        if (!unit.value || unit.value.trim() === "") {
+          fail(`LavaSecIntents ${key}: ${locale} value must not be empty`);
+        }
+
+        // Mirror the app-catalog + core `.strings` passes: a non-English value byte-identical
+        // to the English source is a likely copied-English string that shipped marked
+        // translated/reviewed. Allowlisted brand/format strings (Lava Security, %@, …) pass.
+        if (locale !== "en") {
+          const english = value.localizations?.en?.stringUnit?.value;
+          if (english !== undefined && unit.value === english && !allowedUntranslatedValues.has(english)) {
+            fail(`LavaSecIntents ${key}: ${locale} still matches English source`);
+          }
+        }
       }
     }
   }

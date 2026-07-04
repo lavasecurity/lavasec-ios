@@ -2,7 +2,7 @@ import XCTest
 
 final class PublicNetworkActivityFeatureTests: XCTestCase {
     func testNetworkActivityControlsAreNotQAGated() throws {
-        let settingsSource = try readSource("LavaSecApp/SettingsView.swift")
+        let settingsSource = try readSource(.settingsView)
 
         assertPhraseNotInsideQAConditional("Toggle(\"Keep local network activity\"", in: settingsSource)
         assertPhraseNotInsideQAConditional("localLogClearButton(.networkActivity)", in: settingsSource)
@@ -10,32 +10,20 @@ final class PublicNetworkActivityFeatureTests: XCTestCase {
     }
 
     func testNetworkActivityLogViewIsNotQAGated() throws {
-        let diagnosticsSource = try readSource("LavaSecApp/DiagnosticsView.swift")
+        let diagnosticsSource = try readSource(.diagnosticsView)
 
         assertPhraseNotInsideQAConditional(".localLogSubpageChrome(", in: diagnosticsSource)
         assertPhraseNotInsideQAConditional("struct NetworkActivityLogView", in: diagnosticsSource)
     }
 
     func testNetworkActivityLoggingIsNotQAGated() throws {
-        let appViewModelSource = try readSource("LavaSecApp/AppViewModel.swift")
-        let tunnelSource = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
+        let appViewModelSource = try readSource(.appViewModel)
+        let tunnelSource = try readSource(.packetTunnelProvider)
 
         assertPhraseNotInsideQAConditional("logSettings.append(configuration.keepNetworkActivity)", in: appViewModelSource)
         assertPhraseNotInsideQAConditional("guard configuration.keepNetworkActivity else", in: appViewModelSource)
         assertPhraseNotInsideQAConditional("guard configuration.keepNetworkActivity else", in: tunnelSource)
         assertPhraseNotInsideQAConditional("event: .reconnectNeeded(reason: health.lastFailureReason", in: tunnelSource)
-    }
-
-    private func readSource(_ relativePath: String) throws -> String {
-        let sourceURL = packageRootURL.appendingPathComponent(relativePath)
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private var packageRootURL: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
     }
 
     private func assertPhraseNotInsideQAConditional(

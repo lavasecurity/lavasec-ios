@@ -5,13 +5,15 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+
+# NB: intentionally NO `paths-ignore` (REL-6). A docs filter means a docs-only PR never
+# TRIGGERS this workflow, so its required contexts (Repo Checks, Swift Package Tests,
+# iOS Simulator Build) are never reported and the PR is stuck on "Expected — waiting for
+# status" with only an admin override to escape — hostile to the outside doc contributors
+# CONTRIBUTING.md invites, and normalizing the override habit. Instead the workflow always
+# runs; the `changes` job flags a docs-only diff so the expensive macOS jobs short-circuit
+# their work (still completing green) while the contexts always report.
 
 concurrency:
   group: ios-ci-${{ github.ref }}
@@ -40,6 +42,47 @@ concurrency:
 # tooling, not here.
 
 jobs:
+  changes:
+    # Flags a docs-only PR so the expensive macOS jobs can short-circuit while still
+    # completing (their required contexts must report — see the no-paths-ignore note
+    # above). Cheap Linux; the mac jobs `needs:` it. Non-PR events (push/dispatch) and
+    # anything that can't be classified fall through to docs_only=false → jobs run fully.
+    name: Detect docs-only diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.detect.outputs.docs_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # need base..head to diff the PR's file list
+      - name: Detect docs-only diff
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Only PRs can be short-circuited; a push to main always runs fully.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"; echo "not a PR → run fully"; exit 0
+          fi
+          # --no-renames so a rename decomposes into delete(old)+add(new): renaming a
+          # buildable source INTO docs/ or to a *.md name would otherwise show ONLY the
+          # docs destination (git's default rename detection), read as docs-only, and skip
+          # the build for a tree that actually lost a source file (Codex P2 #232).
+          files=$(git diff --no-renames --name-only "$BASE".."$HEAD" || true)
+          echo "changed files:"; printf '%s\n' "$files"
+          # Fail safe: an empty/undeterminable diff runs fully. docs-only ⇔ EVERY changed
+          # file is under docs/ or ends in .md (README, CONTRIBUTING, etc.).
+          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^(docs/|.*\.md$)'; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"; echo "non-docs changes present → run fully"
+          else
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"; echo "docs-only → macOS jobs short-circuit"
+          fi
+
   repo-checks:
     name: Repo Checks
     runs-on: ubuntu-latest
@@ -116,6 +159,7 @@ jobs:
 
   swift-package-tests:
     name: Swift Package Tests
+    needs: changes
     # Per-lane runner WITHOUT forking this byte-identical file (same trick as
     # ios-simulator-build's gate). Self-hosted is ALLOWLISTED to the exact private repo
     # (it owns lava-mac-vm-ios-internal). EVERY other repo — the public lavasec-ios AND
@@ -125,7 +169,12 @@ jobs:
     # runner to a GitHub-hosted label via the IOS_CI_MAC_RUNNER repo var if the VM is
     # offline (mirrors light-build's fallback). The `if` additionally skips a fork PR
     # opened against the private repo, so fork code can never execute on the VM.
-    if: ${{ github.repository != 'lavasecurity/lavasec-ios-internal' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+    # `!cancelled()` forces this REQUIRED job to run even if the `changes` prerequisite FAILED
+    # (transient checkout/git-diff/outage) instead of being skipped by `needs` — a skipped-after-
+    # failed-dependency required check may not block the PR, so a code PR could merge without this
+    # macOS check (Codex P1 #232). On a `changes` failure `docs_only` is '' so the step-level guard
+    # runs the suite fully (fail-safe). The fork-guard is preserved (parenthesised under the &&).
+    if: ${{ !cancelled() && (github.repository != 'lavasecurity/lavasec-ios-internal' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) }}
     runs-on: ${{ github.repository == 'lavasecurity/lavasec-ios-internal' && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
     timeout-minutes: 15
     steps:
@@ -135,16 +184,51 @@ jobs:
       - name: Show Xcode Version
         run: xcodebuild -version
 
+      - name: Prepare warm test cache (per-runner, Xcode-keyed)
+        # Docs-only PRs skip the mac test entirely (REL-6); the job still completes so its
+        # required "Swift Package Tests" context reports green.
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        run: |
+          set -euo pipefail
+          # Warm per-runner cache keyed by the Xcode build version. On GitHub-hosted runners the home
+          # dir is ephemeral so this is just a cold run (harmless); on a persistent self-hosted runner
+          # it makes incremental test builds fast. Growth is bounded by the runner maintenance sweep.
+          XC="$(xcodebuild -version 2>/dev/null | awk '/^Build version/{print $3}')"; XC="${XC:-unknown}"
+          CACHE="$HOME/.lava-ci/cache/${RUNNER_NAME:-shared}/xcode-$XC"
+          mkdir -p "$CACHE/.build" "$CACHE/spm"
+          { echo "SCRATCH=$CACHE/.build"; echo "SPMCACHE=$CACHE/spm"; } >> "$GITHUB_ENV"
+          echo "warm cache: $CACHE"
+
       - name: Test LavaSecCore
-        run: swift test --package-path .
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        run: |
+          set -euo pipefail
+          # Warm per-runner cache ($SCRATCH/$SPMCACHE from the "Prepare warm test cache" step). The
+          # shared flock lets the maintenance sweep GC that cache safely, never mid-build. On
+          # GitHub-hosted runners RUNNER_ENVIRONMENT != "self-hosted", so this runs unwrapped.
+          LOCK="$HOME/.lava-ci/maintenance.lock"; mkdir -p "$(dirname "$LOCK")"
+          cmd=(swift test --package-path .
+            --scratch-path "$SCRATCH"
+            --cache-path "$SPMCACHE")
+          if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
+            FLOCK="$(command -v flock || true)"
+            [ -n "$FLOCK" ] || for c in /opt/homebrew/bin/flock /usr/local/bin/flock; do [ -x "$c" ] && FLOCK="$c" && break; done
+            [ -n "$FLOCK" ] || { echo "::error::flock required on self-hosted runner (brew install flock)"; exit 1; }
+            "$FLOCK" -s "$LOCK" "${cmd[@]}"
+          else
+            "${cmd[@]}"
+          fi
 
   ios-simulator-build:
     name: iOS Simulator Build
+    needs: changes
     # Gated to the public repo: the full xcodebuild compile burns billed macOS
     # minutes, which are free on public but cost real money on the private lane.
     # The private lane gets app-compile coverage from light-build.yml on owned
     # hardware instead, so it skips this job for $0.
-    if: ${{ github.repository == 'lavasecurity/lavasec-ios' }}
+    # `!cancelled()` so a FAILED `changes` prerequisite doesn't skip this required job (see
+    # swift-package-tests' note — Codex P1 #232); the public-repo gate is preserved.
+    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' }}
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -155,6 +239,9 @@ jobs:
         run: xcodebuild -version
 
       - name: Build LavaSec
+        # Docs-only PRs skip the ~30-min compile (REL-6); the job still reports its
+        # required "iOS Simulator Build" context green.
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: |
           xcodebuild \
             -project LavaSec.xcodeproj \

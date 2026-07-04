@@ -120,6 +120,7 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.consecutiveDNSSmokeProbeFailureCount, 0)
         XCTAssertEqual(snapshot.consecutiveRejectedSmokeResponseCount, 0)
         XCTAssertNil(snapshot.rejectedSmokeResponseResolverIdentity)
+        XCTAssertEqual(snapshot.rejectedSmokeResponseRescopeCount, 0)
         XCTAssertNil(snapshot.lastUpstreamDurationMilliseconds)
         XCTAssertEqual(snapshot.slowUpstreamResponseCount, 0)
         XCTAssertEqual(snapshot.consecutiveSlowUpstreamResponseCount, 0)
@@ -127,6 +128,9 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertNil(snapshot.lastNetworkSettingsReapplyFailureAt)
         XCTAssertNil(snapshot.lastNetworkSettingsReapplyFailureReason)
         XCTAssertEqual(snapshot.networkSettingsReapplyFailureCount, 0)
+        XCTAssertEqual(snapshot.failClosedServedQueryCount, 0)
+        XCTAssertNil(snapshot.lastFailClosedAt)
+        XCTAssertNil(snapshot.lastFailClosedReason)
     }
 
     func testHealthRoundTripPreservesNetworkRecoveryFields() throws {
@@ -196,7 +200,8 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         let snapshot = TunnelHealthSnapshot(
             lastFailureReason: "rejected-response",
             consecutiveRejectedSmokeResponseCount: 3,
-            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201"
+            rejectedSmokeResponseResolverIdentity: "device:220.159.212.200,220.159.212.201",
+            rejectedSmokeResponseRescopeCount: 2
         )
 
         let data = try JSONEncoder().encode(snapshot)
@@ -207,5 +212,22 @@ final class TunnelHealthSnapshotTests: XCTestCase {
             decoded.rejectedSmokeResponseResolverIdentity,
             "device:220.159.212.200,220.159.212.201"
         )
+        XCTAssertEqual(decoded.rejectedSmokeResponseRescopeCount, 2)
+    }
+
+    func testHealthRoundTripPreservesFailClosedTrace() throws {
+        let failClosedAt = Date(timeIntervalSinceReferenceDate: 800_800_000)
+        let snapshot = TunnelHealthSnapshot(
+            failClosedServedQueryCount: 42,
+            lastFailClosedAt: failClosedAt,
+            lastFailClosedReason: "snapshot-unavailable"
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.failClosedServedQueryCount, 42)
+        XCTAssertEqual(decoded.lastFailClosedAt, failClosedAt)
+        XCTAssertEqual(decoded.lastFailClosedReason, "snapshot-unavailable")
     }
 }

@@ -136,6 +136,7 @@ struct LavaScreenContent<Content: View>: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
+                    .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .overlay(alignment: .trailing) {
                         if let titleAccessory {
@@ -580,6 +581,7 @@ struct LavaSectionGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title.lavaLocalized)
                 .lavaSectionLabelText()
+                .accessibilityAddTraits(.isHeader)
 
             content
 

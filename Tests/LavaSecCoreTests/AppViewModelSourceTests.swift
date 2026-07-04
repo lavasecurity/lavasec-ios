@@ -2,12 +2,12 @@ import XCTest
 
 final class AppViewModelSourceTests: XCTestCase {
     func testNotifierUsesPreClearHistoryAndOnlyProblemsAdvanceThrottle() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
         // The app notifier must evaluate notification(for:) against the captured
         // pre-clear `history`, not a re-read (which would have dropped the
         // unresolved-problem marker the silent banner-clear keys off).
-        let scheduleBlock = try Self.sourceBlock(
+        let scheduleBlock = try sourceBlock(
             in: source,
             startingAt: "func scheduleIfNeeded(",
             endingBefore: "func requestAuthorization()"
@@ -26,18 +26,18 @@ final class AppViewModelSourceTests: XCTestCase {
         // The 600s problem throttle keys off the delivered-at timestamp, so only a
         // problem delivery may advance it. (Only actionable problem banners are
         // delivered now — no recovery acknowledgement.)
-        let recordBlock = try Self.sourceBlock(
+        let recordBlock = try sourceBlock(
             in: source,
             startingAt: "private func recordDelivery(of notification:",
             endingBefore: "private func removeSupersededNotifications("
         )
-        let prefix = try Self.sourceBlock(
+        let prefix = try sourceBlock(
             in: recordBlock,
             startingAt: "defaults.set(",
             endingBefore: "if notification.kind.isProblem {"
         )
         XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
-        let problemBranch = try Self.sourceBlock(
+        let problemBranch = try sourceBlock(
             in: source,
             startingAt: "if notification.kind.isProblem {",
             endingBefore: "private func removeSupersededNotifications("
@@ -45,17 +45,21 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
         // No recovery-acknowledgement delivery path remains in recordDelivery.
         XCTAssertFalse(recordBlock.contains(".reconnected"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("notificationHistory"))
     }
 
     func testEncryptedFallbackSilentClearAlsoLiftsTheDuplicateGuardID() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
         // Back-dating `lastDeliveredAt` alone is not enough: the silent supersede removed
         // the reconnect banner, so the persisted last-delivered *id* must also be cleared.
         // Otherwise a lapse back to `.needsReconnect` with the same event id is suppressed by
         // notification(for:)'s exact-id duplicate guard until a later probe shifts the id,
         // defeating the back-dated cooldown. The clear must live in the cooldown branch so a
         // real `.healthy` recovery (cooldownAnchor == nil) keeps its duplicate guard intact.
-        let cooldownBranch = try Self.sourceBlock(
+        let cooldownBranch = try sourceBlock(
             in: source,
             startingAt: "if let cooldownAnchor {",
             endingBefore: "let requestIdentifiers = identifiers.map {"
@@ -67,8 +71,8 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testEncryptedFallbackCoverageLiftsDuplicateGuardWithNoOutstandingBanner() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let scheduleBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let scheduleBlock = try sourceBlock(
             in: source,
             startingAt: "func scheduleIfNeeded(",
             endingBefore: "func requestAuthorization()"
@@ -76,7 +80,7 @@ final class AppViewModelSourceTests: XCTestCase {
         // When coverage engages with no problem banner outstanding (the resolved-ids list is
         // empty so clearResolvedProblemNotifications never runs), the duplicate-guard id must
         // still be lifted, else a later lapse to a same-second reconnect id is suppressed.
-        let coverageBranch = try Self.sourceBlock(
+        let coverageBranch = try sourceBlock(
             in: scheduleBlock,
             startingAt: "} else if assessment.severity == .usingEncryptedFallback {",
             endingBefore: "// Use the pre-clear"
@@ -88,18 +92,18 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testLiveDNSSmokeCanForceResolverPresetFromLaunchArguments() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let runtimeSupportBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let runtimeSupportBlock = try sourceBlock(
             in: source,
             startingAt: "private static let protectionStopWaitTimeout",
             endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
         )
-        let launchArgumentBlock = try Self.sourceBlock(
+        let launchArgumentBlock = try sourceBlock(
             in: source,
             startingAt: "static let liveDNSSmokeTestLaunchArgument",
             endingBefore: "#endif"
         )
-        let configurationBlock = try Self.sourceBlock(
+        let configurationBlock = try sourceBlock(
             in: source,
             startingAt: "private func applyLiveDNSSmokeTestConfigurationIfRequested",
             endingBefore: "#endif"
@@ -123,11 +127,15 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(configurationBlock.contains("try? persistConfigurationOnly()"))
         XCTAssertTrue(configurationBlock.contains("logVPNDebugEvent(\"live-dns-smoke-configuration-persisted\""))
         XCTAssertFalse(configurationBlock.contains("configuration.resolverPresetID = DNSResolverPreset.google.id"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("supportsDNSOverQUICRuntime"))
     }
 
     func testLiveDNSSmokeDebugProbeAlwaysRestartsTunnelAfterPersistingResolverOverride() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let probeBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let probeBlock = try sourceBlock(
             in: source,
             startingAt: "private func runVPNStartupDebugProbe() async",
             endingBefore: "private func logVPNDebugEvent"
@@ -140,13 +148,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNLifecycleSmokeDebugProbeExercisesPauseResumeCommandPath() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let launchArgumentBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let launchArgumentBlock = try sourceBlock(
             in: source,
             startingAt: "static let liveDNSSmokeTestLaunchArgument",
             endingBefore: "#endif"
         )
-        let lifecycleProbeBlock = try Self.sourceBlock(
+        let lifecycleProbeBlock = try sourceBlock(
             in: source,
             startingAt: "private func runVPNLifecycleSmokeProbe() async",
             endingBefore: "private func logVPNDebugEvent"
@@ -168,8 +176,8 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProviderMessagesRecordLatencySpanRequestReplyAndErrors() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let sendTunnelMessageBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let sendTunnelMessageBlock = try sourceBlock(
             in: source,
             startingAt: "private func sendTunnelMessage(",
             endingBefore: "private func requestTunnelHealthFlush() async"
@@ -192,48 +200,48 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProtectionActionsRecordRootLatencySpansAndPropagateOperationIDs() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let enableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(",
             endingBefore: "private func reconnectProtectionNow"
         )
-        let refreshBlock = try Self.sourceBlock(
+        let refreshBlock = try sourceBlock(
             in: source,
             startingAt: "private func performCatalogSync(",
             endingBefore: "func syncCatalogIfStale()"
         )
-        let pauseBlock = try Self.sourceBlock(
+        let pauseBlock = try sourceBlock(
             in: source,
             startingAt: "func pauseProtectionTemporarily(for option: ProtectionPauseDuration)",
             endingBefore: "func resumeProtectionNow()"
         )
-        let resumeBlock = try Self.sourceBlock(
+        let resumeBlock = try sourceBlock(
             in: source,
             startingAt: "private func restoreFiltersAfterTemporaryProtectionPause(",
             endingBefore: "private func clearTemporaryProtectionPause()"
         )
-        let notifySnapshotBlock = try Self.sourceBlock(
+        let notifySnapshotBlock = try sourceBlock(
             in: source,
             startingAt: "private func notifyTunnelSnapshotUpdated(",
             endingBefore: "private func notifyTunnelProtectionPauseUpdated("
         )
-        let notifyPauseBlock = try Self.sourceBlock(
+        let notifyPauseBlock = try sourceBlock(
             in: source,
             startingAt: "private func notifyTunnelProtectionPauseUpdated(",
             endingBefore: "private func restoreProtectionIfNeeded"
         )
-        let cachedRefreshFallbackBlock = try Self.sourceBlock(
+        let cachedRefreshFallbackBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadCachedCatalogAfterSyncFailure(",
             endingBefore: "private func rebuildEnabledBlockRules()"
         )
-        let latencyHelperBlock = try Self.sourceBlock(
+        let latencyHelperBlock = try sourceBlock(
             in: source,
             startingAt: "private func makeLatencyTrace(",
             endingBefore: "private func makeBugReportBundle"
@@ -281,8 +289,8 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testSwitchingResolversKeepsSavedCustomDNSEntry() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let setResolverBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let setResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func setResolver(_ preset: DNSResolverPreset)",
             endingBefore: "func setCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)"
@@ -292,11 +300,18 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertFalse(setResolverBlock.contains("configuration.customResolverSecondaryAddress = nil"))
         XCTAssertFalse(setResolverBlock.contains("configuration.customResolverName = nil"))
         XCTAssertFalse(setResolverBlock.contains("preset.id != DNSResolverPreset.customID"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("customResolverAddress"))
+        XCTAssertTrue(source.contains("customResolverSecondaryAddress"))
+        XCTAssertTrue(source.contains("customResolverName"))
+        XCTAssertTrue(source.contains("customID"))
     }
 
     func testSavingCustomResolverPersistsPrimaryAndSecondaryAddressesTogether() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let customResolverBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let customResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func setCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)",
             endingBefore: "func setCustomResolverAddress(_ rawValue: String)"
@@ -313,8 +328,8 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testClearingCustomResolverRemovesSavedEntryAndKeepsActiveResolverValid() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let clearCustomResolverBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let clearCustomResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func clearCustomResolver(fallback preset: DNSResolverPreset)",
             endingBefore: "func setCustomResolverAddress(_ rawValue: String)"
@@ -329,9 +344,9 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testFallbackResolverSettersMirrorPrimaryAndTargetFallbackFields() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
+        let source = try readSource(.appViewModel)
 
-        let toggleBlock = try Self.sourceBlock(
+        let toggleBlock = try sourceBlock(
             in: source,
             startingAt: "func setUsesEncryptedDeviceDNSFallback(_ usesEncryptedDeviceDNSFallback: Bool)",
             endingBefore: "func setFallbackResolver(_ preset: DNSResolverPreset)"
@@ -342,7 +357,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(toggleBlock.contains("appendAppNetworkActivity(.toggleDeviceDNSFallback)"))
         XCTAssertTrue(toggleBlock.contains("sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"))
 
-        let setResolverBlock = try Self.sourceBlock(
+        let setResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func setFallbackResolver(_ preset: DNSResolverPreset)",
             endingBefore: "func setFallbackCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)"
@@ -351,7 +366,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(setResolverBlock.contains("configuration.fallbackResolverPresetID = preset.id"))
         XCTAssertTrue(setResolverBlock.contains("persistResolverSettings(activity: .changeResolver)"))
 
-        let setAddressesBlock = try Self.sourceBlock(
+        let setAddressesBlock = try sourceBlock(
             in: source,
             startingAt: "func setFallbackCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)",
             endingBefore: "func clearFallbackCustomResolver(fallback preset: DNSResolverPreset)"
@@ -362,7 +377,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(setAddressesBlock.contains("configuration.fallbackCustomResolverSecondaryAddress = normalizedSecondaryValue"))
         XCTAssertTrue(setAddressesBlock.contains("persistResolverSettings(activity: .changeResolver)"))
 
-        let clearBlock = try Self.sourceBlock(
+        let clearBlock = try sourceBlock(
             in: source,
             startingAt: "func clearFallbackCustomResolver(fallback preset: DNSResolverPreset)",
             endingBefore: "func setFallbackCustomResolverAddress(_ rawValue: String)"
@@ -374,7 +389,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(clearBlock.contains("configuration.fallbackResolverPresetID = fallbackPreset.id"))
         XCTAssertTrue(clearBlock.contains("persistResolverSettings(activity: .changeResolver)"))
 
-        let nameBlock = try Self.sourceBlock(
+        let nameBlock = try sourceBlock(
             in: source,
             startingAt: "func setFallbackCustomResolverName(_ rawValue: String)",
             endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
@@ -386,8 +401,8 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistDisplayKeepsSavedSourcesWhileEditing() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let displayedCustomBlocklistsBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let displayedCustomBlocklistsBlock = try sourceBlock(
             in: source,
             startingAt: "private var displayedCustomBlocklists: [CustomBlocklistSource]",
             endingBefore: "var allowlistConfigured: Bool"
@@ -411,23 +426,23 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistDraftKeepsSourcesWhenDisabledAndDeletesOnlyFromTrash() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let setDraftBlocklistsBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let setDraftBlocklistsBlock = try sourceBlock(
             in: source,
             startingAt: "func setDraftBlocklists(_ sourceIDs: Set<String>)",
             endingBefore: "func addCustomBlocklistToDraft"
         )
-        let removeBlocklistBlock = try Self.sourceBlock(
+        let removeBlocklistBlock = try sourceBlock(
             in: source,
             startingAt: "func removeBlocklistFromDraft(_ sourceID: String)",
             endingBefore: "func deleteCustomBlocklistFromDraft"
         )
-        let deleteCustomBlocklistBlock = try Self.sourceBlock(
+        let deleteCustomBlocklistBlock = try sourceBlock(
             in: source,
             startingAt: "func deleteCustomBlocklistFromDraft(_ sourceID: String)",
             endingBefore: "func undoBlocklistDraftChange"
         )
-        let undoBlocklistBlock = try Self.sourceBlock(
+        let undoBlocklistBlock = try sourceBlock(
             in: source,
             startingAt: "func undoBlocklistDraftChange(_ sourceID: String)",
             endingBefore: "func addBlockedDomainToDraft"
@@ -445,13 +460,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistMetadataShowsPendingRefreshUntilCompiled() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let metadataBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let metadataBlock = try sourceBlock(
             in: source,
             startingAt: "func blocklistMetadataText(for sourceID: String) -> String?",
             endingBefore: "func syncCatalogIfNeeded() async"
         )
-        let nameBlock = try Self.sourceBlock(
+        let nameBlock = try sourceBlock(
             in: source,
             startingAt: "func blocklistName(for sourceID: String) -> String",
             endingBefore: "func isBlocklistPendingRemoval"
@@ -465,13 +480,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistDraftRejectsOnlyCustomDisplayNameConflicts() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let draftAddBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let draftAddBlock = try sourceBlock(
             in: source,
             startingAt: "func addCustomBlocklistToDraft(displayName: String, rawURL: String) -> String?",
             endingBefore: "func removeBlocklistFromDraft"
         )
-        let immediateAddBlock = try Self.sourceBlock(
+        let immediateAddBlock = try sourceBlock(
             in: source,
             startingAt: "func addCustomBlocklist(displayName: String, rawURL: String) -> String?",
             endingBefore: "func removeCustomBlocklist"
@@ -499,18 +514,18 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testReconnectOnlyRunsFromExplicitUserOrDebugActions() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let refreshTunnelHealthBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let refreshTunnelHealthBlock = try sourceBlock(
             in: source,
             startingAt: "func refreshTunnelHealth(force: Bool = false)",
             endingBefore: "func sampleTunnelHealth() async"
         )
-        let notificationBlock = try Self.sourceBlock(
+        let notificationBlock = try sourceBlock(
             in: source,
             startingAt: "private func scheduleProtectionNotificationIfNeeded()",
             endingBefore: "private func appendAppNetworkActivity"
         )
-        let primaryActionBlock = try Self.sourceBlock(
+        let primaryActionBlock = try sourceBlock(
             in: source,
             startingAt: "func performProtectionPrimaryAction()",
             endingBefore: "func turnOffProtection()"
@@ -526,53 +541,53 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProtectionHapticsAreOutcomeDrivenAndSkipAutomaticRestores() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let hapticBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let hapticBlock = try sourceBlock(
             in: source,
             startingAt: "enum ProtectionHapticFeedback",
             endingBefore: "final class AppViewModel"
         )
-        let updateStatusBlock = try Self.sourceBlock(
+        let updateStatusBlock = try sourceBlock(
             in: source,
             startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
             endingBefore: "private func scheduleProtectionNotificationIfNeeded()"
         )
-        let enableBlock = try Self.sourceBlock(
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(",
             endingBefore: "private func reconnectProtectionNow"
         )
-        let reconnectBlock = try Self.sourceBlock(
+        let reconnectBlock = try sourceBlock(
             in: source,
             startingAt: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async",
             endingBefore: "private func waitForProtectionToStop(timeout:"
         )
-        let restoreBlock = try Self.sourceBlock(
+        let restoreBlock = try sourceBlock(
             in: source,
             startingAt: "private func restoreProtectionIfNeeded(wasEnabled: Bool) async",
             endingBefore: "private func sendTunnelMessage"
         )
-        let successHapticBlock = try Self.sourceBlock(
+        let successHapticBlock = try sourceBlock(
             in: source,
             startingAt: "private func playProtectionOnSucceededHapticIfNeeded",
             endingBefore: "private func playProtectionStartFailedHaptic()"
         )
-        let failureHapticFeedbackBlock = try Self.sourceBlock(
+        let failureHapticFeedbackBlock = try sourceBlock(
             in: hapticBlock,
             startingAt: "case .protectionStartFailed:",
             endingBefore: "case .protectionTurnedOff:"
         )
-        let failureHapticBlock = try Self.sourceBlock(
+        let failureHapticBlock = try sourceBlock(
             in: source,
             startingAt: "private func playProtectionStartFailedHaptic()",
             endingBefore: "private func scheduleProtectionNotificationIfNeeded()"
         )
-        let turnedOffHapticBlock = try Self.sourceBlock(
+        let turnedOffHapticBlock = try sourceBlock(
             in: hapticBlock,
             startingAt: "case .protectionTurnedOff:",
             endingBefore: "}"
@@ -601,16 +616,20 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(reconnectBlock.contains("await enableProtection(logUserAction: false, playsOutcomeHaptic: playsOutcomeHaptic)"))
         XCTAssertTrue(reconnectBlock.contains("playProtectionStartFailedHaptic()"))
         XCTAssertTrue(restoreBlock.contains("await enableProtection(logUserAction: false, playsOutcomeHaptic: false)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("ProtectionHapticFeedback"))
     }
 
     func testLavaHapticsToggleGatesEveryPlaybackAndOutcomeSurfaces() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let hapticBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let hapticBlock = try sourceBlock(
             in: source,
             startingAt: "enum ProtectionHapticFeedback",
             endingBefore: "final class AppViewModel"
         )
-        let setterBlock = try Self.sourceBlock(
+        let setterBlock = try sourceBlock(
             in: source,
             startingAt: "func setUsesLavaHaptics(_ isEnabled: Bool)",
             endingBefore: "var protectionTitle: String"
@@ -647,23 +666,23 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCatalogSyncAndReconnectWaitWithoutBusyPolling() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let enableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let syncBlock = try Self.sourceBlock(
+        let syncBlock = try sourceBlock(
             in: source,
             startingAt: "func syncCatalog(isBackgroundRefresh: Bool = false) async",
             endingBefore: "func syncCatalogIfStale() async"
         )
-        let performSyncBlock = try Self.sourceBlock(
+        let performSyncBlock = try sourceBlock(
             in: source,
             startingAt: "private func performCatalogSync(",
             endingBefore: "func syncCatalogIfStale() async"
         )
-        let waitBlock = try Self.sourceBlock(
+        let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
@@ -698,16 +717,20 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("statusPollInterval: Self.protectionStopStatusRefreshInterval"))
         XCTAssertFalse(waitBlock.contains("for _ in 0..<12"))
         XCTAssertFalse(waitBlock.contains("Task.sleep(nanoseconds: 250_000_000)"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("isSyncingCatalog"))
     }
 
     func testCacheFirstTurnOnSkipsSyncWaitWhenArtifactReusable() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let enableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let gateBlock = try Self.sourceBlock(
+        let gateBlock = try sourceBlock(
             in: source,
             startingAt: "private func hasReusableArtifactForCurrentConfiguration() async -> Bool",
             endingBefore: "private func loadPreparedFilterSummaryForCurrentConfiguration()"
@@ -754,33 +777,37 @@ final class AppViewModelSourceTests: XCTestCase {
             gateBlock.contains("JSONDecoder().decode(PreparedFilterSnapshot.self"),
             "The cache-first gate must stay manifest-only; decoding the prepared snapshot belongs to the authoritative reuse load."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("PreparedFilterSnapshot"))
     }
 
     func testVPNStopAndStartWaitThroughIOSDisconnectingState() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
-        let guardSource = try Self.source(named: "GuardView.swift", in: "LavaSecApp")
-        let initBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let rootSource = try readSource(.rootView)
+        let guardSource = try readSource(.guardView)
+        let initBlock = try sourceBlock(
             in: source,
             startingAt: "if loadVPNState {",
             endingBefore: "#if DEBUG\n            logVPNDebugEvent"
         )
-        let enableBlock = try Self.sourceBlock(
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(",
             endingBefore: "private func reconnectProtectionNow"
         )
-        let waitBlock = try Self.sourceBlock(
+        let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
         )
-        let stopPendingStatusBlock = try Self.sourceBlock(
+        let stopPendingStatusBlock = try sourceBlock(
             in: source,
             startingAt: "private func isProtectionStopPendingStatus",
             endingBefore: "private func isLocalProtectionUptimeStatus"
@@ -815,13 +842,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNStopTimeoutLeavesActionableStatusInsteadOfClearingTheMessage() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let disableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(",
             endingBefore: "private func reconnectProtectionNow"
         )
-        let waitBlock = try Self.sourceBlock(
+        let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
@@ -833,7 +860,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(disableBlock.contains("await waitForProtectionToStop() == false"))
         XCTAssertTrue(disableBlock.contains("guard await forceRemoveStuckProtectionProfile() else"))
         XCTAssertTrue(disableBlock.contains("throw LavaSecAppError.vpnStillStopping"))
-        XCTAssertTrue(disableBlock.contains("vpnMessage = Self.vpnErrorMessage(prefix: \"Could not stop protection\", error: error)"))
+        XCTAssertTrue(disableBlock.contains("vpnMessage = Self.vpnErrorMessage(prefix: \"Could not stop protection\".lavaLocalized, error: error)"))
         // The timeout-path manager reload (wait-for-stop-timeout-manager-reloaded)
         // is behavior-tested in VPNLifecycleControllerTests; here we pin that the
         // observation callback keeps the cached manager and published status fresh.
@@ -842,14 +869,55 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertFalse(disableBlock.contains("await waitForProtectionToStop()\n            }\n            lastProtectionStatusRefresh"))
     }
 
+    func testProtectionErrorMessagesAreLocalizedEndToEnd() throws {
+        // UX-1: the Guard-panel protection error messages render in production
+        // (GuardView's `Text(message.lavaLocalized)`), so their prefixes must be
+        // localized BEFORE they reach vpnErrorMessage's format-key composer — the
+        // composer only localizes the separator, not the prefix it is handed. QA-only
+        // sites (inside #if DEBUG || LAVA_QA_TOOLS) keep their raw English prefix.
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func enableProtection(",
+            endingBefore: "private func disableProtection("
+        )
+        let reconnectBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func reconnectProtectionNow(",
+            endingBefore: "@discardableResult"
+        )
+        let resumeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resumeTemporaryProtectionIfExpired(",
+            endingBefore: "private func clearTemporaryProtectionPause("
+        )
+
+        XCTAssertTrue(enableBlock.contains(
+            "vpnMessage = Self.vpnErrorMessage(prefix: \"Could not start protection\".lavaLocalized, error: error)"))
+        XCTAssertTrue(reconnectBlock.contains(
+            "vpnMessage = Self.vpnErrorMessage(prefix: \"Could not reconnect protection\".lavaLocalized, error: error)"))
+        XCTAssertTrue(resumeBlock.contains(
+            "vpnMessage = Self.vpnErrorMessage(prefix: \"Resumed protection, but could not refresh filter\".lavaLocalized, error: error)"))
+
+        // The clear-diagnostics error messages interpolate the underlying error, so
+        // they go through .lavaLocalizedFormat (a %@ format key) rather than raw
+        // string interpolation — otherwise the English literal renders verbatim.
+        XCTAssertTrue(source.contains(
+            "vpnMessage = \"Could not clear local history: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        XCTAssertTrue(source.contains(
+            "vpnMessage = \"Could not clear local filtering counts: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        XCTAssertTrue(source.contains(
+            "vpnMessage = \"Could not clear local logs: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+    }
+
     func testVPNLifecycleActionsClaimConfiguringBeforeLaunchingAsyncWork() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let actionBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let actionBlock = try sourceBlock(
             in: source,
             startingAt: "func turnOffProtection()",
             endingBefore: "func installLocalVPNProfileForOnboarding() async -> Bool"
         )
-        let reconnectBlock = try Self.sourceBlock(
+        let reconnectBlock = try sourceBlock(
             in: source,
             startingAt: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async",
             endingBefore: "@discardableResult"
@@ -871,11 +939,16 @@ final class AppViewModelSourceTests: XCTestCase {
             "isConfiguringVPN is the orchestrator's published mirror; manual claims would bypass single-flight."
         )
         XCTAssertFalse(reconnectBlock.contains("isConfiguringVPN = false\n            await enableProtection"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("isConfiguringVPN"))
+        XCTAssertTrue(source.contains("enableProtection"))
     }
 
     func testProtectionConnectedNetworkActivityIsLoggedOnStatusTransition() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let updateStatusBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let updateStatusBlock = try sourceBlock(
             in: source,
             startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
             endingBefore: "private func playProtectionOnSucceededHapticIfNeeded"
@@ -887,13 +960,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testNonCriticalAppGroupDefaultsDoNotForceSynchronousFlushes() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let persistLookBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let persistLookBlock = try sourceBlock(
             in: source,
             startingAt: "private func persistLavaGuardLook(_ look: GuardianShieldStyle)",
             endingBefore: "private func syncAppIcon(to look: GuardianShieldStyle)"
         )
-        let loadPauseBlock = try Self.sourceBlock(
+        let loadPauseBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadTemporaryProtectionPause()",
             endingBefore: "private func beginFreshProtectionVPNSession()"
@@ -906,19 +979,19 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testTemporaryProtectionPausePersistsAndResumesRobustly() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let rootSource = try Self.source(named: "RootView.swift", in: "LavaSecApp")
-        let pauseBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let rootSource = try readSource(.rootView)
+        let pauseBlock = try sourceBlock(
             in: source,
             startingAt: "func pauseProtectionTemporarily(for option: ProtectionPauseDuration)",
             endingBefore: "func resumeProtectionNow()"
         )
-        let resumeBlock = try Self.sourceBlock(
+        let resumeBlock = try sourceBlock(
             in: source,
             startingAt: "private func resumeTemporaryProtectionIfExpired(now: Date = Date()) async",
             endingBefore: "private func restoreFiltersAfterTemporaryProtectionPause("
         )
-        let restoreBlock = try Self.sourceBlock(
+        let restoreBlock = try sourceBlock(
             in: source,
             startingAt: "private func restoreFiltersAfterTemporaryProtectionPause(",
             endingBefore: "private func clearTemporaryProtectionPause()"
@@ -927,7 +1000,7 @@ final class AppViewModelSourceTests: XCTestCase {
         // The @Published mirror + pause/resume orchestration stay in AppViewModel;
         // the resume timer and legacy pause-key cleanup moved to
         // TemporaryProtectionPauseController.
-        let pauseController = try Self.source(named: "TemporaryProtectionPauseController.swift", in: "LavaSecApp")
+        let pauseController = try readSource(.temporaryProtectionPauseController)
         XCTAssertTrue(source.contains("@Published private(set) var temporaryProtectionPauseUntil: Date?"))
         XCTAssertTrue(pauseController.contains("private var resumeTask: Task<Void, Never>?"))
         XCTAssertTrue(pauseController.contains("LavaSecAppGroup.protectionTemporaryPauseUntilDefaultsKey"))
@@ -980,11 +1053,16 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("func reconcileTemporaryProtectionPause()"))
         XCTAssertTrue(rootSource.contains("@Environment(\\.scenePhase) private var scenePhase"))
         XCTAssertTrue(rootSource.contains("viewModel.reconcileTemporaryProtectionPause()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("disableProtection"))
+        XCTAssertTrue(source.contains("enableProtection"))
     }
 
     func testTemporaryPauseControlsAreHiddenWhenNoNetworkPath() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let controlsBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let controlsBlock = try sourceBlock(
             in: source,
             startingAt: "var showsTemporaryProtectionPauseControls: Bool",
             endingBefore: "var formattedTemporaryProtectionResumeTime"
@@ -998,7 +1076,7 @@ final class AppViewModelSourceTests: XCTestCase {
 
         // The action entry point shares the same guard, so a stale pause intent
         // cannot pause protection while Network Lost is showing.
-        let pauseBlock = try Self.sourceBlock(
+        let pauseBlock = try sourceBlock(
             in: source,
             startingAt: "func pauseProtectionTemporarily(for option: ProtectionPauseDuration)",
             endingBefore: "func resumeProtectionNow()"
@@ -1007,23 +1085,23 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testTemporaryProtectionPauseIsBoundToCurrentVPNSession() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let enableBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
             endingBefore: "private func disableProtection("
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "private func disableProtection(",
             endingBefore: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async"
         )
-        let loadPauseBlock = try Self.sourceBlock(
+        let loadPauseBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadTemporaryProtectionPause()",
             endingBefore: "private func beginFreshProtectionVPNSession()"
         )
-        let clearPauseBlock = try Self.sourceBlock(
+        let clearPauseBlock = try sourceBlock(
             in: source,
             startingAt: "private func clearTemporaryProtectionPause()",
             endingBefore: "private func loadExistingTunnelManager() async throws"
@@ -1031,7 +1109,7 @@ final class AppViewModelSourceTests: XCTestCase {
 
         // Session binding + legacy-key cleanup moved into the controller; the
         // store-routing contract is now enforced there.
-        let pauseController = try Self.source(named: "TemporaryProtectionPauseController.swift", in: "LavaSecApp")
+        let pauseController = try readSource(.temporaryProtectionPauseController)
         XCTAssertTrue(pauseController.contains("LavaSecAppGroup.protectionTemporaryPauseSessionIDDefaultsKey"))
 
         let beginSessionIndex = try XCTUnwrap(enableBlock.range(of: "beginFreshProtectionVPNSession()")?.lowerBound)
@@ -1059,21 +1137,25 @@ final class AppViewModelSourceTests: XCTestCase {
             pauseController.contains("pausedSessionIDDefaultsKey"),
             "Legacy standard-defaults pause keys must still be cleared for upgraded installs."
         )
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("temporaryProtectionPauseUntil"))
     }
 
     func testPreparedSnapshotsOnlyPersistWhenSelectedBlocklistsAreCovered() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let summaryBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let summaryBlock = try sourceBlock(
             in: source,
             startingAt: "private func preparedSummary(for snapshot: FilterSnapshot)",
             endingBefore: "private func preparedSnapshotForCurrentConfiguration()"
         )
-        let prepareBlock = try Self.sourceBlock(
+        let prepareBlock = try sourceBlock(
             in: source,
             startingAt: "private func prepareFilterSnapshot(",
             endingBefore: "private func reportFilterPreparationProgress"
         )
-        let persistBlock = try Self.sourceBlock(
+        let persistBlock = try sourceBlock(
             in: source,
             startingAt: "private func persistSharedState(",
             endingBefore: "private func persistConfigurationOnly("
@@ -1103,13 +1185,13 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testClearAndDisableBackupDivergeOnLocalEnvelopeHandling() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let clearBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let clearBlock = try sourceBlock(
             in: source,
             startingAt: "func clearEncryptedBackup() async {",
             endingBefore: "func disableEncryptedBackup() async {"
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "func disableEncryptedBackup() async {",
             endingBefore: "private enum RemoteBackupDeletionOutcome {"
@@ -1135,18 +1217,18 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testBackupMaintenanceAndUploadsAreMutuallyExclusive() throws {
-        let source = try Self.source(named: "AppViewModel.swift", in: "LavaSecApp")
-        let uploadBlock = try Self.sourceBlock(
+        let source = try readSource(.appViewModel)
+        let uploadBlock = try sourceBlock(
             in: source,
             startingAt: "private func uploadEncryptedBackup(",
             endingBefore: "private func uploadPendingEncryptedBackupIfPossible("
         )
-        let clearBlock = try Self.sourceBlock(
+        let clearBlock = try sourceBlock(
             in: source,
             startingAt: "func clearEncryptedBackup() async {",
             endingBefore: "func disableEncryptedBackup() async {"
         )
-        let disableBlock = try Self.sourceBlock(
+        let disableBlock = try sourceBlock(
             in: source,
             startingAt: "func disableEncryptedBackup() async {",
             endingBefore: "private enum RemoteBackupDeletionOutcome {"
@@ -1159,29 +1241,5 @@ final class AppViewModelSourceTests: XCTestCase {
         // And maintenance refuses to run while any upload is in flight.
         XCTAssertTrue(clearBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
         XCTAssertTrue(disableBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
-    }
-
-    private static func source(named fileName: String, in directoryName: String) throws -> String {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let packageRootURL = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRootURL
-            .appendingPathComponent(directoryName)
-            .appendingPathComponent(fileName)
-
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

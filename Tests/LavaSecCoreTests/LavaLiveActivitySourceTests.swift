@@ -4,7 +4,7 @@ import XCTest
 
 final class LavaLiveActivitySourceTests: XCTestCase {
     func testAppIconMascotFaceUsesLargerReadableGeometry() throws {
-        let iconURL = try packageRootURL()
+        let iconURL = packageRootURL
             .appendingPathComponent("LavaSecApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024x1024@1x.png")
         let metrics = try appIconFaceMetrics(at: iconURL)
 
@@ -15,9 +15,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLavaGuardLooksDeclareAlternateAppIcons() throws {
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
-        let project = try readSource("LavaSec.xcodeproj/project.pbxproj")
+        let attributes = try readSource(.lavaActivityAttributes)
+        let appViewModel = try readSource(.appViewModel)
+        let project = try readSource(.xcodeProject)
         let iconNames = [
             "AppIconFireOpal",
             "AppIconAmethyst",
@@ -48,7 +48,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertEqual(project.components(separatedBy: alternateIconSetting).count - 1, 3)
         XCTAssertTrue(project.contains("folder.iconcomposer.icon"))
 
-        let appURL = try packageRootURL().appendingPathComponent("LavaSecApp")
+        let appURL = packageRootURL.appendingPathComponent("LavaSecApp")
         for iconName in iconNames {
             let iconPackageURL = appURL.appendingPathComponent("\(iconName).icon")
             let iconJSONURL = iconPackageURL.appendingPathComponent("icon.json")
@@ -89,7 +89,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             "AppIconEmerald",
             "AppIconKiwiCreme"
         ]
-        let appURL = try packageRootURL().appendingPathComponent("LavaSecApp")
+        let appURL = packageRootURL.appendingPathComponent("LavaSecApp")
 
         for iconName in iconNames {
             let frontLayerURL = appURL
@@ -111,7 +111,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testCustomizationSettingsRouteAppearsBelowUpgrade() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let settings = try readSource(.settingsView)
         let routeBlock = try sourceBlock(
             in: settings,
             startingAt: "enum SettingsRoute: Hashable",
@@ -137,7 +137,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testCustomizationPageUsesApprovedCopyAndControls() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let settings = try readSource(.settingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct CustomizationSettingsView: View",
@@ -287,10 +287,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(customizationBlock.contains("summary: \"Open iOS Settings\""))
         XCTAssertFalse(customizationBlock.contains("Opens iOS Settings > Lava Security > Language."))
         XCTAssertFalse(customizationBlock.contains("Turning this on lets Lava request"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settings.contains("currentDays"))
+        XCTAssertTrue(settings.contains("requiredUsageDays"))
     }
 
     func testCustomizationPageOffersLavaHapticsToggleBetweenLiveActivitiesAndLanguage() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let settings = try readSource(.settingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct CustomizationSettingsView: View",
@@ -324,10 +329,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityPauseLengthStepperIsGatedToLiveActivitiesSection() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
-        let presenter = try readSource("LavaSecApp/ProtectionPlatformSeams.swift")
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
+        let settings = try readSource(.settingsView)
+        let appViewModel = try readSource(.appViewModel)
+        let presenter = try readSource(.protectionPlatformSeams)
+        let controller = try readSource(.lavaLiveActivityController)
         let customizationBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct CustomizationSettingsView: View",
@@ -368,8 +373,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testMaskedLavaGuardIconUsesOriginalShieldContour() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
-        let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
+        let settings = try readSource(.settingsView)
+        let sharedMascot = try readSource(.softShieldGuardian)
         let maskedIconBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct MaskedLavaGuardIcon: View",
@@ -383,10 +388,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(maskedIconBlock.contains("style: StrokeStyle("))
         XCTAssertTrue(maskedIconBlock.contains("dash: [2, 4]"))
         XCTAssertTrue(maskedIconBlock.contains("Text(\"?\")"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settings.contains("LavaGuardianShieldShape"))
     }
 
     func testCustomizationLanguageRowRedirectsToIOSSettingsAfterLiveActivities() throws {
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let settings = try readSource(.settingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct CustomizationSettingsView: View",
@@ -413,10 +422,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // (which wraps `lavaRow()`), so sibling settings rows line up instead of each
         // taking its content's intrinsic height — and no longer inflate inside a
         // LavaPlainCard the way the earlier `.frame(minHeight:)`-inside-card form did.
-        let tokens = try readSource("LavaSecApp/LavaDesignSystem/LavaTokens.swift")
+        let tokens = try readSource(.lavaTokens)
         XCTAssertTrue(tokens.contains("enum LavaRowHeight"))
         XCTAssertTrue(tokens.contains("static let standard: CGFloat = 54"))
-        let components = try readSource("LavaSecApp/LavaDesignSystem/LavaComponents.swift")
+        let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("func lavaRow() -> some View"))
         XCTAssertTrue(components.contains(".frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)"))
         XCTAssertTrue(systemSettingsRowBlock.contains(".lavaControlRowCard()"))
@@ -426,12 +435,17 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let liveActivitiesToggleIndex = try XCTUnwrap(customizationBlock.range(of: "Toggle(\"Use Live Activities\", isOn: usesLiveActivitiesBinding)")?.upperBound)
         let liveActivitiesNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Shows Lava status on the Lock Screen")?.lowerBound)
         XCTAssertTrue(customizationBlock[liveActivitiesToggleIndex..<liveActivitiesNoteIndex].contains(".lavaControlRowCard()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(settings.contains("SettingsNavigationRow"))
+        XCTAssertTrue(settings.contains("LavaPlainCard"))
     }
 
     func testLiveActivitiesToggleIsGatedToSupportedDeviceClasses() throws {
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let appViewModel = try readSource(.appViewModel)
+        let controller = try readSource(.lavaLiveActivityController)
+        let settings = try readSource(.settingsView)
 
         XCTAssertTrue(controller.contains("import UIKit"))
         XCTAssertTrue(controller.contains("var canOfferLiveActivities: Bool"))
@@ -449,9 +463,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testAppearanceAndLiveActivityPreferencesPersistInAppGroupDefaults() throws {
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
-        let appGroup = try readSource("Shared/AppGroup.swift")
-        let rootView = try readSource("LavaSecApp/RootView.swift")
+        let appViewModel = try readSource(.appViewModel)
+        let appGroup = try readSource(.appGroup)
+        let rootView = try readSource(.rootView)
         let persistLookBlock = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistLavaGuardLook(_ look: GuardianShieldStyle)",
@@ -501,11 +515,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testMascotShieldStyleAddsNamedLooksWithoutDuplicatingEmotions() throws {
-        let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let rootView = try readSource("LavaSecApp/RootView.swift")
-        let guardView = try readSource("LavaSecApp/GuardView.swift")
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let sharedMascot = try readSource(.softShieldGuardian)
+        let attributes = try readSource(.lavaActivityAttributes)
+        let rootView = try readSource(.rootView)
+        let guardView = try readSource(.guardView)
+        let settings = try readSource(.settingsView)
 
         XCTAssertTrue(attributes.contains("enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable, Sendable"))
         XCTAssertTrue(attributes.contains("case original"))
@@ -591,12 +605,16 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))
         XCTAssertFalse(tabViewBlock.contains("shieldStyle: viewModel.lavaGuardLook"))
         XCTAssertFalse(tabViewBlock.contains("@EnvironmentObject private var viewModel: AppViewModel"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(sharedMascot.contains("GuardianShieldStyle"))
     }
 
     func testKiwiCremeGuardLookAddsOnlyColorSchemeAndLine() throws {
-        let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let settings = try readSource("LavaSecApp/SettingsView.swift")
+        let sharedMascot = try readSource(.softShieldGuardian)
+        let attributes = try readSource(.lavaActivityAttributes)
+        let settings = try readSource(.settingsView)
         let faceBlock = try sourceBlock(
             in: sharedMascot,
             startingAt: "private func face(_ frame: GuardianMascotFrame) -> some View",
@@ -623,11 +641,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivitySharedModelAndActionRequestsUseAppGroupCommandPath() throws {
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let actionRequest = try readSource("Shared/LavaLiveActivityActionRequest.swift")
-        let intents = try readSource("Shared/LavaLiveActivityIntents.swift")
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+        let attributes = try readSource(.lavaActivityAttributes)
+        let actionRequest = try readSource(.lavaLiveActivityActionRequest)
+        let intents = try readSource(.lavaLiveActivityIntents)
+        let commandService = try readSource(.lavaProtectionCommandService)
+        let widget = try readSource(.lavaSecWidget)
 
         XCTAssertTrue(attributes.contains("import ActivityKit"))
         XCTAssertTrue(attributes.contains("struct LavaActivityAttributes: ActivityAttributes"))
@@ -711,9 +729,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testDynamicIslandModelsOnPausedAndTransientRestartingOnly() throws {
-        let attributes = try readSource("Shared/LavaActivityAttributes.swift")
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let attributes = try readSource(.lavaActivityAttributes)
+        let widget = try readSource(.lavaSecWidget)
+        let appViewModel = try readSource(.appViewModel)
 
         // ProtectionState models the two states the surface can keep honest while
         // suspended (on/paused) plus `restarting`, a transient set and cleared
@@ -763,12 +781,17 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(
             attributes.contains("(try? container.decode(ProtectionState.self, forKey: .protectionState)) ?? .on")
         )
+        // No canaries for the `case needsReconnect` / `case networkUnavailable` pins: those
+        // are REMOVAL pins (the states must stay deleted), so the identifiers are expected
+        // to be dead in this source — only a comment mentions them today, and pinning a
+        // comment would fail on a harmless rewording. The decode-compat behavior they
+        // protect is anchored by the `?? .on` fallback assertion above.
     }
 
     func testDynamicIslandActionLayoutIsPausePrimaryWithSecondaryRestart() throws {
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let intents = try readSource("Shared/LavaLiveActivityIntents.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let widget = try readSource(.lavaSecWidget)
+        let intents = try readSource(.lavaLiveActivityIntents)
+        let appViewModel = try readSource(.appViewModel)
 
         let actionBlock = try sourceBlock(
             in: widget,
@@ -810,10 +833,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(intents.contains("\"Restart Lava Protection\""))
         XCTAssertTrue(intents.contains("LavaProtectionCommandService.perform(.reconnect)"))
         XCTAssertTrue(appViewModel.contains("case .reconnect:\n            reconnectProtection()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(widget.contains("liveActivityActionLabel"))
     }
 
     func testLiveActivityRestartPerformsRealStopThenStart() throws {
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let commandService = try readSource(.lavaProtectionCommandService)
 
         // Restart is now offered while the tunnel is already connected, so a bare
         // start would be a no-op. performReconnect must stop, wait, then start.
@@ -861,7 +888,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityRestartShowsTransientRestartingFeedback() throws {
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let commandService = try readSource(.lavaProtectionCommandService)
 
         XCTAssertTrue(commandService.contains("private static let restartingStaleWindow: TimeInterval"))
 
@@ -932,26 +959,26 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         // The app's reconcile path carries the same deadline as resumeDate when
         // restarting, so the widget self-clear is consistent across both push paths.
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let appViewModel = try readSource(.appViewModel)
         XCTAssertTrue(appViewModel.contains("private var isRestartInFlight: Bool"))
         XCTAssertTrue(appViewModel.contains("private var restartInFlightDeadline: Date?"))
         XCTAssertTrue(appViewModel.contains("protectionState == .restarting ? restartDeadline : temporaryProtectionPauseUntil"))
 
         // The widget resolves BOTH transient states to On via its own clock.
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+        let widget = try readSource(.lavaSecWidget)
         XCTAssertTrue(widget.contains("case .paused, .restarting:"))
 
         // The controller must PRESERVE the deadline for .restarting (not null it like
         // .on), or the reconcile-path republish would strip the widget's self-clear.
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
+        let controller = try readSource(.lavaLiveActivityController)
         XCTAssertTrue(controller.contains("case .restarting:\n            publishedResumeDate = resumeDate"))
         XCTAssertTrue(controller.contains("case .on:\n            publishedResumeDate = nil"))
         XCTAssertTrue(controller.contains("ActivityContent(state: state, staleDate: publishedResumeDate)"))
     }
 
     func testLiveActivityPauseActionsAreHiddenAndDeniedWhenPauseRequiresAuthentication() throws {
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let widget = try readSource(.lavaSecWidget)
+        let commandService = try readSource(.lavaProtectionCommandService)
 
         let onStateBlock = try sourceBlock(
             in: widget,
@@ -986,8 +1013,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityPauseCommandIsBoundToActiveVPNSession() throws {
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
-        let appGroup = try readSource("Shared/AppGroup.swift")
+        let commandService = try readSource(.lavaProtectionCommandService)
+        let appGroup = try readSource(.appGroup)
         let pauseBlock = try sourceBlock(
             in: commandService,
             startingAt: "private static func pauseProtection",
@@ -1025,7 +1052,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityWidgetRendersExpiredPauseAsOnWithoutProcessUpdate() throws {
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
+        let widget = try readSource(.lavaSecWidget)
         let expandedViewBlock = try sourceBlock(
             in: widget,
             startingAt: "private struct LavaLiveActivityExpandedView: View",
@@ -1046,8 +1073,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityControllerStartsUpdatesEndsAndPublishesPauseAuthState() throws {
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let controller = try readSource(.lavaLiveActivityController)
+        let appViewModel = try readSource(.appViewModel)
 
         XCTAssertTrue(controller.contains("import ActivityKit"))
         XCTAssertTrue(controller.contains("ActivityAuthorizationInfo()"))
@@ -1076,11 +1103,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: "private func liveActivityProtectionState"
         )
         XCTAssertFalse(actionRequestBlock.contains("turnOffProtection()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(appViewModel.contains("turnOffProtection"))
     }
 
     func testLiveActivityRefreshRespectsSharedTemporaryPauseBeforePublishingStatus() throws {
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let controller = try readSource(.lavaLiveActivityController)
+        let appViewModel = try readSource(.appViewModel)
 
         XCTAssertTrue(controller.contains("private func effectiveProtectionState("))
         XCTAssertTrue(controller.contains("UserDefaults(suiteName: LavaSecAppGroup.identifier)"))
@@ -1104,8 +1135,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityDoesNotRenderStalePauseWhenProtectionStateIsUnavailable() throws {
-        let controller = try readSource("LavaSecApp/LavaLiveActivityController.swift")
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
+        let controller = try readSource(.lavaLiveActivityController)
+        let appViewModel = try readSource(.appViewModel)
 
         let liveActivityProtectionStateBlock = try sourceBlock(
             in: appViewModel,
@@ -1142,11 +1173,33 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(controllerReconcileBlock.contains("case .active, .stale:"))
     }
 
+    func testCoordinatorSkipsAPausedUpdateWhosePauseHasVanished() throws {
+        // A detached `.paused` Live Activity update must not apply after the pause it announced
+        // was resumed / expired / sanity-cap discarded (a backward clock step between pause() and
+        // the detached update). The discard mints no revision, so the revision guard alone lets
+        // it through — the coordinator must positively re-verify the pause still exists, or a
+        // stale `.paused` strands the Dynamic Island paused after the ON reconcile (UX-2, Codex #208).
+        let commandService = try readSource(.lavaProtectionCommandService)
+        let updateBlock = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func updateLiveActivitiesIfCurrent(",
+            endingBefore: "private static func updateLiveActivities("
+        )
+        XCTAssertTrue(
+            updateBlock.contains("update.protectionState == .paused"),
+            "the guard must special-case a .paused update"
+        )
+        XCTAssertTrue(
+            updateBlock.contains("pauseStore.currentPauseState()) == nil"),
+            "a .paused update whose pause no longer exists must be skipped, not just gated on revision"
+        )
+    }
+
     func testLiveActivityDoesNotExposeURLActionsAndFallbackResumeSkipsAuthentication() throws {
-        let rootView = try readSource("LavaSecApp/RootView.swift")
-        let securityPolicy = try readSource("Sources/LavaSecCore/SecurityAccessPolicy.swift")
-        let securityController = try readSource("LavaSecApp/SecurityController.swift")
-        let actionRequest = try readSource("Shared/LavaLiveActivityActionRequest.swift")
+        let rootView = try readSource(.rootView)
+        let securityPolicy = try readSource(.securityAccessPolicy)
+        let securityController = try readSource(.securityController)
+        let actionRequest = try readSource(.lavaLiveActivityActionRequest)
 
         XCTAssertTrue(securityPolicy.contains("enum SecurityProtectedSurfaceStorage"))
         XCTAssertTrue(securityPolicy.contains("public static let defaultsKey = \"securityProtectedSurfaces\""))
@@ -1164,12 +1217,16 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(actionRequest.contains("components.scheme = \"lavasecurity\""))
         XCTAssertFalse(actionRequest.contains("components.host = actionHost"))
         XCTAssertFalse(actionRequest.contains("components.path = actionPath"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(rootView.contains("LavaLiveActivityActionRequest"))
     }
 
     func testWidgetTargetAndDynamicIslandUseMascotExpressionsAndSFGlyphs() throws {
-        let project = try readSource("LavaSec.xcodeproj/project.pbxproj")
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
+        let project = try readSource(.xcodeProject)
+        let widget = try readSource(.lavaSecWidget)
+        let sharedMascot = try readSource(.softShieldGuardian)
 
         XCTAssertTrue(project.contains("LavaSecWidget.appex"))
         XCTAssertTrue(project.contains("LavaSecWidget.swift in Sources"))
@@ -1283,11 +1340,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(widget.contains("Link(destination: url)"))
         XCTAssertFalse(widget.contains("LavaLiveActivityActionRequest.actionURL"))
         XCTAssertFalse(widget.contains("Button(\"Turn off\""))
+        // No canary for the `private struct GuardianShieldShape: Shape` pin: that is the
+        // OLD pre-shared type name (the live shared type is LavaGuardianShieldShape, which
+        // contains it as a substring), so it is a REMOVAL pin - the name must stay dead.
+        XCTAssertTrue(project.contains("LavaLiveActivityActionRequest"))
     }
 
     func testLiveActivityPrivacyRedactionKeepsOnlyMascotShieldVisible() throws {
-        let widget = try readSource("LavaSecWidget/LavaSecWidget.swift")
-        let sharedMascot = try readSource("Shared/SoftShieldGuardian.swift")
+        let widget = try readSource(.lavaSecWidget)
+        let sharedMascot = try readSource(.softShieldGuardian)
 
         XCTAssertTrue(sharedMascot.contains("@Environment(\\.redactionReasons) private var redactionReasons"))
         XCTAssertTrue(sharedMascot.contains("maskExpressionWhenPrivacyRedacted: Bool = false"))
@@ -1301,10 +1362,17 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(widget.contains("Text(expandedTitle(for: protectionState))\n                        .unredacted()"))
         XCTAssertFalse(widget.contains("liveActivityActionLabel(\"Resume\")\n                                .unredacted()"))
         XCTAssertFalse(widget.contains("pauseActivityActionLabel(title)\n                .unredacted()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(widget.contains("expandedTitle"))
+        XCTAssertTrue(widget.contains("protectionState"))
+        XCTAssertTrue(widget.contains("liveActivityActionLabel"))
+        XCTAssertTrue(widget.contains("pauseActivityActionLabel"))
     }
 
     func testLiveActivityCommandServiceLogsIntentExecutionForDeviceDebugging() throws {
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let commandService = try readSource(.lavaProtectionCommandService)
 
         XCTAssertTrue(commandService.contains("LavaSecDeviceDebugLog.append(component: \"live-activity-intent\""))
         XCTAssertTrue(commandService.contains("log(\"perform-begin\""))
@@ -1315,7 +1383,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityCommandServiceSerializesSharedStateAndDoesNotBlockOnActivityKit() throws {
-        let commandService = try readSource("Shared/LavaProtectionCommandService.swift")
+        let commandService = try readSource(.lavaProtectionCommandService)
         let performBlock = try sourceBlock(
             in: commandService,
             startingAt: "static func perform(",
@@ -1336,13 +1404,17 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(mutationBlock.contains("try LavaProtectionCommandFileLock.withExclusiveLock"))
         XCTAssertTrue(performBlock.contains("await liveActivityUpdateCoordinator.schedule"))
         XCTAssertFalse(performBlock.contains("await updateLiveActivities("))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(commandService.contains("updateLiveActivities"))
     }
 
     func testDynamicIslandReconcilesOnTunnelHealthChangeAndTunnelNudgesForegroundApp() throws {
-        let appViewModel = try readSource("LavaSecApp/AppViewModel.swift")
-        let tunnel = try readSource("LavaSecTunnel/PacketTunnelProvider.swift")
-        let signal = try readSource("Sources/LavaSecCore/TunnelHealthSignal.swift")
-        let observer = try readSource("LavaSecApp/DarwinNotificationObserver.swift")
+        let appViewModel = try readSource(.appViewModel)
+        let tunnel = try readSource(.packetTunnelProvider)
+        let signal = try readSource(.tunnelHealthSignal)
+        let observer = try readSource(.darwinNotificationObserver)
 
         // Part A: the app reconciles the Live Activity whenever tunnel-health
         // content changes — NEVPNStatus stays `.connected` through a reconnect.
@@ -1385,19 +1457,6 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         )
         XCTAssertTrue(nudgeBlock.contains("await self.requestTunnelHealthFlush()"))
         XCTAssertTrue(nudgeBlock.contains("self.refreshTunnelHealth(force: true)"))
-    }
-
-    private func readSource(_ relativePath: String) throws -> String {
-        let sourceURL = try packageRootURL().appendingPathComponent(relativePath)
-        return try String(contentsOf: sourceURL, encoding: .utf8)
-    }
-
-    private func packageRootURL() throws -> URL {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        return testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
     }
 
     private struct AppIconFaceMetrics {
@@ -1526,16 +1585,5 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     ) -> (red: UInt8, green: UInt8, blue: UInt8) {
         let offset = y * bytesPerRow + x * bytesPerPixel
         return (pixels[offset], pixels[offset + 1], pixels[offset + 2])
-    }
-
-    private func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }

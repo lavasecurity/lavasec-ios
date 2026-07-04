@@ -8,8 +8,8 @@ import XCTest
 ///   (under Nerd Stats) and carries its own privacy info panel + link.
 final class ActivityMetricsSourceTests: XCTestCase {
     func testActivityDigestRendersRequestFlowInsteadOfDomainCount() throws {
-        let source = try Self.source("LavaSecApp/DiagnosticsView.swift")
-        let digestBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let digestBlock = try sourceBlock(
             in: source,
             startingAt: "private struct ActivityDigestSection: View",
             endingBefore: "private struct ActivityFlowBar"
@@ -34,8 +34,8 @@ final class ActivityMetricsSourceTests: XCTestCase {
     }
 
     func testFlowBarFloorsBlockedBranchSoItNeverVanishes() throws {
-        let source = try Self.source("LavaSecApp/DiagnosticsView.swift")
-        let flowBarBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let flowBarBlock = try sourceBlock(
             in: source,
             startingAt: "private struct ActivityFlowBar: View",
             endingBefore: "private struct ActivityFlowStatRow"
@@ -47,10 +47,10 @@ final class ActivityMetricsSourceTests: XCTestCase {
     }
 
     func testTopDomainsDetailRanksDomainsByQueryCount() throws {
-        let source = try Self.source("LavaSecApp/DiagnosticsView.swift")
+        let source = try readSource(.diagnosticsView)
         // Top Domains is now its own screen reached from a Local Logs row, reusing
         // the Allowed/Blocked toggle and ranking domains by query count.
-        let topBlock = try Self.sourceBlock(
+        let topBlock = try sourceBlock(
             in: source,
             startingAt: "private struct TopDomainsView: View",
             endingBefore: "private struct TopDomainRow"
@@ -69,8 +69,8 @@ final class ActivityMetricsSourceTests: XCTestCase {
     }
 
     func testActivityScreenDropsNetworkActivityRowAndAddsTopDomains() throws {
-        let source = try Self.source("LavaSecApp/DiagnosticsView.swift")
-        let activityContentBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let activityContentBlock = try sourceBlock(
             in: source,
             startingAt: "private var activityContent: some View",
             endingBefore: "private var selectedSummary"
@@ -84,16 +84,23 @@ final class ActivityMetricsSourceTests: XCTestCase {
         XCTAssertFalse(activityContentBlock.contains("ActivityTopDomainsSection("))
         XCTAssertFalse(activityContentBlock.contains("icon: .networkActivity"))
         XCTAssertFalse(activityContentBlock.contains("NetworkActivityLogView()"))
+        // Canary: the negative pins above key on these identifiers - if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name. (The icon case anchors in the LavaIcon
+        // source, NOT SettingsView's same-named route case - and a bare "networkActivity"
+        // match in this file would be satisfied by networkActivityLog.)
+        XCTAssertTrue(source.contains("struct NetworkActivityLogView"))
+        XCTAssertTrue(try readSource(.lavaIcon).contains("case .networkActivity:"))
     }
 
     func testNetworkActivityCarriesPrivacyInfoPanelWithReviewLink() throws {
-        let source = try Self.source("LavaSecApp/DiagnosticsView.swift")
-        let panelBlock = try Self.sourceBlock(
+        let source = try readSource(.diagnosticsView)
+        let panelBlock = try sourceBlock(
             in: source,
             startingAt: "private struct NetworkActivityPrivacyInfoPanel: View",
             endingBefore: "struct NetworkActivityLogView: View"
         )
-        let logBlock = try Self.sourceBlock(
+        let logBlock = try sourceBlock(
             in: source,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
@@ -107,7 +114,7 @@ final class ActivityMetricsSourceTests: XCTestCase {
     }
 
     func testNetworkActivityMovedToSettingsUnderNerdStats() throws {
-        let source = try Self.source("LavaSecApp/SettingsView.swift")
+        let source = try readSource(.settingsView)
 
         // Route exists with a destination and a scoped security policy
         // (gated by .activityViewing, matching its old home in the Activity tab).
@@ -116,14 +123,14 @@ final class ActivityMetricsSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("return \"Open Network Activity\""))
         XCTAssertTrue(source.contains("NetworkActivityLogView()"))
 
-        let routeBlock = try Self.sourceBlock(
+        let routeBlock = try sourceBlock(
             in: source,
             startingAt: "enum SettingsRoute: Hashable",
             endingBefore: "private enum LavaWebLinks"
         )
         XCTAssertTrue(routeBlock.contains(".networkActivity"))
 
-        let advancedBlock = try Self.sourceBlock(
+        let advancedBlock = try sourceBlock(
             in: source,
             startingAt: "LavaSectionGroup(\"Advanced\")",
             endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
@@ -135,24 +142,5 @@ final class ActivityMetricsSourceTests: XCTestCase {
         let nerdStatsIndex = try XCTUnwrap(advancedBlock.range(of: "title: \"Nerd Stats\"")?.lowerBound)
         let networkActivityIndex = try XCTUnwrap(advancedBlock.range(of: "title: \"Network Activity\"")?.lowerBound)
         XCTAssertLessThan(nerdStatsIndex, networkActivityIndex)
-    }
-
-    private static func source(_ relativePath: String) throws -> String {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        return try String(contentsOf: packageRoot.appendingPathComponent(relativePath), encoding: .utf8)
-    }
-
-    private static func sourceBlock(
-        in source: String,
-        startingAt startMarker: String,
-        endingBefore endMarker: String
-    ) throws -> String {
-        let start = try XCTUnwrap(source.range(of: startMarker)?.lowerBound)
-        let suffix = source[start...]
-        let end = try XCTUnwrap(suffix.range(of: endMarker)?.lowerBound)
-        return String(suffix[..<end])
     }
 }
