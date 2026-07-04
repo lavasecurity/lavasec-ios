@@ -263,8 +263,10 @@ public enum IncidentLedgerPersistence {
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let lockURL = url.appendingPathExtension("lock")
         // open(O_CREAT) — never FileManager.createFile — so the lock inode is stable
-        // across a concurrent unlink (the flock-inode lesson).
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
+        // across a concurrent unlink (the flock-inode lesson). Owner-only mode (0o600),
+        // mirroring NetworkActivityLogPersistence — the sentinel carries no data, but
+        // least-privilege keeps the two lock creators consistent.
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else {
             return work()
         }
@@ -292,7 +294,7 @@ public enum IncidentLedgerPersistence {
         let directoryURL = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let lockURL = url.appendingPathExtension("lock")
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, 0o644)
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else {
             return false
         }

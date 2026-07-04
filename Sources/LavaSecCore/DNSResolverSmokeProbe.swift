@@ -67,7 +67,43 @@ public enum DNSResolverSmokeProbe {
         let isResponse = responseFlags & 0x8000 != 0
         let responseCode = responseFlags & 0x000F
         let answerCount = readUInt16(response, at: 6)
-        return isResponse && responseCode == 0 && answerCount > 0
+        guard isResponse, responseCode == 0, answerCount > 0 else {
+            return false
+        }
+        // Match the forwarding path's client-facing bar (`completeForward`): a NOERROR reply
+        // whose resource records are malformed/truncated is downgraded to a synthesized
+        // SERVFAIL before it reaches the client, so it must not stamp accepted-primary
+        // evidence either. Otherwise organic malformed-RR traffic would keep periodic smoke
+        // probes skipped (NRG-3a) while clients are actually receiving SERVFAILs — masking a
+        // degraded resolver and freezing the LAV-87 escalation.
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
+    }
+
+    /// The organic-evidence REVOCATION counterpart to `indicatesAcceptedAnswer`: a reply that
+    /// claims answers (`NOERROR` + `ANCOUNT > 0`) but whose resource records are
+    /// malformed/truncated. `completeForward` downgrades exactly this to a synthesized SERVFAIL
+    /// for the client, so the resolver is misbehaving NOW — like SERVFAIL/REFUSED, it must
+    /// REVOKE any stale accepted-primary evidence, not merely withhold a fresh stamp, or a
+    /// timestamp from an earlier good answer would keep the next periodic probe skipped while
+    /// clients receive SERVFAILs. Distinct from `indicatesResolverFailure` on purpose: that
+    /// classifier ALSO drives encrypted-fallback engagement (keyed on SERVFAIL/REFUSED rcodes),
+    /// which this malformed-but-NOERROR case deliberately does NOT change.
+    public static func indicatesMalformedAnswer(_ response: Data?) -> Bool {
+        guard let response = response.map({ zeroBased($0) }) else {
+            return false
+        }
+        guard response.count >= 12 else {
+            return false
+        }
+
+        let responseFlags = readUInt16(response, at: 2)
+        let isResponse = responseFlags & 0x8000 != 0
+        let responseCode = responseFlags & 0x000F
+        let answerCount = readUInt16(response, at: 6)
+        guard isResponse, responseCode == 0, answerCount > 0 else {
+            return false
+        }
+        return !DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {
@@ -96,7 +132,16 @@ public enum DNSResolverSmokeProbe {
             return false
         }
 
-        return query[queryQuestionRange] == response[responseQuestionRange]
+        guard query[queryQuestionRange] == response[responseQuestionRange] else {
+            return false
+        }
+        // Same client-facing bar as the organic-evidence path and `completeForward`: a NOERROR
+        // reply whose resource records are malformed/truncated is downgraded to SERVFAIL before
+        // clients see it, so a direct probe must not accept it as a healthy answer — doing so
+        // would clear the smoke/rejected streaks and stamp a degraded resolver healthy, defeating
+        // the LAV-87 escalation. This reuses the exact validator the forwarding path already
+        // applies, so it adds no new false-reject surface for legitimate responses.
+        return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
     /// Forwarding-path classifier (NOT for smoke probes): does this resolver reply

@@ -4140,19 +4140,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 if !result.deviceDNSFallbackSucceeded, !resolvedThroughFallbackMode {
                     health.lastPrimaryUpstreamSuccessAt = now
                     // NRG-3a: only an answer passing the probe's OWN acceptance check
-                    // (NOERROR + answers; the transport already verified the query
-                    // identity) counts as probe-equivalent evidence. `didResolve`
-                    // alone must not — a hijacking resolver's REFUSED/SERVFAIL reply
-                    // reaches this branch too (see the LAV-87 NB below), and evidence
-                    // from it would let the hijacker suppress routine probes. A
-                    // rejected reply moreover REVOKES existing evidence (Codex round 2):
-                    // the resolver just proved it is misbehaving NOW, so pre-failure
-                    // evidence must not let the next routine tick skip the very probe
-                    // that advances the LAV-87 escalation. Legitimate NODATA/NXDOMAIN
+                    // (NOERROR + answers with WELL-FORMED RRs; the transport already
+                    // verified the query identity) counts as probe-equivalent evidence.
+                    // `didResolve` alone must not — a hijacking resolver's REFUSED/SERVFAIL
+                    // reply reaches this branch too (see the LAV-87 NB below), and evidence
+                    // from it would let the hijacker suppress routine probes. A rejected
+                    // reply moreover REVOKES existing evidence (Codex round 2): the resolver
+                    // just proved it is misbehaving NOW, so pre-failure evidence must not let
+                    // the next routine tick skip the very probe that advances the LAV-87
+                    // escalation. A NOERROR reply with MALFORMED RRs revokes for the same
+                    // reason — `completeForward` synthesizes a SERVFAIL for the client, so it
+                    // is the resolver misbehaving now, but its NOERROR rcode is invisible to
+                    // `indicatesResolverFailure` (SERVFAIL/REFUSED only, which also gates the
+                    // encrypted fallback and must not widen here). Legitimate NODATA/NXDOMAIN
                     // answers neither stamp nor revoke.
                     if DNSResolverSmokeProbe.indicatesAcceptedAnswer(result.response) {
                         lastAcceptedPrimaryEvidenceAt = now
-                    } else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response) {
+                    } else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response)
+                        || DNSResolverSmokeProbe.indicatesMalformedAnswer(result.response) {
                         lastAcceptedPrimaryEvidenceAt = nil
                     }
                     // A genuine primary answer also proves the primary's health, so it

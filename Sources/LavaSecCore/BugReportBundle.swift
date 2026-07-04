@@ -713,7 +713,11 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             now.timeIntervalSince(gap.endedAt ?? now) <= 24 * 60 * 60
         } ?? false
         self.recentIncidents = Array(recentIncidents.suffix(IncidentLedger.maximumRecordCount))
-        self.hasRecentLedgerIncident = recentIncidents.contains { record in
+        // Compute the recency flag over the STORED (truncated) set so it provably matches the
+        // incidents actually carried in the report — never a dropped-prefix record. In practice
+        // the ledger is chronological and pre-capped at `maximumRecordCount`, so this is a no-op,
+        // but it removes the unfiltered-vs-suffix asymmetry the reviewer flagged.
+        self.hasRecentLedgerIncident = self.recentIncidents.contains { record in
             now.timeIntervalSince(record.at) <= 24 * 60 * 60
         }
         self.hasRecentFocusSwitch = lastFocusSwitch.map { record in

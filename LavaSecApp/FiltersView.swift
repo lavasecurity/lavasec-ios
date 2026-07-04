@@ -1113,6 +1113,9 @@ private struct FiltersOverviewPanel: View {
             Text("When the connection is".lavaLocalized)
                 .font(.subheadline)
                 .foregroundStyle(LavaStyle.secondaryText)
+                // The lead-in reads as part of the picker's own label below, so don't
+                // announce it as a separate VoiceOver element.
+                .accessibilityHidden(true)
 
             Button {
                 showingPicker = true
@@ -1129,6 +1132,9 @@ private struct FiltersOverviewPanel: View {
                 .background(Capsule().fill(LavaStyle.lavaOrangeSoft))
             }
             .buttonStyle(.plain)
+            // Announce this as a picker: a stable label with the current option as the value.
+            .accessibilityLabel(Text("When the connection is".lavaLocalized))
+            .accessibilityValue(Text(preview.label.lavaLocalized))
             .popover(isPresented: $showingPicker) {
                 connectionPickerPopover
                     .presentationCompactAdaptation(.popover)
@@ -1159,6 +1165,9 @@ private struct FiltersOverviewPanel: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // The selected option is shown by a checkmark (a non-color shape cue); also
+                // expose it to VoiceOver as the selected element.
+                .accessibilityAddTraits(option == preview ? [.isSelected] : [])
 
                 if index < FilterConnectionPreview.allCases.count - 1 {
                     Divider()

@@ -81,6 +81,7 @@ struct ProtectionStatusPanel: View {
                     shieldStyle: viewModel.lavaGuardLook
                 )
                 .contentShape(Rectangle())
+                .accessibilityHidden(true)
                 .onTapGesture { playGuardianTapGratitude() }
                 .onDisappear {
                     guardianTapAnimationTask?.cancel()
@@ -102,16 +103,30 @@ struct ProtectionStatusPanel: View {
                     Text(viewModel.protectionSubtitle.lavaLocalized)
                         .lavaBodySupportingText()
                 }
+                // One summary element with a STABLE, localized "Protection status" label and the
+                // live protection state spoken as the value (state title + detail subtitle, both
+                // localized). The label never changes with VPN state; only the value updates.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Protection status"))
+                .accessibilityValue(Text(viewModel.protectionTitle.lavaLocalized) + Text(". ") + Text(viewModel.protectionSubtitle.lavaLocalized))
             }
 
             ProtectionPrimaryActionButton()
 
             if let message = viewModel.guardPanelMessage {
-                Text(message.lavaLocalized)
-                    .font(.footnote)
-                    .foregroundStyle(viewModel.guardPanelMessageIsError ? LavaStyle.errorText : LavaStyle.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.opacity)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if viewModel.guardPanelMessageIsError {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .accessibilityHidden(true)
+                    }
+
+                    Text(message.lavaLocalized)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(viewModel.guardPanelMessageIsError ? LavaStyle.errorText : LavaStyle.secondaryText)
+                .transition(.opacity)
             }
 
         }

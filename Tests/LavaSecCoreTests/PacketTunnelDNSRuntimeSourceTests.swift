@@ -3610,8 +3610,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(genuinePrimaryBlock.contains("lastAcceptedPrimaryEvidenceAt = now"))
         // A rejected reply REVOKES evidence: the resolver just proved it is misbehaving,
         // so pre-failure evidence must not delay the LAV-87 probe by another interval
-        // (Codex round 2).
-        XCTAssertTrue(genuinePrimaryBlock.contains("} else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response) {"))
+        // (Codex round 2). A malformed-RR NOERROR reply revokes for the same reason — it is
+        // SERVFAIL-downgraded for the client (completeForward) but invisible to
+        // indicatesResolverFailure (SERVFAIL/REFUSED rcodes only, which also gates the
+        // encrypted fallback and must not widen), so it gets its own classifier in the branch.
+        XCTAssertTrue(genuinePrimaryBlock.contains("} else if DNSResolverSmokeProbe.indicatesResolverFailure(result.response)"))
+        XCTAssertTrue(genuinePrimaryBlock.contains("|| DNSResolverSmokeProbe.indicatesMalformedAnswer(result.response) {"))
 
         // Evidence never survives a runtime reset (2 clear sites) or any query the
         // configured primary failed to serve: a rejected primary reply, an outright

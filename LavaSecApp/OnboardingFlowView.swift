@@ -145,6 +145,7 @@ struct LavaOnboardingView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
                 .padding(.horizontal, 28)
                 .padding(.top, 86)
@@ -234,7 +235,11 @@ struct LavaOnboardingView: View {
             description: "This enforces the filter and does not route traffic to a server at all",
             contentPlacement: .centered
         ) {
+            // Decorative preview of the upcoming iOS system prompt — its fake "Allow"/"Don't
+            // Allow" buttons are not real controls, so hide it from assistive tech. The page
+            // heading + description already convey what the real prompt will ask.
             OnboardingVPNPermissionDialogIllustration()
+                .accessibilityHidden(true)
 
             if viewModel.vpnMessageIsError, let message = viewModel.vpnMessage {
                 Text(message)
@@ -252,7 +257,10 @@ struct LavaOnboardingView: View {
             description: "Turn on notifications in case Lava needs your help to unblock network issues",
             contentPlacement: .centered
         ) {
+            // Decorative preview of the iOS notification prompt (fake buttons); hide from
+            // assistive tech — the heading + description carry the meaning.
             OnboardingNotificationPromptCard()
+                .accessibilityHidden(true)
         }
     }
 
@@ -266,6 +274,7 @@ struct LavaOnboardingView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(LavaStyle.ink)
                 .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
 
             Text("We are happy to serve you!\nThe setup is complete. You can change everything later in Settings.")
                 .font(.title3)
@@ -303,7 +312,8 @@ struct LavaOnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!visitedPages.contains(dotPage))
-                .accessibilityLabel("Step \(dotPage.rawValue + 1)")
+                .accessibilityLabel("Step \(dotPage.rawValue + 1) of \(OnboardingPage.allCases.count)")
+                .accessibilityAddTraits(dotPage == page ? [.isSelected] : [])
             }
         }
     }
@@ -624,6 +634,7 @@ private struct OnboardingStepHeading: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.68)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
 
             Text(description.lavaLocalized)
                 .font(.title3)
@@ -699,6 +710,7 @@ private struct OnboardingProtectionLevelPanel: View {
                         Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                             .font(.title3)
                             .foregroundStyle(isOn ? LavaStyle.safeGreen : LavaStyle.secondaryText.opacity(0.35))
+                            .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(group.category.displayLabel.lavaLocalized)
@@ -714,6 +726,11 @@ private struct OnboardingProtectionLevelPanel: View {
                         Spacer(minLength: 0)
                     }
                     .opacity(isOn ? 1 : 0.5)
+                    // The included/excluded state was conveyed only by the glyph + dimming; give
+                    // VoiceOver an explicit On/Off value (icon hidden as decorative) so grayscale
+                    // and non-visual users get the same meaning.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(Text(isOn ? "On" : "Off"))
                 }
             }
         }

@@ -468,6 +468,7 @@ private struct SettingsNavigationRow: View {
                         .foregroundStyle(LavaStyle.safeGreen)
                         .frame(width: 34, height: 34)
                         .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityHidden(true)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -485,6 +486,7 @@ private struct SettingsNavigationRow: View {
                 Image(systemName: "chevron.right")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -4222,6 +4224,7 @@ struct BugReportSettingsView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])
 
                         if index < BugReportIssueType.allCases.count - 1 {
                             LavaCondensedDivider()
@@ -4876,7 +4879,9 @@ private struct BugReportStepProgressView: View {
 
     private func stepLabel(for step: BugReportStep) -> some View {
         Text("\(step.displayNumber) \(step.title.lavaLocalized)")
-            .font(.caption.weight(.semibold))
+            // Current step also carries a heavier weight — a non-color cue so the active step
+            // survives grayscale, not just the selection tint swap.
+            .font(.caption.weight(step == currentStep ? .heavy : .semibold))
             .foregroundStyle(isUnavailableStep(step) ? LavaStyle.tertiaryText : Color.primary)
             .lineLimit(1)
             .minimumScaleFactor(0.72)
@@ -4886,6 +4891,7 @@ private struct BugReportStepProgressView: View {
             .lavaSurface(.selection(isSelected: step == currentStep))
             .opacity(isUnavailableStep(step) ? 0.55 : 1)
             .contentShape(Rectangle())
+            .accessibilityAddTraits(step == currentStep ? [.isSelected] : [])
     }
 
     private func isUnavailableStep(_ step: BugReportStep) -> Bool {
