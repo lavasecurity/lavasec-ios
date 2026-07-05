@@ -236,6 +236,9 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(malformedAnswer), "malformed positive → client SERVFAIL")
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(malformedNegative), "malformed negative → client SERVFAIL (the missed case)")
         XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(nil))
+        // A QUERY (QR=0), even well-formed, is not a served answer — QR-gated like the sibling
+        // classifiers so a stray query can't be misread as the primary serving.
+        XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(query), "a query (QR=0) is not a served answer")
     }
 
     func testIndicatesAcceptedAnswerRejectsMalformedResourceRecords() {

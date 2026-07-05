@@ -82,8 +82,7 @@ struct BackupSetupView: View {
             Text(step.title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
 
             Spacer()
@@ -160,7 +159,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -181,7 +180,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -255,7 +254,7 @@ struct BackupSetupView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

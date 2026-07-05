@@ -348,7 +348,7 @@ private struct ActivityFlowStatRow: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(LavaStyle.ink)
                 .monospacedDigit()
-                .lineLimit(1)
+                .lineLimit(2)
                 .minimumScaleFactor(0.7)
         }
         .accessibilityElement(children: .combine)
@@ -662,7 +662,7 @@ private enum NetworkActivityTheme {
         case .networkChange, .protectionLifecycle, .userAction:
             return LavaStyle.safeGreen
         case .smokeTest(let isWarning):
-            return isWarning ? LavaStyle.lavaOrange : LavaStyle.safeGreen
+            return isWarning ? LavaStyle.lavaOrangeText : LavaStyle.safeGreen
         case .deviceDNS, .reconnect:
             return LavaStyle.secondaryText
         }
@@ -968,11 +968,10 @@ private struct ActivityDateEndpointButton: View {
                 Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(isActive ? LavaStyle.safeGreen : LavaStyle.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
+            .frame(minHeight: 56)
             .lavaSurface(.selection(isSelected: isActive))
         }
         .buttonStyle(ActivityDateEndpointButtonStyle())

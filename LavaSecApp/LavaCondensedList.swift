@@ -45,7 +45,7 @@ struct LavaCondensedStatus {
     }
 
     static let newlyAdded = LavaCondensedStatus(text: "New", tint: LavaStyle.safeGreen)
-    static let pendingRemoval = LavaCondensedStatus(text: "Pending remove", tint: LavaStyle.lavaOrange)
+    static let pendingRemoval = LavaCondensedStatus(text: "Pending remove", tint: LavaStyle.lavaOrangeText)
 
     static func blocklistSizeBucket(entryCount: Int) -> LavaCondensedStatus {
         let bucket = BlocklistSourceSizeBucket.bucket(forEntryCount: entryCount)
@@ -75,7 +75,7 @@ struct LavaCondensedListItem<Leading: View>: View {
     var metadataPrefixStatus: LavaCondensedStatus?
     var status: LavaCondensedStatus?
     var isInactive = false
-    var titleFont: Font = .subheadline.weight(.semibold)
+    var titleFont: Font = LavaTypography.rowTitle
     var titleLineLimit = 2
     var trailingAction: LavaCondensedTrailingAction?
     private let leading: Leading
@@ -87,7 +87,7 @@ struct LavaCondensedListItem<Leading: View>: View {
         metadataPrefixStatus: LavaCondensedStatus? = nil,
         status: LavaCondensedStatus? = nil,
         isInactive: Bool = false,
-        titleFont: Font = .subheadline.weight(.semibold),
+        titleFont: Font = LavaTypography.rowTitle,
         titleLineLimit: Int = 2,
         trailingAction: LavaCondensedTrailingAction? = nil,
         @ViewBuilder leading: () -> Leading
@@ -171,7 +171,7 @@ extension LavaCondensedListItem where Leading == EmptyView {
         metadataPrefixStatus: LavaCondensedStatus? = nil,
         status: LavaCondensedStatus? = nil,
         isInactive: Bool = false,
-        titleFont: Font = .subheadline.weight(.semibold),
+        titleFont: Font = LavaTypography.rowTitle,
         titleLineLimit: Int = 2,
         trailingAction: LavaCondensedTrailingAction? = nil
     ) {

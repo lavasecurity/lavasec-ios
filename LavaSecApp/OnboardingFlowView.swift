@@ -631,8 +631,6 @@ private struct OnboardingStepHeading: View {
             Text(title.lavaLocalized)
                 .font(.largeTitle.bold())
                 .foregroundStyle(LavaStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.68)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
 
@@ -679,6 +677,7 @@ private extension OnboardingProtectionLevel {
 private struct OnboardingProtectionLevelPanel: View {
     @Binding var selection: OnboardingProtectionLevel
     @Namespace private var segmentNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // The full superset of category rows (from the broadest level) so the checklist
     // keeps a constant height — only each row's enabled state changes.
@@ -737,7 +736,7 @@ private struct OnboardingProtectionLevelPanel: View {
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
-        .animation(.easeInOut(duration: 0.2), value: selection)
+        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: selection)
     }
 
     private var segments: some View {
@@ -745,7 +744,7 @@ private struct OnboardingProtectionLevelPanel: View {
             ForEach(OnboardingProtectionLevel.allCases, id: \.self) { level in
                 let isSelected = selection == level
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion)) {
                         selection = level
                     }
                 } label: {
@@ -782,6 +781,7 @@ private struct OnboardingProtectionLevelPanel: View {
 private struct OnboardingConnectionPanel: View {
     @Binding var useEncryptedFallback: Bool
     @Binding var fallbackResolverPresetID: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let providers: [DNSResolverPreset] = [
         .mullvadDoH, .cloudflareDoH, .quad9SecureDoH, .googleDoH
@@ -801,7 +801,7 @@ private struct OnboardingConnectionPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Toggle(isOn: $useEncryptedFallback.animation(.easeInOut(duration: 0.2))) {
+            Toggle(isOn: $useEncryptedFallback.animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion))) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Encrypted fallback")
                         .font(.body.weight(.semibold))
@@ -841,8 +841,8 @@ private struct OnboardingConnectionPanel: View {
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
-        .animation(.easeInOut(duration: 0.2), value: useEncryptedFallback)
-        .animation(.easeInOut(duration: 0.2), value: fallbackResolverPresetID)
+        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: useEncryptedFallback)
+        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: fallbackResolverPresetID)
     }
 
     private func providerRow(_ provider: DNSResolverPreset) -> some View {
@@ -1189,12 +1189,10 @@ private struct OnboardingPrimaryButton: View {
 
                 Text(title.lavaLocalized)
                     .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            .frame(minHeight: 52)
             .background(LavaStyle.safeControlGreen, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -1212,10 +1210,8 @@ private struct OnboardingSecondaryButton: View {
             Text(title.lavaLocalized)
                 .font(.headline)
                 .foregroundStyle(LavaStyle.panelActionGreen)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(minHeight: 52)
                 .background(LavaStyle.panelActionFill, in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)

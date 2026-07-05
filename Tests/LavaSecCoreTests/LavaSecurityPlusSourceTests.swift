@@ -12,7 +12,8 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Security Plus\")"))
         XCTAssertTrue(settingsSource.contains(".navigationBarTitleDisplayMode(.large)"))
         XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")"))
-        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")\n                    .foregroundStyle(LavaStyle.lavaOrange)"))
+        // Retinted to lavaOrangeText for WCAG contrast (visual a11y Task 3) — still the orange role.
+        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")\n                    .foregroundStyle(LavaStyle.lavaOrangeText)"))
         XCTAssertFalse(settingsSource.contains("title: \"More room for your rules\""))
         XCTAssertFalse(settingsSource.contains("UpgradeLargeTitle()"))
         XCTAssertFalse(settingsSource.contains("Text(\"Lava Security Plus\")\n                        .foregroundStyle(LavaStyle.lavaOrange)\n                    Text(\" unlocks\")"))
@@ -143,6 +144,40 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(viewModelSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertFalse(viewModelSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map"))
+    }
+
+    func testYearlySavingsPitchIsComputedFromStoreKitPricesNotHardcoded() throws {
+        let storeSource = try readSource(.lavaSecurityPlusStore)
+        let settingsSource = try readSource(.settingsView)
+
+        // The saving is derived from the customer's own storefront prices
+        // (yearly vs 12× monthly), floored so it never overstates, and gated on a
+        // minimum before it is shown as a number.
+        XCTAssertTrue(storeSource.contains("let savingsPercent: Int?"))
+        XCTAssertTrue(storeSource.contains("func yearlySavingsPercent(yearly: Product?, monthly: Product?)"))
+        XCTAssertTrue(storeSource.contains("let annualizedMonthly = monthly.price * 12"))
+        // Floored in Decimal space via Int(truncating:) (truncates toward zero) so it never
+        // overstates — NOT through a Double round-trip, which drops a clean integer point (an exact
+        // Decimal 0.37 becomes 0.36999… → 36 instead of 37). (#44 Kilo finding)
+        XCTAssertTrue(storeSource.contains("Int(truncating: NSDecimalNumber("))
+        XCTAssertFalse(storeSource.contains(".doubleValue * 100"),
+                       "The savings floor must stay in Decimal space, not round-trip the fraction through Double.")
+        XCTAssertTrue(storeSource.contains("minimumDisplayableSavingsPercent"))
+        XCTAssertTrue(storeSource.contains("savingsPercent: plan.kind == .yearly ? savingsPercent : nil"))
+
+        // The pitch quotes the computed figure via a localized placeholder, and
+        // falls back to number-free copy when there is no storefront saving.
+        // (The pitch strings embed literal quotes, so match the inner text rather
+        // than the backslash-escaped quotes as they appear in the raw source.)
+        XCTAssertTrue(settingsSource.contains("private func planPitch(for offer: LavaSecurityPlusOffer)"))
+        XCTAssertTrue(settingsSource.contains("planPitch(for: offer)"))
+        XCTAssertTrue(settingsSource.contains("We are saving %d%%! This has the best value."))
+        XCTAssertTrue(settingsSource.contains(".lavaLocalizedFormat(savingsPercent)"))
+        XCTAssertTrue(settingsSource.contains("Paying by the year beats paying by the month."))
+
+        // Guard against the hard-coded percentage ever coming back.
+        XCTAssertFalse(settingsSource.contains("We are saving 37%!"))
+        XCTAssertFalse(settingsSource.contains("planPitch(for: offer.plan.kind)"))
     }
 
     func testUpgradeScreenShowsCommitmentPitchAndFamilySharingBenefit() throws {

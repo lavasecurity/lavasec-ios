@@ -8,12 +8,35 @@ extension View {
             .foregroundStyle(LavaStyle.secondaryText)
     }
 
+    /// The primary text of a list / table ROW — one shared size so row titles do not drift per
+    /// screen (`LavaTypography.rowTitle`, 15 pt semibold, Dynamic-Type-scaling). **Font only**: a row
+    /// title carries its own color (active / inactive / frozen / error), so this sets no color.
+    func lavaRowTitleText() -> some View {
+        font(LavaTypography.rowTitle)
+    }
+
+    /// The title of a tappable ENTRY CARD or navigation row — the surfaces that OPEN a list or a
+    /// detail. One step above a row title (`LavaTypography.cardTitle`, 17 pt). **Font only** (above).
+    func lavaCardTitleText() -> some View {
+        font(LavaTypography.cardTitle)
+    }
+
+    /// Secondary supporting copy — `.subheadline` (15 pt). The DEFAULT for the dense,
+    /// glanceable text that sits under a title or inside a card (row subtitles, panel
+    /// captions, one- or two-line explainers). Rule: reach for this first; use the larger
+    /// `lavaBodySupportingText()` only for genuine primary paragraph copy (below). Both are
+    /// secondary-colored and grow vertically; they differ only in size, so pick by role — do
+    /// not coin-flip between them per screen.
     func lavaSupportingText() -> some View {
         font(.subheadline)
             .foregroundStyle(LavaStyle.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// Primary paragraph copy — `.body` (17 pt). For the main readable prose of a screen or
+    /// sheet (an explanatory paragraph the user is meant to actually read), NOT for the dense
+    /// caption/subtitle text that belongs to `lavaSupportingText()` (15 pt) above. If in doubt
+    /// it is supporting, not body — default to the smaller one.
     func lavaBodySupportingText() -> some View {
         font(.body)
             .foregroundStyle(LavaStyle.secondaryText)
@@ -755,6 +778,16 @@ enum LavaFlowTransition {
     /// system push, and softened to a plain fade under Reduce Motion.
     static func animation(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeInOut(duration: 0.2) : .easeOut(duration: 0.32)
+    }
+
+    /// Gate for an *incidental* animation — a selection slide, section expand/collapse, animated
+    /// scroll, or press-scale. Returns `nil` under Reduce Motion so the change lands instantly (no
+    /// movement); otherwise the given animation. Distinct from `animation(reduceMotion:)`, which
+    /// keeps a gentle fade for staged-flow *page* changes. Use as
+    /// `.animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value:)`
+    /// or `withAnimation(LavaFlowTransition.incidental(..., reduceMotion: reduceMotion))`.
+    static func incidental(_ animation: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : animation
     }
 
     /// Horizontal push/pop transition honoring `direction`. Reduce Motion trades

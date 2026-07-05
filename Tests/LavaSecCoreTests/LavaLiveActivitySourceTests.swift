@@ -263,16 +263,19 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLiveActivities(isEnabled)"))
         XCTAssertTrue(customizationBlock.contains("Shows Lava status on the Lock Screen and Dynamic Island when available."))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Language\")"))
-        // Section order: Lava Guard, Live Activities, Haptics, Appearance, Language.
+        // Section order (Customization reorder): Lava Guard, Appearance, Text Size, Notifications,
+        // Live Activities, Haptics, Language. The Display cluster (Appearance + Text Size) rises to
+        // the top; Live Activities drops below Notifications. Full order pinned in
+        // CustomizationTextSizeSourceTests; this keeps the Live-Activities-relative anchors current.
         let lavaGuardIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Lava Guard\")")?.lowerBound)
+        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
         let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
         let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
-        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
         let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        XCTAssertLessThan(lavaGuardIndex, liveActivitiesIndex)
+        XCTAssertLessThan(lavaGuardIndex, appearanceIndex)
+        XCTAssertLessThan(appearanceIndex, liveActivitiesIndex)
         XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
-        XCTAssertLessThan(hapticsIndex, appearanceIndex)
-        XCTAssertLessThan(appearanceIndex, languageIndex)
+        XCTAssertLessThan(hapticsIndex, languageIndex)
 
         let guardPickerIndex = try XCTUnwrap(customizationBlock.range(of: "LavaGuardLookPickerRow(")?.lowerBound)
         let unlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
@@ -599,7 +602,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(settings.contains("case .emerald:"))
         XCTAssertTrue(settings.contains("\"Giveaways should not ask for secrets.\""))
         XCTAssertTrue(settings.contains("\"Make me your web-surfing buddy!\""))
-        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.sfSymbolName)"))
+        // The Guard tab stays a plain SF Symbol Label (no custom mascot view); the glyph now
+        // resolves per selection via tabBarSymbolName for the R1 fill-on-select cue.
+        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
         XCTAssertFalse(tabViewBlock.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))

@@ -932,7 +932,9 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(actionBlock.contains("await disableProtection()\n            protectionActionOrchestrator.release(.turnOff)"))
         XCTAssertTrue(actionBlock.contains("guard protectionActionOrchestrator.claim(.reconnect) else"))
         XCTAssertTrue(actionBlock.contains("guard protectionActionOrchestrator.claim(.toggle) else"))
-        XCTAssertTrue(actionBlock.contains("let shouldDisableProtection = isProtectionEnabledStatus(vpnStatus)"))
+        // An armed-but-dropped tunnel (awaiting on-demand reconnect) counts as "on" so the toggle's
+        // "Turn Off" disables it, instead of re-enabling and stranding the user unable to turn it off.
+        XCTAssertTrue(actionBlock.contains("let shouldDisableProtection = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"))
         XCTAssertTrue(actionBlock.contains("if shouldDisableProtection"))
         XCTAssertFalse(
             source.contains("isConfiguringVPN = true"),

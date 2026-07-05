@@ -49,19 +49,26 @@ struct RootView: View {
                 scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel)
             )
                 .tabItem {
-                    Label("Guard", systemImage: LavaIconRole.guardShield.sfSymbolName)
+                    // Fill on select (outline when not) so the active tab reads without relying on
+                    // tint — a Differentiate Without Color cue. VoiceOver selection is already
+                    // conveyed by the native tab bar.
+                    Label("Guard", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))
                 }
                 .tag(LavaRootTab.guardPanel)
 
             SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))
                 .tabItem {
-                    Label("Settings", systemImage: LavaIconRole.settings.sfSymbolName)
+                    Label("Settings", systemImage: LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings))
                 }
                 .tag(LavaRootTab.settings)
         }
         .tint(LavaStyle.safeGreen)
         .background(LavaStyle.groupedBackground)
         .preferredColorScheme(viewModel.preferredColorScheme)
+        // Customization → Text Size. Nil when "Match System" is on (the default), so the system's
+        // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
+        // so every screen — including sheets/covers presented from it — inherits it.
+        .lavaTextSizeOverride(viewModel.textSizeOverride)
         .overlay {
             RageShakeDetector {
                 viewModel.handleRageShake()
@@ -473,6 +480,20 @@ struct RootView: View {
 
         print("LAVA_RAGE_SHAKE_SHEET_VISIBLE \(destination)")
         #endif
+    }
+}
+
+private extension View {
+    /// Forces an app-wide Dynamic Type size when the Customization → Text Size control is set to a
+    /// fixed size; passes through untouched (letting the system's Larger Text setting flow) when
+    /// "Match System" is on and `size` is nil.
+    @ViewBuilder
+    func lavaTextSizeOverride(_ size: DynamicTypeSize?) -> some View {
+        if let size {
+            dynamicTypeSize(size)
+        } else {
+            self
+        }
     }
 }
 

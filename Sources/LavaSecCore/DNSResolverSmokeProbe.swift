@@ -95,7 +95,16 @@ public enum DNSResolverSmokeProbe {
     /// not count as the primary serving. It intentionally does NOT touch
     /// `indicatesResolverFailure`, which additionally gates encrypted-fallback engagement.
     public static func indicatesServedAnswer(_ response: Data?) -> Bool {
-        guard let response else {
+        guard let response = response.map({ zeroBased($0) }), response.count >= 12 else {
+            return false
+        }
+        // Must be a RESPONSE (QR=1), matching the sibling classifiers `indicatesAcceptedAnswer`
+        // and `indicatesResolverFailure`. A query (QR=0) with a well-formed question but no RRs
+        // would otherwise pass both `hasWellFormedResourceRecords` and `!indicatesResolverFailure`
+        // (the latter is itself QR-gated) and be misclassified as a served answer. The only call
+        // site passes an upstream reply, so this does not manifest today — it is a defensive
+        // consistency guard.
+        guard readUInt16(response, at: 2) & 0x8000 != 0 else {
             return false
         }
         guard !indicatesResolverFailure(response) else {

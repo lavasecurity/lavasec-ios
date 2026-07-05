@@ -166,7 +166,7 @@ private struct FilterInEffectRow: View {
             HStack(spacing: 14) {
                 Image(systemName: isUnprotected ? "exclamationmark.shield.fill" : "play.circle.fill")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(isUnprotected ? LavaStyle.lavaOrange : LavaStyle.safeGreen)
+                    .foregroundStyle(isUnprotected ? LavaStyle.lavaOrangeText : LavaStyle.safeGreen)
                     .frame(width: 38, height: 38)
                     .background(
                         (isUnprotected ? LavaStyle.lavaOrange.opacity(0.12) : LavaStyle.softGreen),
@@ -175,14 +175,14 @@ private struct FilterInEffectRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Now filtering".lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
                     if isUnprotected {
                         Text("Blocks nothing — not protected".lavaLocalized)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(LavaStyle.lavaOrange)
+                            .foregroundStyle(LavaStyle.lavaOrangeText)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     } else {
@@ -606,7 +606,7 @@ private struct FilterLibraryRow: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(filter.name)
-                                .font(.subheadline.weight(.semibold))
+                                .lavaRowTitleText()
                                 .foregroundStyle(isFrozen ? LavaStyle.secondaryText : LavaStyle.primaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.82)
@@ -774,7 +774,7 @@ private struct ShareFilterPickerRow: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(name)
-                        .font(.subheadline.weight(.semibold))
+                        .lavaRowTitleText()
                         .foregroundStyle(isShareable ? LavaStyle.primaryText : LavaStyle.secondaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
@@ -906,7 +906,7 @@ private struct RenameFilterSheet: View {
                 if isDuplicate {
                     Text("You already have a filter with that name.".lavaLocalized)
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(LavaStyle.lavaOrange)
+                        .foregroundStyle(LavaStyle.lavaOrangeText)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
@@ -1127,7 +1127,7 @@ private struct FiltersOverviewPanel: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                 }
-                .foregroundStyle(LavaStyle.lavaOrange)
+                .foregroundStyle(LavaStyle.lavaOrangeText)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(LavaStyle.lavaOrangeSoft))
@@ -1158,7 +1158,7 @@ private struct FiltersOverviewPanel: View {
                         Spacer(minLength: 0)
                         Image(systemName: "checkmark")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(LavaStyle.lavaOrange)
+                            .foregroundStyle(LavaStyle.lavaOrangeText)
                             .opacity(option == preview ? 1 : 0)
                     }
                     .padding(.horizontal, 16)
@@ -1466,7 +1466,7 @@ private struct MyListCover: View {
                     (Text(Image(systemName: "exclamationmark.shield.fill"))
                         + Text(" \("Blocks nothing — not protected".lavaLocalized)"))
                         .font(.footnote.weight(.semibold))
-                        .foregroundColor(LavaStyle.lavaOrange)
+                        .foregroundColor(LavaStyle.lavaOrangeText)
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
                     (Text(Image(systemName: viewModel.blocklistCatalogFreshnessSystemImage))
@@ -1495,7 +1495,7 @@ private struct MyListCover: View {
                     (Text(Image(systemName: "exclamationmark.shield.fill"))
                         + Text(" \("Blocks nothing".lavaLocalized)"))
                         .font(.footnote.weight(.semibold))
-                        .foregroundColor(LavaStyle.lavaOrange)
+                        .foregroundColor(LavaStyle.lavaOrangeText)
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
                     (Text(Image(systemName: "pause.circle"))
@@ -1515,7 +1515,7 @@ private struct MyListCover: View {
             EmptyFilterRow(
                 title: "No blocklists enabled",
                 subtitle: editSubtitle("Add a curated blocklist to start blocking known domains"),
-                titleFont: .body
+                titleFont: LavaTypography.rowTitle
             )
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -1551,7 +1551,7 @@ private struct MyListCover: View {
             EmptyFilterRow(
                 title: "No allowed exceptions",
                 subtitle: isEditing ? "Add only domains you trust" : nil,
-                titleFont: .body
+                titleFont: LavaTypography.rowTitle
             )
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -1715,7 +1715,9 @@ private struct LavaInlineInfoContent: View {
 private struct EmptyFilterRow: View {
     let title: String
     let subtitle: String?
-    var titleFont: Font = .headline
+    // Empty-state placeholder sits in a row list, so it matches the row-title size (15pt),
+    // not a card title. All three EmptyFilterRow usages resolve here.
+    var titleFont: Font = LavaTypography.rowTitle
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1744,7 +1746,7 @@ private struct BlocklistEffectRow: View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(viewModel.blocklistName(for: sourceID).lavaLocalized)
-                    .font(.subheadline.weight(.semibold))
+                    .lavaRowTitleText()
                     .foregroundStyle(pendingRemoval ? LavaStyle.secondaryText : LavaStyle.primaryText)
                     .strikethrough(pendingRemoval, color: LavaStyle.secondaryText)
                     .lineLimit(2)
@@ -1818,7 +1820,7 @@ private struct DomainEffectRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Text(domain.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .lavaRowTitleText()
                 .foregroundStyle(isPendingRemoval ? LavaStyle.secondaryText : LavaStyle.primaryText)
                 .strikethrough(isPendingRemoval, color: LavaStyle.secondaryText)
                 .lineLimit(1)
@@ -1946,7 +1948,7 @@ private struct DomainEntryForm: View {
 
             Text(usageText.lavaLocalized)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(usageTextIsError ? LavaStyle.lavaOrange : LavaStyle.secondaryText)
+                .foregroundStyle(usageTextIsError ? LavaStyle.lavaOrangeText : LavaStyle.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
         }
@@ -1994,6 +1996,7 @@ private enum AddBlocklistRoute: Hashable {
 }
 
 struct AddBlocklistSheet: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     enum Usage {
         case filterDraft
         case onboardingSelection
@@ -2048,7 +2051,7 @@ struct AddBlocklistSheet: View {
                                 activeSectionID: activeSectionID
                             ) { sectionID in
                                 activeSectionID = sectionID
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.25), reduceMotion: reduceMotion)) {
                                     proxy.scrollTo(BlocklistJumpMetrics.anchorID(for: sectionID), anchor: .top)
                                 }
                             }
@@ -2106,7 +2109,7 @@ struct AddBlocklistSheet: View {
 
                     Text(selectionStatusText.lavaLocalized)
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(selectionStatusIsError ? LavaStyle.lavaOrange : LavaStyle.secondaryText)
+                        .foregroundStyle(selectionStatusIsError ? LavaStyle.lavaOrangeText : LavaStyle.secondaryText)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
@@ -2474,7 +2477,7 @@ private struct BlocklistCategoryJumpPills: View {
                             .padding(.vertical, 8)
                             .background(
                                 Capsule()
-                                    .fill(isActive ? LavaStyle.lavaOrange : LavaStyle.secondaryText.opacity(0.12))
+                                    .fill(isActive ? LavaStyle.lavaOrangeSelectedFill : LavaStyle.secondaryText.opacity(0.12))
                             )
                             .contentShape(Capsule())
                     }
@@ -2650,7 +2653,7 @@ private struct CustomBlocklistPickerRow: View {
                 ) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title.lavaLocalized)
-                            .font(.headline.weight(.semibold))
+                            .lavaRowTitleText()
                             .foregroundStyle(LavaStyle.primaryText)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -2715,7 +2718,7 @@ private struct BlocklistPickerTextStack: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.lavaLocalized)
-                .font(.headline.weight(.semibold))
+                .lavaRowTitleText()
                 .foregroundStyle(LavaStyle.primaryText)
                 .lineLimit(titleLineLimit)
                 .minimumScaleFactor(0.82)
@@ -2811,7 +2814,7 @@ private struct BringYourOwnListView: View {
             if let customSourceFooterText {
                 Text(customSourceFooterText.lavaLocalized)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             }

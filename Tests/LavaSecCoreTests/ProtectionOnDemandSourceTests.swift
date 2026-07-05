@@ -105,6 +105,82 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private func setManagerOnDemand("))
     }
 
+    /// An armed-but-dropped tunnel (`.disconnected` + confirmed on-demand) must persist
+    /// `protectionEnabled = true`, not merely render as "Reconnecting": the tunnel's own
+    /// self-reconnect (`TunnelSelfReconnectPolicy`) hard-requires the persisted hint, so a filter
+    /// edit/switch during the drop that wrote a false hint would suppress future self-reconnects
+    /// even though the user never turned protection off (Codex #262 P2).
+    func testProtectionEnabledHintPreservedWhileAwaitingOnDemandReconnect() throws {
+        let source = try readSource(.appViewModel)
+        let block = try sourceBlock(
+            in: source,
+            startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionOnSucceededHapticIfNeeded("
+        )
+        XCTAssertTrue(
+            block.contains("let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
+            "The persisted protectionEnabled hint must keep the armed-reconnect state true, not derive from vpnStatus alone."
+        )
+        // Codex #262 P2: the cached confirmed-on-demand bit must be RECONCILED against the live
+        // manager so an externally-disabled on-demand (or re-added profile) can't leave a stale
+        // `true` that shows "Reconnecting" / persists protectionEnabled=true with nothing armed.
+        // Clear-direction only (race-safe vs an in-flight app arm, which sets isOnDemandEnabled
+        // true in-memory before its save).
+        // Prove the clear sits INSIDE the !isOnDemandEnabled guard body, not merely somewhere in the
+        // method — there are other setOnDemandConfirmedEnabled(false) calls in AppViewModel (the arm
+        // flow), so two independent `contains` would pass even if this clear were hoisted out of the
+        // guard to run unconditionally (which would clobber an in-flight app arm).
+        let reconcileGuard = try XCTUnwrap(
+            block.range(of: "if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {"),
+            "A disconnected manager whose on-demand is no longer armed must clear the stale confirmed-on-demand bit before deriving the reconnecting state.")
+        let afterGuard = block[reconcileGuard.upperBound...]
+        // Anchor the guard's closing brace at ITS indentation (12 spaces) rather than the first `}`,
+        // so a future nested brace-delimited block in the guard body (deeper-indented) can't be
+        // mistaken for the guard close and truncate the slice before the clear call. (#44 OCR)
+        let guardClose = try XCTUnwrap(afterGuard.range(of: "\n            }")?.lowerBound)
+        XCTAssertTrue(
+            afterGuard[..<guardClose].contains("Self.setOnDemandConfirmedEnabled(false)"),
+            "The stale-bit clear must sit INSIDE the !isOnDemandEnabled guard body (clear-direction only), not run unconditionally.")
+        // …and it must run BEFORE the protectionEnabled derivation reads isAwaitingOnDemandReconnect
+        // (which reads the bit). If the reconcile were moved below the derivation, an externally
+        // disabled profile would still derive protectionEnabled=true off the stale bit (Codex).
+        let derivationIndex = try XCTUnwrap(
+            block.range(of: "let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect")?.lowerBound)
+        XCTAssertLessThan(
+            reconcileGuard.lowerBound, derivationIndex,
+            "The stale-bit reconcile must run BEFORE the protectionEnabled derivation, else the derivation reads the stale confirmed-on-demand bit.")
+    }
+
+    /// The armed-reconnect state must be honored across the lifecycle restore/enable paths too, not
+    /// just the persist derivation — otherwise the preserved hint drives a redundant enableProtection
+    /// whose no-network start-timeout re-persists `protectionEnabled = false`, undoing it and
+    /// suppressing the self-reconnect (Codex #262 P2 follow-up).
+    func testAwaitingOnDemandReconnectHonoredInRestoreAndEnableTimeout() throws {
+        let source = try readSource(.appViewModel)
+        // Restore treats armed-reconnect as already-active (iOS will reconnect) — it must not force enable.
+        let restoreBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func restoreProtectionIfNeeded(wasEnabled: Bool) async",
+            endingBefore: "private func reconcileTunnelSnapshotAfterLaunch"
+        )
+        XCTAssertTrue(
+            restoreBlock.contains("guard !isProtectionEnabledStatus(vpnStatus), !isAwaitingOnDemandReconnect else"),
+            "Restore must skip enableProtection while awaiting an on-demand reconnect."
+        )
+        // The enable start-timeout keeps the hint true when on-demand is armed. Scope to
+        // enableProtection: the same expression also appears in updateProtectionStatus, so an
+        // unscoped `source.contains` could pass on the wrong site if this one regressed.
+        let enableBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func enableProtection(",
+            endingBefore: "private func disableProtection("
+        )
+        XCTAssertTrue(
+            enableBlock.contains("configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect"),
+            "The enable start-timeout persist must preserve the armed-reconnect hint."
+        )
+    }
+
     func testLaunchReconcilesTunnelSnapshotWhenAlreadyConnected() throws {
         // On-demand persists across restarts, so on launch iOS can bring the
         // tunnel up cold — it loads fail-closed and never recovers on its own,
@@ -123,8 +199,8 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             endingBefore: "private func sendTunnelMessage("
         )
         XCTAssertTrue(
-            reconcileBlock.contains("guard isProtectionEnabledStatus(vpnStatus) else"),
-            "Reconcile must only act when protection is already active."
+            reconcileBlock.contains("guard isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect else"),
+            "Reconcile must act when protection is active OR armed-but-dropped — an armed-reconnect launch must publish the snapshot BEFORE iOS reconnects, else the tunnel starts cold on stale/fail-closed rules (Codex #44 P2)."
         )
         let prepareIndex = try XCTUnwrap(reconcileBlock.range(of: "preparedSnapshotForProtectionStartup()")?.lowerBound)
         let persistIndex = try XCTUnwrap(reconcileBlock.range(of: "persistSharedState(")?.lowerBound)
@@ -283,6 +359,36 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         XCTAssertLessThan(
             recoveryIndex, throwIndex,
             "Recovery must be attempted before giving up with vpnStillStopping."
+        )
+    }
+
+    func testTurnOffForceRemovesWhenOnDemandDisableFailsEvenIfAlreadyStopped() throws {
+        // Regression (#44 Codex P2): the reconnecting turn-off routes an armed-but-dropped tunnel
+        // (already `.disconnected`) through disableProtection. There `waitForProtectionToStop()`
+        // returns true immediately, so a `== false` gate would SKIP the force-remove backstop — yet a
+        // failed on-demand disable leaves the saved profile armed and iOS re-arms the tunnel, so the
+        // user can't actually turn protection off. disableProtection must capture the disable result
+        // and force-remove when it failed, not only when the tunnel is stuck running.
+        let source = try readSource(.appViewModel)
+        let disableBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func disableProtection(operationID:",
+            endingBefore: "private func reconnectProtectionNow"
+        )
+        XCTAssertTrue(
+            disableBlock.contains("onDemandDisabled = await disableOnDemandWithRetry(on: manager)"),
+            "disableProtection must capture whether on-demand actually got disabled (its result must not be ignored)."
+        )
+        // The backstop seeds on `!onDemandDisabled` (so a failed disable forces removal even when the
+        // tunnel is already stopped) and still fires when the tunnel never stops. (Branched rather than
+        // `|| await …` because `await` can't sit in a `||` autoclosure.)
+        XCTAssertTrue(
+            disableBlock.contains("var mustForceRemoveProfile = !onDemandDisabled"),
+            "The force-remove backstop must seed on !onDemandDisabled, so an armed-but-dropped turn-off with a failed on-demand disable can't leave the profile re-arming."
+        )
+        XCTAssertTrue(
+            disableBlock.contains("mustForceRemoveProfile = await waitForProtectionToStop() == false"),
+            "The backstop must also fire when the tunnel never reaches a stopped state."
         )
     }
 

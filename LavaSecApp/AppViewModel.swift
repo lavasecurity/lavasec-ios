@@ -88,6 +88,94 @@ enum LavaAppearancePreference: String, CaseIterable, Identifiable {
     }
 }
 
+/// In-app Dynamic Type override for the Customization → Text Size control. Covers the seven
+/// standard content sizes (the same range as iOS Settings → Display & Brightness → Text Size).
+/// Larger accessibility sizes stay reachable through the system's Larger Text setting, which the
+/// app respects whenever "Match System" is on — so this control never has to reproduce them.
+enum LavaTextSize: String, CaseIterable, Identifiable {
+    case xSmall
+    case small
+    case medium
+    case large
+    case xLarge
+    case xxLarge
+    case xxxLarge
+
+    var id: Self {
+        self
+    }
+
+    /// Matches the system's out-of-the-box Dynamic Type size, so turning "Match System" off does
+    /// not jump the text until the user actually moves the slider.
+    static let systemDefault: LavaTextSize = .large
+
+    var dynamicTypeSize: DynamicTypeSize {
+        switch self {
+        case .xSmall:
+            .xSmall
+        case .small:
+            .small
+        case .medium:
+            .medium
+        case .large:
+            .large
+        case .xLarge:
+            .xLarge
+        case .xxLarge:
+            .xxLarge
+        case .xxxLarge:
+            .xxxLarge
+        }
+    }
+
+    /// A short, localized name for the size, announced to VoiceOver as the Text Size slider's value
+    /// so a non-sighted user knows which size they've chosen (the slider is otherwise just a 0–6
+    /// numeric position). Rendered via `.lavaLocalized` at the call site, like the appearance names.
+    var displayName: String {
+        switch self {
+        case .xSmall:
+            "Extra Small"
+        case .small:
+            "Small"
+        case .medium:
+            "Medium"
+        case .large:
+            "Large"
+        case .xLarge:
+            "Extra Large"
+        case .xxLarge:
+            "Extra Extra Large"
+        case .xxxLarge:
+            "Largest"
+        }
+    }
+
+    /// The in-app size closest to a system `DynamicTypeSize`, clamping the larger accessibility
+    /// sizes (which this control does not expose) down to the largest in-range size. Used to seed
+    /// the slider from the current system size the first time "Match System" is turned off, so
+    /// nothing jumps for users whose iOS text size isn't the default.
+    static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize {
+        switch dynamicTypeSize {
+        case .xSmall:
+            .xSmall
+        case .small:
+            .small
+        case .medium:
+            .medium
+        case .large:
+            .large
+        case .xLarge:
+            .xLarge
+        case .xxLarge:
+            .xxLarge
+        case .xxxLarge:
+            .xxxLarge
+        default:
+            .xxxLarge
+        }
+    }
+}
+
 struct LavaGuardAvailability: Equatable {
     let isSelectable: Bool
     let isRevealed: Bool
@@ -596,17 +684,31 @@ private struct RegisteredBackupPasskey: Equatable {
 @MainActor
 private final class FilterPreparationProgressPresenter {
     private let policy: FilterPreparationPresentationPolicy
+    // A silent (coverless) switch — a programmatic Focus reconcile apply — renders nothing, so the
+    // phase-visibility holds are pure dead time that only keep the previous filter active longer.
+    // When no cover is presented, `present`/`holdCurrentPhaseIfNeeded` short-circuit their sleeps
+    // (the setState closure is already a no-op on that path), so a Focus automation applies without
+    // any UI-only delay. (Codex #44 P2)
+    private let presentsCover: Bool
     private var currentPhase: FilterPreparationPhase?
     private var phaseStartedAt: Date?
 
-    init(policy: FilterPreparationPresentationPolicy = FilterPreparationPresentationPolicy()) {
+    init(
+        policy: FilterPreparationPresentationPolicy = FilterPreparationPresentationPolicy(),
+        presentsCover: Bool = true
+    ) {
         self.policy = policy
+        self.presentsCover = presentsCover
     }
 
     func present(
         _ update: FilterPreparationProgressUpdate,
         setState: (FilterPreparationState) -> Void
     ) async {
+        // No cover on screen (silent Focus apply): nothing to hold, so don't sleep. currentPhase/
+        // phaseStartedAt exist only to pace the cover, so leaving them untouched is inert here.
+        guard presentsCover else { return }
+
         let holdDuration = policy.holdDurationBeforePresenting(
             currentPhase: currentPhase,
             phaseStartedAt: phaseStartedAt,
@@ -631,7 +733,8 @@ private final class FilterPreparationProgressPresenter {
     }
 
     func holdCurrentPhaseIfNeeded() async {
-        guard phaseStartedAt != nil
+        // Same rationale as `present`: a coverless silent apply has no phase to hold on screen.
+        guard presentsCover, phaseStartedAt != nil
         else {
             return
         }
@@ -979,6 +1082,8 @@ final class AppViewModel: ObservableObject {
     @Published var vpnMessageIsError = false
     @Published private(set) var temporaryProtectionPauseUntil: Date?
     @Published private(set) var appearancePreference: LavaAppearancePreference = .system
+    @Published private(set) var textSizeMatchesSystem: Bool = true
+    @Published private(set) var textSize: LavaTextSize = .systemDefault
     @Published private(set) var lavaGuardLook: GuardianShieldStyle = .original
     @Published private(set) var lavaGuardProgress = LavaGuardProgress()
     @Published private(set) var updatesAppIconWithLavaGuard = true
@@ -1026,6 +1131,7 @@ final class AppViewModel: ObservableObject {
             plan: $0,
             displayPrice: $0.fallbackDisplayPrice,
             commitmentDisplayPrice: nil,
+            savingsPercent: nil,
             product: nil
         )
     }
@@ -1105,6 +1211,8 @@ final class AppViewModel: ObservableObject {
     private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
     private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
+    private let textSizeMatchesSystemDefaultsKey = "lavasec.customization.textSizeMatchesSystem"
+    private let textSizeDefaultsKey = "lavasec.customization.textSize"
     private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey
     private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
     private let updatesAppIconWithLavaGuardDefaultsKey = "lavasec.customization.updatesAppIconWithLavaGuard"
@@ -1512,6 +1620,40 @@ final class AppViewModel: ObservableObject {
         defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)
     }
 
+    /// The Dynamic Type size to force app-wide, or `nil` to follow the system (the default).
+    /// `RootView` applies this only when it is non-nil, so "Match System" leaves the system's
+    /// Larger Text setting fully in charge.
+    var textSizeOverride: DynamicTypeSize? {
+        textSizeMatchesSystem ? nil : textSize.dynamicTypeSize
+    }
+
+    /// Toggles "Match System". `systemTextSize` is the app's *current* system Dynamic Type size
+    /// (read from the environment at the call site): the first time Match System is turned off with
+    /// no saved Lava-specific size, the slider is seeded from it so the app doesn't jump before the
+    /// user has chosen a size. A previously-saved Lava size always wins over the seed.
+    func setTextSizeMatchesSystem(_ matchesSystem: Bool, seedingFrom systemTextSize: LavaTextSize) {
+        guard textSizeMatchesSystem != matchesSystem else {
+            return
+        }
+
+        if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil {
+            textSize = systemTextSize
+            defaults.set(systemTextSize.rawValue, forKey: textSizeDefaultsKey)
+        }
+
+        textSizeMatchesSystem = matchesSystem
+        defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKey)
+    }
+
+    func setTextSize(_ size: LavaTextSize) {
+        guard textSize != size else {
+            return
+        }
+
+        textSize = size
+        defaults.set(size.rawValue, forKey: textSizeDefaultsKey)
+    }
+
     func setLavaGuardLook(_ look: GuardianShieldStyle) {
         guard isLavaGuardLookSelectable(look) else {
             return
@@ -1663,6 +1805,18 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// The tunnel is DOWN (`.disconnected`) but Connect-On-Demand is confirmed armed, so iOS will
+    /// bring it back on its own once a network path returns (e.g. leaving an elevator). This is NOT a
+    /// fully-off state — the user did not turn protection off — so the surface must read "Reconnecting",
+    /// never the fully-off "Turn On". Without this the transient-but-armed drop mapped to the `default`
+    /// (Protection Off) branch and showed a [Turn On] button while a self-reconnect was pending.
+    var isAwaitingOnDemandReconnect: Bool {
+        ProtectionLifecyclePolicy.isAwaitingOnDemandReconnect(
+            status: vpnStatus.protectionLifecycleStatus,
+            onDemandConfirmedEnabled: Self.isOnDemandConfirmedEnabled()
+        )
+    }
+
     var protectionTitle: String {
         if isProtectionTemporarilyPaused {
             return "Paused"
@@ -1676,7 +1830,7 @@ final class AppViewModel: ObservableObject {
         case .disconnecting:
             return "Turning Off"
         default:
-            return "Protection Off"
+            return isAwaitingOnDemandReconnect ? "Reconnecting" : "Protection Off"
         }
     }
 
@@ -1695,7 +1849,13 @@ final class AppViewModel: ObservableObject {
         case .invalid:
             return "Tap once to add local protection"
         default:
-            return "Turn on local protection when you are ready"
+            // Reuse the already-localized network-unavailable copy for the armed-but-dropped
+            // (`.disconnected`) case: it accurately describes it ("Lava will resume when the network
+            // returns"). Reference the single source rather than duplicating the literal, so the two
+            // can't drift.
+            return isAwaitingOnDemandReconnect
+                ? ProtectionConnectivityPresentation.subtitle(for: .networkUnavailable)
+                : "Turn on local protection when you are ready"
         }
     }
 
@@ -1709,7 +1869,10 @@ final class AppViewModel: ObservableObject {
             return "Reconnect"
         }
 
-        if isProtectionEnabledStatus(vpnStatus) {
+        // Armed-but-dropped is still "on" from the user's standpoint (protection was never turned off,
+        // iOS will self-reconnect), so offer Turn Off — not the fully-off Turn On. `toggleProtection`
+        // routes this to the disable path in lockstep.
+        if isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect {
             return "Turn Off"
         }
 
@@ -1745,7 +1908,7 @@ final class AppViewModel: ObservableObject {
         case .connecting, .reasserting:
             return "shield.righthalf.filled"
         default:
-            return "shield"
+            return isAwaitingOnDemandReconnect ? "arrow.triangle.2.circlepath" : "shield"
         }
     }
 
@@ -1767,7 +1930,9 @@ final class AppViewModel: ObservableObject {
         case .connecting, .reasserting, .disconnecting:
             return .transitioning
         default:
-            return .inactive
+            // Armed-but-dropped is a live reconnect, not an inactive/off surface — tint it like the
+            // other transitioning states rather than the grey "off" role.
+            return isAwaitingOnDemandReconnect ? .transitioning : .inactive
         }
     }
 
@@ -3535,6 +3700,15 @@ final class AppViewModel: ObservableObject {
 
         let nextConfiguration = plan.configuration
 
+        // A programmatic Focus reconcile apply (`stampsForegroundSwitch == false`, the reconcile's
+        // replay) must be SILENT — no full-screen preparation cover, no "Success" state, no haptic —
+        // exactly like the committed-adopt path (`applyCommittedOnDiskActiveFilter`). Surfacing the
+        // modal cover for every Focus-driven apply is what popped a "Success" page each time the app
+        // was opened after a Focus switch (the automation is not a user action). Only a genuine
+        // user-initiated switch drives the cover. The compile/commit/persist/tunnel-notify below run
+        // identically either way; this gate governs the UI surface ONLY.
+        let presentsPreparationCover = stampsForegroundSwitch
+
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
         // Snapshot the loaded state so ANY failure restores the previously-loaded filter
         // exactly — a cold-compile failure (before commit) or a mid-publish error (after).
@@ -3554,15 +3728,20 @@ final class AppViewModel: ObservableObject {
         // Claim the configuration-replacement token. A later switch/restore/import supersedes
         // it, so this attempt bails at its commit/rollback gate instead of clobbering the
         // newer owner (the silent switch-vs-restore revert as well as overlapping switches).
-        // A switch drives the preparation cover, so a superseded switch knows to dismiss it
-        // when the new owner is a non-cover-driver (restore/import).
-        let switchToken = configurationReplacementGate.begin(ownsPreparationCover: true)
+        // A user switch drives the preparation cover, so a superseded switch knows to dismiss it
+        // when the new owner is a non-cover-driver (restore/import). A silent Focus apply owns no
+        // cover, so it claims the gate as a non-cover-driver.
+        let switchToken = configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)
         // A switch is a Filters-tab action, so the Filters cover (not Domain History) owns it.
         filterPreparationOrigin = .filters
-        isFilterPreparationScreenPresented = true
+        if presentsPreparationCover {
+            isFilterPreparationScreenPresented = true
+        }
 
         do {
-            let progressPresenter = FilterPreparationProgressPresenter()
+            // A silent Focus apply presents no cover, so the presenter skips its phase-visibility
+            // holds — the automation commits/publishes without UI-only delay (Codex #44 P2).
+            let progressPresenter = FilterPreparationProgressPresenter(presentsCover: presentsPreparationCover)
             // Instant switch-back: reuse the target's still-warm compiled artifacts (a pointer flip)
             // when its lastCompiledToken is valid for the current config + a FRESH cached catalog, else
             // cold-compile. Both yield a PreparedFilterSnapshot the shared tail below commits + publishes
@@ -3572,13 +3751,19 @@ final class AppViewModel: ObservableObject {
             var publication = try await prepareSwitchPublication(
                 target: target,
                 configuration: nextConfiguration,
-                progressPresenter: progressPresenter
+                progressPresenter: progressPresenter,
+                presentsPreparationCover: presentsPreparationCover
             )
 
             await progressPresenter.present(
                 FilterPreparationProgressUpdate(progress: 0.86, phase: .saving)
             ) { state in
-                self.filterPreparationState = state
+                // Only churn the preparation UI state when a cover is actually showing — a silent
+                // Focus apply must not flip filterPreparationState (nothing renders it, and callers
+                // like endViewingFilterDetail/guardFiltersHaveIssue observe it).
+                if presentsPreparationCover {
+                    self.filterPreparationState = state
+                }
             }
             await progressPresenter.holdCurrentPhaseIfNeeded()
 
@@ -3625,10 +3810,19 @@ final class AppViewModel: ObservableObject {
                 // Surface the dead end instead of silently dropping the cover. Non-retryable
                 // (retrying a gone/frozen target just re-fails), so the failure screen offers
                 // only "Keep Current Filter". pendingSwitchFilterID stays set so "Back to Edit"
-                // stays hidden; keepCurrentFiltersAfterPrepareFailure clears it.
-                filterPreparationFailureIsRetryable = false
-                filterPreparationState = .failed(message: "That filter is no longer available.")
-                isFilterPreparationScreenPresented = true
+                // stays hidden; keepCurrentFiltersAfterPrepareFailure clears it. A silent Focus
+                // apply shows no cover — it just returns; the reconcile's own gone/frozen guard
+                // then drops the now-moot marker on its next pass.
+                if presentsPreparationCover {
+                    filterPreparationFailureIsRetryable = false
+                    filterPreparationState = .failed(message: "That filter is no longer available.")
+                    isFilterPreparationScreenPresented = true
+                } else {
+                    // No cover for a silent apply, so drop the retry target set at entry — otherwise a
+                    // later UNRELATED preparation failure would retry this gone/frozen id and hide the
+                    // failure screen's edit-return path (filterPreparationFailureOffersEditReturn).
+                    pendingSwitchFilterID = nil
+                }
                 return
             }
 
@@ -3750,12 +3944,17 @@ final class AppViewModel: ObservableObject {
             filterEditTargetID = nil
             pendingSwitchFilterID = nil
 
-            filterPreparationState = .preparing(progress: 1, message: "Success")
-            ProtectionHapticFeedback.play(.actionSucceeded)
+            // A silent Focus apply skips the "Success" cover + haptic entirely — the reconcile
+            // adopts the switch invisibly, mirroring applyCommittedOnDiskActiveFilter. Only a genuine
+            // user switch flashes the success confirmation.
+            if presentsPreparationCover {
+                filterPreparationState = .preparing(progress: 1, message: "Success")
+                ProtectionHapticFeedback.play(.actionSucceeded)
 
-            try? await Task.sleep(nanoseconds: 650_000_000)
-            filterPreparationState = .idle
-            isFilterPreparationScreenPresented = false
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                filterPreparationState = .idle
+                isFilterPreparationScreenPresented = false
+            }
         } catch {
             // Only the current owner may roll back. A superseded attempt that failed must not
             // restore its previousActiveID over a newer switch/restore/import that committed; it
@@ -3773,11 +3972,20 @@ final class AppViewModel: ObservableObject {
             // can leave the TARGET filter on disk; rewrite the previous config + library (no
             // artifact publish, no tunnel reload) so a restart loads the filter still in effect.
             try? persistConfigurationOnly()
-            filterPreparationState = .failed(
-                message: Self.filterPreparationFailureMessage(for: error)
-            )
-            isFilterPreparationScreenPresented = true
-            ProtectionHapticFeedback.play(.actionFailed)
+            // A silent Focus apply surfaces no failure cover: the rollback above keeps disk consistent,
+            // and the reconcile leaves the marker in place (its post-apply active-filter check fails), so
+            // the switch self-heals on a later foreground / Focus re-fire without a modal interrupting the
+            // user for an automation they didn't trigger.
+            if presentsPreparationCover {
+                filterPreparationState = .failed(
+                    message: Self.filterPreparationFailureMessage(for: error)
+                )
+                isFilterPreparationScreenPresented = true
+                ProtectionHapticFeedback.play(.actionFailed)
+            } else {
+                // No failure cover for a silent apply, so drop the retry target it would have driven.
+                pendingSwitchFilterID = nil
+            }
         }
     }
 
@@ -3810,7 +4018,11 @@ final class AppViewModel: ObservableObject {
     private func prepareSwitchPublication(
         target: Filter,
         configuration: AppConfiguration,
-        progressPresenter: FilterPreparationProgressPresenter
+        progressPresenter: FilterPreparationProgressPresenter,
+        // False for a silent Focus reconcile apply: the cold-compile progress must not churn
+        // filterPreparationState (nothing renders it, and it would spuriously read as in-progress
+        // to endViewingFilterDetail / the Guard issue indicator). See switchToFilter.
+        presentsPreparationCover: Bool
     ) async throws -> SwitchPublication {
         // Reuse the target's warm artifact when one exists (shared with the headless warm switch via
         // warmReusableSnapshotForSwitch — same candidate set + validation). Skipped entirely while a
@@ -3823,7 +4035,9 @@ final class AppViewModel: ObservableObject {
 
         let prepared = try await prepareFilterSnapshot(for: configuration) { update in
             await progressPresenter.present(update) { state in
-                self.filterPreparationState = state
+                if presentsPreparationCover {
+                    self.filterPreparationState = state
+                }
             }
         }
         return .compiled(prepared)
@@ -4541,7 +4755,10 @@ final class AppViewModel: ObservableObject {
         guard protectionActionOrchestrator.claim(.toggle) else {
             return
         }
-        let shouldDisableProtection = isProtectionEnabledStatus(vpnStatus)
+        // Treat an armed-but-dropped tunnel as "on" so the "Turn Off" the reconnecting surface shows
+        // routes to the disable path (which disarms on-demand), instead of re-enabling and leaving the
+        // user unable to actually turn protection off while iOS keeps trying to reconnect.
+        let shouldDisableProtection = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect
         Task {
             if shouldDisableProtection {
                 await disableProtection()
@@ -8306,7 +8523,11 @@ final class AppViewModel: ObservableObject {
                 let statusWaitSpan = trace.beginSpan("turnOn.statusWait", parent: span)
                 guard await waitForProtectionToConnect(timeout: Self.protectionStartWaitTimeout) else {
                     statusWaitSpan.end(details: ["status": "timeout"])
-                    configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus)
+                    // If the start timed out but Connect-On-Demand is armed (e.g. no network yet), keep
+                    // the enabled hint true — iOS will connect when the path returns. Deriving it from
+                    // vpnStatus alone would persist false and suppress the self-reconnect (mirrors the
+                    // updateProtectionStatus derivation).
+                    configuration.protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect
                     // Rule artifacts were already persisted (or validly reused)
                     // above; only the configuration state changed here.
                     _ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)
@@ -8410,8 +8631,13 @@ final class AppViewModel: ObservableObject {
             // so retry briefly (disableOnDemandWithRetry) rather than swallowing
             // the first error; a persistent failure still falls through to the
             // stop, backstopped by forceRemoveStuckProtectionProfile().
+            // Capture whether on-demand actually got disabled: a persistent failure means the SAVED
+            // profile is still armed, so iOS will reconnect the tunnel even from a stopped/disconnected
+            // state — the force-remove backstop below must run in that case too, not only when the
+            // tunnel is stuck running (see the reconnecting turn-off path below).
+            var onDemandDisabled = true
             if let manager {
-                await disableOnDemandWithRetry(on: manager)
+                onDemandDisabled = await disableOnDemandWithRetry(on: manager)
             }
 
             manager?.connection.stopVPNTunnel()
@@ -8420,21 +8646,33 @@ final class AppViewModel: ObservableObject {
                 endProtectionVPNSession()
                 tunnelManager = nil
                 vpnStatus = .disconnected
-            } else if await waitForProtectionToStop() == false {
-                // The tunnel never reached a stopped state. The usual cause is
-                // that Connect-On-Demand could not be disabled above (that step
-                // is best-effort), so iOS keeps reasserting the tunnel — and if
-                // the provider has already exited, the device is left with a dead
-                // tunnel, no working internet, and no in-app way out (UR-31/UR-32:
-                // "couldn't connect to the internet and Lava wouldn't turn off
-                // either, showing 'Couldn't stop protection'"). Last resort:
-                // delete the VPN profile so its on-demand rules go away and
-                // connectivity is restored. The profile (and the system VPN
+            } else {
+                // Force-remove when EITHER on-demand could not be disabled OR the tunnel never reached
+                // a stopped state. The `!onDemandDisabled` arm is load-bearing for the reconnecting
+                // turn-off (an armed-but-dropped tunnel routed here via toggleProtection): the manager
+                // is already `.disconnected`, so `waitForProtectionToStop()` returns true immediately
+                // and would skip this backstop — yet the still-armed profile means iOS re-arms the
+                // tunnel and the user can't actually turn protection off. The usual stuck-RUNNING cause
+                // is the same best-effort-disable failure leaving a dead tunnel with no working internet
+                // and no in-app way out (UR-31/UR-32: "couldn't connect to the internet and Lava
+                // wouldn't turn off either"). Last resort either way: delete the VPN profile so its
+                // on-demand rules go away and connectivity is restored. The profile (and the system VPN
                 // permission prompt) is recreated next time protection is enabled.
-                guard await forceRemoveStuckProtectionProfile() else {
-                    throw LavaSecAppError.vpnStillStopping
+                //
+                // Branch explicitly rather than `!onDemandDisabled || await …` — `await` may not sit in
+                // the RHS autoclosure of `||` — and this also preserves the short-circuit: when the
+                // disable already failed we go straight to force-remove without waiting for a clean stop
+                // that the still-armed profile won't allow anyway.
+                var mustForceRemoveProfile = !onDemandDisabled
+                if !mustForceRemoveProfile {
+                    mustForceRemoveProfile = await waitForProtectionToStop() == false
                 }
-                stoppedViaProfileRemoval = true
+                if mustForceRemoveProfile {
+                    guard await forceRemoveStuckProtectionProfile() else {
+                        throw LavaSecAppError.vpnStillStopping
+                    }
+                    stoppedViaProfileRemoval = true
+                }
             }
             lastProtectionStatusRefresh = Date()
             configuration.protectionEnabled = false
@@ -8694,6 +8932,16 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    /// Reads the confirmed-on-demand bit (the same one the tunnel gates self-reconnect on). Absent
+    /// key ⇒ false. Used by the UI to tell a temporarily-dropped-but-armed tunnel (which iOS will
+    /// auto-reconnect) apart from a genuine off state, so a `.disconnected` status while armed shows
+    /// "Reconnecting" rather than the fully-off "Turn On" surface.
+    private static func isOnDemandConfirmedEnabled() -> Bool {
+        LavaSecAppGroup.sharedDefaults.bool(
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+        )
+    }
+
     /// Seeds the confirmed-on-demand bit from a freshly loaded manager's actual
     /// `isOnDemandEnabled` only when it has never been written. This backfills the
     /// common upgrade/auto-start case — an existing profile whose protection is
@@ -8775,6 +9023,18 @@ final class AppViewModel: ObservableObject {
         // tunnel's self-reconnect isn't gated off until the user re-toggles.
         if let manager {
             Self.seedOnDemandConfirmedIfAbsent(from: manager)
+            // Reconcile a STALE confirmed-on-demand bit against the live manager: if the profile
+            // is installed but on-demand is no longer armed — the user disabled Connect On Demand
+            // or removed/re-added the VPN profile OUTSIDE the app, where `setManagerOnDemand` never
+            // runs — the cached bit can stay `true`. Left unreconciled, a `.disconnected` manager
+            // would show "Reconnecting" and persist `protectionEnabled = true` with nothing armed
+            // to reconnect. Clear it. Reconciling ONLY in the clear direction is race-safe: an
+            // app-initiated arm sets `manager.isOnDemandEnabled = true` in-memory BEFORE its
+            // save (on this same cached manager instance), so `isOnDemandEnabled` is already true
+            // throughout that flow and this never clobbers the arming's deliberate pre-save clear.
+            if !manager.isOnDemandEnabled, Self.isOnDemandConfirmedEnabled() {
+                Self.setOnDemandConfirmedEnabled(false)
+            }
         }
 
         // The status poll repeats with identical state; published properties only
@@ -8785,7 +9045,14 @@ final class AppViewModel: ObservableObject {
         if vpnStatus != currentStatus {
             vpnStatus = currentStatus
         }
-        let protectionEnabled = isProtectionEnabledStatus(vpnStatus)
+        // An armed-but-dropped tunnel (awaiting on-demand reconnect) is still "on": iOS will bring it
+        // back, and the tunnel's OWN self-reconnect (TunnelSelfReconnectPolicy) hard-requires this
+        // persisted hint to stay true. Deriving it from `.disconnected → false` alone would let a
+        // filter edit/switch during the drop persist `protectionEnabled = false`, suppressing future
+        // self-reconnects even though the UI (correctly) says protection is reconnecting. The
+        // intentional turn-off path clears the confirmed-on-demand bit BEFORE stopping, so
+        // `isAwaitingOnDemandReconnect` is false there and this still resolves to false.
+        let protectionEnabled = isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect
         if configuration.protectionEnabled != protectionEnabled {
             configuration.protectionEnabled = protectionEnabled
         }
@@ -10102,23 +10369,24 @@ final class AppViewModel: ObservableObject {
             logFocusSwitchEvent("reconcile-deferred-manual-switch-in-flight", details: ["filterID": request.targetFilterID])
             return
         }
-        // Apply through the normal foreground switch (puts up the preparation cover, cold-compiles on a
-        // warm miss; for a resident foreground re-syncing an already-committed headless switch it's a fast
-        // warm pointer-flip). stampsForegroundSwitch: false — this is replaying a Focus automation, NOT a
-        // user-initiated switch, so it must not poison the lastForegroundSwitch supersession timestamp and
-        // suppress a newer Focus request recorded during this (possibly slow) apply.
+        // Apply through the normal foreground switch, cold-compiling on a warm miss; for a resident
+        // foreground re-syncing an already-committed headless switch it's a fast warm pointer-flip.
+        // stampsForegroundSwitch: false — this is replaying a Focus automation, NOT a user-initiated
+        // switch, so it must not poison the lastForegroundSwitch supersession timestamp and suppress a
+        // newer Focus request recorded during this (possibly slow) apply. The same flag makes the apply
+        // SILENT: no full-screen preparation cover / "Success" modal / haptic (mirrors the committed-
+        // adopt path). Surfacing that modal for an automated switch is what popped a "Success" page
+        // every time the user opened the app after a Focus switch — the user never initiated it.
         // Log every reconcile-driven apply so a transient failure that keeps re-recording (Focus re-fires,
         // each cold-compile fails) surfaces as a repeating reconcile-apply for the same filter in QA dumps.
-        // switchToFilter shows its own failure screen; the marker is cleared after the attempt either way.
+        // A failed apply is silent too; the kept marker (below) retries it on the next foreground / Focus edge.
         logFocusSwitchEvent("reconcile-apply", details: ["filterID": request.targetFilterID])
         await switchToFilter(id: request.targetFilterID, stampsForegroundSwitch: false)
         // Clear the marker ONLY if the switch actually took effect. switchToFilter returns Void and LEAVES
         // the active filter unchanged on a preparation/publish failure (a cold-compile network blip, a
-        // transient catalog miss) while showing its own failure screen. Clearing unconditionally would
-        // silently DROP the user's Focus automation with no retry (Codex round-8). Keeping the marker on
-        // failure lets the next foreground — or a Focus re-fire — retry until it succeeds. (A permanent
-        // failure therefore re-shows the cover each foreground; a visible, actionable degradation, strictly
-        // better than a silent drop, and the failure screen still offers manual retry.) The compare-and-clear
+        // transient catalog miss). Clearing unconditionally would silently DROP the user's Focus automation
+        // with no retry (Codex round-8). Keeping the marker on failure lets the next foreground — or a Focus
+        // re-fire — retry until it succeeds (a silent self-heal now, no modal). The compare-and-clear
         // below still protects a NEWER marker recorded during this apply.
         guard library.activeFilterID == request.targetFilterID else {
             logFocusSwitchEvent("reconcile-apply-failed-kept-marker", details: ["filterID": request.targetFilterID])
@@ -10498,6 +10766,19 @@ final class AppViewModel: ObservableObject {
             appearancePreference = .system
         }
 
+        if defaults.object(forKey: textSizeMatchesSystemDefaultsKey) != nil {
+            textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKey)
+        } else {
+            textSizeMatchesSystem = true
+        }
+
+        if let rawValue = defaults.string(forKey: textSizeDefaultsKey),
+           let size = LavaTextSize(rawValue: rawValue) {
+            textSize = size
+        } else {
+            textSize = .systemDefault
+        }
+
         if let rawValue = defaults.string(forKey: lavaGuardLookDefaultsKey)
             ?? appGroupDefaults.string(forKey: lavaGuardLookDefaultsKey),
            let look = GuardianShieldStyle(rawValue: rawValue) {
@@ -10756,7 +11037,12 @@ final class AppViewModel: ObservableObject {
         }
 
         await refreshProtectionStatus(force: true)
-        guard !isProtectionEnabledStatus(vpnStatus) else {
+        // Skip the restore when protection is already active OR armed-but-dropped: in the latter
+        // case iOS's Connect-On-Demand is already waiting to reconnect, so forcing enableProtection
+        // here is redundant and — with no network (the elevator case) — its start attempt can time
+        // out and persist `protectionEnabled = false`, undoing the very armed-reconnect hint this
+        // restore is meant to preserve. Let on-demand bring the tunnel back instead.
+        guard !isProtectionEnabledStatus(vpnStatus), !isAwaitingOnDemandReconnect else {
             return
         }
 
@@ -10778,12 +11064,20 @@ final class AppViewModel: ObservableObject {
     // rules out of fail-closed. Fail-closed stays the safe default; this just
     // supersedes it promptly. (Fixes: filters shown red / traffic blocked after
     // an app restart while Connect-On-Demand keeps the tunnel up.)
+    //
+    // ALSO covers the armed-but-DROPPED launch (`.disconnected` + on-demand armed):
+    // restoreProtectionIfNeeded deliberately skips enableProtection there (letting iOS
+    // reconnect), which also skips the snapshot publish enableProtection would have done.
+    // Without this the stale/missing `latest.json` pointer stays unrepaired until iOS
+    // reconnects, at which point the tunnel starts cold on old/fail-closed rules. Publishing
+    // the snapshot here — WITHOUT starting the VPN — hands iOS's on-demand reconnect the real
+    // rules (the reconnect UI is unaffected; only the shared snapshot is republished).
     private func reconcileTunnelSnapshotAfterLaunch() async {
         #if targetEnvironment(simulator)
         return
         #else
         await refreshProtectionStatus(force: true)
-        guard isProtectionEnabledStatus(vpnStatus) else {
+        guard isProtectionEnabledStatus(vpnStatus) || isAwaitingOnDemandReconnect else {
             return
         }
 

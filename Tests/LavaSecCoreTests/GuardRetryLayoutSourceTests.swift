@@ -543,7 +543,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertTrue(rootViewSource.contains("static let primaryActionMaxWidth: CGFloat"))
         XCTAssertTrue(rootViewSource.contains("static let primaryActionHeight: CGFloat = 56"))
         XCTAssertTrue(actionButtonBlock.contains(".frame(maxWidth: ProtectionStatusMetrics.primaryActionMaxWidth)"))
-        XCTAssertTrue(actionButtonBlock.contains(".frame(height: ProtectionStatusMetrics.primaryActionHeight)"))
+        XCTAssertTrue(actionButtonBlock.contains(".frame(minHeight: ProtectionStatusMetrics.primaryActionHeight)"))
         XCTAssertFalse(actionButtonBlock.contains("showsTemporaryProtectionPauseControls ? 64 : 56"))
         XCTAssertTrue(actionButtonBlock.contains(".contextMenu"))
         XCTAssertTrue(actionButtonBlock.contains(".frame(maxWidth: .infinity)"))

@@ -473,7 +473,7 @@ private struct SettingsNavigationRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(summary.lavaLocalized)
                         .lavaRowSubtitleText()
@@ -534,7 +534,7 @@ private struct SettingsExternalLinkRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title.lavaLocalized)
-                        .font(.headline)
+                        .lavaCardTitleText()
                         .foregroundStyle(.primary)
                     Text(summary.lavaLocalized)
                         .lavaRowSubtitleText()
@@ -571,7 +571,7 @@ private struct SettingsSystemSettingsRow: View {
         } label: {
             HStack(spacing: 12) {
                 Text(title.lavaLocalized)
-                    .font(.headline)
+                    .lavaCardTitleText()
                     .foregroundStyle(.primary)
 
                 Spacer(minLength: 8)
@@ -1156,7 +1156,7 @@ private struct UpgradeSettingsView: View {
         SettingsSubpageContent(tier: .celebratory) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("More room for your rules")
-                    .foregroundStyle(LavaStyle.lavaOrange)
+                    .foregroundStyle(LavaStyle.lavaOrangeText)
                     .font(.title3.bold())
 
                 LavaInfoCard {
@@ -1223,7 +1223,7 @@ private struct UpgradeSettingsView: View {
                     } label: {
                         UpgradePlanOfferRow(
                             offer: offer,
-                            pitch: planPitch(for: offer.plan.kind)
+                            pitch: planPitch(for: offer)
                         )
                     }
                     .buttonStyle(.plain)
@@ -1270,19 +1270,27 @@ private struct UpgradeSettingsView: View {
                 plan: $0,
                 displayPrice: $0.fallbackDisplayPrice,
                 commitmentDisplayPrice: nil,
+                savingsPercent: nil,
                 product: nil
             )
         }
     }
 
-    private func planPitch(for kind: LavaSecurityPlusPlanKind) -> String {
-        switch kind {
+    // Returns the fully localized pitch. The yearly pitch quotes the saving only
+    // when StoreKit gave us a real, storefront-computed figure (`offer.savingsPercent`);
+    // otherwise it falls back to number-free copy so we never show a hard-coded
+    // percentage that isn't true in the customer's currency.
+    private func planPitch(for offer: LavaSecurityPlusOffer) -> String {
+        switch offer.plan.kind {
         case .yearly:
-            "\"We are saving 37%! This has the best value.\""
+            if let savingsPercent = offer.savingsPercent {
+                return "\"We are saving %d%%! This has the best value.\"".lavaLocalizedFormat(savingsPercent)
+            }
+            return "\"Paying by the year beats paying by the month.\"".lavaLocalized
         case .yearlyPaidMonthly:
-            "\"If we commit for 12 months, each month is cheaper.\""
+            return "\"If we commit for 12 months, each month is cheaper.\"".lavaLocalized
         case .monthly:
-            "\"We already saved this by unplugging appliances.\""
+            return "\"We already saved this by unplugging appliances.\"".lavaLocalized
         }
     }
 
@@ -1581,7 +1589,7 @@ private struct UpgradePlanOfferRow: View {
                         .font(.headline)
                         .foregroundStyle(LavaStyle.ink)
 
-                    Text(pitch.lavaLocalized)
+                    Text(pitch)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(LavaStyle.secondaryText)
                         .lineLimit(2)
@@ -1617,6 +1625,9 @@ private struct UpgradePlanOfferRow: View {
 private struct CustomizationSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
+    // The app's current system Dynamic Type size — reflects the real system setting while "Match
+    // System" is on (no override applied), so it seeds the slider on the first opt-out.
+    @Environment(\.dynamicTypeSize) private var systemDynamicTypeSize
 
     var body: some View {
         SettingsSubpageContent(
@@ -1640,6 +1651,78 @@ private struct CustomizationSettingsView: View {
                     .font(.headline)
                     .tint(LavaStyle.safeGreen)
                     .lavaControlRowCard()
+            }
+
+            LavaSectionGroup("Appearance") {
+                Picker("Appearance", selection: appearanceBinding) {
+                    ForEach(LavaAppearancePreference.allCases) { preference in
+                        Text(preference.displayName.lavaLocalized)
+                            .tag(preference)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .tint(LavaStyle.safeGreen)
+                .lavaControlRowCard()
+            }
+
+            LavaSectionGroup("Text Size") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Match System", isOn: textSizeMatchesSystemBinding)
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "textformat.size.smaller")
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .accessibilityHidden(true)
+                        Slider(
+                            value: textSizeSliderBinding,
+                            in: 0...Double(LavaTextSize.allCases.count - 1),
+                            step: 1
+                        )
+                        .tint(LavaStyle.safeGreen)
+                        .accessibilityLabel("Text Size")
+                        .accessibilityValue(viewModel.textSize.displayName.lavaLocalized)
+                        Image(systemName: "textformat.size.larger")
+                            .foregroundStyle(LavaStyle.secondaryText)
+                            .accessibilityHidden(true)
+                    }
+                    .lavaControlRowCard()
+                    // Grey out and disable the slider while "Match System" drives the size, so the
+                    // control reads as inactive (a Differentiate-Without-Color-friendly state) and
+                    // VoiceOver skips a knob that would do nothing.
+                    .disabled(viewModel.textSizeMatchesSystem)
+                    .opacity(viewModel.textSizeMatchesSystem ? 0.4 : 1)
+
+                    Text("Match your iOS text size, or set one just for Lava. Everything reflows to fit.".lavaLocalized)
+                        .lavaQuietNoteText()
+                }
+            }
+
+            LavaSectionGroup("Notifications") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Filter changes", isOn: notificationBinding(for: .filterChanged))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Tells you when a Focus switches your filter while Lava is closed or in the background.".lavaLocalized)
+                        .lavaQuietNoteText()
+
+                    Toggle("Filter couldn't switch", isOn: notificationBinding(for: .filterCouldNotApply))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Tells you when a Focus couldn't switch your filter, for example while editing is locked.".lavaLocalized)
+                        .lavaQuietNoteText()
+
+                    Toggle("Connection updates", isOn: notificationBinding(for: .connectivity))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Alerts when protection needs your help to reconnect on a network.".lavaLocalized)
+                        .lavaQuietNoteText()
+                }
             }
 
             if viewModel.canOfferLiveActivities {
@@ -1683,43 +1766,6 @@ private struct CustomizationSettingsView: View {
                 }
             }
 
-            LavaSectionGroup("Notifications") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Filter changes", isOn: notificationBinding(for: .filterChanged))
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-                    Text("Tells you when a Focus switches your filter while Lava is closed or in the background.".lavaLocalized)
-                        .lavaQuietNoteText()
-
-                    Toggle("Filter couldn't switch", isOn: notificationBinding(for: .filterCouldNotApply))
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-                    Text("Tells you when a Focus couldn't switch your filter, for example while editing is locked.".lavaLocalized)
-                        .lavaQuietNoteText()
-
-                    Toggle("Connection updates", isOn: notificationBinding(for: .connectivity))
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-                    Text("Alerts when protection needs your help to reconnect on a network.".lavaLocalized)
-                        .lavaQuietNoteText()
-                }
-            }
-
-            LavaSectionGroup("Appearance") {
-                Picker("Appearance", selection: appearanceBinding) {
-                    ForEach(LavaAppearancePreference.allCases) { preference in
-                        Text(preference.displayName.lavaLocalized)
-                            .tag(preference)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .tint(LavaStyle.safeGreen)
-                .lavaControlRowCard()
-            }
-
             LavaSectionGroup("Language") {
                 SettingsSystemSettingsRow(title: "Change in iOS Settings")
             }
@@ -1732,6 +1778,34 @@ private struct CustomizationSettingsView: View {
         } set: { preference in
             performAppSettingsMutation(reason: "Edit Customization settings") {
                 viewModel.setAppearancePreference(preference)
+            }
+        }
+    }
+
+    private var textSizeMatchesSystemBinding: Binding<Bool> {
+        Binding {
+            viewModel.textSizeMatchesSystem
+        } set: { matchesSystem in
+            performAppSettingsMutation(reason: "Edit Customization settings") {
+                viewModel.setTextSizeMatchesSystem(
+                    matchesSystem,
+                    seedingFrom: LavaTextSize.matching(systemDynamicTypeSize)
+                )
+            }
+        }
+    }
+
+    private var textSizeSliderBinding: Binding<Double> {
+        Binding {
+            Double(LavaTextSize.allCases.firstIndex(of: viewModel.textSize) ?? 0)
+        } set: { newValue in
+            let index = min(max(Int(newValue.rounded()), 0), LavaTextSize.allCases.count - 1)
+            let size = LavaTextSize.allCases[index]
+            guard size != viewModel.textSize else {
+                return
+            }
+            performAppSettingsMutation(reason: "Edit Customization settings") {
+                viewModel.setTextSize(size)
             }
         }
     }
@@ -3234,7 +3308,7 @@ private struct ResolverPresetRowContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .lavaRowTitleText()
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
@@ -3260,7 +3334,7 @@ private struct CustomDNSResolverRow: View {
         ) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Custom DNS".lavaLocalized)
-                    .font(.subheadline.weight(.medium))
+                    .lavaRowTitleText()
                     .lavaInactiveText(!isEnabled)
                     .lineLimit(2)
                     .minimumScaleFactor(0.82)
@@ -4814,7 +4888,7 @@ private struct BugReportTopicOptionRow: View {
                 .accessibilityHidden(true)
 
             Text(title.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .lavaRowTitleText()
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
