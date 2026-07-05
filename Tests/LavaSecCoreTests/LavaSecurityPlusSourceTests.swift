@@ -139,9 +139,17 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("options.insert(.billingPlanType(.monthly))"))
         XCTAssertTrue(storeSource.contains("commitmentDisplayPrice"))
         XCTAssertTrue(storeSource.contains("yearlyPaidMonthlyOffer(from: productsByID[plan.productID])"))
-        XCTAssertTrue(storeSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
         XCTAssertTrue(storeSource.contains("LavaSecurityPlusPolicy.recommendedOfferOrder.compactMap"))
-        XCTAssertTrue(viewModelSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
+        // The store must NOT fabricate fallback offers — `offers` holds live StoreKit offers or is
+        // empty, and the hardcoded fallback list is supplied by `displayedOffers` in the view. The
+        // store previously seeded `fallbackOfferOrder` in `init`/`loadProducts`, which kept the
+        // paywall's `offers.isEmpty` load guard from ever retrying after a failed launch load.
+        XCTAssertFalse(storeSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
+        // The view model must NOT pre-seed offers with the fallback list — doing so froze the
+        // paywall's `offers.isEmpty` load guard so live StoreKit products never loaded. The fallback
+        // is supplied by `displayedOffers` in the view instead (asserted below + in
+        // LavaSecurityPlusOffersLoadSourceTests).
+        XCTAssertFalse(viewModelSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertFalse(viewModelSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map"))
     }
@@ -196,6 +204,19 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(settingsSource.contains("Text(\"%@ total\".lavaLocalizedFormat(commitmentDisplayPrice))"))
         XCTAssertTrue(comparisonBlock.contains("\"Family Sharing\""))
         XCTAssertTrue(comparisonBlock.contains("(\"Family Sharing\", nil, .unlocked)"))
+    }
+
+    func testAutoRenewFooterDropsCommitmentSentenceWhenYearlyPaidMonthlyIsAbsent() throws {
+        let settingsSource = try readSource(.settingsView)
+
+        // The footer is told whether the yearly-paid-monthly plan is actually offered, computed from
+        // the displayed offers (that plan needs its `.monthly` billing plan configured + iOS 26.4+).
+        XCTAssertTrue(settingsSource.contains("let showsYearlyPaidMonthly: Bool"))
+        XCTAssertTrue(settingsSource.contains("showsYearlyPaidMonthly: displayedOffers.contains { $0.plan.kind == .yearlyPaidMonthly }"))
+
+        // The shorter variant omits the 12-month commitment sentence — auto-renew flows straight into
+        // the Payment sentence — so we never disclose a plan the customer can't see.
+        XCTAssertTrue(settingsSource.contains("Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase"))
     }
 
     func testStoreKitBoundaryMirrorsEntitlementsAfterLocalVerification() throws {

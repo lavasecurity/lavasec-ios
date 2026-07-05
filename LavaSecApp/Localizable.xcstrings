@@ -1,6 +1,72 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings.": {
+      "comment": "Paywall auto-renew disclosure shown when the yearly-paid-monthly plan is NOT offered (omits the 12-month commitment sentence). The with-commitment variant is the longer sibling string.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Monats- und Jahresabos verlängern sich automatisch. Der Betrag wird beim Kauf über dein Apple-Konto abgebucht und verlängert sich, sofern du nicht mindestens 24 Stunden vor Periodenende deaktivierst. Verwalten oder kündigen in den Apple-Konto-Einstellungen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las suscripciones mensual y anual se renuevan automáticamente. El pago se carga en tu Cuenta de Apple al comprar y se renueva salvo que se desactive al menos 24 horas antes de que termine el periodo. Gestiona o cancela en los ajustes de tu Cuenta de Apple."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les abonnements mensuel et annuel se renouvellent automatiquement. Le paiement est prélevé sur votre compte Apple à l'achat et se renouvelle sauf désactivation au moins 24 heures avant la fin de la période. Gérez ou résiliez dans les réglages de votre compte Apple."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gli abbonamenti mensile e annuale si rinnovano automaticamente. Il pagamento è addebitato sull'Account Apple all'acquisto e si rinnova salvo disattivazione almeno 24 ore prima della fine del periodo. Gestisci o annulla nelle impostazioni dell'Account Apple."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月額と年額は自動更新サブスクリプションです。料金は購入時にAppleアカウントへ請求され、期間終了の24時間以上前にオフにしない限り自動更新されます。管理・解約はAppleアカウント設定で行えます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "월간 및 연간 구독은 자동 갱신됩니다. 결제는 구입 시 Apple 계정으로 청구되고, 기간 종료 24시간 전까지 끄지 않으면 자동 갱신됩니다. Apple 계정 설정에서 관리하거나 해지하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As assinaturas mensal e anual são renovadas automaticamente. A cobrança é feita na sua Conta Apple na compra e renova, a menos que seja desativada pelo menos 24 horas antes do fim do período. Gerencie ou cancele nos ajustes da Conta Apple."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月度和年度订阅会自动续期。购买时从你的 Apple 账户扣款，除非在周期结束前至少 24 小时关闭，否则自动续期。可在 Apple 账户设置中管理或取消。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月繳與年繳訂閱會自動續訂。購買時向你的 Apple 帳號收費，除非在期間結束前至少 24 小時關閉，否則自動續訂。可在 Apple 帳號設定中管理或取消。"
+          }
+        }
+      }
+    },
     "Extra Small": {
       "comment": "Customization → Text Size slider VoiceOver value (LavaTextSize.displayName), rendered .lavaLocalized in CustomizationSettingsView / SettingsView.swift.",
       "extractionState": "manual",
@@ -591,72 +657,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "配合系統"
-          }
-        }
-      }
-    },
-    "Match your iOS text size, or set one just for Lava. Everything reflows to fit.": {
-      "comment": "Customization → Text Size explanatory note under the slider. CustomizationSettingsView in SettingsView.swift.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Match your iOS text size, or set one just for Lava. Everything reflows to fit."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Übernimm deine iOS-Textgröße oder lege eine eigene für Lava fest. Alles passt sich an."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Usa el tamaño de texto de iOS o define uno solo para Lava. Todo se adapta."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Utilisez la taille de texte d'iOS ou définissez-en une pour Lava. Tout s'adapte."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Usa la dimensione del testo di iOS oppure impostane una solo per Lava. Tutto si adatta."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iOS の文字サイズに合わせるか、Lava 専用のサイズを設定できます。すべてが自動で調整されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iOS 텍스트 크기를 따르거나 Lava에만 적용할 크기를 설정하세요. 모든 화면이 맞춰집니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use o tamanho de texto do iOS ou defina um só para o Lava. Tudo se ajusta."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "跟随 iOS 的文字大小，或为 Lava 单独设置一个。所有内容都会自动适配。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "跟隨 iOS 的文字大小，或為 Lava 單獨設定一個。所有內容都會自動適配。"
           }
         }
       }
@@ -26119,72 +26119,6 @@
         }
       }
     },
-    "How long the Pause button turns Lava off before protection resumes on its own.": {
-      "comment": "Live Activities settings: note under the pause-length stepper explaining the Pause button behaviour.",
-      "extractionState": "manual",
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cuánto tiempo el botón Pause desactiva Lava antes de que la protección se reanude sola."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Per quanto tempo il pulsante Pausa spegne Lava prima che la protezione riprenda da sola."
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pause 버튼이 보호를 자동으로 다시 켜기 전까지 Lava를 꺼 두는 시간이에요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Por quanto tempo o botão Pausar desativa a Lava antes de a proteção retomar sozinha."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wie lange die Pause-Taste Lava ausschaltet, bevor der Schutz von selbst weiterläuft."
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "How long the Pause button turns Lava off before protection resumes on its own."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Combien de temps le bouton Pause désactive Lava avant que la protection ne reprenne d'elle-même."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "一時停止ボタンを押してから保護が自動で再開するまで、Lava をオフにしておく時間です。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "“暂停”按钮关闭 Lava 多久后保护会自动恢复。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pause 按鈕關閉 Lava 多久後，保護會自動恢復。"
-          }
-        }
-      }
-    },
     "How restore works": {
       "comment": "Localization-gap backfill (wrapper-localized; was hardcoded in BackupSetupView.swift).",
       "extractionState": "manual",
@@ -31652,72 +31586,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Lava 幕後的計數器"
-          }
-        }
-      }
-    },
-    "Lava's own taps. System haptics stay with iOS.": {
-      "comment": "Localization-gap backfill (was hardcoded in SettingsView.swift).",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava's own taps. System haptics stay with iOS."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lavas eigene Vibrationen. System-Haptik bleibt bei iOS."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Las vibraciones propias de Lava. Las del sistema las controla iOS."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les vibrations propres à Lava. Le retour haptique du système reste géré par iOS."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le vibrazioni di Lava. Quelle di sistema restano gestite da iOS."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava 独自の触覚フィードバックです。システムの触覚フィードバックは iOS の設定に従います。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava 자체 진동이에요. 시스템 햅틱은 iOS에서 관리해요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A vibração da própria Lava. A vibração do sistema fica com o iOS."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仅限 Lava 自身的触感。系统触感由 iOS 控制。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lava 自己的觸覺回饋。系統觸覺仍由 iOS 控制。"
           }
         }
       }
@@ -50783,72 +50651,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "告訴我們更多"
-          }
-        }
-      }
-    },
-    "Tells you when a Focus couldn't switch your filter, for example while editing is locked.": {
-      "comment": "Customization → Notifications: helper text for the Filter couldn't switch toggle.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tells you when a Focus couldn't switch your filter, for example while editing is locked."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "編集がロックされている場合など、集中モードがフィルターを切り替えできなかったことをお知らせします。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "當「專注模式」無法切換你的篩選器時通知你，例如編輯已鎖定時。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当「专注模式」无法切换你的筛选器时通知你，例如在编辑被锁定时。"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sagt dir, wenn ein Fokus deinen Filter nicht wechseln konnte, etwa wenn das Bearbeiten gesperrt ist."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vous prévient lorsqu'un mode de concentration n'a pas pu changer votre filtre, par exemple lorsque la modification est verrouillée."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Te avisa cuando un modo de concentración no pudo cambiar tu filtro, por ejemplo mientras la edición está bloqueada."
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "예를 들어 편집이 잠겨 있어 집중 모드가 필터를 전환하지 못했을 때 알려줘요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Avisa quando um Foco não conseguiu trocar seu filtro, por exemplo quando a edição está bloqueada."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ti avvisa quando una Full Immersion non è riuscita a cambiare il filtro, ad esempio quando le modifiche sono bloccate."
           }
         }
       }
