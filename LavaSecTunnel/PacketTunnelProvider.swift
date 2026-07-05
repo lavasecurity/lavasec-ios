@@ -1351,24 +1351,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             let now = Date()
             if let cachedResponse = self.dnsResponseCache.cachedResponse(for: cacheKey, query: dnsPayload, now: now) {
                 self.recordCacheHit()
-                // Cached entries are validated well-formed at store time: `completeForward`
-                // runs `DNSWireMessage.hasWellFormedResourceRecords` before caching and
-                // `DNSResponseCache.store` re-parses for the cacheable TTL. The only work
-                // left on a hit is the optional TTL cap used by the protection-pause path,
-                // so the steady-state (no-cap) hit writes the cached response directly and
-                // skips a redundant full-RR re-validation — removing a per-query wire parse
-                // from the DNS hot path without changing what reaches the client.
-                let responseToWrite: Data
-                if let maximumAnswerTTL {
-                    guard let capped = self.responseByApplyingMaximumAnswerTTL(
-                        cachedResponse,
-                        maximumAnswerTTL: maximumAnswerTTL
-                    ) ?? DNSResponseFactory.serverFailure(for: dnsPayload) else {
-                        return
-                    }
-                    responseToWrite = capped
-                } else {
-                    responseToWrite = cachedResponse
+                // Keep cache hits on the same write-path normalizer as upstream responses:
+                // it applies the optional pause TTL cap and fails closed if a malformed cached
+                // packet ever slips past the store-time validation.
+                guard let responseToWrite = self.responseByApplyingMaximumAnswerTTL(
+                    cachedResponse,
+                    maximumAnswerTTL: maximumAnswerTTL
+                ) ?? DNSResponseFactory.serverFailure(for: dnsPayload) else {
+                    return
                 }
                 self.writeDNSResponse(responseToWrite, for: request, protocolNumber: protocolValue)
                 return

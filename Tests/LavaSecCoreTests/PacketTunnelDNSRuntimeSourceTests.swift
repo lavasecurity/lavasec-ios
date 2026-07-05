@@ -96,12 +96,25 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
         XCTAssertTrue(healthMarkBlock.contains("signalAppIfConnectivityStateChanged()"))
 
-        // (3) A cache hit with no TTL cap (the steady-state allow path) writes the
-        // cached response directly: cached entries are validated well-formed at store
-        // time, so re-running the full RR validation on every hit was a redundant parse.
+        // (3) A cache hit must still route through the shared write-path normalizer. That
+        // keeps the optional TTL cap and malformed-cache fail-closed fallback identical to
+        // the upstream/coalesced paths, even when maximumAnswerTTL is nil.
+        let cacheHitBlock = try sourceBlock(
+            in: forwardBlock,
+            startingAt: "if let cachedResponse = self.dnsResponseCache.cachedResponse",
+            endingBefore: "self.recordCacheMiss()"
+        )
         XCTAssertTrue(
-            forwardBlock.contains("if let maximumAnswerTTL {"),
-            "The TTL-cap re-validation must be gated on maximumAnswerTTL so the no-cap hit skips it."
+            cacheHitBlock.contains("responseByApplyingMaximumAnswerTTL("),
+            "Cache hits must use the shared TTL/well-formedness helper before writing."
+        )
+        XCTAssertTrue(
+            cacheHitBlock.contains("DNSResponseFactory.serverFailure(for: dnsPayload)"),
+            "Malformed cached packets must still fail closed before writing."
+        )
+        XCTAssertFalse(
+            cacheHitBlock.contains("responseToWrite = cachedResponse"),
+            "Cache hits must not bypass the shared write-path normalizer."
         )
 
         // (4) The bootstrap checks reuse the question domain already normalized in
