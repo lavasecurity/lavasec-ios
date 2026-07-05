@@ -151,6 +151,88 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
     }
 
+    /// NRG round 2: companion reductions to the hot-path work trimmed in #285. These remove
+    /// per-query / per-resolution redundant computation that provably produces the same result,
+    /// without touching any validation gate, fail-closed check, or the #288 cache-hit guard.
+    func testDNSHotPathAvoidsRedundantNormalizationAndEvidenceRecomputation() throws {
+        let source = try readSource(.packetTunnelProvider)
+
+        // (1) The bootstrap checks (which run FIRST on every DNS packet, including cache hits)
+        // must normalize resolver endpoint hostnames through the memoizing helper, not re-run
+        // `DomainName.normalize` per query per endpoint. Resolver hostnames are stable for a
+        // tunnel session, so the memo never goes stale and is naturally bounded. All three
+        // transports are pinned (each scoped to its own function) so none can silently regress
+        // to the inline per-query normalize.
+        let bootstrapBoundaries: [(function: String, endMarker: String)] = [
+            ("dohBootstrapResponse", "private func doqBootstrapResponse"),
+            ("doqBootstrapResponse", "private func dotBootstrapResponse"),
+            ("dotBootstrapResponse", "private func startPeriodicResolverSmokeProbe")
+        ]
+        for (function, endMarker) in bootstrapBoundaries {
+            let block = try sourceBlock(
+                in: source,
+                startingAt: "private func \(function)",
+                endingBefore: endMarker
+            )
+            XCTAssertTrue(
+                block.contains("normalizedEndpointHostname("),
+                "\(function) must normalize endpoint hosts via the memoizing helper, not inline DomainName.normalize per query."
+            )
+            XCTAssertFalse(
+                block.contains("try? DomainName.normalize(endpoint"),
+                "\(function) must not re-normalize endpoint hosts per query (use the memo)."
+            )
+        }
+        // The memo helper itself exists and is the single normalization site for endpoint hosts.
+        XCTAssertTrue(source.contains("private func normalizedEndpointHostname(_ hostname: String) -> String?"))
+        let endpointHostMemoBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func normalizedEndpointHostname(_ hostname: String) -> String?",
+            endingBefore: "private func dohBootstrapResponse"
+        )
+        XCTAssertTrue(source.contains("private static let endpointHostnameNormalizationCacheLimit = 32"))
+        XCTAssertTrue(
+            endpointHostMemoBlock.contains("endpointHostnameNormalizationCache.count >= Self.endpointHostnameNormalizationCacheLimit"),
+            "Endpoint-host memoization must have an explicit safety cap, not rely only on today's small caller set."
+        )
+        XCTAssertTrue(
+            endpointHostMemoBlock.contains("endpointHostnameNormalizationCache.removeAll(keepingCapacity: true)"),
+            "Endpoint-host memoization must evict before it can grow without bound."
+        )
+        XCTAssertTrue(source.contains("private func clearEndpointHostnameNormalizationCache()"))
+        let policyResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetDNSRuntimeForProtectionPolicyChange",
+            endingBefore: "private func resetResolverRuntimeStateIfNeeded"
+        )
+        let lifecycleResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resetResolverRuntimeForTunnelLifecycle",
+            endingBefore: "private func collectPendingResponsesAndResetResolverRuntime"
+        )
+        let collectedResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func collectPendingResponsesAndResetResolverRuntime",
+            endingBefore: "private func currentResolverPreset"
+        )
+        XCTAssertTrue(policyResetBlock.contains("clearEndpointHostnameNormalizationCache()"))
+        XCTAssertTrue(lifecycleResetBlock.contains("clearEndpointHostnameNormalizationCache()"))
+        XCTAssertTrue(collectedResetBlock.contains("clearEndpointHostnameNormalizationCache()"))
+
+        // (2) The genuine-primary evidence REVOKER must reuse `primaryServedLegitimateAnswer`
+        // (bound just above as `indicatesServedAnswer(result.response)`) instead of recomputing
+        // the same full-RR walk on the same immutable response. The binding line is unchanged
+        // (still `indicatesServedAnswer(result.response)`); only the redundant second walk is removed.
+        let genuinePrimaryBlock = try sourceBlock(
+            in: source,
+            startingAt: "let resolvedThroughFallbackMode = result.transport == .deviceDNS && wasDeviceDNSFallbackModeActive",
+            endingBefore: "// Record recovery before clearing the wedge state (organic-query path)."
+        )
+        XCTAssertTrue(genuinePrimaryBlock.contains("let primaryServedLegitimateAnswer ="))
+        XCTAssertTrue(genuinePrimaryBlock.contains("DNSResolverSmokeProbe.indicatesServedAnswer(result.response)"))
+        XCTAssertTrue(genuinePrimaryBlock.contains("} else if !primaryServedLegitimateAnswer {"))
+    }
+
     func testDiagnosticsClearDedupGateReadsTheDurableStoreMarkerNotAnInMemoryIvar() throws {
         let source = try readSource(.packetTunnelProvider)
 
@@ -3129,11 +3211,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(doqBootstrapResponseBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
         XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
         // The question domain must be NORMALIZED before matching against endpoint
-        // hostnames. The packet path now reuses `question.normalizedDomain` (already
+        // hostnames. The packet path reuses `question.normalizedDomain` (already
         // `DomainName.normalize(question.domain)` from `DNSMessage.parseQuestion`)
-        // instead of re-normalizing per query; the endpoint host is still normalized here.
+        // instead of re-normalizing per query; the endpoint host is normalized via the
+        // memoizing helper `normalizedEndpointHostname` (the same `DomainName.normalize`,
+        // cached because resolver hostnames are stable across queries).
         XCTAssertTrue(doqBootstrapResponseBlock.contains("question.normalizedDomain"))
-        XCTAssertTrue(doqBootstrapResponseBlock.contains("DomainName.normalize(endpoint.hostname)"))
+        XCTAssertTrue(doqBootstrapResponseBlock.contains("normalizedEndpointHostname(endpoint.hostname)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("doqEndpointResolvingBootstrapIfNeeded(endpoint)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)"))
         XCTAssertTrue(doqTransportSource.contains("NWConnection(host: NWEndpoint.Host(endpoint.hostname), port: port, using: parameters)"))
@@ -3800,8 +3884,10 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // interval (Codex round 2/final). That is exactly `!indicatesServedAnswer` — the same
         // completeForward bar as the recovery gate above (a SERVFAIL/REFUSED rcode OR any
         // malformed reply, INCLUDING a malformed negative whose authority/additional section is
-        // truncated) — so a well-formed NXDOMAIN/NODATA neither stamps nor revokes.
-        XCTAssertTrue(genuinePrimaryBlock.contains("} else if !DNSResolverSmokeProbe.indicatesServedAnswer(result.response) {"))
+        // truncated) — so a well-formed NXDOMAIN/NODATA neither stamps nor revokes. The revoke
+        // branch reuses `primaryServedLegitimateAnswer` (bound just above as that exact
+        // `indicatesServedAnswer(result.response)` value) instead of recomputing the full-RR walk.
+        XCTAssertTrue(genuinePrimaryBlock.contains("} else if !primaryServedLegitimateAnswer {"))
 
         // Evidence never survives a runtime reset (2 clear sites) or any query the
         // configured primary failed to serve: a rejected primary reply, an outright
