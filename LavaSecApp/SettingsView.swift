@@ -1256,7 +1256,9 @@ private struct UpgradeSettingsView: View {
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
 
-            UpgradeLegalFooter()
+            UpgradeLegalFooter(
+                showsYearlyPaidMonthly: displayedOffers.contains { $0.plan.kind == .yearlyPaidMonthly }
+            )
         }
     }
 
@@ -1389,9 +1391,15 @@ private struct UpgradeSettingsView: View {
 /// Guideline 3.1.2 disclosure: auto-renew terms + functional Terms (EULA) and
 /// Privacy Policy links, shown on the paywall wherever subscriptions are offered.
 private struct UpgradeLegalFooter: View {
+    /// Whether the "Yearly, paid monthly" plan is actually offered on this paywall. That plan is the
+    /// only one carrying a 12-month commitment, and it appears only when its `.monthly` billing plan
+    /// is configured in App Store Connect (and on iOS 26.4+). When it isn't shown, we drop the
+    /// commitment sentence so the disclosure never describes a plan the customer can't see.
+    let showsYearlyPaidMonthly: Bool
+
     var body: some View {
         VStack(spacing: 8) {
-            Text("Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment; after that, cancelling affects the next renewal per App Store terms. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings.")
+            Text(disclosureText)
                 .lavaQuietNoteText()
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1407,6 +1415,18 @@ private struct UpgradeLegalFooter: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
+    }
+
+    // Two fully-localized variants: the with-commitment paragraph is used only when the
+    // yearly-paid-monthly plan is on the paywall; otherwise the shorter sibling drops the
+    // "12-month commitment" sentence. Both are string-literal keys so SwiftUI localizes them from
+    // Localizable.xcstrings.
+    private var disclosureText: LocalizedStringKey {
+        if showsYearlyPaidMonthly {
+            return "Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment; after that, cancelling affects the next renewal per App Store terms. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings."
+        }
+
+        return "Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase and renews unless turned off at least 24 hours before the period ends. Manage or cancel in Apple Account settings."
     }
 }
 
@@ -1694,9 +1714,6 @@ private struct CustomizationSettingsView: View {
                     // VoiceOver skips a knob that would do nothing.
                     .disabled(viewModel.textSizeMatchesSystem)
                     .opacity(viewModel.textSizeMatchesSystem ? 0.4 : 1)
-
-                    Text("Match your iOS text size, or set one just for Lava. Everything reflows to fit.".lavaLocalized)
-                        .lavaQuietNoteText()
                 }
             }
 
@@ -1713,8 +1730,6 @@ private struct CustomizationSettingsView: View {
                         .font(.headline)
                         .tint(LavaStyle.safeGreen)
                         .lavaControlRowCard()
-                    Text("Tells you when a Focus couldn't switch your filter, for example while editing is locked.".lavaLocalized)
-                        .lavaQuietNoteText()
 
                     Toggle("Connection updates", isOn: notificationBinding(for: .connectivity))
                         .font(.headline)
@@ -1746,24 +1761,16 @@ private struct CustomizationSettingsView: View {
                             }
                             .tint(LavaStyle.safeGreen)
                             .lavaControlRowCard()
-
-                            Text("How long the Pause button turns Lava off before protection resumes on its own.".lavaLocalized)
-                                .lavaQuietNoteText()
                         }
                     }
                 }
             }
 
             LavaSectionGroup("Haptics") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("App Haptics", isOn: lavaHapticsBinding)
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-
-                    Text("Lava's own taps. System haptics stay with iOS.".lavaLocalized)
-                        .lavaQuietNoteText()
-                }
+                Toggle("App Haptics", isOn: lavaHapticsBinding)
+                    .font(.headline)
+                    .tint(LavaStyle.safeGreen)
+                    .lavaControlRowCard()
             }
 
             LavaSectionGroup("Language") {

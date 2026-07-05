@@ -92,7 +92,14 @@ final class LavaSecurityPlusStore: ObservableObject {
     private var updatesTask: Task<Void, Never>?
 
     init() {
-        offers = Self.fallbackOffers()
+        // Starts EMPTY on purpose. `offers` holds only live StoreKit offers — never the display
+        // fallback. The paywall's on-appear guard loads products while this is empty, and the UI
+        // substitutes the hardcoded fallback offer list (via `displayedOffers`) whenever it is empty,
+        // so the screen still shows prices before/without a successful load. Seeding this with
+        // fabricated fallback offers (as it did) left `.isEmpty` permanently false, so a launch whose
+        // `Product.products` request had not yet completed — or had failed — would sit on the
+        // hardcoded fallback prices forever and never surface the yearly-paid-monthly offer.
+        offers = []
     }
 
     deinit {
@@ -124,7 +131,10 @@ final class LavaSecurityPlusStore: ObservableObject {
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
             offers = Self.offers(from: productsByID)
         } catch {
-            offers = Self.fallbackOffers()
+            // Leave `offers` untouched — keep the last successful load, or stay empty. Overwriting it
+            // with fabricated fallback offers here would make `.isEmpty` false and stop the paywall's
+            // load guard from ever retrying. `displayedOffers` already shows the hardcoded fallback
+            // list while this is empty, so a failed load never leaves the paywall blank.
         }
     }
 
@@ -251,18 +261,6 @@ final class LavaSecurityPlusStore: ObservableObject {
     /// the yearly pitch drops the number, so a storefront whose App Store price
     /// tiers don't preserve the base-currency ratio never shows an inflated figure.
     static let minimumDisplayableSavingsPercent = 5
-
-    private static func fallbackOffers() -> [LavaSecurityPlusOffer] {
-        LavaSecurityPlusPolicy.fallbackOfferOrder.map {
-            LavaSecurityPlusOffer(
-                plan: $0,
-                displayPrice: $0.fallbackDisplayPrice,
-                commitmentDisplayPrice: nil,
-                savingsPercent: nil,
-                product: nil
-            )
-        }
-    }
 
     private static func offers(from productsByID: [String: Product]) -> [LavaSecurityPlusOffer] {
         let savingsPercent = yearlySavingsPercent(

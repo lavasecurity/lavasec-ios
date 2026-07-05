@@ -309,10 +309,6 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // "Haptic Feedback" / configuration-backed `playsHapticFeedback` design.
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Haptics\")"))
         XCTAssertTrue(customizationBlock.contains("Toggle(\"App Haptics\", isOn: lavaHapticsBinding)"))
-        // The note scopes this to Lava's own taps — system haptics (keyboard
-        // feedback, etc.) keep firing after this is off, which is why an earlier
-        // app-wide haptics toggle was dropped.
-        XCTAssertTrue(customizationBlock.contains("Lava's own taps. System haptics stay with iOS."))
         XCTAssertFalse(customizationBlock.contains("LavaSectionGroup(\"Appearance & Haptics\")"))
         XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
         XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))

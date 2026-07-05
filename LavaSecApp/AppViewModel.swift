@@ -1126,15 +1126,14 @@ final class AppViewModel: ObservableObject {
     // row being deleted.
     private var isUploadingEncryptedBackup = false
     @Published private(set) var isAutomaticBackupEnabled = false
-    @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map {
-        LavaSecurityPlusOffer(
-            plan: $0,
-            displayPrice: $0.fallbackDisplayPrice,
-            commitmentDisplayPrice: nil,
-            savingsPercent: nil,
-            product: nil
-        )
-    }
+    // Starts EMPTY on purpose — it holds offers actually loaded from StoreKit, not the display
+    // fallback. The paywall's on-appear guard loads products only while this is empty, and
+    // `displayedOffers` substitutes the hardcoded fallback list whenever it's empty, so the UI
+    // still shows something before the load completes. Pre-seeding it with the fallback offers (as
+    // it was) made `.isEmpty` never true, so `loadLavaSecurityPlusProducts()` never ran and the
+    // paywall showed hardcoded fallback prices ($3.99/$29.99) forever instead of live StoreKit
+    // prices — and never surfaced the yearly-paid-monthly offer.
+    @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = []
     @Published private(set) var isLoadingLavaSecurityPlusProducts = false
     @Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false
     @Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false
