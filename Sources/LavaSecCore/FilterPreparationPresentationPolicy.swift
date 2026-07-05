@@ -30,12 +30,18 @@ public struct FilterPreparationPresentationPolicy: Equatable, Sendable {
         return max(0, minimumPhaseDuration - elapsed)
     }
 
+    /// Number of equal steps the bar is divided into: the three preparation phases plus
+    /// the terminal **Success** step. Each visible step owns one quarter, so the final
+    /// Success fill is a consistent quarter rather than a jump.
+    public static let stepCount = 4.0
+
     /// Re-maps the preparation service's uneven overall checkpoints (downloading
-    /// ~0.05–0.2, compiling ~0.42–0.72, saving ~0.86) so the displayed bar gives each
-    /// phase an equal third: download fills 0–1/3, build 1/3–2/3, save 2/3–1.
-    /// `rawProgress` only positions the fill within the phase's nominal sub-range —
-    /// the magnitudes need to be monotonic, not exact — and is clamped to that third.
-    public static func equalThirdsProgress(phase: FilterPreparationPhase, rawProgress: Double) -> Double {
+    /// ~0.05–0.2, compiling ~0.42–0.72, saving ~0.86) so each visible step fills an
+    /// equal quarter of the bar: download 0–1/4, build 1/4–2/4, save 2/4–3/4, and the
+    /// terminal Success step 3/4–1 (set by the caller when it finishes the apply).
+    /// `rawProgress` only positions the fill within the phase's nominal sub-range — the
+    /// magnitudes need to be monotonic, not exact — and is clamped to that quarter.
+    public static func equalStepsProgress(phase: FilterPreparationPhase, rawProgress: Double) -> Double {
         let (index, rawStart, rawEnd): (Double, Double, Double)
         switch phase {
         case .downloading: (index, rawStart, rawEnd) = (0, 0.0, 0.42)
@@ -45,6 +51,6 @@ public struct FilterPreparationPresentationPolicy: Equatable, Sendable {
 
         let span = max(rawEnd - rawStart, 0.0001)
         let intra = min(max((rawProgress - rawStart) / span, 0), 1)
-        return (index + intra) / 3
+        return (index + intra) / stepCount
     }
 }

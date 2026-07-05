@@ -97,6 +97,55 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
         XCTAssertFalse(encryptedPrimary.treatsResolverRejectionAsFallbackTrigger)
     }
 
+    // The DNS hot path captures the plan once and reuses it when the query resolves; the wedge
+    // bit can flip in between and is NOT folded into cacheIdentifier, so `forward` re-reads it
+    // onto the captured plan via this helper. It must flip ONLY the rejection trigger.
+    func testRecomputingResolverRejectionFallbackTriggerFlipsOnlyTheWedgeBit() {
+        // Device-DNS primary with encrypted fallback, captured while healthy → trigger off.
+        let captured = DNSResolverRuntimePlan.make(
+            resolver: .device,
+            fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: true,
+            deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false,
+            deviceResolverWedged: false
+        )
+        XCTAssertTrue(captured.shouldFallbackToEncrypted)
+        XCTAssertFalse(captured.treatsResolverRejectionAsFallbackTrigger)
+
+        // Re-reading a now-wedged state flips the trigger ON without disturbing anything else —
+        // cacheIdentifier especially (the wedge bit is deliberately not folded into it).
+        let rewedged = captured.recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: true)
+        XCTAssertTrue(rewedged.treatsResolverRejectionAsFallbackTrigger)
+        XCTAssertEqual(rewedged.cacheIdentifier, captured.cacheIdentifier)
+        XCTAssertEqual(rewedged.shouldFallbackToEncrypted, captured.shouldFallbackToEncrypted)
+        XCTAssertEqual(rewedged.plainAddresses, captured.plainAddresses)
+        XCTAssertEqual(rewedged.deviceDNSFallbackAddresses, captured.deviceDNSFallbackAddresses)
+
+        // Re-reading a healthy state flips it back off (idempotent round-trip, identity preserved).
+        let rehealthy = rewedged.recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: false)
+        XCTAssertFalse(rehealthy.treatsResolverRejectionAsFallbackTrigger)
+        XCTAssertEqual(rehealthy.cacheIdentifier, captured.cacheIdentifier)
+
+        // An encrypted primary has no encrypted fallback, so shouldFallbackToEncrypted gates the
+        // trigger off even when the recompute is handed a wedged state.
+        let encryptedPrimary = DNSResolverRuntimePlan.make(
+            resolver: .cloudflareDoH,
+            fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: true,
+            deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi,
+            deviceDNSFallbackModeActive: false,
+            deviceResolverWedged: false
+        )
+        XCTAssertFalse(encryptedPrimary.shouldFallbackToEncrypted)
+        XCTAssertFalse(
+            encryptedPrimary.recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: true)
+                .treatsResolverRejectionAsFallbackTrigger
+        )
+    }
+
     func testDeviceDNSPrimaryEncryptedFallbackRespectsToggleAndProbeContext() {
         // Encrypted-fallback opt-in off (default) → no fallback, even though the
         // separate device-DNS-fallback flag is on.

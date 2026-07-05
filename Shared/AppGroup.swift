@@ -1,5 +1,6 @@
 import Foundation
 import LavaSecCore
+import os
 
 enum LavaSecAppGroup {
     static let identifier = "group.com.lavasec"
@@ -212,7 +213,58 @@ enum LavaSecDeviceDebugLog {
         try? FileManager.default.removeItem(at: rotatedURL(for: url))
     }
 
+    // DESIGN / ENERGY TRADE-OFF (NRG — deferred, no behavior change here):
+    // This logger is compiled in Release (see the privacy-audit note above) and is
+    // injected into every resolver transport + dozens of tunnel event sites, so on
+    // a busy tunnel it appends many lines per minute. Each `append` currently does
+    // a synchronous open(2) + fstat(2) + write(2) + close(2) per line (see
+    // `appendLine` / `openForAppend`) — a syscall triplet on the DNS-serving path.
+    // The cost is intentional TODAY for two reasons that a batching change must not
+    // regress:
+    //   1. ATOMICITY / ORDER: `O_APPEND` with a single `write(2)` per line is what
+    //      keeps concurrent appends from the app + tunnel (+ every NWConnection
+    //      queue) from tearing each other's JSONL lines — the prior seek-then-write
+    //      path produced corrupted dumps. A batched/deferred flush must preserve
+    //      cross-thread + cross-process atomicity and total ordering.
+    //   2. DURABILITY FOR FEEDBACK: events written here survive into the optional
+    //      Feedback report even if the process is jetsamed mid-session; a purely
+    //      in-memory ring that drops on a hard kill would lose incident evidence.
+    // The deferred optimization is a bounded in-memory ring flushed on a debounce
+    // (mirroring `DebouncedPersistenceController`), collapsing N syscall triplets
+    // per interval into one batched write — but it must keep the 8 MB cap +
+    // rotation invariants, the non-blocking `try()`-lock rotation guards (CON-1:
+    // rotation must never block a DNS writer), and the privacy audit (no event may
+    // record a queried domain).
+    //
+    // SCOPE (review 2026-07-05): after the #285 hot-path pass this is NOT a
+    // per-query cost in Release — query-begin traces are DEBUG/QA-only, query-result
+    // logs are failure-only, DoH/DoT connection-ready fires only on a FRESH
+    // (non-reused) connection, and DoQ's per-query ready line is dropped in Release.
+    // The "many lines per minute" above is the busy/DEBUG framing; the honest
+    // Release residual is connection-lifecycle + periodic-timer + failure sites —
+    // low-frequency, bursty, pure CPU (no radio). Measure the actual Release append
+    // rate on-device before spending effort here; the triplet is wasteful per append
+    // but small at today's rate.
+    //
+    // MIDDLE-PATH APPRAISAL: neither obvious batching wins cleanly. (A) a persistent
+    // fd (drop open+close per line) nets only ~25% once made rotation-safe — a held
+    // fd keeps writing into the renamed `.1` after another process rotates (link
+    // count stays 1, so it needs a per-line path/inode compare, not a zero-link
+    // check), and the naive open-once orphans the fd across two rotations, giving
+    // unbounded `.1` growth + lost lines on exit. (B) the debounced ring above trades
+    // away the jetsam-durability invariant during the incident window where volume
+    // actually peaks, and ADDS a flush timer (a new periodic wake) — net-negative for
+    // battery. Per-append CPU is anyway dominated by the JSON encode + timestamp
+    // format below, not the syscalls. Deferred; not worth either regression today.
     static func append(component: String, event: String, details: [String: String] = [:]) {
+        #if DEBUG || LAVA_QA_TOOLS
+        // NRG debug-log lever: count real appends only. Skip the "nrg" component (the
+        // nrg-counters flush's own append) so a quiet window can't inherit a synthetic
+        // debugLogAppend from the previous summary write.
+        if component != "nrg" {
+            EnergyCounters.shared.bump(.debugLogAppend)
+        }
+        #endif
         guard let url = logURL else {
             return
         }
@@ -336,3 +388,121 @@ enum LavaSecDeviceDebugLog {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.vpnDebugLogRotationLockFilename)
     }
 }
+
+// QA-ONLY energy-measurement counters — Phase 1 of the energy-measurement plan
+// (lavasec-infra docs/engineering/energy-measurement-and-qa-instrumentation-plan.md).
+// Compiled ONLY under DEBUG/LAVA_QA_TOOLS: nothing here ships in the App Store build
+// (Principle 1 — instrumentation stays strictly in QA), and every call site is
+// likewise gated. These aggregate the four deferred energy levers' per-lever event
+// rates IN MEMORY and flush ONE `nrg-counters` summary line per ~60 s window to the
+// device log, so a measurement run reads rates instead of parsing thousands of
+// per-event lines. Crucially the debug-log lever is counted with an in-memory bump,
+// never by emitting a log line per append — that would be the observer effect the
+// plan warns about. The flush piggybacks the tunnel's existing 60 s Focus poll, so
+// it adds no timer (no new wake) of its own.
+#if DEBUG || LAVA_QA_TOOLS
+enum EnergyCounter: String, CaseIterable {
+    case debugLogAppend   // debug-log lever: LavaSecDeviceDebugLog.append calls
+    case doqHandshake     // DoQ lever: fresh QUIC handshakes (connection-ready)
+    case smokeProbeWire   // smoke-probe lever: probes that hit the wire (radio)
+    case smokeProbeSkip   // smoke-probe lever: probes suppressed by NRG-3a evidence
+    case focusPollTick    // focus-poll lever: 60 s config-poll wakes
+}
+
+final class EnergyCounters: @unchecked Sendable {
+    static let shared = EnergyCounters()
+
+    private let lock = NSLock()
+    private var isActive = false
+    private var counts: [EnergyCounter: Int] = [:]
+    private var doqHandshakeMsSum = 0
+    private var windowStartedAt = Date()
+    private var lastFlushAt = Date()
+    private static let flushInterval: TimeInterval = 60
+
+    // `bump` is compiled into every process that links Shared (app, tunnel, intents), but only
+    // the tunnel drives `flushIfDue` (its 60 s Focus poll). Counting in a process that never
+    // flushes would silently drop those counts, so counting is gated to the flushing process:
+    // the tunnel calls `activate()` once at startup and every other process stays a no-op. The
+    // debug-log lever IS the DNS-serving path (the tunnel), so scoping it this way is intentional,
+    // not a lost measurement.
+    // Reset the window on each activation so each tunnel session's measurement is
+    // isolated: a stop/start within the same (un-killed) extension process would
+    // otherwise carry the previous session's counts + an idle `windowSec` gap into
+    // the first nrg-counters line, skewing the rates. Called once per startTunnel.
+    func activate() {
+        let now = Date()
+        lock.lock()
+        isActive = true
+        counts = [:]
+        doqHandshakeMsSum = 0
+        windowStartedAt = now
+        lastFlushAt = now
+        lock.unlock()
+    }
+
+    // Atomic increment only — never touches the log (the debug-log lever must not be
+    // measured by writing more log lines).
+    func bump(_ counter: EnergyCounter) {
+        lock.lock()
+        if isActive { counts[counter, default: 0] += 1 }
+        lock.unlock()
+    }
+
+    // Count a DoQ handshake AND add its duration under ONE lock, so a concurrent
+    // flush can never snapshot a count without its milliseconds (keeps doqHandshakeAvgMs
+    // consistent). `milliseconds` is nil when the ready event carried no timing.
+    func recordDoQHandshake(milliseconds: Int?) {
+        lock.lock()
+        if isActive {
+            counts[.doqHandshake, default: 0] += 1
+            if let milliseconds { doqHandshakeMsSum += max(0, milliseconds) }
+        }
+        lock.unlock()
+    }
+
+    // Emits at most one `nrg-counters` summary per window; rates are per-minute so
+    // windows of slightly different length stay comparable. Safe to call every tick.
+    func flushIfDue(now: Date = Date()) {
+        lock.lock()
+        guard isActive, now.timeIntervalSince(lastFlushAt) >= Self.flushInterval else {
+            lock.unlock()
+            return
+        }
+        let elapsed = max(1, now.timeIntervalSince(windowStartedAt))
+        let snapshot = counts
+        let handshakeMsSum = doqHandshakeMsSum
+        counts = [:]
+        doqHandshakeMsSum = 0
+        windowStartedAt = now
+        lastFlushAt = now
+        lock.unlock()
+
+        var details: [String: String] = ["windowSec": "\(Int(elapsed))"]
+        for counter in EnergyCounter.allCases {
+            let count = snapshot[counter, default: 0]
+            details[counter.rawValue] = "\(count)"
+            details[counter.rawValue + "PerMin"] = String(format: "%.1f", Double(count) / elapsed * 60)
+        }
+        let handshakes = snapshot[.doqHandshake, default: 0]
+        if handshakes > 0 {
+            details["doqHandshakeAvgMs"] = "\(handshakeMsSum / handshakes)"
+        }
+        LavaSecDeviceDebugLog.append(component: "nrg", event: "nrg-counters", details: details)
+        EnergySignpost.event("nrg-window")   // mark each counter window on the Instruments timeline
+    }
+}
+
+// QA-only Points-of-Interest signposts (Phase 2) so an Instruments Energy Log run
+// can correlate battery cost to each lever firing. Emitted ONLY at low-frequency
+// sites — never per debug-log append (that would be the observer effect); the
+// debug-log lever is represented by the once-per-window `nrg-window` mark above.
+// The counters give per-lever RATES; these signposts give the per-event timeline
+// brackets Instruments attributes energy to.
+enum EnergySignpost {
+    static let poiLog = OSLog(subsystem: "app.lavasecurity.nrg", category: .pointsOfInterest)
+    static func event(_ name: StaticString) {
+        os_signpost(.event, log: poiLog, name: name)
+    }
+}
+#endif
