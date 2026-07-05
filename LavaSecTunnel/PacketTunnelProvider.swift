@@ -289,9 +289,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let diagnosticsWriteInterval: TimeInterval = 30
     private let configurationRefreshInterval: TimeInterval = 30
     private let protectionPauseStateRefreshInterval: TimeInterval = 1
+    private static let transientBootstrapDNSWaitTimeout: TimeInterval = 8
+    private static let transientBootstrapDNSWaitMaximumPendingResponses = 64
     // dnsStateQueue-confined, like the dictionaries they replaced.
     private let dnsResponseCache = DNSResponseCache()
     private let inFlightQueryCoalescer = InFlightDNSQueryCoalescer<PendingDNSResponse>()
+    private var transientBootstrapDNSWaitActive = false
+    private var transientBootstrapDNSWaitGeneration: UInt64?
+    private var transientBootstrapDNSWaitExpiredGeneration: UInt64?
+    private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []
+    private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?
     private var resolverBackoffPolicy = ResolverBackoffPolicy()
     private var health = TunnelHealthSnapshot()
     private var diagnostics = DiagnosticsStore()
@@ -582,7 +589,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let completion = SendableCompletion(completionHandler)
         let lifecycleGeneration = beginTunnelLifecycle(reason: "startTunnel")
         beginFreshProtectionVPNSession(reason: "startTunnel")
-        loadInitialSharedState()
+        let shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings = loadInitialSharedState()
         scheduleProtectionPauseResumeIfNeeded(reason: "startTunnel")
         refreshDeviceDNSResolverAddresses(reason: "startTunnel")
         resetHealth()
@@ -663,6 +670,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // both the only place orphans appear and the only race-free place to sweep them.
             if let catalogCacheURL = self.catalogCacheURL {
                 CachedFilterSnapshotCompiler.sweepStaleScratch(cacheDirectoryURL: catalogCacheURL)
+            }
+            if shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings {
+                self.beginTransientBootstrapDNSWait(reason: "setTunnelNetworkSettings-success")
             }
             self.loadSnapshotInBackground(reason: "startTunnel", operationID: operationID)
             // Lazy vars are not thread-safe: force the resolver seams here,
@@ -749,7 +759,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 force: true
             )
             self.resolverBootstrapService.invalidateAll()
-            self.writeServerFailures(for: pendingResponses)
+            self.writeServerFailures(for: pendingResponses, reason: "wake")
             self.resolverProbeCoalescer.noteUnsettled()
             // The pre-sleep capture is likely stale (the device may have changed
             // networks while suspended); retry the read so a device-DNS user adopts
@@ -809,6 +819,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func invalidateTunnelLifecycle(reason: String) {
         let invalidate = {
             self.tunnelLifecycleGeneration += 1
+            self.cancelTransientBootstrapDNSWait(reason: "lifecycle-invalidated-\(reason)")
             #if DEBUG || LAVA_QA_TOOLS
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "lifecycle-invalidated", details: [
                 "reason": reason,
@@ -1161,12 +1172,39 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
+        handleDNSRequest(
+            request,
+            protocolNumber: protocolNumber.intValue,
+            allowsTransientBootstrapDeferral: true,
+            expectedLifecycleGeneration: nil
+        )
+    }
+
+    private func handleDNSRequest(
+        _ request: IPv4UDPDNSPacket,
+        protocolNumber: Int,
+        allowsTransientBootstrapDeferral: Bool,
+        expectedLifecycleGeneration: UInt64?
+    ) {
+        if let expectedLifecycleGeneration,
+           !isCurrentTunnelLifecycle(expectedLifecycleGeneration) {
+            let pending = PendingDNSResponse(
+                request: request,
+                protocolNumber: protocolNumber,
+                maximumAnswerTTL: nil,
+                temporaryPauseNormalizedDomain: nil
+            )
+            writeServerFailures(for: [pending], reason: "transient-bootstrap-dns-wait-stale-lifecycle")
+            return
+        }
+
         guard let question = try? DNSMessage.parseQuestion(from: request.dnsPayload) else {
-            writeParseFailureResponse(for: request, protocolNumber: protocolNumber.intValue)
+            writeParseFailureResponse(for: request, protocolNumber: protocolNumber)
             return
         }
 
         let resolverConfiguration = currentResolverRuntimeConfiguration()
+        let protocolNumberObject = NSNumber(value: protocolNumber)
         // Captured inside the filterDecision closure (non-escaping, called synchronously by
         // the dispatcher) so the fail-closed reason is read under the SAME snapshotQueue
         // pass as the decision — a deferred read could describe a different resident
@@ -1206,7 +1244,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         switch decision {
         case .bootstrap(let bootstrapResponse):
             resetResolverRuntimeStateIfNeeded(identifier: resolverConfiguration.cacheIdentifier)
-            writeDNSResponse(bootstrapResponse, for: request, protocolNumber: protocolNumber.intValue)
+            writeDNSResponse(bootstrapResponse, for: request, protocolNumber: protocolNumber)
 
         case .pausedForward:
             let maximumAnswerTTL = temporaryPauseMaximumAnswerTTL(forNormalizedDomain: question.normalizedDomain)
@@ -1214,13 +1252,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             recordFirstDNSDecisionIfNeeded("pause-allow")
             forward(
                 request,
-                protocolNumber: protocolNumber,
+                protocolNumber: protocolNumberObject,
                 resolverConfiguration: resolverConfiguration,
                 maximumAnswerTTL: maximumAnswerTTL,
                 temporaryPauseNormalizedDomain: question.normalizedDomain
             )
 
         case .filtered(let filterDecision):
+            if enqueueTransientBootstrapDNSRequestIfNeeded(
+                request: request,
+                protocolNumber: protocolNumber,
+                filterDecision: filterDecision,
+                failClosedReason: failClosedReasonAtDecision,
+                allowsTransientBootstrapDeferral: allowsTransientBootstrapDeferral
+            ) {
+                return
+            }
+
             recordDiagnostic(
                 domain: question.domain,
                 decision: filterDecision,
@@ -1228,7 +1276,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
             recordFirstDNSDecisionIfNeeded(filterDecision.action == .block ? "block" : "allow")
             guard filterDecision.action == .block else {
-                forward(request, protocolNumber: protocolNumber, resolverConfiguration: resolverConfiguration)
+                forward(request, protocolNumber: protocolNumberObject, resolverConfiguration: resolverConfiguration)
                 return
             }
 
@@ -1240,7 +1288,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
-            writeDNSResponse(response, for: request, protocolNumber: protocolNumber.intValue)
+            writeDNSResponse(response, for: request, protocolNumber: protocolNumber)
         }
     }
 
@@ -1972,7 +2020,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 reason: "device-dns-recaptured-on-settle",
                 force: true
             )
-            writeServerFailures(for: pendingResponses)
+            writeServerFailures(for: pendingResponses, reason: "device-dns-recaptured-on-settle")
         }
 
         prewarmResolverBootstrapIfNeeded()
@@ -3013,7 +3061,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     reason: "device-dns-recaptured-on-retry",
                     force: true
                 )
-                writeServerFailures(for: pendingResponses)
+                writeServerFailures(for: pendingResponses, reason: "device-dns-recaptured-on-retry")
                 scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-recaptured-on-retry")
             }
             return
@@ -3078,7 +3126,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     reason: "device-dns-stale-dropped-on-exhaustion",
                     force: true
                 )
-                writeServerFailures(for: pendingResponses)
+                writeServerFailures(for: pendingResponses, reason: "device-dns-stale-dropped-on-exhaustion")
                 scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-stale-dropped-on-exhaustion")
             }
 
@@ -3459,7 +3507,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 )
             }
             scheduleProtectionNotificationIfNeeded(now: now)
-            writeServerFailures(for: pendingResponses)
+            writeServerFailures(for: pendingResponses, reason: "device-dns-fallback-recovered")
             #if LAVA_QA_TOOLS
             logQAConnectivityAssessmentIfNeeded(reason: "dns-smoke-probe-success", now: now)
             #endif
@@ -3520,7 +3568,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 scheduleProtectionNotificationIfNeeded(now: now)
             }
             persistHealthIfNeeded(force: true)
-            writeServerFailures(for: pendingResponses)
+            writeServerFailures(for: pendingResponses, reason: "device-dns-fallback-activated")
             #if LAVA_QA_TOOLS
             logQAConnectivityAssessmentIfNeeded(
                 reason: deviceDNSFallbackModeActive ? "device-dns-fallback-activated" : "device-dns-fallback-candidate",
@@ -3864,7 +3912,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             "resolverIdentifier": resolverIdentifier
         ])
 
-        writeServerFailures(for: pendingResponses)
+        writeServerFailures(for: pendingResponses, reason: "network-path-changed")
 
         if update.isSatisfied {
             reapplyTunnelNetworkSettings(reason: "network-path-changed", enforceThrottle: true)
@@ -3945,10 +3993,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
-    private func loadInitialSharedState() {
+    private func loadInitialSharedState() -> Bool {
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadInitialSharedState-begin")
 
         let configuration = loadConfiguration() ?? AppConfiguration()
+        let launchFollowsRecentSelfReconnect = Self.launchFollowsRecentSelfReconnect(now: Date())
         setAppConfiguration(configuration)
         // Queue-confine the refresh bookkeeping like setAppConfiguration above and every
         // other access via refreshConfigurationIfNeeded: a prior-lifecycle detached snapshot
@@ -3983,10 +4032,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let bootstrapSnapshot: any FilterRuntimeSnapshot
         let bootstrapIdentity: PreparedFilterSnapshotIdentity?
         let bootstrapHasEnabledFilters: Bool
+        let shouldBeginTransientBootstrapDNSWait: Bool
         if configuration.enabledBlocklistIDs.isEmpty {
             bootstrapSnapshot = configuration.filterSnapshot()
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false
+            shouldBeginTransientBootstrapDNSWait = false
         } else if let resumed = bootstrapResidentSnapshotFromDisk(configuration: configuration) {
             // Fast-resume from the user's own on-disk artifact so a cold start (notably a
             // self-reconnect that kills + relaunches the process) does NOT serve a block-all
@@ -4000,15 +4051,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
             bootstrapIdentity = resumed.identity
             bootstrapHasEnabledFilters = true
+            shouldBeginTransientBootstrapDNSWait = false
         } else {
             // No serviceable in-budget on-disk artifact, or it exceeds the synchronous-decode
             // cap → fail closed (NEVER fail open). The async loadSnapshotInBackground resumes
-            // from disk / recompiles and commits the real snapshot. This bootstrap fail-closed
-            // is TRANSIENT — the unavailable marker stays false (below) so it does not suppress
-            // a later self-reconnect the way a genuine unavailability does.
+            // from disk / recompiles and commits the real snapshot. For a RECENT self-reconnect
+            // launch, DNS requests in this window are queued briefly below instead of receiving
+            // synthetic blocked answers; ordinary cold starts keep the existing immediate
+            // fail-closed behavior. This bootstrap fail-closed is TRANSIENT — the unavailable
+            // marker stays false (below) so it does not suppress a later self-reconnect the way
+            // a genuine unavailability does.
             bootstrapSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false
+            shouldBeginTransientBootstrapDNSWait = launchFollowsRecentSelfReconnect
             // Deliberately NOT ledgered at ENTRY (OBS-C2): this window is transient by design —
             // the async loadSnapshotInBackground commits a real snapshot within ~seconds, and the
             // marker stays false below. It is taken on EVERY start for the over-sync-cap /
@@ -4039,6 +4095,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             residentFailClosedDueToUnavailableSnapshot = false
         }
 
+        // NetworkExtension can spend most of the bounded wait installing settings before DNS
+        // packets can arrive. Clear stale wait state here, but start the timer only after
+        // setTunnelNetworkSettings succeeds and the async snapshot load/read loop are about
+        // to begin.
+        cancelTransientBootstrapDNSWait(reason: "loadInitialSharedState")
+
         if let diagnosticsURL {
             diagnostics = DiagnosticsPersistence.load(from: diagnosticsURL)
         }
@@ -4064,6 +4126,273 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             "bootstrapBlockRuleCount": "\(snapshot.blockRuleCount)",
             "bootstrapAllowRuleCount": "\(snapshot.allowRuleCount)"
         ])
+        return shouldBeginTransientBootstrapDNSWait
+    }
+
+    private func enqueueTransientBootstrapDNSRequestIfNeeded(
+        request: IPv4UDPDNSPacket,
+        protocolNumber: Int,
+        filterDecision: FilterDecision,
+        failClosedReason: String?,
+        allowsTransientBootstrapDeferral: Bool
+    ) -> Bool {
+        guard allowsTransientBootstrapDeferral,
+              filterDecision.action == .block,
+              filterDecision.reason == .protectionUnavailable,
+              failClosedReason == "transient-protection-unavailable"
+        else {
+            return false
+        }
+
+        let pending = PendingDNSResponse(
+            request: request,
+            protocolNumber: protocolNumber,
+            maximumAnswerTTL: nil,
+            temporaryPauseNormalizedDomain: nil
+        )
+        var serverFailure: PendingDNSResponse?
+        var serverFailureReason: String?
+        let handledByWait = dnsStateQueue.sync {
+            if transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration {
+                serverFailure = pending
+                serverFailureReason = "transient-bootstrap-dns-wait-timeout"
+                return true
+            }
+
+            guard transientBootstrapDNSWaitActive,
+                  transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration
+            else {
+                return false
+            }
+
+            guard transientBootstrapDNSWaitPendingResponses.count < Self.transientBootstrapDNSWaitMaximumPendingResponses else {
+                serverFailure = pending
+                serverFailureReason = "transient-bootstrap-dns-wait-overflow"
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-overflow", details: [
+                    "generation": "\(tunnelLifecycleGeneration)",
+                    "pendingResponses": "\(transientBootstrapDNSWaitPendingResponses.count)"
+                ])
+                return true
+            }
+
+            transientBootstrapDNSWaitPendingResponses.append(pending)
+            if transientBootstrapDNSWaitPendingResponses.count == 1 {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-queued", details: [
+                    "generation": "\(tunnelLifecycleGeneration)"
+                ])
+            }
+            return true
+        }
+
+        if let serverFailure {
+            writeServerFailures(for: [serverFailure], reason: serverFailureReason)
+        }
+        return handledByWait
+    }
+
+    private func drainTransientBootstrapDNSWait(reason: String) {
+        let drain = { [self] () -> (pendingResponses: [PendingDNSResponse], replayGeneration: UInt64?) in
+            guard transientBootstrapDNSWaitActive || transientBootstrapDNSWaitExpiredGeneration != nil else {
+                return ([], nil)
+            }
+            guard transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration
+                    || transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration
+            else {
+                let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+                if !pendingResponses.isEmpty {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-stale-lifecycle", details: [
+                        "generation": "\(tunnelLifecycleGeneration)",
+                        "pendingResponses": "\(pendingResponses.count)",
+                        "reason": reason
+                    ])
+                }
+                writeServerFailures(
+                    for: pendingResponses,
+                    reason: "transient-bootstrap-dns-wait-stale-lifecycle"
+                )
+                return ([], nil)
+            }
+
+            let replayGeneration = transientBootstrapDNSWaitGeneration ?? transientBootstrapDNSWaitExpiredGeneration
+            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+            if !pendingResponses.isEmpty {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-drain", details: [
+                    "generation": "\(tunnelLifecycleGeneration)",
+                    "pendingResponses": "\(pendingResponses.count)",
+                    "reason": reason
+                ])
+            }
+            return (pendingResponses, replayGeneration)
+        }
+
+        let result: (pendingResponses: [PendingDNSResponse], replayGeneration: UInt64?)
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            result = drain()
+        } else {
+            result = dnsStateQueue.sync(execute: drain)
+        }
+
+        replayTransientBootstrapDNSRequests(
+            result.pendingResponses,
+            expectedLifecycleGeneration: result.replayGeneration
+        )
+    }
+
+    private func failTransientBootstrapDNSWait(reason: String, expectedGeneration: UInt64? = nil) {
+        let fail = { [self] () -> [PendingDNSResponse] in
+            guard transientBootstrapDNSWaitActive else {
+                return []
+            }
+            if let expectedGeneration, transientBootstrapDNSWaitGeneration != expectedGeneration {
+                return []
+            }
+
+            let generation = transientBootstrapDNSWaitGeneration
+            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+            if reason == "transient-bootstrap-dns-wait-timeout" {
+                transientBootstrapDNSWaitExpiredGeneration = expectedGeneration ?? generation
+            }
+            if !pendingResponses.isEmpty {
+                if reason == "transient-bootstrap-dns-wait-timeout" {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-timeout", details: [
+                        "generation": "\(tunnelLifecycleGeneration)",
+                        "pendingResponses": "\(pendingResponses.count)",
+                        "reason": reason
+                    ])
+                } else {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-failed", details: [
+                        "generation": "\(tunnelLifecycleGeneration)",
+                        "pendingResponses": "\(pendingResponses.count)",
+                        "reason": reason
+                    ])
+                }
+            }
+            return pendingResponses
+        }
+
+        let pendingResponses: [PendingDNSResponse]
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            pendingResponses = fail()
+        } else {
+            pendingResponses = dnsStateQueue.sync(execute: fail)
+        }
+
+        writeServerFailures(for: pendingResponses, reason: reason)
+    }
+
+    private func replayTransientBootstrapDNSRequests(
+        _ pendingResponses: [PendingDNSResponse],
+        expectedLifecycleGeneration: UInt64?
+    ) {
+        guard !pendingResponses.isEmpty else {
+            return
+        }
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            guard let expectedLifecycleGeneration,
+                  self.isCurrentTunnelLifecycle(expectedLifecycleGeneration)
+            else {
+                self.writeServerFailures(
+                    for: pendingResponses,
+                    reason: "transient-bootstrap-dns-wait-stale-lifecycle"
+                )
+                return
+            }
+
+            for (index, pending) in pendingResponses.enumerated() {
+                guard self.isCurrentTunnelLifecycle(expectedLifecycleGeneration) else {
+                    self.writeServerFailures(
+                        for: Array(pendingResponses[index...]),
+                        reason: "transient-bootstrap-dns-wait-stale-lifecycle"
+                    )
+                    return
+                }
+
+                self.handleDNSRequest(
+                    pending.request,
+                    protocolNumber: pending.protocolNumber,
+                    allowsTransientBootstrapDeferral: false,
+                    expectedLifecycleGeneration: expectedLifecycleGeneration
+                )
+            }
+        }
+    }
+
+    private func beginTransientBootstrapDNSWait(reason: String) {
+        guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
+            dnsStateQueue.sync {
+                self.beginTransientBootstrapDNSWait(reason: reason)
+            }
+            return
+        }
+
+        let replacedPendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+        writeServerFailures(
+            for: replacedPendingResponses,
+            reason: "transient-bootstrap-dns-wait-replaced"
+        )
+        transientBootstrapDNSWaitExpiredGeneration = nil
+        transientBootstrapDNSWaitActive = true
+        transientBootstrapDNSWaitGeneration = tunnelLifecycleGeneration
+
+        let generation = tunnelLifecycleGeneration
+        let timer = DispatchSource.makeTimerSource(queue: dnsStateQueue)
+        timer.schedule(deadline: .now() + Self.transientBootstrapDNSWaitTimeout)
+        timer.setEventHandler { [weak self] in
+            self?.failTransientBootstrapDNSWait(
+                reason: "transient-bootstrap-dns-wait-timeout",
+                expectedGeneration: generation
+            )
+        }
+        transientBootstrapDNSWaitTimer = timer
+        timer.resume()
+
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-begin", details: [
+            "generation": "\(generation)",
+            "reason": reason
+        ])
+    }
+
+    private func cancelTransientBootstrapDNSWait(reason: String) {
+        let cancel = { [self] () -> [PendingDNSResponse] in
+            guard transientBootstrapDNSWaitActive || transientBootstrapDNSWaitExpiredGeneration != nil else {
+                return []
+            }
+
+            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+            if !pendingResponses.isEmpty {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-cancel", details: [
+                    "generation": "\(tunnelLifecycleGeneration)",
+                    "pendingResponses": "\(pendingResponses.count)",
+                    "reason": reason
+                ])
+            }
+            return pendingResponses
+        }
+
+        let pendingResponses: [PendingDNSResponse]
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            pendingResponses = cancel()
+        } else {
+            pendingResponses = dnsStateQueue.sync(execute: cancel)
+        }
+
+        writeServerFailures(for: pendingResponses, reason: reason)
+    }
+
+    private func finishTransientBootstrapDNSWaitOnDNSQueue() -> [PendingDNSResponse] {
+        transientBootstrapDNSWaitTimer?.cancel()
+        transientBootstrapDNSWaitTimer = nil
+        transientBootstrapDNSWaitActive = false
+        transientBootstrapDNSWaitGeneration = nil
+        transientBootstrapDNSWaitExpiredGeneration = nil
+        let pendingResponses = transientBootstrapDNSWaitPendingResponses
+        transientBootstrapDNSWaitPendingResponses.removeAll(keepingCapacity: true)
+        return pendingResponses
     }
 
     private func recordDiagnostic(
@@ -5197,6 +5526,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return raw > 0 ? Date(timeIntervalSince1970: raw) : nil
     }
 
+    private static func launchFollowsRecentSelfReconnect(now: Date) -> Bool {
+        guard let lastSelfReconnectAt = loadLastSelfReconnectAt() else {
+            return false
+        }
+
+        let age = now.timeIntervalSince(lastSelfReconnectAt)
+        return age >= 0 && age <= selfReconnectCreditWindow
+    }
+
     private static func saveLastSelfReconnectAt(_ date: Date) {
         LavaSecAppGroup.sharedDefaults.set(date.timeIntervalSince1970, forKey: lastSelfReconnectAtDefaultsKey)
     }
@@ -6005,6 +6343,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     }
                     self.refreshDNSRuntimeAfterSnapshotOrConfigurationChange()
                 }
+                if didCommitFailClosed {
+                    self.failTransientBootstrapDNSWait(reason: "snapshot-unavailable-\(reason)")
+                }
                 return
             }
 
@@ -6109,6 +6450,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     self.clearResidentFailClosedDueToUnavailableSnapshot(ifCurrentGeneration: generation)
                 }
 
+                self.failTransientBootstrapDNSWait(reason: "snapshot-unavailable-\(reason)")
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-missing", details: [
                     "generation": "\(generation)",
                     "reason": reason
@@ -6206,6 +6548,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 }
 
                 self.refreshDNSRuntimeAfterSnapshotOrConfigurationChange()
+                self.drainTransientBootstrapDNSWait(reason: "snapshot-loaded-\(reason)")
                 self.refreshConfigurationIfNeeded(force: true)
                 self.applyDiagnosticsControlIfNeeded(force: true)
                 self.scheduleProtectionPauseResumeIfNeeded(reason: "snapshot-loaded-\(reason)")
@@ -6725,7 +7068,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         health.lastResolverRuntimeResetAt = Date()
         health.lastResolverRuntimeResetReason = reason
         health.resolverRuntimeResetCount += 1
-        writeServerFailures(for: pendingResponses)
+        writeServerFailures(for: pendingResponses, reason: reason)
     }
 
     private func resetResolverRuntimeStateIfNeeded(identifier: String) {
@@ -6736,7 +7079,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
         }
 
-        writeServerFailures(for: pendingResponses)
+        writeServerFailures(for: pendingResponses, reason: "resolver-configuration-changed")
     }
 
     private func resetResolverRuntimeStateOnDNSQueueIfNeeded(identifier: String) {
@@ -6744,7 +7087,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             identifier: identifier,
             reason: "resolver-configuration-changed"
         )
-        writeServerFailures(for: pendingResponses)
+        writeServerFailures(for: pendingResponses, reason: "resolver-configuration-changed")
     }
 
     private func resetResolverRuntimeForTunnelLifecycle(reason: String) {
@@ -6877,7 +7220,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return pendingResponses
     }
 
-    private func writeServerFailures(for pendingResponses: [PendingDNSResponse]) {
+    private func writeServerFailures(for pendingResponses: [PendingDNSResponse], reason: String? = nil) {
+        if !pendingResponses.isEmpty, let reason {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "pending-dns-servfail", details: [
+                "reason": reason,
+                "pendingResponses": "\(pendingResponses.count)"
+            ])
+        }
+
         for pending in pendingResponses {
             guard let response = DNSResponseFactory.serverFailure(for: pending.request.dnsPayload) else {
                 continue
@@ -6967,46 +7317,54 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // the root store before the in-extension recompile. Each store is read as a
         // single resolved unit, so compact + prepared within one store never mix
         // generations.
-        var artifactStores: [FilterArtifactStore] = []
-        if let resolved = readableArtifactStore() {
-            artifactStores.append(resolved)
-        }
+        var artifactStores: [(store: FilterArtifactStore, route: String)] = []
         if let containerURL = LavaSecAppGroup.containerURL {
             let rootStore = FilterArtifactStore(directoryURL: containerURL)
-            if artifactStores.first?.directoryURL != rootStore.directoryURL {
-                artifactStores.append(rootStore)
+            if let resolved = readableArtifactStore() {
+                let route = resolved.directoryURL == rootStore.directoryURL ? "root" : "resolved"
+                artifactStores.append((store: resolved, route: route))
+            }
+            if artifactStores.first?.store.directoryURL != rootStore.directoryURL {
+                artifactStores.append((store: rootStore, route: "root"))
             }
         }
 
-        for artifactStore in artifactStores {
+        for (artifactStore, route) in artifactStores {
             // Both reads gate (reuse + budget) BEFORE the multi-MB decode and re-validate
             // from consistent bytes, so a stale/over-budget artifact is never materialized
             // before the root fallback, and a concurrent atomic rewrite of the mutable
             // root store cannot slip a different generation past the header check.
-            if let compactSnapshot = reusableCompactSnapshot(
+            let compactResult = reusableCompactSnapshot(
                 from: artifactStore,
                 configuration: configuration,
                 cachedCatalog: cachedCatalog
-            ) {
+            )
+            if let compactSnapshot = compactResult.snapshot {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-hit", details: [
-                    "identity": compactSnapshot.identity.fingerprint
+                    "identity": compactSnapshot.identity.fingerprint,
+                    "route": route
                 ])
                 return (compactSnapshot, compactSnapshot.identity)
             }
 
-            if let preparedSnapshot = reusablePreparedSnapshot(
+            let preparedResult = reusablePreparedSnapshot(
                 from: artifactStore,
                 configuration: configuration,
                 cachedCatalog: cachedCatalog
-            ) {
+            )
+            if let preparedSnapshot = preparedResult.snapshot {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-prepared-hit", details: [
-                    "identity": preparedSnapshot.identity.fingerprint
+                    "identity": preparedSnapshot.identity.fingerprint,
+                    "route": route
                 ])
                 return (preparedSnapshot.snapshot, preparedSnapshot.identity)
             }
 
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-store-miss", details: [
-                "expected": expectedIdentity.fingerprint
+                "route": route,
+                "compactReason": compactResult.missReason ?? "unknown",
+                "preparedReason": preparedResult.missReason ?? "unknown",
+                "generation": "\(generation)"
             ])
         }
 
@@ -7050,13 +7408,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             let hasKeepableFilteringResident = self.currentResidentSnapshotIdentity() != nil
                 && self.currentResidentSnapshotHasEnabledFilters()
             if !hasKeepableFilteringResident, !configuration.enabledBlocklistIDs.isEmpty {
-                for artifactStore in artifactStores {
+                for (artifactStore, route) in artifactStores {
                     if let lastGood = self.lastKnownGoodCompactSnapshot(
                         from: artifactStore,
                         configuration: configuration
                     ) {
                         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-last-known-good", details: [
-                            "identity": lastGood.identity.fingerprint
+                            "identity": lastGood.identity.fingerprint,
+                            "route": route
                         ])
                         return (lastGood, lastGood.identity)
                     }
@@ -7177,12 +7536,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?,
         syncDecodeRuleCap: Int? = nil
-    ) -> CompactFilterSnapshot? {
-        guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]),
-              let summary = try? CompactFilterSnapshot.readSummary(from: data),
-              summary.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: cachedCatalog)
-        else {
-            return nil
+    ) -> (snapshot: CompactFilterSnapshot?, missReason: String?) {
+        guard FileManager.default.fileExists(atPath: store.compactSnapshotURL.path) else {
+            return (nil, "missing")
+        }
+        guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]) else {
+            return (nil, "unreadable")
+        }
+        guard let summary = try? CompactFilterSnapshot.readSummary(from: data) else {
+            return (nil, "invalid")
+        }
+        if let reuseRejection = compactReuseRejectionReason(
+            summary: summary,
+            configuration: configuration,
+            cachedCatalog: cachedCatalog
+        ) {
+            return (nil, "reuse:\(reuseRejection)")
         }
 
         let ruleCount = summary.blockRuleCount + summary.allowRuleCount + summary.guardrailRuleCount
@@ -7199,17 +7568,46 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "ruleCount": "\(ruleCount)",
                 "syncCap": "\(syncDecodeRuleCap)"
             ])
-            return nil
+            return (nil, "over-sync-cap")
         }
         guard !FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: ruleCount) else {
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-over-budget", details: [
                 "identity": summary.identity.fingerprint,
                 "ruleCount": "\(ruleCount)"
             ])
-            return nil
+            return (nil, "over-budget")
         }
 
-        return try? CompactFilterSnapshot.decode(from: data)
+        guard let snapshot = try? CompactFilterSnapshot.decode(from: data) else {
+            return (nil, "decode-failed")
+        }
+        return (snapshot, nil)
+    }
+
+    private func compactReuseRejectionReason(
+        summary: CompactFilterSnapshotSummary,
+        configuration: AppConfiguration,
+        cachedCatalog: BlocklistCatalog?
+    ) -> String? {
+        guard summary.resolver.transport == configuration.resolverPreset.transport else {
+            return "resolverTransport"
+        }
+
+        if !configuration.enabledBlocklistIDs.isEmpty {
+            guard cachedCatalog != nil else { return "noCachedCatalog" }
+            guard summary.coversEnabledBlocklists(in: configuration) else { return "coverage" }
+        }
+
+        if let cachedCatalog {
+            let expectedIdentity = PreparedFilterSnapshotIdentity.make(
+                configuration: configuration,
+                catalog: cachedCatalog
+            )
+            let mismatches = summary.identity.snapshotInputMismatches(against: expectedIdentity)
+            return mismatches.isEmpty ? nil : "inputs:\(mismatches.joined(separator: "+"))"
+        }
+
+        return summary.identity.hasSameConfigurationInputs(as: configuration) ? nil : "configInputs"
     }
 
     // Last-known-good fallback for a failed fresh (re)compile (the rotating-upstream /
@@ -7271,14 +7669,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         // Same [pointer-resolved, root] store order as loadCompiledSnapshot — a stale pointer
         // must not shadow a fresh root copy.
-        var artifactStores: [FilterArtifactStore] = []
-        if let resolved = readableArtifactStore() {
-            artifactStores.append(resolved)
-        }
+        var artifactStores: [(store: FilterArtifactStore, route: String)] = []
         if let containerURL = LavaSecAppGroup.containerURL {
             let rootStore = FilterArtifactStore(directoryURL: containerURL)
-            if artifactStores.first?.directoryURL != rootStore.directoryURL {
-                artifactStores.append(rootStore)
+            if let resolved = readableArtifactStore() {
+                let route = resolved.directoryURL == rootStore.directoryURL ? "root" : "resolved"
+                artifactStores.append((store: resolved, route: route))
+            }
+            if artifactStores.first?.store.directoryURL != rootStore.directoryURL {
+                artifactStores.append((store: rootStore, route: "root"))
             }
         }
 
@@ -7293,40 +7692,79 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         //     next publish), so skip them and let the async load decode them once off the
         //     critical path. readSyncBootstrapInfo reports both signals in one skip-only read.
         // The same filter yields the same count across stores.
-        let eligibleStores = artifactStores.filter { store in
-            guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]),
-                  let info = try? CompactFilterSnapshot.readSyncBootstrapInfo(from: data)
-            else {
-                return false
+        var maxRuleCount = 0
+        var eligibleStores: [(store: FilterArtifactStore, route: String)] = []
+        for (store, route) in artifactStores {
+            guard FileManager.default.fileExists(atPath: store.compactSnapshotURL.path) else {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                    "route": route,
+                    "reason": "missing"
+                ])
+                continue
             }
+            guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]) else {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                    "route": route,
+                    "reason": "unreadable"
+                ])
+                continue
+            }
+            guard let info = try? CompactFilterSnapshot.readSyncBootstrapInfo(from: data) else {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                    "route": route,
+                    "reason": "invalid"
+                ])
+                continue
+            }
+            maxRuleCount = max(maxRuleCount, info.totalRuleCount)
             guard info.hasStoredSummary else {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-skip-legacy-artifact", details: [
+                    "route": route,
                     "ruleCount": "\(info.totalRuleCount)"
                 ])
-                return false
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                    "route": route,
+                    "reason": "legacy",
+                    "ruleCount": "\(info.totalRuleCount)"
+                ])
+                continue
             }
             if info.totalRuleCount > cap {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-over-sync-cap", details: [
+                    "route": route,
                     "ruleCount": "\(info.totalRuleCount)",
                     "syncCap": "\(cap)"
                 ])
-                return false
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                    "route": route,
+                    "reason": "over-sync-cap",
+                    "ruleCount": "\(info.totalRuleCount)",
+                    "syncCap": "\(cap)"
+                ])
+                continue
             }
-            return true
+            eligibleStores.append((store: store, route: route))
         }
 
-        for store in eligibleStores {
-            if let compact = reusableCompactSnapshot(
+        for (store, route) in eligibleStores {
+            let compactResult = reusableCompactSnapshot(
                 from: store,
                 configuration: configuration,
                 cachedCatalog: cachedCatalog,
                 syncDecodeRuleCap: cap
-            ) {
+            )
+            if let compact = compactResult.snapshot {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-compact-resume", details: [
+                    "route": route,
                     "identity": compact.identity.fingerprint
                 ])
                 return (compact, compact.identity)
             }
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-store-miss", details: [
+                "route": route,
+                "reason": compactResult.missReason ?? "unknown",
+                "syncCap": "\(cap)"
+            ])
         }
         // No strict-reusable, sync-eligible CURRENT artifact → fail closed; the async load handles
         // everything else off the critical path. Deliberately NO last-known-good resume here: a
@@ -7334,6 +7772,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // artifact is reusable-but-over-cap) would UNDER-BLOCK domains added since it was built,
         // breaking the over-cap-→-fail-closed guarantee. The async serveLastKnownGoodOrFailClosed
         // still provides last-known-good when the fresh (re)compile genuinely fails.
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-fast-resume-miss", details: [
+            "reason": eligibleStores.isEmpty ? "no-eligible-stores" : "strict-miss",
+            "storeCount": "\(artifactStores.count)",
+            "eligibleStoreCount": "\(eligibleStores.count)",
+            "syncCap": "\(cap)",
+            "maxRuleCount": "\(maxRuleCount)"
+        ])
         return nil
     }
 
@@ -7352,24 +7797,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         from store: FilterArtifactStore,
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
-    ) -> PreparedFilterSnapshot? {
-        guard let manifest = (try? store.loadManifest()).flatMap({ $0 }),
-              manifest.reuseRejectionReason(configuration: configuration, cachedCatalog: cachedCatalog) == nil
-        else {
-            return nil
+    ) -> (snapshot: PreparedFilterSnapshot?, missReason: String?) {
+        guard FileManager.default.fileExists(atPath: store.manifestURL.path) else {
+            return (nil, "manifest-missing")
+        }
+        guard let manifest = (try? store.loadManifest()).flatMap({ $0 }) else {
+            return (nil, "manifest-invalid")
+        }
+        if let reuseRejection = manifest.reuseRejectionReason(
+            configuration: configuration,
+            cachedCatalog: cachedCatalog
+        ) {
+            return (nil, "reuse:\(reuseRejection)")
         }
 
         let manifestRuleCount = manifest.summary.blockRuleCount + manifest.summary.allowRuleCount + manifest.summary.guardrailRuleCount
         guard !FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: manifestRuleCount) else {
-            return nil
+            return (nil, "over-budget")
         }
 
-        guard let prepared = loadPreparedSnapshot(from: store),
-              prepared.identity == manifest.snapshotIdentity,
+        guard FileManager.default.fileExists(atPath: store.preparedSnapshotURL.path) else {
+            return (nil, "missing")
+        }
+        guard let prepared = loadPreparedSnapshot(from: store) else {
+            return (nil, "decode-failed")
+        }
+        guard prepared.identity == manifest.snapshotIdentity,
               prepared.snapshot.generatedAt == manifest.generatedAt,
               prepared.summary == manifest.summary
         else {
-            return nil
+            return (nil, "manifest-mismatch")
         }
 
         // Authority gate: the decoded prepared's OWN rule count, not the manifest's, so a
@@ -7381,13 +7838,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "identity": prepared.identity.fingerprint,
                 "ruleCount": "\(ruleCount)"
             ])
-            return nil
+            return (nil, "over-budget")
         }
 
         guard prepared.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: cachedCatalog) else {
-            return nil
+            return (nil, "decoded-reuse-mismatch")
         }
-        return prepared
+        return (prepared, nil)
     }
 
     private func loadPreparedSnapshot(from store: FilterArtifactStore) -> PreparedFilterSnapshot? {

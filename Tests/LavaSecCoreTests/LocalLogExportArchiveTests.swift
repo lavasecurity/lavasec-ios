@@ -81,6 +81,7 @@ final class LocalLogExportArchiveTests: XCTestCase {
         let entries = BugReportDebugLogEntry.parseJSONLines(Data("""
         {"component":"tunnel","event":"self-reconnect-suppressed","timestamp":"2026-06-18T05:09:14Z","decision":"throttled","onDemandConfirmed":"false","reason":"send-failed","privateDomain":"checkout.example"}
         {"component":"tunnel","event":"device-dns-captured","timestamp":"2026-06-18T05:09:20Z","reason":"network-settled","count":"2","activeCount":"2"}
+        {"component":"tunnel","event":"loadSnapshot-store-miss","timestamp":"2026-06-18T05:09:24Z","route":"resolved","compactReason":"reuse:inputs:selectedSourceHashes+catalogVersion","preparedReason":"manifest-missing","storeCount":"2","eligibleStoreCount":"1","privateDomain":"checkout.example"}
         """.utf8))
 
         let archive = try LocalLogExportArchive.make(
@@ -97,7 +98,11 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("device-debug-log-2026-06-18-1412.jsonl"))
         XCTAssertTrue(archiveText.contains("self-reconnect-suppressed"))
         XCTAssertTrue(archiveText.contains("device-dns-captured"))
+        XCTAssertTrue(archiveText.contains("loadSnapshot-store-miss"))
         XCTAssertTrue(archiveText.contains("network-settled"))
+        XCTAssertTrue(archiveText.contains("compactReason"))
+        XCTAssertTrue(archiveText.contains("reuse:inputs:selectedSourceHashes+catalogVersion"))
+        XCTAssertTrue(archiveText.contains("eligibleStoreCount"))
         // Redaction holds in the export path too: a queried domain never ships.
         XCTAssertFalse(archiveText.contains("checkout.example"))
     }

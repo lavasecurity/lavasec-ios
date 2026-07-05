@@ -445,6 +445,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "consecutiveSmokeFailures",
         "consecutiveRejectedResponses",
         "count",
+        "compactReason",
         // Self-reconnect suppression diagnostics (why a wedge did not restart the
         // tunnel): a decision label + the gating booleans. Privacy-safe — no
         // queried domain, just policy state.
@@ -492,12 +493,14 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "lastUpstreamFailureAt",
         "lastUpstreamSuccessAt",
         "manager",
+        "maxRuleCount",
         "networkKind",
         "networkPathIsSatisfied",
         "operationID",
         "operationKind",
         "parentSpanID",
         "pendingResponses",
+        "preparedReason",
         "primaryAction",
         "previousKind",
         "previousSatisfied",
@@ -507,6 +510,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "resolverIdentifier",
         "resolverRuntimeResetCount",
         "route",
+        "ruleCount",
         "sequence",
         "severity",
         "spanEvent",
@@ -544,6 +548,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "fallbackOutcome",
         "footprintMB",
         "generation",
+        "eligibleStoreCount",
         "handshakeMs",
         "hostname",
         "ipv4Count",
@@ -556,7 +561,9 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "primaryOutcome",
         "protocol",
         "resolverCount",
+        "storeCount",
         "succeeded",
+        "syncCap",
         "underlyingError",
 
         // Build provenance stamped on startTunnel-begin so every captured tunnel

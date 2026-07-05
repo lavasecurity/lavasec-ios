@@ -55,6 +55,35 @@ final class LocalizationCatalogSourceTests: XCTestCase {
         }
     }
 
+    func testFeedbackReviewAndSubmitCatalogKeysCoverAllLocales() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+
+        // The bug-report review echo and submit button feed dynamic Strings through
+        // .lavaLocalized, so the generic string-coverage script can't see them — pin these
+        // keys manually with every app locale so "Not provided"/"Submit" never render
+        // English-only in a translated build.
+        for key in [
+            "Submit",
+            "Retry",
+            "Submitting",
+            "Not provided",
+            "Not selected",
+            "Sent",
+            "Not sent"
+        ] {
+            let localizations = try XCTUnwrap(
+                strings[key]?["localizations"] as? [String: Any],
+                "Missing localization catalog key: \(key)"
+            )
+            XCTAssertEqual(
+                Set(localizations.keys),
+                Self.expectedAppLocales,
+                "Localization key \(key) must include every app locale."
+            )
+        }
+    }
+
     private static func catalog(_ sourceFile: SourceFile) throws -> [String: Any] {
         let data = try Data(contentsOf: sourceFileURL(sourceFile))
 

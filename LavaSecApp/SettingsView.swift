@@ -4285,7 +4285,7 @@ struct BugReportSettingsView: View {
             if newValue != .websiteAccess && !affectedSite.isEmpty {
                 affectedSite = ""
             }
-            refreshDraft()
+            refreshDraftContext()
             syncReportDirtyState()
         }
         .onChange(of: affectedSite) { _, _ in reportInputChanged() }
@@ -4339,6 +4339,7 @@ struct BugReportSettingsView: View {
                                 title: type.title,
                                 isSelected: selectedIssueType == type
                             )
+                            .equatable()
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])
@@ -4437,15 +4438,15 @@ struct BugReportSettingsView: View {
 
                         Divider()
 
-                        BugReportReviewRow(label: "Details", value: normalizedDetails.isEmpty ? "Not provided" : normalizedDetails)
+                        BugReportReviewRow(label: "Details", value: normalizedDetails.isEmpty ? "Not provided".lavaLocalized : normalizedDetails)
 
                         Divider()
 
-                        BugReportReviewRow(label: "Email", value: normalizedContactEmail.isEmpty ? "Not provided" : normalizedContactEmail)
+                        BugReportReviewRow(label: "Email", value: normalizedContactEmail.isEmpty ? "Not provided".lavaLocalized : normalizedContactEmail)
 
                         Divider()
 
-                        BugReportReviewRow(label: "Diagnostics", value: includeDiagnostics ? "Sent" : "Not sent")
+                        BugReportReviewRow(label: "Diagnostics", value: includeDiagnostics ? "Sent".lavaLocalized : "Not sent".lavaLocalized)
                     }
                 }
             }
@@ -4882,7 +4883,7 @@ private struct FeedbackSecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
-private struct BugReportTopicOptionRow: View {
+private struct BugReportTopicOptionRow: View, Equatable {
     let title: String
     let isSelected: Bool
 

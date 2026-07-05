@@ -543,7 +543,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(wakeBlock.contains("collectPendingResponsesAndResetResolverRuntime("))
         XCTAssertTrue(wakeBlock.contains("reason: \"wake\""))
         XCTAssertTrue(wakeBlock.contains("force: true"))
-        XCTAssertTrue(wakeBlock.contains("writeServerFailures(for: pendingResponses)"))
+        XCTAssertTrue(wakeBlock.contains("writeServerFailures(for: pendingResponses, reason: \"wake\")"))
         XCTAssertTrue(wakeBlock.contains("resolverBootstrapService.invalidateAll()"))
         XCTAssertTrue(wakeBlock.contains("resolverProbeCoalescer.noteUnsettled()"))
         // wake() must NOT clear the device-DNS fallback decision: it also fires on
@@ -2150,7 +2150,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState()",
+            startingAt: "private func loadInitialSharedState() -> Bool",
             endingBefore: "private func refreshConfigurationIfNeeded"
         )
         let loadSnapshotBlock = try sourceBlock(
@@ -2177,10 +2177,10 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // Scratch from a jetsam-killed compile is reclaimed ONCE at startTunnel, before any
         // reload spawns a compile — NOT per-compile, which would race a concurrent reload's
         // in-flight scratch dir. So the sweep must be absent from the compile path and sit
-        // immediately before the startTunnel snapshot load.
+        // before the transient wait is armed and before the startTunnel snapshot load.
         XCTAssertFalse(loadBlock.contains("sweepStaleScratch"))
         XCTAssertTrue(source.contains(
-            "CachedFilterSnapshotCompiler.sweepStaleScratch(cacheDirectoryURL: catalogCacheURL)\n            }\n            self.loadSnapshotInBackground(reason: \"startTunnel\""
+            "CachedFilterSnapshotCompiler.sweepStaleScratch(cacheDirectoryURL: catalogCacheURL)\n            }\n            if shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings {\n                self.beginTransientBootstrapDNSWait(reason: \"setTunnelNetworkSettings-success\")\n            }\n            self.loadSnapshotInBackground(reason: \"startTunnel\""
         ))
         XCTAssertTrue(initialStateBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
         XCTAssertTrue(loadSnapshotBlock.contains("FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)"))
@@ -2196,7 +2196,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let source = try readSource(.packetTunnelProvider)
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState()",
+            startingAt: "private func loadInitialSharedState() -> Bool",
             endingBefore: "private func refreshConfigurationIfNeeded"
         )
 
@@ -2214,7 +2214,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let source = try readSource(.packetTunnelProvider)
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState()",
+            startingAt: "private func loadInitialSharedState() -> Bool",
             endingBefore: "private func refreshConfigurationIfNeeded"
         )
         let bootstrapBlock = try sourceBlock(
@@ -2274,11 +2274,174 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("lastKnownGoodCompactSnapshot"))
     }
 
+    func testTransientBootstrapFailClosedQueuesRecentSelfReconnectQueriesInsteadOfBlocking() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let startTunnelBlock = try sourceBlock(
+            in: source,
+            startingAt: "override func startTunnel",
+            endingBefore: "override func stopTunnel"
+        )
+        let initialStateBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadInitialSharedState() -> Bool",
+            endingBefore: "private func recordDiagnostic("
+        )
+        let filteredBlock = try sourceBlock(
+            in: source,
+            startingAt: "case .filtered(let filterDecision):",
+            endingBefore: "// `resolverConfiguration` is taken from the caller"
+        )
+        let enqueueBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func enqueueTransientBootstrapDNSRequestIfNeeded(",
+            endingBefore: "private func drainTransientBootstrapDNSWait("
+        )
+
+        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitTimeout: TimeInterval = 8"))
+        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitMaximumPendingResponses = 64"))
+        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []"))
+        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitGeneration: UInt64?"))
+        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitExpiredGeneration: UInt64?"))
+        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?"))
+
+        XCTAssertTrue(initialStateBlock.contains("let launchFollowsRecentSelfReconnect = Self.launchFollowsRecentSelfReconnect(now: Date())"))
+        XCTAssertTrue(startTunnelBlock.contains("let shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings = loadInitialSharedState()"))
+        XCTAssertTrue(startTunnelBlock.contains("if shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings"))
+        XCTAssertTrue(startTunnelBlock.contains("self.beginTransientBootstrapDNSWait(reason: \"setTunnelNetworkSettings-success\")"))
+        XCTAssertFalse(initialStateBlock.contains("beginTransientBootstrapDNSWait(reason: \"loadInitialSharedState\")"))
+        XCTAssertTrue(initialStateBlock.contains("cancelTransientBootstrapDNSWait(reason: \"loadInitialSharedState\")"))
+        XCTAssertTrue(initialStateBlock.contains("return shouldBeginTransientBootstrapDNSWait"))
+        XCTAssertTrue(enqueueBlock.contains("filterDecision.action == .block"))
+        XCTAssertTrue(enqueueBlock.contains("filterDecision.reason == .protectionUnavailable"))
+        XCTAssertTrue(enqueueBlock.contains("failClosedReason == \"transient-protection-unavailable\""))
+        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitActive"))
+        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
+        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
+
+        let enqueueIndex = try XCTUnwrap(filteredBlock.range(of: "enqueueTransientBootstrapDNSRequestIfNeeded(")?.lowerBound)
+        let diagnosticIndex = try XCTUnwrap(filteredBlock.range(of: "recordDiagnostic(")?.lowerBound)
+        let syntheticBlockIndex = try XCTUnwrap(filteredBlock.range(of: "DNSMessage.blockedResponse(")?.lowerBound)
+        XCTAssertLessThan(enqueueIndex, diagnosticIndex)
+        XCTAssertLessThan(enqueueIndex, syntheticBlockIndex)
+
+        let settingsSuccessIndex = try XCTUnwrap(startTunnelBlock.range(of: "setTunnelNetworkSettings-success")?.lowerBound)
+        let waitBeginIndex = try XCTUnwrap(startTunnelBlock.range(of: "self.beginTransientBootstrapDNSWait(reason: \"setTunnelNetworkSettings-success\")")?.lowerBound)
+        let snapshotLoadIndex = try XCTUnwrap(startTunnelBlock.range(of: "self.loadSnapshotInBackground(reason: \"startTunnel\"")?.lowerBound)
+        let readPacketsIndex = try XCTUnwrap(startTunnelBlock.range(of: "self.readPackets()")?.lowerBound)
+        XCTAssertLessThan(settingsSuccessIndex, waitBeginIndex)
+        XCTAssertLessThan(waitBeginIndex, snapshotLoadIndex)
+        XCTAssertLessThan(waitBeginIndex, readPacketsIndex)
+    }
+
+    func testTransientBootstrapDNSWaitDrainsOnSnapshotLoadAndServfailsOnTimeoutOrOverflow() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let loadSnapshotBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadSnapshotInBackground(reason: String, operationID: LatencyOperationID? = nil)",
+            endingBefore: "private func scheduleProtectionPauseResumeIfNeeded"
+        )
+        let drainBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func drainTransientBootstrapDNSWait(",
+            endingBefore: "private func failTransientBootstrapDNSWait("
+        )
+        let invalidateLifecycleBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func invalidateTunnelLifecycle(reason: String)",
+            endingBefore: "private func isCurrentTunnelLifecycle"
+        )
+        let failBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func failTransientBootstrapDNSWait(",
+            endingBefore: "private func replayTransientBootstrapDNSRequests("
+        )
+        let replayBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func replayTransientBootstrapDNSRequests(",
+            endingBefore: "private func recordDiagnostic("
+        )
+        let finishBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func finishTransientBootstrapDNSWaitOnDNSQueue()",
+            endingBefore: "private func recordDiagnostic("
+        )
+        let writeServerFailureBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func writeServerFailures(",
+            endingBefore: "private func filterDecision(for domain:"
+        )
+
+        XCTAssertFalse(source.contains("{ [self] ->"))
+        XCTAssertTrue(loadSnapshotBlock.contains("drainTransientBootstrapDNSWait(reason: \"snapshot-loaded-\\(reason)\")"))
+        XCTAssertTrue(loadSnapshotBlock.contains("failTransientBootstrapDNSWait(reason: \"snapshot-unavailable-\\(reason)\")"))
+        XCTAssertTrue(invalidateLifecycleBlock.contains("cancelTransientBootstrapDNSWait(reason: \"lifecycle-invalidated-\\(reason)\")"))
+        XCTAssertTrue(drainBlock.contains("let drain = { [self] () ->"))
+        XCTAssertTrue(failBlock.contains("let fail = { [self] () ->"))
+        XCTAssertTrue(drainBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
+        XCTAssertTrue(drainBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
+        XCTAssertTrue(drainBlock.contains("transient-bootstrap-dns-wait-stale-lifecycle"))
+        XCTAssertTrue(drainBlock.contains("expectedLifecycleGeneration: result.replayGeneration"))
+        XCTAssertTrue(failBlock.contains("writeServerFailures(for: pendingResponses, reason: reason)"))
+        XCTAssertTrue(failBlock.contains("transientBootstrapDNSWaitExpiredGeneration = expectedGeneration ?? generation"))
+        XCTAssertTrue(replayBlock.contains("expectedLifecycleGeneration: UInt64?"))
+        XCTAssertTrue(replayBlock.contains("self.isCurrentTunnelLifecycle(expectedLifecycleGeneration)"))
+        XCTAssertTrue(replayBlock.contains("transient-bootstrap-dns-wait-stale-lifecycle"))
+        XCTAssertTrue(replayBlock.contains("allowsTransientBootstrapDeferral: false"))
+        XCTAssertTrue(replayBlock.contains("expectedLifecycleGeneration: expectedLifecycleGeneration"))
+        XCTAssertTrue(finishBlock.contains("transientBootstrapDNSWaitExpiredGeneration = nil"))
+        XCTAssertTrue(source.contains("let cancel = { [self] () ->"))
+        XCTAssertTrue(source.contains("event: \"transient-bootstrap-dns-wait-timeout\""))
+        XCTAssertTrue(source.contains("event: \"transient-bootstrap-dns-wait-overflow\""))
+
+        XCTAssertTrue(writeServerFailureBlock.contains("event: \"pending-dns-servfail\""))
+        XCTAssertFalse(writeServerFailureBlock.contains("event: \"resolver-runtime-pending-servfail\""))
+        XCTAssertTrue(writeServerFailureBlock.contains("\"reason\": reason"))
+        XCTAssertTrue(writeServerFailureBlock.contains("\"pendingResponses\": \"\\(pendingResponses.count)\""))
+    }
+
+    func testSnapshotArtifactMissDiagnosticsExplainFastResumeFailures() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let loadCompiledBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadCompiledSnapshot(",
+            endingBefore: "private func reusableCompactSnapshot("
+        )
+        let bootstrapBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func bootstrapResidentSnapshotFromDisk(",
+            endingBefore: "private func reusablePreparedSnapshot("
+        )
+
+        // Async load misses must carry route + controlled reason tokens. A raw expected identity
+        // does not survive bug-report redaction and does not explain why the artifact was missed.
+        XCTAssertTrue(loadCompiledBlock.contains("event: \"loadSnapshot-store-miss\""))
+        XCTAssertTrue(loadCompiledBlock.contains("\"route\": route"))
+        XCTAssertTrue(loadCompiledBlock.contains("resolved.directoryURL == rootStore.directoryURL ? \"root\" : \"resolved\""))
+        XCTAssertTrue(loadCompiledBlock.contains("\"compactReason\": compactResult.missReason ?? \"unknown\""))
+        XCTAssertTrue(loadCompiledBlock.contains("\"preparedReason\": preparedResult.missReason ?? \"unknown\""))
+        XCTAssertTrue(loadCompiledBlock.contains("\"generation\": \"\\(generation)\""))
+        XCTAssertFalse(loadCompiledBlock.contains("\"expected\": expectedIdentity.fingerprint"))
+
+        // Synchronous bootstrap misses must explain whether the startup gap was caused by no
+        // readable artifact, legacy/over-cap pre-gating, or a strict reuse miss.
+        XCTAssertTrue(bootstrapBlock.contains("event: \"bootstrap-store-miss\""))
+        XCTAssertTrue(bootstrapBlock.contains("event: \"bootstrap-fast-resume-miss\""))
+        XCTAssertTrue(bootstrapBlock.contains("\"route\": route"))
+        XCTAssertTrue(bootstrapBlock.contains("resolved.directoryURL == rootStore.directoryURL ? \"root\" : \"resolved\""))
+        XCTAssertTrue(bootstrapBlock.contains("\"storeCount\": \"\\(artifactStores.count)\""))
+        XCTAssertTrue(bootstrapBlock.contains("\"eligibleStoreCount\": \"\\(eligibleStores.count)\""))
+        XCTAssertTrue(bootstrapBlock.contains("\"ruleCount\": \"\\(info.totalRuleCount)\""))
+        XCTAssertTrue(bootstrapBlock.contains("\"syncCap\": \"\\(cap)\""))
+        XCTAssertTrue(bootstrapBlock.contains("event: \"bootstrap-skip-legacy-artifact\", details: [\n                    \"route\": route,"))
+        XCTAssertTrue(bootstrapBlock.contains("event: \"bootstrap-over-sync-cap\", details: [\n                    \"route\": route,"))
+        XCTAssertTrue(bootstrapBlock.contains("event: \"bootstrap-compact-resume\", details: [\n                    \"route\": route,"))
+    }
+
     func testConfigurationRefreshMarkersAreQueueConfinedNotWrittenOffQueue() throws {
         let source = try readSource(.packetTunnelProvider)
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState()",
+            startingAt: "private func loadInitialSharedState() -> Bool",
             endingBefore: "private func refreshConfigurationIfNeeded"
         )
         let loadSnapshotBlock = try sourceBlock(
@@ -2355,7 +2518,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(resetBlock.contains("resolverRuntimeGeneration += 1"))
         XCTAssertTrue(resetBlock.contains("inFlightQueryCoalescer.drainAll()"))
         XCTAssertTrue(resetBlock.contains("dnsResponseCache.removeAll()"))
-        XCTAssertTrue(resetBlock.contains("writeServerFailures(for: pendingResponses)"))
+        XCTAssertTrue(resetBlock.contains("writeServerFailures(for: pendingResponses, reason: reason)"))
     }
 
     func testReloadSnapshotRequestsAreCoalescedAndEpochGuarded() throws {
