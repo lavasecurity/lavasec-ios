@@ -449,6 +449,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // attempts, device fallback, bootstrap) for a tunnel session. Only read
     // inside DEBUG/QA latency emission; harmless and unused in Release.
     private let resolverLatencyOperationID = LatencyOperationID.make()
+    // Memo of `DomainName.normalize` for resolver endpoint hostnames. normalize is pure and
+    // deterministic (same input → same output), and the set of resolver hostnames is tiny and
+    // stable for a resolver runtime. The memo is still runtime-scoped and capped so a future
+    // dynamic caller cannot retain unbounded hostnames in a long-running extension process.
+    // The bootstrap checks run first on EVERY DNS packet — including cache hits — and previously
+    // re-normalized each candidate endpoint host per query (≈2–5 normalize calls/packet, each
+    // doing IDNA/split/map allocations). This collapses the steady state to a dict lookup.
+    // Thread-safe: read primarily from the serial packet callback queue, the lock is defensive
+    // against any off-queue caller.
+    private static let endpointHostnameNormalizationCacheLimit = 32
+    private let endpointHostnameNormalizationCacheLock = NSLock()
+    private var endpointHostnameNormalizationCache: [String: String] = [:]
     private var activeResolverRuntimeIdentifier: String?
     // The PRIMARY-resolver identity of the active runtime (no fallback/encrypted-fallback/mode
     // components). The DNS-health-context boundary (smokeProbeContextBaseline) and the rejected
@@ -2283,6 +2295,39 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         DNSResolverRuntimePlan.orderedResolverAddresses(addresses, networkKind: currentNetworkKind())
     }
 
+    /// `DomainName.normalize` memoized for a resolver endpoint hostname — the bootstrap checks
+    /// call this per candidate endpoint on every DNS packet, and the hostnames are stable for the
+    /// resolver runtime. Returns exactly what `try? DomainName.normalize(hostname)` would (the
+    /// cached success, or nil for a hostname that fails to normalize). Resolver hostnames that
+    /// fail normalization are not cached (recomputed on each call, matching the prior `try?`
+    /// behaviour) — in practice resolver hostnames are always valid, so this path is not hit.
+    private func normalizedEndpointHostname(_ hostname: String) -> String? {
+        endpointHostnameNormalizationCacheLock.lock()
+        if let cached = endpointHostnameNormalizationCache[hostname] {
+            endpointHostnameNormalizationCacheLock.unlock()
+            return cached
+        }
+        endpointHostnameNormalizationCacheLock.unlock()
+
+        guard let normalized = try? DomainName.normalize(hostname) else {
+            return nil
+        }
+
+        endpointHostnameNormalizationCacheLock.lock()
+        if endpointHostnameNormalizationCache.count >= Self.endpointHostnameNormalizationCacheLimit {
+            endpointHostnameNormalizationCache.removeAll(keepingCapacity: true)
+        }
+        endpointHostnameNormalizationCache[hostname] = normalized
+        endpointHostnameNormalizationCacheLock.unlock()
+        return normalized
+    }
+
+    private func clearEndpointHostnameNormalizationCache() {
+        endpointHostnameNormalizationCacheLock.lock()
+        endpointHostnameNormalizationCache.removeAll(keepingCapacity: true)
+        endpointHostnameNormalizationCacheLock.unlock()
+    }
+
     private func dohBootstrapResponse(
         for question: DNSQuestion,
         query: Data,
@@ -2310,7 +2355,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         guard !candidateEndpoints.isEmpty,
               let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let endpointHost = endpoint.url.host,
-                        let normalizedEndpointHost = try? DomainName.normalize(endpointHost)
+                        let normalizedEndpointHost = normalizedEndpointHostname(endpointHost)
                   else {
                       return false
                   }
@@ -2356,7 +2401,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let normalizedQuestionDomain = question.normalizedDomain
         guard !candidateEndpoints.isEmpty,
               let endpoint = candidateEndpoints.first(where: { endpoint in
-                  guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
+                  guard let normalizedEndpointHost = normalizedEndpointHostname(endpoint.hostname) else {
                       return false
                   }
 
@@ -2395,7 +2440,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let normalizedQuestionDomain = question.normalizedDomain
         guard !candidateEndpoints.isEmpty,
               let endpoint = candidateEndpoints.first(where: { endpoint in
-                  guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
+                  guard let normalizedEndpointHost = normalizedEndpointHostname(endpoint.hostname) else {
                       return false
                   }
 
@@ -4302,7 +4347,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     // well-formed NODATA/NXDOMAIN neither stamps nor revokes.
                     if DNSResolverSmokeProbe.indicatesAcceptedAnswer(result.response) {
                         lastAcceptedPrimaryEvidenceAt = now
-                    } else if !DNSResolverSmokeProbe.indicatesServedAnswer(result.response) {
+                    } else if !primaryServedLegitimateAnswer {
+                        // `primaryServedLegitimateAnswer` (bound above) is
+                        // `indicatesServedAnswer(result.response)` — reuse it instead of
+                        // recomputing the same full-RR walk on the same immutable response.
                         lastAcceptedPrimaryEvidenceAt = nil
                     }
                     // A genuine primary answer also proves the primary's health, so it
@@ -6669,6 +6717,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         resolverRuntimeGeneration += 1
         let pendingResponses = inFlightQueryCoalescer.drainAll()
         dnsResponseCache.removeAll()
+        clearEndpointHostnameNormalizationCache()
         // NRG-3a: probe-equivalent evidence never survives a runtime reset — the new
         // runtime (wake, config change, identity change, fallback flip) re-proves with
         // a real probe, exactly like the pre-skip behavior.
@@ -6703,6 +6752,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             activeResolverRuntimeIdentifier = nil
             resolverRuntimeGeneration += 1
             dnsResponseCache.removeAll()
+            clearEndpointHostnameNormalizationCache()
             _ = inFlightQueryCoalescer.drainAll()
             resolverBackoffStateQueue.sync {
                 resolverBackoffPolicy.reset()
@@ -6763,6 +6813,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         resolverRuntimeGeneration += 1
         let pendingResponses = inFlightQueryCoalescer.drainAll()
         dnsResponseCache.removeAll()
+        clearEndpointHostnameNormalizationCache()
         // NRG-3a: probe-equivalent evidence never survives a runtime reset — the new
         // runtime (wake, config change, identity change, fallback flip) re-proves with
         // a real probe, exactly like the pre-skip behavior.
