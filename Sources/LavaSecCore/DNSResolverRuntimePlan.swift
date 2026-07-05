@@ -112,6 +112,35 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         self.treatsResolverRejectionAsFallbackTrigger = treatsResolverRejectionAsFallbackTrigger
     }
 
+    /// A copy of this plan with `treatsResolverRejectionAsFallbackTrigger` recomputed from a
+    /// freshly-read wedge state, leaving every other field — including `cacheIdentifier` — unchanged.
+    ///
+    /// The trigger derives from the device-resolver wedge marker, which is deliberately NOT folded
+    /// into `cacheIdentifier` and does not advance the resolver-runtime generation. On the DNS hot
+    /// path the plan is captured once (when the packet is classified) and reused when the query
+    /// actually resolves; if the wedge marker flips in between, the captured trigger is stale.
+    /// Recomputing just this bit from a fresh read lets a query straddling a Device-DNS wedge
+    /// transition be carried by the encrypted fallback rather than returning the wedged resolver's
+    /// SERVFAIL/REFUSED authoritatively — without re-deriving (and re-reading the state behind) the
+    /// whole plan. `shouldFallbackToEncrypted` is unchanged, so a plan with no encrypted fallback
+    /// keeps a `false` trigger regardless of `deviceResolverWedged`.
+    public func recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: Bool) -> DNSResolverRuntimePlan {
+        DNSResolverRuntimePlan(
+            transport: transport,
+            plainAddresses: plainAddresses,
+            dohEndpoints: dohEndpoints,
+            dotEndpoints: dotEndpoints,
+            doqEndpoints: doqEndpoints,
+            cacheIdentifier: cacheIdentifier,
+            deviceDNSFallbackAddresses: deviceDNSFallbackAddresses,
+            shouldFallbackToDeviceDNS: shouldFallbackToDeviceDNS,
+            usesDeviceDNSFallbackMode: usesDeviceDNSFallbackMode,
+            shouldFallbackToEncrypted: shouldFallbackToEncrypted,
+            encryptedFallback: encryptedFallback,
+            treatsResolverRejectionAsFallbackTrigger: shouldFallbackToEncrypted && deviceResolverWedged
+        )
+    }
+
     public static func make(
         configuration: AppConfiguration,
         deviceDNSAddresses: [String],

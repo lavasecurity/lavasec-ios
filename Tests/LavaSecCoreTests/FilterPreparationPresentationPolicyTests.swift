@@ -46,27 +46,33 @@ final class FilterPreparationPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(holdDuration, 0, accuracy: 0.001)
     }
 
-    func testEqualThirdsProgressGivesEachPhaseAnEqualSegment() {
+    func testEqualStepsProgressGivesEachStepAnEqualQuarter() {
         typealias Policy = FilterPreparationPresentationPolicy
 
-        // Each phase begins at its third boundary...
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .downloading, rawProgress: 0.0), 0.0, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .compiling, rawProgress: 0.42), 1.0 / 3, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .saving, rawProgress: 0.86), 2.0 / 3, accuracy: 0.001)
+        // Four equal steps: the three phases plus the terminal Success step.
+        XCTAssertEqual(Policy.stepCount, 4.0, accuracy: 0.001)
+
+        // Each phase begins at its quarter boundary...
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.0), 0.0, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.42), 1.0 / 4, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .saving, rawProgress: 0.86), 2.0 / 4, accuracy: 0.001)
 
         // ...and fills to the next boundary at the top of its raw range.
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .downloading, rawProgress: 0.42), 1.0 / 3, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .compiling, rawProgress: 0.86), 2.0 / 3, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .saving, rawProgress: 1.0), 1.0, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.42), 1.0 / 4, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.86), 2.0 / 4, accuracy: 0.001)
 
-        // A mid-phase checkpoint stays inside that phase's own third.
-        let downloadMid = Policy.equalThirdsProgress(phase: .downloading, rawProgress: 0.2)
+        // Saving now tops out at 3/4 — the terminal Success step (set by the caller as progress 1)
+        // owns the final quarter 3/4 → 1, so the Success fill is a clean quarter, not a jump.
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .saving, rawProgress: 1.0), 3.0 / 4, accuracy: 0.001)
+
+        // A mid-phase checkpoint stays inside that phase's own quarter.
+        let downloadMid = Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.2)
         XCTAssertGreaterThan(downloadMid, 0)
-        XCTAssertLessThan(downloadMid, 1.0 / 3)
+        XCTAssertLessThan(downloadMid, 1.0 / 4)
 
         // Out-of-range raw values clamp into the phase band.
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .compiling, rawProgress: 0.0), 1.0 / 3, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalThirdsProgress(phase: .saving, rawProgress: 2.0), 1.0, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.0), 1.0 / 4, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .saving, rawProgress: 2.0), 3.0 / 4, accuracy: 0.001)
     }
 
     func testSamePhaseAndInitialPhaseDoNotHold() {

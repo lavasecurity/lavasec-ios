@@ -727,7 +727,7 @@ private final class FilterPreparationProgressPresenter {
         }
 
         setState(.preparing(
-            progress: FilterPreparationPresentationPolicy.equalThirdsProgress(phase: update.phase, rawProgress: update.progress),
+            progress: FilterPreparationPresentationPolicy.equalStepsProgress(phase: update.phase, rawProgress: update.progress),
             message: FilterPreparationPresentation.message(for: update.phase)
         ))
     }
@@ -3395,10 +3395,48 @@ final class AppViewModel: ObservableObject {
             catalogStatusMessage = (protectedRuleCount == 1 ? "Prepared %@ rule for local protection." : "Prepared %@ rules for local protection.").lavaLocalizedFormat(protectedRuleCount.formatted())
             catalogStatusIsError = false
             self.activeFilterDraft = nil
+            // notifyTunnelSnapshotUpdated / restoreProtectionIfNeeded above are suspensions since the
+            // last ownership check, so recheck BEFORE writing the saving-top frame to the shared cover:
+            // a superseded task must not paint a stale 3/4 "Saving" frame over the newer owner's cover
+            // (nor keep a stale cover up through the following 500ms render yield). (Codex #284 P2)
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
+            // Saving is done (persist + tunnel reload committed above): land the bar on the top of the
+            // saving quarter (3/4) so the terminal Success step is a clean final quarter rather than a
+            // jump. Success then sweeps the bar 3/4 → full before the checkmark takes over.
+            await progressPresenter.present(
+                FilterPreparationProgressUpdate(progress: 1.0, phase: .saving)
+            ) { state in
+                self.filterPreparationState = state
+            }
+            // Yield so SwiftUI actually RENDERS (and eases to) the 3/4 saving-top frame. The
+            // same-phase present() above returns without suspending, so without this sleep the
+            // Success write below lands in the same main-actor turn and SwiftUI coalesces the 3/4
+            // state away — the bar would sit at the previous saving value and sweep straight to 100%
+            // instead of the intended 3/4 → full final quarter. (Codex #284 P3)
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            // The render yield is another suspension since the recheck above, so recheck again before
+            // the Success confirmation — otherwise a stale task would write Success, fire the haptic,
+            // and later dismiss the shared cover, clobbering the newer preparation's UI. (Codex #284 P2)
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
             filterPreparationState = .preparing(progress: 1, message: "Success")
             ProtectionHapticFeedback.play(.actionSucceeded)
 
-            try? await Task.sleep(nanoseconds: 650_000_000)
+            // Hold long enough for the bar to sweep to a full 100% (~0.55s) and then show the
+            // checkmark for a beat. The cover view fills the bar, then cross-fades to the glyph.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            // The success hold is another suspension (one this change lengthened to 1.2s): if a newer
+            // switch/apply superseded us during it, do NOT clear the state — that would dismiss the
+            // newer preparation's cover. Bail via the shared helper instead. (Codex #284 P2)
+            guard configurationReplacementGate.isCurrent(draftToken) else {
+                dismissPreparationCoverIfStrandedBySupersession()
+                return
+            }
             filterPreparationState = .idle
             isFilterPreparationScreenPresented = false
         } catch {
@@ -3947,10 +3985,43 @@ final class AppViewModel: ObservableObject {
             // adopts the switch invisibly, mirroring applyCommittedOnDiskActiveFilter. Only a genuine
             // user switch flashes the success confirmation.
             if presentsPreparationCover {
+                // notify/restore above are suspensions since the last ownership check: recheck BEFORE
+                // writing the saving-top frame so a superseded switch/apply can't paint a stale 3/4
+                // frame over (or hold up) the newer preparation's cover. (Codex #284 P2)
+                guard configurationReplacementGate.isCurrent(switchToken) else {
+                    dismissPreparationCoverIfStrandedBySupersession()
+                    return
+                }
+                // Saving is done: land the bar on the top of the saving quarter (3/4) so the terminal
+                // Success step is a clean final quarter rather than a jump, then sweep to full.
+                await progressPresenter.present(
+                    FilterPreparationProgressUpdate(progress: 1.0, phase: .saving)
+                ) { state in
+                    self.filterPreparationState = state
+                }
+                // Yield so the 3/4 saving-top frame actually renders + eases before Success —
+                // otherwise SwiftUI coalesces it away in the same main-actor turn and the bar sweeps
+                // straight to 100% (see the matching note in prepareAndApplyFilterDraft). (Codex #284 P3)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                // Recheck ownership after the render yield: a newer switch/apply may have superseded us
+                // during it, and a stale task must not write Success / fire the haptic / dismiss the
+                // shared cover over the newer preparation's UI. (Codex #284 P2)
+                guard configurationReplacementGate.isCurrent(switchToken) else {
+                    dismissPreparationCoverIfStrandedBySupersession()
+                    return
+                }
                 filterPreparationState = .preparing(progress: 1, message: "Success")
                 ProtectionHapticFeedback.play(.actionSucceeded)
 
-                try? await Task.sleep(nanoseconds: 650_000_000)
+                // Hold long enough for the bar to sweep to a full 100% (~0.55s) and then show the
+                // checkmark for a beat (the cover fills the bar, then cross-fades to the glyph).
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                // Same as the draft path: recheck ownership after the lengthened success hold so a
+                // stale task never dismisses a newer preparation's cover. (Codex #284 P2)
+                guard configurationReplacementGate.isCurrent(switchToken) else {
+                    dismissPreparationCoverIfStrandedBySupersession()
+                    return
+                }
                 filterPreparationState = .idle
                 isFilterPreparationScreenPresented = false
             }

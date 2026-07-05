@@ -428,12 +428,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
     }
     private let doqResolver = DoQTransport(timeoutSeconds: PacketTunnelProvider.doqTimeoutSeconds) { event, details in
-        #if !(DEBUG || LAVA_QA_TOOLS)
-        // DoQ opens a fresh QUIC connection per query (no pooling yet), so its
-        // per-query "connection-ready" handshake event would put appendLine back on
-        // the Release DNS success hot path. Drop just that event in Release; the
-        // rare connection-error events (failures — the useful handoff signal) still
-        // log. DoH/DoT pool connections, so their connection-ready stays on.
+        #if DEBUG || LAVA_QA_TOOLS
+        if event == "dns-doq-connection-ready" {
+            // NRG DoQ lever: count the fresh QUIC handshake + its duration atomically
+            EnergyCounters.shared.recordDoQHandshake(milliseconds: details["handshakeMs"].flatMap(Int.init))
+            EnergySignpost.event("doq-handshake")       // NRG Phase 2: mark the handshake for Instruments
+        }
+        #endif
+        #if !DEBUG
+        // Drop the per-query DoQ "connection-ready" log OUTSIDE local DEBUG builds: in Release to
+        // keep appendLine off the DNS success hot path, and in the LAVA_QA_TOOLS energy build so
+        // the measured append rate + battery MATCH Release (the counter/signpost above already
+        // captured the handshake). The rare connection-error events (the useful handoff signal)
+        // still log; DoH/DoT pool connections, so their connection-ready stays on.
         if event == "dns-doq-connection-ready" { return }
         #endif
         LavaSecDeviceDebugLog.append(component: "tunnel", event: event, details: details)
@@ -651,6 +658,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // first touch.
             _ = self.resolverOrchestrator
             self.prewarmResolverBootstrapIfNeeded()
+            #if DEBUG || LAVA_QA_TOOLS
+            EnergyCounters.shared.activate()   // NRG: activate (synchronously) BEFORE the first "startTunnel" probe so its wire bump counts
+            #endif
             self.scheduleResolverSmokeProbeIfNeeded(reason: "startTunnel")
             self.startPeriodicResolverSmokeProbe()
             self.startFocusConfigurationPoll()
@@ -1193,6 +1203,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             forward(
                 request,
                 protocolNumber: protocolNumber,
+                resolverConfiguration: resolverConfiguration,
                 maximumAnswerTTL: maximumAnswerTTL,
                 temporaryPauseNormalizedDomain: question.normalizedDomain
             )
@@ -1205,7 +1216,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             )
             recordFirstDNSDecisionIfNeeded(filterDecision.action == .block ? "block" : "allow")
             guard filterDecision.action == .block else {
-                forward(request, protocolNumber: protocolNumber)
+                forward(request, protocolNumber: protocolNumber, resolverConfiguration: resolverConfiguration)
                 return
             }
 
@@ -1221,14 +1232,52 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // `resolverConfiguration` is taken from the caller (`handle`) rather than
+    // recomputed here: `currentResolverRuntimeConfiguration()` performs several
+    // blocking `dnsStateQueue.sync` reads, and `handle` already computed the SAME
+    // value to drive the bootstrap/pause/filter decision. Reusing it keeps the
+    // decision and the forward on one consistent runtime and removes a second
+    // batch of queue hops from the per-query hot path. Staleness is still guarded
+    // by `resetResolverRuntimeStateIfNeeded` below and the `isActiveResolverRuntime`
+    // generation check before any response is written.
+    //
+    // Adoption timing: a resolver-config change (A→B) that commits AFTER `handle`
+    // captured A at its entry — via the queued `refreshConfigurationIfNeeded` in
+    // `recordDiagnostic`, or a concurrent snapshot reload — is adopted by the NEXT
+    // query, not this one. This in-flight query is served under A, the runtime it
+    // was classified on (previously `forward` re-read the config here and could
+    // adopt B one query sooner). The lag is one query and self-correcting: the next
+    // `handle` reads `appConfiguration == B` and its `forward` resets the runtime to
+    // B. Because the reset is keyed on the captured identifier (not a live re-read),
+    // `setAppConfiguration` alone never advances `activeResolverRuntimeIdentifier`,
+    // so reset(A) hits the identity guard and no-ops rather than flipping a runtime
+    // that is still A. The authoritative apply path
+    // (`refreshDNSRuntimeAfterSnapshotOrConfigurationChange`, invoked from a snapshot
+    // reload) is unaffected — it resets the runtime to the new identifier directly.
     private func forward(
         _ request: IPv4UDPDNSPacket,
         protocolNumber: NSNumber,
+        resolverConfiguration: ResolverRuntimeConfiguration,
         maximumAnswerTTL: UInt32? = nil,
         temporaryPauseNormalizedDomain: String? = nil
     ) {
-        let resolverConfiguration = currentResolverRuntimeConfiguration()
         resetResolverRuntimeStateIfNeeded(identifier: resolverConfiguration.cacheIdentifier)
+        // The encrypted-fallback rejection trigger (`treatsResolverRejectionAsFallbackTrigger`)
+        // derives from `currentDeviceResolverWedged()`, which is deliberately NOT part of
+        // `cacheIdentifier` and does not advance the resolver-runtime generation — so a wedge flip
+        // between `handle`'s capture of this plan and the resolution below is invisible to BOTH the
+        // reset guard above and the `isActiveResolverRuntime` generation check. Re-read just that
+        // volatile bit and recompute the trigger onto the captured plan, so a query straddling a
+        // Device-DNS wedge onset is carried by the encrypted fallback instead of returning the
+        // wedged resolver's SERVFAIL/REFUSED authoritatively (the exact transition the fallback
+        // exists to cover). Gated on `shouldFallbackToEncrypted` — a captured field, no queue hop —
+        // so encrypted-primary resolvers (no encrypted fallback) skip the read and keep the full
+        // per-query savings; everything folded into `cacheIdentifier` is still reused from capture.
+        let resolverConfiguration = resolverConfiguration.shouldFallbackToEncrypted
+            ? resolverConfiguration.recomputingResolverRejectionFallbackTrigger(
+                deviceResolverWedged: currentDeviceResolverWedged()
+            )
+            : resolverConfiguration
         let resolverGeneration = currentResolverRuntimeGeneration()
         let dnsPayload = request.dnsPayload
         let protocolValue = protocolNumber.intValue
@@ -1302,6 +1351,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             let now = Date()
             if let cachedResponse = self.dnsResponseCache.cachedResponse(for: cacheKey, query: dnsPayload, now: now) {
                 self.recordCacheHit()
+                // Keep cache hits on the same write-path normalizer as upstream responses:
+                // it applies the optional pause TTL cap and fails closed if a malformed cached
+                // packet ever slips past the store-time validation.
                 guard let responseToWrite = self.responseByApplyingMaximumAnswerTTL(
                     cachedResponse,
                     maximumAnswerTTL: maximumAnswerTTL
@@ -2249,8 +2301,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             candidateEndpoints = resolverConfiguration.dohEndpoints + candidateEndpoints
         }
 
+        // `question.normalizedDomain` is `DomainName.normalize(question.domain)`, already
+        // computed once in `DNSMessage.parseQuestion`. Reuse it instead of re-normalizing
+        // on every query: the bootstrap closure runs first on every DNS packet, and for a
+        // non-resolver hostname (the common case) all three transports' checks run, so this
+        // previously re-normalized the question domain up to 3× per query.
+        let normalizedQuestionDomain = question.normalizedDomain
         guard !candidateEndpoints.isEmpty,
-              let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
               let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let endpointHost = endpoint.url.host,
                         let normalizedEndpointHost = try? DomainName.normalize(endpointHost)
@@ -2295,8 +2352,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             candidateEndpoints = resolverConfiguration.doqEndpoints + candidateEndpoints
         }
 
+        // Reuse question.normalizedDomain instead of re-normalizing per query (see dohBootstrapResponse).
+        let normalizedQuestionDomain = question.normalizedDomain
         guard !candidateEndpoints.isEmpty,
-              let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
               let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
                       return false
@@ -2333,8 +2391,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             candidateEndpoints = resolverConfiguration.dotEndpoints + candidateEndpoints
         }
 
+        // Reuse question.normalizedDomain instead of re-normalizing per query (see dohBootstrapResponse).
+        let normalizedQuestionDomain = question.normalizedDomain
         guard !candidateEndpoints.isEmpty,
-              let normalizedQuestionDomain = try? DomainName.normalize(question.domain),
               let endpoint = candidateEndpoints.first(where: { endpoint in
                   guard let normalizedEndpointHost = try? DomainName.normalize(endpoint.hostname) else {
                       return false
@@ -2355,6 +2414,37 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)
     }
 
+    /// DESIGN / ENERGY TRADE-OFF (NRG — deferred, no behavior change here):
+    /// This repeating timer is the ONE periodic that issues a real upstream DNS wire
+    /// query on its cadence, so it is the most expensive steady-state probe: every
+    /// 300 s it can wake the radio. It CANNOT be made purely event-driven: its entire
+    /// purpose is to catch a resolver that went SILENTLY dead while there is no
+    /// organic traffic to prove otherwise — an idle tunnel has no other signal. The
+    /// cadence (300 s) is deliberately the "honesty budget" and stays fixed; lowering
+    /// it widens blind-spot windows and raising it costs more energy for no gain.
+    ///
+    /// The energy cost is already mitigated by NRG-3a: `scheduleResolverSmokeProbe-
+    /// IfNeeded` SKIPS the wire query when acceptance-checked primary evidence
+    /// (a probe success or an organic primary answer passing the SAME acceptance
+    /// check) is younger than one interval — so under live browsing the timer still
+    /// fires (a CPU wake) but the radio wake is suppressed. The residual cost is one
+    /// CPU wake + skip-predicate evaluation per 300 s on an idle-but-healthy tunnel;
+    /// the 30 s leeway lets the kernel coalesce it. A future change must keep the
+    /// cadence as the honesty budget and must NOT let skip evidence come from a
+    /// merely-resolved reply (a hijacking resolver's REFUSED/SERVFAIL stamps those —
+    /// the LAV-87 suppression regression), nor survive a resolver-runtime reset.
+    ///
+    /// (Honesty note, review 2026-07-05: two directions on the residual. SMALLER —
+    /// the 30 s leeway already coalesces much of the idle radio wake into other
+    /// activity, so the true marginal cost is below the naive one-wake-per-300 s.
+    /// LARGER — a periodic-probe SUCCESS deliberately does NOT refresh the
+    /// accepted-primary evidence stamp (only organic traffic does), so a
+    /// steadily-idle-but-healthy tunnel keeps probing at full cadence and each probe
+    /// pays a COLD handshake, not a warm round-trip; an always-cellular-all-day-idle
+    /// phone is the only cohort where this is non-trivial. The one tweak that trims
+    /// idle radio energy WITHOUT widening the dead-resolver window is widening this
+    /// timer's leeway — measure the coalesced idle cost on-device before changing
+    /// even that. NRG-3a already captured the main (live-traffic) win.)
     private func startPeriodicResolverSmokeProbe() {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -2401,6 +2491,35 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// configuration generation each tick and reloads through the EXISTING `requestSnapshotReload` entry
     /// when it advances past the generation the tunnel last loaded. Reliable where a Darwin observer is not
     /// (the tunnel run loop does not service Darwin notifications when idle). Does NOT touch DNS recovery.
+    ///
+    /// DESIGN / ENERGY TRADE-OFF (NRG — deferred, no behavior change here):
+    /// This is a constant ~60 s heartbeat for the whole life of the tunnel — a CPU
+    /// wake + on-disk generation read every tick even when nothing changed (no radio
+    /// wake unless the generation advanced and a reload runs). Polling is used over
+    /// an event-driven signal for a concrete reliability reason, not by default: a
+    /// Darwin-notification observer was proven UNRELIABLE in this NE extension
+    /// (0 callbacks / 14 device probes), and a `DispatchSource` vnode/.write monitor
+    /// on the generation file carries the same run-loop-when-idle risk that sank the
+    /// Darwin observer. So the poll is the hard invariant; the 10 s leeway lets the
+    /// kernel coalesce the wake with other system activity, and the reload itself is
+    /// skipped (not re-requested) when the generation has not advanced or a reload is
+    /// already in flight. A future event-driven replacement must FIRST be proven to
+    /// fire reliably in the idle NE process at volume (re-running the device-probe
+    /// harness) before this timer can be retired — otherwise a closed-app Focus switch
+    /// silently stops being adopted.
+    ///
+    /// (Precision + scope, review 2026-07-05: a `DispatchSource` vnode source is
+    /// kqueue-based, so it is not literally the Darwin "run loop not serviced when
+    /// idle" failure — the stronger reason it is unattractive is that the config file
+    /// is written atomically (temp+rename), so the watched inode is unlinked on every
+    /// write and the source can MISS the replace. It also could not retire this timer
+    /// anyway: the tick does DOUBLE DUTY — `reloadSnapshotIfConfigurationGeneration-
+    /// Advanced` runs the PST-7 diagnostics-control pickup every tick — so the poll
+    /// earns its keep independent of Focus. This is the SMALLEST of the four NRG
+    /// levers: a leeway-coalesced pure-CPU wake per 60 s, off the DNS hot path, zero
+    /// steady-state radio; the energy prize is unmeasurable and lengthening the
+    /// interval regresses the ~60 s Focus-adoption promise and delays the PST-7
+    /// pickup. Keep as-is.)
     private func startFocusConfigurationPoll() {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -2494,6 +2613,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // dnsStateQueue (where the store is confined and the snapshot-loaded apply already
         // runs) — no new timer, no cadence change, and BEFORE the config-generation guards
         // so it fires every tick regardless of whether a Focus switch needs adopting.
+        #if DEBUG || LAVA_QA_TOOLS
+        EnergyCounters.shared.bump(.focusPollTick)   // NRG focus-poll lever: count the 60 s wakes
+        EnergySignpost.event("focus-poll-tick")      // NRG Phase 2: mark the poll wake for Instruments
+        EnergyCounters.shared.flushIfDue()           // NRG: flush the per-window counter summary (piggybacks this tick)
+        #endif
         applyDiagnosticsControlIfNeeded(force: false)
         if diagnosticsPersistence.isDirty {
             persistDiagnosticsIfNeeded(force: true)
@@ -2992,6 +3116,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     "reason": reason,
                     "evidenceAgeMs": "\(Int(evidenceAge * 1_000))"
                 ])
+                #if DEBUG || LAVA_QA_TOOLS
+                EnergyCounters.shared.bump(.smokeProbeSkip)   // NRG smoke-probe lever: NRG-3a suppressed the wire query
+                #endif
                 return
             }
         }
@@ -3003,6 +3130,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let canUseDeviceDNSFallback = currentAppConfiguration().fallbackToDeviceDNS
             && resolverConfiguration.transport != .deviceDNS
             && !resolverConfiguration.deviceDNSFallbackAddresses.isEmpty
+        #if DEBUG || LAVA_QA_TOOLS
+        EnergyCounters.shared.bump(.smokeProbeWire)   // NRG smoke-probe lever: this probe hits the wire (radio wake)
+        EnergySignpost.event("smoke-probe-wire")      // NRG Phase 2: mark the radio wake for Instruments
+        #endif
         resolverSmokeProbeGeneration += 1
         let generation = resolverSmokeProbeGeneration
         // Rotate the canary domain per probe so a single blocked/hijacked domain
@@ -4021,17 +4152,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func recordCacheHit() {
         health.cacheHitCount += 1
-        markHealthUpdated()
+        markHealthCountersUpdated()
     }
 
     private func recordCacheMiss() {
         health.cacheMissCount += 1
-        markHealthUpdated()
+        markHealthCountersUpdated()
     }
 
     private func recordCoalescedQuery() {
         health.coalescedQueryCount += 1
-        markHealthUpdated()
+        markHealthCountersUpdated()
     }
 
     private func recordUpstreamResult(_ result: DNSResolutionResult) {
@@ -4386,6 +4517,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         health.updatedAt = Date()
         health.networkKind = currentNetworkKind()
         signalAppIfConnectivityStateChanged()
+        healthPersistence.markDirty()
+    }
+
+    /// The per-query counter bumps (`recordCacheHit` / `recordCacheMiss` /
+    /// `recordCoalescedQuery`) update only stats fields the connectivity
+    /// assessment never reads (`cacheHitCount` / `cacheMissCount` /
+    /// `coalescedQueryCount`), so they must NOT re-run the full
+    /// `ProtectionConnectivityPolicy` cascade. Doing so on every served query
+    /// was pure steady-state CPU work that always produced the same severity
+    /// (the Darwin nudge is deduped by key anyway, so the post was already a
+    /// no-op there). Connectivity-relevant mutations keep going through
+    /// `markHealthUpdated`, which still reassesses and signals. dnsStateQueue-confined.
+    private func markHealthCountersUpdated() {
+        health.updatedAt = Date()
+        health.networkKind = currentNetworkKind()
         healthPersistence.markDirty()
     }
 
@@ -6580,6 +6726,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         force: Bool = false
     ) -> [PendingDNSResponse] {
         guard force || activeResolverRuntimeIdentifier != identifier else {
+            return []
+        }
+
+        // Don't let a stale per-query identifier clobber a newer runtime. The non-forced
+        // (per-query, lazy) reset carries the resolver identifier `handle` captured when it
+        // classified the packet, then reused by `forward`. If a concurrent authoritative reload
+        // (snapshot/config change, fallback flip, network-path change) has since advanced BOTH
+        // `appConfiguration` and the active runtime to a different resolver, honoring the captured
+        // identifier here would flip the active runtime BACK to the resolver the config has already
+        // moved away from — draining the new runtime's in-flight queries and clearing its cache,
+        // only for the next query to flip it forward again. Every forced reset and the authoritative
+        // apply path (`refreshDNSRuntimeAfterSnapshotOrConfigurationChange`) pass the CURRENT
+        // identifier, so this drops ONLY the stale lazy case: leave the current runtime in place —
+        // the racing query then fails its `isActiveResolverRuntime` gate and is retried under the
+        // current resolver. dnsStateQueue-confined; the plan rebuild runs only on this rare
+        // active-differs path, never the steady-state no-op returned above.
+        if !force, identifier != currentResolverRuntimeConfiguration().cacheIdentifier {
             return []
         }
 

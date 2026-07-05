@@ -178,9 +178,18 @@ struct FilterReviewChangeRow: View {
 
 struct FilterPreparationScreen: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // Gate the bar's eased fill + the checkmark reveal on Reduce Motion, matching the sibling
+    // PreparationTickerTitle and the app-wide LavaFlowTransition.incidental convention: under Reduce
+    // Motion the quarters land instantly (no sliding sweep, no dead-hold) — the fade to the checkmark
+    // stays, since a fade carries no motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let origin: FilterReviewOrigin
     let returnToReview: (() -> Void)?
+
+    // Success is the bar's 4th quarter (3/4 → full). We let the bar sweep to a full 100% first, then
+    // reveal the checkmark — so Success reads as the bar completing, not the bar vanishing at 75%.
+    @State private var successGlyphShown = false
 
     init(origin: FilterReviewOrigin, returnToReview: (() -> Void)? = nil) {
         self.origin = origin
@@ -201,19 +210,23 @@ struct FilterPreparationScreen: View {
                     PreparationTickerTitle(FilterPreparationPresentation.message(for: .downloading))
 
                 case .preparing(let progress, let message):
-                    if progress >= 1 {
+                    if progress >= 1, successGlyphShown {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: LavaIconSize.heroResult, weight: .bold))
                             .foregroundStyle(LavaStyle.safeGreen)
                             .accessibilityHidden(true)
+                            .transition(.opacity)
                         PreparationTickerTitle("Success")
                     } else {
+                        // Still filling — including the Success sweep (3/4 → full) before the glyph
+                        // takes over. The eased animation makes every step a smooth slide, not a jump.
                         SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
-                        PreparationTickerTitle(message)
+                        PreparationTickerTitle(progress >= 1 ? "Success" : message)
 
                         ProgressView(value: progress, total: 1)
                             .tint(LavaStyle.safeGreen)
                             .frame(maxWidth: 280)
+                            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.55), reduceMotion: reduceMotion), value: progress)
                     }
 
                 case .failed(let message):
@@ -293,6 +306,33 @@ struct FilterPreparationScreen: View {
             // and not again when the state later resets to `.idle`).
             announceFilterPreparationOutcome(newState)
         }
+        // Reveal the Success checkmark only AFTER the bar has swept to a full 100%. `.task(id:)`
+        // cancels + restarts on every terminal-success transition, so the glyph resets for the next
+        // apply and never leaks across covers.
+        .task(id: isTerminalSuccess) {
+            guard isTerminalSuccess else {
+                successGlyphShown = false
+                return
+            }
+            successGlyphShown = false
+            // Match the bar's fill sweep (see the ProgressView `.animation`) so the glyph lands right
+            // as the bar reaches full. Under Reduce Motion the fill is instant, so skip the wait (no
+            // dead-hold) and reveal the glyph immediately with an instant (nil) animation.
+            try? await Task.sleep(nanoseconds: reduceMotion ? 0 : 550_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.25), reduceMotion: reduceMotion)) {
+                successGlyphShown = true
+            }
+        }
+    }
+
+    /// True while the cover is showing the terminal Success state (`progress >= 1`). Drives the
+    /// fill-to-full-then-checkmark handoff; false for every in-progress or non-terminal state.
+    private var isTerminalSuccess: Bool {
+        if case .preparing(let progress, _) = viewModel.filterPreparationState {
+            return progress >= 1
+        }
+        return false
     }
 
     /// Speak a terminal prepare/apply outcome to VoiceOver. A no-op for non-terminal states, so it

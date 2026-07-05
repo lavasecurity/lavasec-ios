@@ -11,20 +11,30 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
 
     // MARK: Root application
 
-    func testRootViewAppliesTextSizeOverrideConditionally() throws {
+    func testRootViewAppliesTextSizeOverrideWithStableIdentity() throws {
         let source = try readSource(.rootView)
 
         XCTAssertTrue(source.contains(".lavaTextSizeOverride(viewModel.textSizeOverride)"),
                       "RootView must apply the Customization text-size override app-wide.")
-
-        // The modifier is conditional: it forces `dynamicTypeSize` only when a size is set, and
-        // passes through untouched when nil (Match System → the system's Larger Text setting flows).
         XCTAssertTrue(source.contains("func lavaTextSizeOverride(_ size: DynamicTypeSize?)"),
                       "The override helper must take an optional size.")
-        XCTAssertTrue(source.contains("if let size"),
-                      "The override helper must pass through when the size is nil.")
-        XCTAssertTrue(source.contains("dynamicTypeSize(size)"),
-                      "The override helper must force dynamicTypeSize when a size is set.")
+
+        // The modifier must apply `dynamicTypeSize` UNCONDITIONALLY (a range value), so toggling Match
+        // System changes only the range — not the view's structural identity. A fixed size clamps to
+        // `size...size`; Match System clamps to the full span (an inert pass-through).
+        XCTAssertTrue(source.contains("return dynamicTypeSize(range)"),
+                      "The override helper must apply dynamicTypeSize unconditionally so it never changes view identity.")
+        XCTAssertTrue(source.contains("size.map { $0 ... $0 }"),
+                      "A fixed size must clamp to the degenerate size...size range (forcing exactly that size).")
+
+        // Regression guard: the helper must NOT branch on the size. The old `if let size {
+        // dynamicTypeSize(size) } else { self }` built a `_ConditionalContent`, so flipping Match
+        // System tore down the tree below this modifier — including the Settings NavigationStack —
+        // and kicked the user back to the Settings root mid-toggle.
+        XCTAssertFalse(source.contains("if let size"),
+                       "The override helper must not branch on the size — a _ConditionalContent here resets navigation on toggle.")
+        XCTAssertFalse(source.contains("dynamicTypeSize(size)"),
+                       "The override helper must not force a bare size value — use the size...size range so identity stays stable.")
     }
 
     // MARK: Model — Match-System gating + persistence

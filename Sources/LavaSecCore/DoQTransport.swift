@@ -6,6 +6,60 @@ import Network
 // head-of-line blocking; each query currently opens a fresh QUIC connection
 // (reuse review is a tracked Track 4 item). Debug logging is injected so the
 // transport never links a logging backend itself.
+//
+// DESIGN / ENERGY TRADE-OFF (NRG — deferred, no behavior change here):
+// Each query pays a FULL QUIC handshake (TLS 1.3 over QUIC) plus connection
+// tear-down, which is the single largest per-query transport energy cost in the
+// tunnel: a radio wake for the handshake round-trips on every DoQ query, where
+// DoH/DoT pool and reuse connections. The per-lane `DoQConnection` structure
+// exists to bound parallelism, but it does NOT pool the underlying QUIC
+// connection — `resolveCurrentQuery` builds a fresh `NWConnection` and
+// `finishCurrentQuery` cancels it (see below).
+//
+// Why connection reuse is deferred rather than a straightforward port of the
+// DoT-style pool: RFC 9250 maps each DNS query to its own QUIC stream (with
+// FIN), so reuse is NOT a single reused `NWConnection` — it requires the
+// multi-stream QUIC API, which is gated to iOS 26 while the app floor is iOS 17.
+// An iOS-26-gated reuse path was built and device-tested against a real DoQ
+// resolver and failed on every attempt (the stream send/receive errored, and the
+// fallback was worse than this per-query path), matching the vendor guidance to
+// hold off. It was reverted. The full rationale + the rejected-API list is
+// recorded in PacketTunnelDNSRuntimeSourceTests (testDoQTransportUsesPublic-
+// QUICConnectionWithoutCustomStack) — re-attempt reuse ONLY after a later iOS
+// 26.x proves the QUIC stream API reliable, and update that pin deliberately
+// (do not delete it to make a change pass).
+//
+// SCOPE / BLAST RADIUS (review 2026-07-05): real but NARROW — read this cost as
+// per-DoQ-user, not an always-on population drain. DoQ ships in NO first-party
+// preset and is never offered by `availableTransports` for a built-in resolver;
+// it is reachable ONLY through a custom `doq://` resolver or a pasted DoQ stamp
+// (an opt-in power-user path), and it sits BEHIND the response cache + in-flight
+// coalescer, so the handshake lands only on non-coalesced cache MISSES. Net
+// exposure ≈ (opt-in custom-resolver users) × (cache-miss queries) — a rounding
+// error against the default population (Device DNS primary, DoH fallback). Even a
+// working reuse path buys little at the battery-pack level, which is itself a
+// reason not to re-attempt it speculatively.
+//
+// FRAMING OF THE DEFERRAL (review 2026-07-05): the real gate is API RELIABILITY,
+// not the iOS-17 floor. The floor does not forbid an iOS-26-gated path (the app
+// already ships one elsewhere), so this is "iOS-26+ gated once the platform is
+// ready," NOT "blocked until we raise the floor." Re-attempt keys off the iOS-26
+// QUIC stream API becoming reliable on a later 26.x (the built path was
+// device-proven worse), not off the deployment target.
+//
+// NO CHEAPER iOS-17 MIDDLE PATH: QUIC 0-RTT / TLS 1.3 session resumption does NOT
+// rescue this. It trims handshake round-trips, but the DOMINANT cost is the radio
+// wake to send the query + its tail, paid regardless of handshake mode; and
+// resumption needs a session ticket retained across connections, which
+// `finishCurrentQuery` tears down every query (cross-connection reuse is the
+// unreliable QUIC behavior the vendor guidance flagged). Treat it as not viable.
+//
+// What a future reuse path MUST preserve: per-query isolation, hostname-based
+// connection start (SNI + certificate validation against `endpoint.hostname`),
+// the timeout/cancel/failed-state handling in `handleConnectionState`, the
+// idempotent `finishCurrentQuery`/`cancelLocked` completion semantics, and the
+// smoke-probe timeout budgeting in PacketTunnelProvider that today sizes the
+// probe window to include this per-probe connect cost.
 public final class DoQTransport: @unchecked Sendable {
     private static let maxConnectionsPerEndpoint = 4
     private let timeoutSeconds: Int

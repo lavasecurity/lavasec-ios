@@ -658,10 +658,13 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "A superseded cover-driver dismisses its stranded cover via a shared helper.")
         XCTAssertTrue(app.contains("guard !configurationReplacementGate.currentOwnerOwnsPreparationCover else { return }"),
                       "The dismiss helper must no-op when the new owner is itself a cover-driver.")
-        // Every supersession bail in the two cover-driving replacers routes through the helper
-        // (switch: commit + post-persist + rollback; draft apply: commit + post-persist + catch).
-        XCTAssertEqual(app.components(separatedBy: "dismissPreparationCoverIfStrandedBySupersession()").count - 1, 7,
-                       "Six supersession bails call the dismiss helper, plus its one definition.")
+        // Every supersession bail in the two cover-driving replacers routes through the helper. Each
+        // path (switch / draft apply) bails at: commit + post-persist + saving-top-before-tick +
+        // render-yield-before-Success + success-hold + rollback/catch = 6 each. The three progress-bar
+        // bails guard the shared cover against a newer preparation superseding us during the
+        // notify/restore awaits, the 3/4-render yield, and the 1.2s success hold respectively (#284 P2).
+        XCTAssertEqual(app.components(separatedBy: "dismissPreparationCoverIfStrandedBySupersession()").count - 1, 13,
+                       "Twelve supersession bails call the dismiss helper, plus its one definition.")
 
         // The retryable flag must ONLY be reset to true at the two fresh-attempt entry points
         // (switch + draft apply) — not scattered — and set false only on the dead-end edge. Total

@@ -487,13 +487,19 @@ private extension View {
     /// Forces an app-wide Dynamic Type size when the Customization → Text Size control is set to a
     /// fixed size; passes through untouched (letting the system's Larger Text setting flow) when
     /// "Match System" is on and `size` is nil.
-    @ViewBuilder
+    ///
+    /// Applies `dynamicTypeSize` UNCONDITIONALLY so toggling Match System changes only the range
+    /// *value*, never this view's structural identity. The earlier version branched — forcing the size
+    /// in one arm and passing `self` through in the other — which built a `_ConditionalContent`:
+    /// flipping Match System swapped the branch, and SwiftUI treats that as a different view, tearing
+    /// down the entire tree below this modifier — including the Settings `NavigationStack` — and
+    /// bouncing the user back to the Settings root mid-toggle. A fixed size clamps to the degenerate
+    /// `size...size` range (forcing exactly that size); Match System clamps to the full
+    /// `.xSmall ... .accessibility5` span, an inert pass-through that lets the system's Larger Text
+    /// setting flow unchanged.
     func lavaTextSizeOverride(_ size: DynamicTypeSize?) -> some View {
-        if let size {
-            dynamicTypeSize(size)
-        } else {
-            self
-        }
+        let range = size.map { $0 ... $0 } ?? (DynamicTypeSize.xSmall ... DynamicTypeSize.accessibility5)
+        return dynamicTypeSize(range)
     }
 }
 

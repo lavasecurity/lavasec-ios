@@ -26,6 +26,131 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("diagnosticsPersistence.flush(force: force)"))
     }
 
+    /// NRG: the DNS hot path (`readPackets` → `handle` → `forward`) runs for every
+    /// inbound query while the tunnel is up, so steady-state CPU work there is the
+    /// dominant always-on energy cost. These pins guard four reductions that remove
+    /// per-query work without changing any observable behavior — they must not regress.
+    func testDNSHotPathAvoidsRedundantPerQueryWork() throws {
+        let source = try readSource(.packetTunnelProvider)
+
+        // (1) `forward` reuses the resolver runtime configuration `handle` already
+        // computed for the bootstrap/pause/filter decision instead of re-deriving it
+        // — each derivation performs several blocking dnsStateQueue.sync reads, so the
+        // old second call per forwarded query was pure redundant work on the hot path.
+        let forwardBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func forward(",
+            endingBefore: "private func dispatchForwardResolution("
+        )
+        XCTAssertTrue(
+            forwardBlock.contains("resolverConfiguration: ResolverRuntimeConfiguration,"),
+            "forward must accept the resolverConfiguration handle already computed."
+        )
+        XCTAssertFalse(
+            forwardBlock.contains("let resolverConfiguration = currentResolverRuntimeConfiguration()"),
+            "forward must reuse handle's resolverConfiguration, not re-derive it (per-query queue hops)."
+        )
+
+        // (2) The per-query counter bumps (cache hit/miss/coalesce) update only stats
+        // fields the connectivity assessment never reads, so they route through the
+        // stats-only mark and must NOT re-run the full ProtectionConnectivityPolicy
+        // cascade (which always produced the same severity — the Darwin nudge is deduped
+        // by key anyway, so the post was already a no-op there).
+        let recordCacheHitBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordCacheHit",
+            endingBefore: "private func recordCacheMiss"
+        )
+        let recordCacheMissBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordCacheMiss",
+            endingBefore: "private func recordCoalescedQuery"
+        )
+        let recordCoalescedBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func recordCoalescedQuery",
+            endingBefore: "private func recordUpstreamResult"
+        )
+        XCTAssertTrue(recordCacheHitBlock.contains("markHealthCountersUpdated()"))
+        XCTAssertTrue(recordCacheMissBlock.contains("markHealthCountersUpdated()"))
+        XCTAssertTrue(recordCoalescedBlock.contains("markHealthCountersUpdated()"))
+        XCTAssertFalse(recordCacheHitBlock.contains("markHealthUpdated()"))
+        XCTAssertFalse(recordCacheMissBlock.contains("markHealthUpdated()"))
+        XCTAssertFalse(recordCoalescedBlock.contains("markHealthUpdated()"))
+
+        let countersMarkBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func markHealthCountersUpdated",
+            endingBefore: "private func signalAppIfConnectivityStateChanged"
+        )
+        XCTAssertTrue(countersMarkBlock.contains("healthPersistence.markDirty()"))
+        XCTAssertFalse(
+            countersMarkBlock.contains("signalAppIfConnectivityStateChanged"),
+            "The per-query stats mark must not re-run the connectivity cascade."
+        )
+        // The connectivity-relevant mark still reassesses and signals (unchanged).
+        let healthMarkBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func markHealthUpdated",
+            endingBefore: "private func markHealthCountersUpdated"
+        )
+        XCTAssertTrue(healthMarkBlock.contains("signalAppIfConnectivityStateChanged()"))
+
+        // (3) A cache hit must still route through the shared write-path normalizer. That
+        // keeps the optional TTL cap and malformed-cache fail-closed fallback identical to
+        // the upstream/coalesced paths, even when maximumAnswerTTL is nil.
+        let cacheHitBlock = try sourceBlock(
+            in: forwardBlock,
+            startingAt: "if let cachedResponse = self.dnsResponseCache.cachedResponse",
+            endingBefore: "self.recordCacheMiss()"
+        )
+        XCTAssertTrue(
+            cacheHitBlock.contains("responseByApplyingMaximumAnswerTTL("),
+            "Cache hits must use the shared TTL/well-formedness helper before writing."
+        )
+        XCTAssertTrue(
+            cacheHitBlock.contains("DNSResponseFactory.serverFailure(for: dnsPayload)"),
+            "Malformed cached packets must still fail closed before writing."
+        )
+        XCTAssertFalse(
+            cacheHitBlock.contains("responseToWrite = cachedResponse"),
+            "Cache hits must not bypass the shared write-path normalizer."
+        )
+
+        // (4) The bootstrap checks reuse the question domain already normalized in
+        // parseQuestion instead of re-normalizing it per transport on every query.
+        XCTAssertTrue(source.contains("let normalizedQuestionDomain = question.normalizedDomain"))
+
+        // (5) Because (1) makes `forward` reuse the identifier `handle` captured, the
+        // per-query (non-forced, lazy) runtime reset must NOT clobber a newer runtime that
+        // a concurrent authoritative reload already installed: it is dropped when the
+        // captured identifier no longer matches the freshly recomputed resident config.
+        // Runs only on the rare active-differs path (the identity guard above it short-
+        // circuits the steady-state no-op), so it adds no hot-path cost. Forced resets and
+        // the authoritative apply path pass the current identifier and are unaffected.
+        let runtimeResetBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func collectPendingResponsesAndResetResolverRuntime(",
+            endingBefore: "private func writeServerFailures("
+        )
+        XCTAssertTrue(
+            runtimeResetBlock.contains("if !force, identifier != currentResolverRuntimeConfiguration().cacheIdentifier {"),
+            "The lazy per-query resolver-runtime reset must skip a stale captured identifier so it can't clobber a newer runtime installed by a concurrent authoritative reload."
+        )
+
+        // (6) The ONE volatile plan input that is not covered by cacheIdentifier or the generation
+        // guard — the device-resolver wedge bit behind `treatsResolverRejectionAsFallbackTrigger` —
+        // must be re-read fresh onto the captured plan before resolving, so a query straddling a
+        // Device-DNS wedge onset is still carried by the encrypted fallback instead of being handed
+        // the wedged resolver's SERVFAIL/REFUSED as authoritative. Gated on `shouldFallbackToEncrypted`
+        // so encrypted-primary resolvers keep the full per-query savings; the rest of the captured
+        // plan (everything folded into cacheIdentifier) is still reused.
+        XCTAssertTrue(
+            forwardBlock.contains("recomputingResolverRejectionFallbackTrigger("),
+            "forward must re-read the volatile wedge bit onto the captured plan so the encrypted-fallback safety net still engages at a wedge transition."
+        )
+    }
+
     func testDiagnosticsClearDedupGateReadsTheDurableStoreMarkerNotAnInMemoryIvar() throws {
         let source = try readSource(.packetTunnelProvider)
 
@@ -3003,7 +3128,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // too — otherwise its lookup recurses through the wedged Device DNS.
         XCTAssertTrue(doqBootstrapResponseBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
         XCTAssertTrue(prewarmBlock.contains("resolverConfiguration.encryptedFallbackDoQEndpoints"))
-        XCTAssertTrue(doqBootstrapResponseBlock.contains("DomainName.normalize(question.domain)"))
+        // The question domain must be NORMALIZED before matching against endpoint
+        // hostnames. The packet path now reuses `question.normalizedDomain` (already
+        // `DomainName.normalize(question.domain)` from `DNSMessage.parseQuestion`)
+        // instead of re-normalizing per query; the endpoint host is still normalized here.
+        XCTAssertTrue(doqBootstrapResponseBlock.contains("question.normalizedDomain"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("DomainName.normalize(endpoint.hostname)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("doqEndpointResolvingBootstrapIfNeeded(endpoint)"))
         XCTAssertTrue(doqBootstrapResponseBlock.contains("DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: bootstrappedEndpoint)"))
