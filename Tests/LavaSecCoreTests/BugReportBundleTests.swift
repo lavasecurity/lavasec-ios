@@ -286,6 +286,33 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertNil(entries[1].details["options"])
     }
 
+    func testDebugLogParserKeepsSnapshotArtifactMissDetails() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"loadSnapshot-store-miss","timestamp":"2026-05-18T01:02:03Z","route":"resolved","compactReason":"reuse:inputs:selectedSourceHashes+catalogVersion","preparedReason":"manifest-missing","generation":"42","ruleCount":"356662","syncCap":"1000000","storeCount":"2","eligibleStoreCount":"1","maxRuleCount":"356662","expected":"full-private-fingerprint","privateDomain":"checkout.example"}
+        {"component":"tunnel","event":"bootstrap-fast-resume-miss","timestamp":"2026-05-18T01:02:04Z","reason":"strict-miss","storeCount":"2","eligibleStoreCount":"1","syncCap":"1000000","maxRuleCount":"356662","privateDomain":"checkout.example"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0].event, "loadSnapshot-store-miss")
+        XCTAssertEqual(entries[0].details["route"], "resolved")
+        XCTAssertEqual(entries[0].details["compactReason"], "reuse:inputs:selectedSourceHashes+catalogVersion")
+        XCTAssertEqual(entries[0].details["preparedReason"], "manifest-missing")
+        XCTAssertEqual(entries[0].details["generation"], "42")
+        XCTAssertEqual(entries[0].details["ruleCount"], "356662")
+        XCTAssertEqual(entries[0].details["syncCap"], "1000000")
+        XCTAssertEqual(entries[0].details["storeCount"], "2")
+        XCTAssertEqual(entries[0].details["eligibleStoreCount"], "1")
+        XCTAssertEqual(entries[0].details["maxRuleCount"], "356662")
+        XCTAssertNil(entries[0].details["expected"])
+        XCTAssertNil(entries[0].details["privateDomain"])
+        XCTAssertEqual(entries[1].details["reason"], "strict-miss")
+        XCTAssertEqual(entries[1].details["storeCount"], "2")
+        XCTAssertEqual(entries[1].details["eligibleStoreCount"], "1")
+        XCTAssertNil(entries[1].details["privateDomain"])
+    }
+
     // An 8 MB rotation can land between an incident and the report: the loaders read the
     // rotated generation + the current file, and the concatenating parser must survive a
     // rotation that cut mid-line (no trailing newline on the rotated chunk) without fusing

@@ -1239,6 +1239,103 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertFalse(customRowBlock.contains(".font(.subheadline.weight(.semibold))"))
         XCTAssertFalse(customRowBlock.contains("Text(\"Use your own resolver.\")"))
     }
+
+    func testFeedbackReviewStepLocalizesPlaceholderAndDiagnosticsValues() throws {
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
+            in: source,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let reviewPageBlock = try sourceBlock(
+            in: feedbackBlock,
+            startingAt: "private var reviewPage: some View",
+            endingBefore: "private var thankYouPage: some View"
+        )
+
+        // The placeholder/status VALUES flow straight into BugReportReviewRow (which renders
+        // them verbatim), so they must be localized AT THE CALL SITE — a bare "Not provided"
+        // would render English in every locale. Both Details and Email echo the same placeholder.
+        XCTAssertEqual(reviewPageBlock.occurrences(of: "\"Not provided\".lavaLocalized"), 2)
+        XCTAssertTrue(reviewPageBlock.contains("\"Sent\".lavaLocalized"))
+        XCTAssertTrue(reviewPageBlock.contains("\"Not sent\".lavaLocalized"))
+        // No untranslated copies of these literals remain in the review echo.
+        XCTAssertFalse(reviewPageBlock.contains("? \"Not provided\" :"))
+        XCTAssertFalse(reviewPageBlock.contains("? \"Sent\" : \"Not sent\""))
+    }
+
+    func testFeedbackSubmitButtonLocalizesSubmitAndRetryCatalogKeys() throws {
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
+            in: source,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let submitTitleBlock = try sourceBlock(
+            in: feedbackBlock,
+            startingAt: "private var submitButtonTitle: String",
+            endingBefore: "private func refreshDraft()"
+        )
+
+        // The submit button title is a dynamic String piped through .lavaLocalized, so the
+        // idle ("Submit") and failed ("Retry") labels must be catalog keys — "Submitting" was
+        // already present, but the other two shipped English-only and rendered verbatim.
+        XCTAssertTrue(submitTitleBlock.contains("\"Submit\""))
+        XCTAssertTrue(submitTitleBlock.contains("\"Retry\""))
+        XCTAssertTrue(submitTitleBlock.contains("\"Submitting\""))
+        XCTAssertTrue(feedbackBlock.contains("Text(submitButtonTitle.lavaLocalized)"))
+
+        let catalog = try readSource(.localizableStringsCatalog)
+        for key in ["Submit", "Retry", "Submitting"] {
+            XCTAssertTrue(catalog.contains("\"\(key)\": {"), "Missing localization catalog key: \(key)")
+        }
+    }
+
+    func testFeedbackTopicSelectionReusesPreparedDiagnosticsInsteadOfRebuilding() throws {
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
+            in: source,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let topicChangeBlock = try sourceBlock(
+            in: feedbackBlock,
+            startingAt: ".onChange(of: selectedIssueType)",
+            endingBefore: ".onChange(of: affectedSite)"
+        )
+
+        // Tapping a topic radio button only changes user-entered context (issue type /
+        // affected site), never the device diagnostics — so it must take the cheap
+        // context-only refresh that reuses the snapshot captured on appear, not the full
+        // prepareBugReport that re-reads files and rebuilds the blocklist union on the main
+        // thread (the lag that made the radio buttons feel slow; same class as UR-5 typing).
+        XCTAssertTrue(topicChangeBlock.contains("refreshDraftContext()"))
+        XCTAssertFalse(topicChangeBlock.contains("refreshDraft()"))
+        XCTAssertTrue(feedbackBlock.contains("private func refreshDraftContext()"))
+        XCTAssertTrue(feedbackBlock.contains("viewModel.refreshBugReportDraftContext(context: currentContext)"))
+    }
+
+    func testFeedbackTopicOptionRowSkipsRedundantReRenderViaEquatable() throws {
+        let source = try readSource(.settingsView)
+        let feedbackBlock = try sourceBlock(
+            in: source,
+            startingAt: "struct BugReportSettingsView: View",
+            endingBefore: "private struct LegalNoticesView: View"
+        )
+        let topicPageBlock = try sourceBlock(
+            in: feedbackBlock,
+            startingAt: "private var topicPage: some View",
+            endingBefore: "private var contextPage: some View"
+        )
+
+        // Fixing the on-tap rebuild (refreshDraftContext, above) removes the main-thread
+        // lag, but SwiftUI still re-evaluates every unchanged row's body when a sibling's
+        // `isSelected` flips unless the row opts out of diffing. `EquatableView` makes that
+        // wrapper explicit so the optimization is not mistaken for a project-local modifier.
+        XCTAssertTrue(topicPageBlock.contains("EquatableView(content: BugReportTopicOptionRow("))
+        XCTAssertFalse(topicPageBlock.contains(".equatable()"))
+        XCTAssertTrue(feedbackBlock.contains("private struct BugReportTopicOptionRow: View, Equatable"))
+    }
 }
 
 private extension String {
