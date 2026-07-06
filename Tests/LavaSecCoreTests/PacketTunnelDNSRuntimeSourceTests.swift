@@ -2317,6 +2317,19 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitActive"))
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
+        let activeWaitGuardIndex = try XCTUnwrap(enqueueBlock.range(of: "guard transientBootstrapDNSWaitActive")?.lowerBound)
+        let waitGenerationGuardIndex = try XCTUnwrap(enqueueBlock.range(of: "transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration")?.lowerBound)
+        let pendingResponseIndex = try XCTUnwrap(enqueueBlock.range(of: "let pending = PendingDNSResponse(")?.lowerBound)
+        XCTAssertLessThan(
+            activeWaitGuardIndex,
+            pendingResponseIndex,
+            "The transient wait helper must avoid constructing PendingDNSResponse until the active wait guard passes."
+        )
+        XCTAssertLessThan(
+            waitGenerationGuardIndex,
+            pendingResponseIndex,
+            "The transient wait helper must avoid constructing PendingDNSResponse until the current lifecycle guard passes."
+        )
 
         let enqueueIndex = try XCTUnwrap(filteredBlock.range(of: "enqueueTransientBootstrapDNSRequestIfNeeded(")?.lowerBound)
         let diagnosticIndex = try XCTUnwrap(filteredBlock.range(of: "recordDiagnostic(")?.lowerBound)

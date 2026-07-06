@@ -4144,17 +4144,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return false
         }
 
-        let pending = PendingDNSResponse(
-            request: request,
-            protocolNumber: protocolNumber,
-            maximumAnswerTTL: nil,
-            temporaryPauseNormalizedDomain: nil
-        )
         var serverFailure: PendingDNSResponse?
         var serverFailureReason: String?
         let handledByWait = dnsStateQueue.sync {
             if transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration {
-                serverFailure = pending
+                serverFailure = PendingDNSResponse(
+                    request: request,
+                    protocolNumber: protocolNumber,
+                    maximumAnswerTTL: nil,
+                    temporaryPauseNormalizedDomain: nil
+                )
                 serverFailureReason = "transient-bootstrap-dns-wait-timeout"
                 return true
             }
@@ -4165,6 +4164,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return false
             }
 
+            let pending = PendingDNSResponse(
+                request: request,
+                protocolNumber: protocolNumber,
+                maximumAnswerTTL: nil,
+                temporaryPauseNormalizedDomain: nil
+            )
             guard transientBootstrapDNSWaitPendingResponses.count < Self.transientBootstrapDNSWaitMaximumPendingResponses else {
                 serverFailure = pending
                 serverFailureReason = "transient-bootstrap-dns-wait-overflow"
