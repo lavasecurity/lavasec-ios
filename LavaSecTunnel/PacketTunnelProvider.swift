@@ -4064,6 +4064,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // otherwise it receives SERVFAIL. This bootstrap fail-closed is TRANSIENT — the
             // unavailable marker stays false (below) so it does not suppress a later
             // self-reconnect the way a genuine unavailability does.
+            // Security boundary: the self-reconnect wait holds at most 64 DNS requests for <=4s
+            // after a recent self-reconnect credit. Timeout, overflow, stale lifecycle, or failed
+            // snapshot completion all return SERVFAIL instead of forwarding around the filter.
             bootstrapSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false

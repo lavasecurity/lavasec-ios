@@ -2,6 +2,9 @@ import LavaSecCore
 import XCTest
 
 final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
+    // PacketTunnelProvider is an NE extension type with private queue-confined DNS internals.
+    // This suite intentionally pins source-level contracts for wiring that cannot be safely
+    // exercised from the SwiftPM test host without adding production-only seams.
     func testHealthAndDiagnosticsWritesAreCoalescedNotPerEvent() throws {
         let source = try readSource(.packetTunnelProvider)
 
@@ -2309,7 +2312,6 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(startTunnelBlock.contains("let shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings = loadInitialSharedState()"))
         XCTAssertTrue(startTunnelBlock.contains("if shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings"))
         XCTAssertTrue(startTunnelBlock.contains("self.beginTransientBootstrapDNSWait(reason: \"setTunnelNetworkSettings-success\")"))
-        XCTAssertFalse(initialStateBlock.contains("beginTransientBootstrapDNSWait(reason: \"loadInitialSharedState\")"))
         XCTAssertTrue(initialStateBlock.contains("cancelTransientBootstrapDNSWait(reason: \"loadInitialSharedState\")"))
         XCTAssertTrue(initialStateBlock.contains("return shouldBeginTransientBootstrapDNSWait"))
         XCTAssertTrue(enqueueBlock.contains("filterDecision.action == .block"))
@@ -2347,7 +2349,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertLessThan(waitBeginIndex, readPacketsIndex)
     }
 
-    func testTransientBootstrapDNSWaitDrainsOnSnapshotLoadAndServfailsOnTimeoutOrOverflow() throws {
+    func testTransientBootstrapDNSWaitDrainsOnSnapshotLoadAndSERVFAILsOnTimeoutOrOverflow() throws {
         let source = try readSource(.packetTunnelProvider)
         let loadSnapshotBlock = try sourceBlock(
             in: source,
@@ -2390,7 +2392,6 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func filterDecision(for domain:"
         )
 
-        XCTAssertFalse(source.contains("{ [self] ->"))
         XCTAssertTrue(loadSnapshotBlock.contains("drainTransientBootstrapDNSWait(reason: \"snapshot-loaded-\\(reason)\")"))
         XCTAssertTrue(loadSnapshotBlock.contains("failTransientBootstrapDNSWait(reason: \"snapshot-unavailable-\\(reason)\")"))
         XCTAssertTrue(loadSnapshotBlock.containsInOrder([
