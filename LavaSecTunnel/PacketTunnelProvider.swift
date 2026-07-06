@@ -289,7 +289,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let diagnosticsWriteInterval: TimeInterval = 30
     private let configurationRefreshInterval: TimeInterval = 30
     private let protectionPauseStateRefreshInterval: TimeInterval = 1
-    private static let transientBootstrapDNSWaitTimeout: TimeInterval = 8
+    private static let transientBootstrapDNSWaitTimeout: TimeInterval = 4
     private static let transientBootstrapDNSWaitMaximumPendingResponses = 64
     // dnsStateQueue-confined, like the dictionaries they replaced.
     private let dnsResponseCache = DNSResponseCache()
@@ -299,6 +299,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var transientBootstrapDNSWaitExpiredGeneration: UInt64?
     private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []
     private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?
+    private var transientBootstrapDNSWaitDidLogOverflow = false
     private var resolverBackoffPolicy = ResolverBackoffPolicy()
     private var health = TunnelHealthSnapshot()
     private var diagnostics = DiagnosticsStore()
@@ -4058,9 +4059,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // from disk / recompiles and commits the real snapshot. For a RECENT self-reconnect
             // launch, DNS requests in this window are queued briefly below instead of receiving
             // synthetic blocked answers; ordinary cold starts keep the existing immediate
-            // fail-closed behavior. This bootstrap fail-closed is TRANSIENT — the unavailable
-            // marker stays false (below) so it does not suppress a later self-reconnect the way
-            // a genuine unavailability does.
+            // fail-closed behavior. Queued DNS is not forwarded while the snapshot is unavailable:
+            // it is replayed through the filter only after a current-lifecycle snapshot commits,
+            // otherwise it receives SERVFAIL. This bootstrap fail-closed is TRANSIENT — the
+            // unavailable marker stays false (below) so it does not suppress a later
+            // self-reconnect the way a genuine unavailability does.
             bootstrapSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false
@@ -4173,10 +4176,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             guard transientBootstrapDNSWaitPendingResponses.count < Self.transientBootstrapDNSWaitMaximumPendingResponses else {
                 serverFailure = pending
                 serverFailureReason = "transient-bootstrap-dns-wait-overflow"
-                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-overflow", details: [
-                    "generation": "\(tunnelLifecycleGeneration)",
-                    "pendingResponses": "\(transientBootstrapDNSWaitPendingResponses.count)"
-                ])
+                if !transientBootstrapDNSWaitDidLogOverflow {
+                    transientBootstrapDNSWaitDidLogOverflow = true
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-overflow", details: [
+                        "generation": "\(tunnelLifecycleGeneration)",
+                        "pendingResponses": "\(transientBootstrapDNSWaitPendingResponses.count)"
+                    ])
+                }
                 return true
             }
 
@@ -4308,15 +4314,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
-            for (index, pending) in pendingResponses.enumerated() {
-                guard self.isCurrentTunnelLifecycle(expectedLifecycleGeneration) else {
-                    self.writeServerFailures(
-                        for: Array(pendingResponses[index...]),
-                        reason: "transient-bootstrap-dns-wait-stale-lifecycle"
-                    )
-                    return
-                }
-
+            for pending in pendingResponses {
                 self.handleDNSRequest(
                     pending.request,
                     protocolNumber: pending.protocolNumber,
@@ -4395,6 +4393,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         transientBootstrapDNSWaitActive = false
         transientBootstrapDNSWaitGeneration = nil
         transientBootstrapDNSWaitExpiredGeneration = nil
+        transientBootstrapDNSWaitDidLogOverflow = false
         let pendingResponses = transientBootstrapDNSWaitPendingResponses
         transientBootstrapDNSWaitPendingResponses.removeAll(keepingCapacity: true)
         return pendingResponses
@@ -6428,10 +6427,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 // closed. Mark it snapshot-unavailable so the DNS smoke-probe failure this
                 // block-all causes does NOT escalate to a self-reconnect restart loop —
                 // restarting cannot rebuild a snapshot the config can't compile.
+                var didCommitFailClosed = false
                 if !configuration.enabledBlocklistIDs.isEmpty {
                     let failClosedSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
                     let wasFailClosedBeforeBuildFailure = self.isResidentFailClosedDueToUnavailableSnapshot()
-                    let didCommitFailClosed = self.replaceSnapshot(
+                    didCommitFailClosed = self.replaceSnapshot(
                         failClosedSnapshot,
                         failClosedDueToUnavailableSnapshot: true,
                         generation: generation
@@ -6455,7 +6455,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     self.clearResidentFailClosedDueToUnavailableSnapshot(ifCurrentGeneration: generation)
                 }
 
-                self.failTransientBootstrapDNSWait(reason: "snapshot-unavailable-\(reason)")
+                if didCommitFailClosed {
+                    self.failTransientBootstrapDNSWait(reason: "snapshot-unavailable-\(reason)")
+                }
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-missing", details: [
                     "generation": "\(generation)",
                     "reason": reason

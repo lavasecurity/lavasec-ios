@@ -1330,10 +1330,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         // Fixing the on-tap rebuild (refreshDraftContext, above) removes the main-thread
         // lag, but SwiftUI still re-evaluates every unchanged row's body when a sibling's
-        // `isSelected` flips unless the row opts out of diffing. `Equatable` + `.equatable()`
-        // lets SwiftUI skip re-rendering the 4+ rows whose (title, isSelected) didn't change,
-        // complementing the context-refresh fix rather than substituting for it.
-        XCTAssertTrue(topicPageBlock.contains(".equatable()"))
+        // `isSelected` flips unless the row opts out of diffing. `EquatableView` makes that
+        // wrapper explicit so the optimization is not mistaken for a project-local modifier.
+        XCTAssertTrue(topicPageBlock.contains("EquatableView(content: BugReportTopicOptionRow("))
+        XCTAssertFalse(topicPageBlock.contains(".equatable()"))
         XCTAssertTrue(feedbackBlock.contains("private struct BugReportTopicOptionRow: View, Equatable"))
     }
 }

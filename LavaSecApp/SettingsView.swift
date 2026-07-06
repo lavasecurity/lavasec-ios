@@ -4335,11 +4335,10 @@ struct BugReportSettingsView: View {
                         Button {
                             selectIssueType(type)
                         } label: {
-                            BugReportTopicOptionRow(
+                            EquatableView(content: BugReportTopicOptionRow(
                                 title: type.title,
                                 isSelected: selectedIssueType == type
-                            )
-                            .equatable()
+                            ))
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])

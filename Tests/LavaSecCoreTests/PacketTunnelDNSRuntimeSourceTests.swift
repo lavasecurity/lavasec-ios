@@ -2297,12 +2297,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func drainTransientBootstrapDNSWait("
         )
 
-        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitTimeout: TimeInterval = 8"))
+        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitTimeout: TimeInterval = 4"))
         XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitMaximumPendingResponses = 64"))
         XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []"))
         XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitGeneration: UInt64?"))
         XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitExpiredGeneration: UInt64?"))
         XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?"))
+        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitDidLogOverflow = false"))
 
         XCTAssertTrue(initialStateBlock.contains("let launchFollowsRecentSelfReconnect = Self.launchFollowsRecentSelfReconnect(now: Date())"))
         XCTAssertTrue(startTunnelBlock.contains("let shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings = loadInitialSharedState()"))
@@ -2317,18 +2318,18 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitActive"))
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
         XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
-        let activeWaitGuardIndex = try XCTUnwrap(enqueueBlock.range(of: "guard transientBootstrapDNSWaitActive")?.lowerBound)
-        let waitGenerationGuardIndex = try XCTUnwrap(enqueueBlock.range(of: "transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration")?.lowerBound)
-        let pendingResponseIndex = try XCTUnwrap(enqueueBlock.range(of: "let pending = PendingDNSResponse(")?.lowerBound)
-        XCTAssertLessThan(
-            activeWaitGuardIndex,
-            pendingResponseIndex,
-            "The transient wait helper must avoid constructing PendingDNSResponse until the active wait guard passes."
-        )
-        XCTAssertLessThan(
-            waitGenerationGuardIndex,
-            pendingResponseIndex,
-            "The transient wait helper must avoid constructing PendingDNSResponse until the current lifecycle guard passes."
+        XCTAssertTrue(enqueueBlock.contains("if !transientBootstrapDNSWaitDidLogOverflow {"))
+        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitDidLogOverflow = true"))
+        XCTAssertTrue(enqueueBlock.containsInOrder([
+            "if transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration",
+            "serverFailure = PendingDNSResponse(",
+            "guard transientBootstrapDNSWaitActive",
+            "else {\n                return false\n            }",
+            "let pending = PendingDNSResponse("
+        ]))
+        XCTAssertTrue(
+            initialStateBlock.contains("Queued DNS is not forwarded while the snapshot is unavailable"),
+            "The self-reconnect transient wait must document that queued DNS is held fail-closed, not forwarded past filtering."
         )
 
         let enqueueIndex = try XCTUnwrap(filteredBlock.range(of: "enqueueTransientBootstrapDNSRequestIfNeeded(")?.lowerBound)
@@ -2357,6 +2358,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             in: source,
             startingAt: "private func drainTransientBootstrapDNSWait(",
             endingBefore: "private func failTransientBootstrapDNSWait("
+        )
+        let enqueueBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func enqueueTransientBootstrapDNSRequestIfNeeded(",
+            endingBefore: "private func drainTransientBootstrapDNSWait("
         )
         let invalidateLifecycleBlock = try sourceBlock(
             in: source,
@@ -2387,6 +2393,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("{ [self] ->"))
         XCTAssertTrue(loadSnapshotBlock.contains("drainTransientBootstrapDNSWait(reason: \"snapshot-loaded-\\(reason)\")"))
         XCTAssertTrue(loadSnapshotBlock.contains("failTransientBootstrapDNSWait(reason: \"snapshot-unavailable-\\(reason)\")"))
+        XCTAssertTrue(loadSnapshotBlock.containsInOrder([
+            "if didCommitFailClosed {",
+            "self.failTransientBootstrapDNSWait(reason: \"snapshot-unavailable-\\(reason)\")",
+            "}"
+        ]))
         XCTAssertTrue(invalidateLifecycleBlock.contains("cancelTransientBootstrapDNSWait(reason: \"lifecycle-invalidated-\\(reason)\")"))
         XCTAssertTrue(drainBlock.contains("let drain = { [self] () ->"))
         XCTAssertTrue(failBlock.contains("let fail = { [self] () ->"))
@@ -2401,10 +2412,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(replayBlock.contains("transient-bootstrap-dns-wait-stale-lifecycle"))
         XCTAssertTrue(replayBlock.contains("allowsTransientBootstrapDeferral: false"))
         XCTAssertTrue(replayBlock.contains("expectedLifecycleGeneration: expectedLifecycleGeneration"))
+        XCTAssertFalse(replayBlock.contains("for (index, pending) in pendingResponses.enumerated()"))
+        XCTAssertTrue(replayBlock.contains("for pending in pendingResponses"))
         XCTAssertTrue(finishBlock.contains("transientBootstrapDNSWaitExpiredGeneration = nil"))
+        XCTAssertTrue(finishBlock.contains("transientBootstrapDNSWaitDidLogOverflow = false"))
         XCTAssertTrue(source.contains("let cancel = { [self] () ->"))
-        XCTAssertTrue(source.contains("event: \"transient-bootstrap-dns-wait-timeout\""))
-        XCTAssertTrue(source.contains("event: \"transient-bootstrap-dns-wait-overflow\""))
+        XCTAssertTrue(failBlock.contains("event: \"transient-bootstrap-dns-wait-timeout\""))
+        XCTAssertTrue(enqueueBlock.contains("event: \"transient-bootstrap-dns-wait-overflow\""))
 
         XCTAssertTrue(writeServerFailureBlock.contains("event: \"pending-dns-servfail\""))
         XCTAssertFalse(writeServerFailureBlock.contains("event: \"resolver-runtime-pending-servfail\""))
@@ -4527,5 +4541,20 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let start = try XCTUnwrap(source.range(of: "\(name): TimeInterval = ")?.upperBound)
         let digits = source[start...].prefix { $0.isNumber || $0 == "." || $0 == "_" }
         return try XCTUnwrap(Double(String(digits).replacingOccurrences(of: "_", with: "")))
+    }
+}
+
+private extension String {
+    func containsInOrder(_ needles: [String]) -> Bool {
+        var searchRange = startIndex..<endIndex
+
+        for needle in needles {
+            guard let range = range(of: needle, range: searchRange) else {
+                return false
+            }
+            searchRange = range.upperBound..<endIndex
+        }
+
+        return true
     }
 }
