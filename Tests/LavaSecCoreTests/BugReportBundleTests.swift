@@ -1,5 +1,7 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecAppServices
+@testable import LavaSecKit
 
 final class BugReportBundleTests: XCTestCase {
     func testIssueTypesUseFeedbackTopicSet() {

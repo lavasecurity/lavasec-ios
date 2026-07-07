@@ -242,7 +242,8 @@ private final class ProtectionUserNotificationController {
             for: assessment,
             health: health,
             history: history,
-            now: now
+            now: now,
+            languageCode: LavaNotificationLanguage.pinnedCode(in: defaults)
         ), !pendingNotificationIDs.contains(notification.identifier) else {
             return
         }
@@ -1487,6 +1488,8 @@ final class AppViewModel: ObservableObject {
     }
     #endif
 
+    // MARK: - LavaSecurity+ paywall & billing
+
     func loadLavaSecurityPlusProducts() async {
         isLoadingLavaSecurityPlusProducts = true
         await lavaSecurityPlusStore.loadProducts()
@@ -1609,6 +1612,8 @@ final class AppViewModel: ObservableObject {
     var preferredColorScheme: ColorScheme? {
         appearancePreference.colorScheme
     }
+
+    // MARK: - Customization preferences (appearance, LavaGuard look, icon, haptics)
 
     func setAppearancePreference(_ preference: LavaAppearancePreference) {
         guard appearancePreference != preference else {
@@ -2905,6 +2910,8 @@ final class AppViewModel: ObservableObject {
         filterEditDraft != nil
     }
 
+    // MARK: - Filter editing drafts
+
     func beginFilterEditing() {
         filterEditDraft = FilterEditDraft(configuration: filterDetailBaseline)
         filterPreparationState = .idle
@@ -3312,6 +3319,8 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    // MARK: - Filter draft preparation & apply
+
     func prepareAndApplyFilterDraft(origin: FilterReviewOrigin = .filters) async {
         // Record which surface is applying so the matching cover (and only it) presents the
         // preparation / failure UI — set at the apply point, not at staging, so it can't go stale.
@@ -3706,6 +3715,8 @@ final class AppViewModel: ObservableObject {
     /// prepare + publish, and reload the tunnel. A cold target shows the preparation
     /// screen ("Applying protection…"); on failure the previously-loaded filter is kept
     /// (never a half-applied state). Refuses a no-op, an unknown id, or a frozen filter.
+    // MARK: - Filter switching
+
     func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {
         // The four-scoped-field mirroring is the shared FilterSwitchPlan transition (same source of
         // truth as the headless warm switch); it already rejects a no-op / unknown target. The library's
@@ -4586,6 +4597,8 @@ final class AppViewModel: ObservableObject {
         toggleProtection()
     }
 
+    // MARK: - Temporary protection pause
+
     func pauseProtectionTemporarily(for option: ProtectionPauseDuration) {
         pauseProtectionTemporarily(request: option.protectionCommandRequest)
     }
@@ -4661,6 +4674,8 @@ final class AppViewModel: ObservableObject {
             reconcileLiveActivity()
         }
     }
+
+    // MARK: - Live Activity
 
     func reconcileLiveActivity() {
         loadTemporaryProtectionPause()
@@ -4839,6 +4854,8 @@ final class AppViewModel: ObservableObject {
         }
         #endif
     }
+
+    // MARK: - Onboarding
 
     func installLocalVPNProfileForOnboarding() async -> Bool {
         guard protectionActionOrchestrator.claim(.installProfile) else {
@@ -5158,6 +5175,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Resolver settings
+
     func setResolver(_ preset: DNSResolverPreset) {
         guard configuration.resolverPresetID != preset.id else {
             return
@@ -5360,6 +5379,8 @@ final class AppViewModel: ObservableObject {
             vpnMessageIsError = true
         }
     }
+
+    // MARK: - QA / admin tooling
 
     #if DEBUG || LAVA_QA_TOOLS
     func applyHostedQAProbeSet() {
@@ -5670,6 +5691,8 @@ final class AppViewModel: ObservableObject {
 
     #endif
 
+    // MARK: - Diagnostics & local log export
+
     func clearDiagnostics() {
         clearAllLocalLogs()
     }
@@ -5971,6 +5994,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Account & sign-in
+
     func beginSignInWithApple() {
         Task {
             accountSignInProviderInProgress = .apple
@@ -6085,6 +6110,8 @@ final class AppViewModel: ObservableObject {
     /// Step 1 of passkey setup: create the passkey (first authenticator ceremony) and confirm it
     /// supports PRF. The PRF output is captured separately in `validateBackupPasskey()` so the two
     /// biometric ceremonies are split across explicit UI steps rather than fired back-to-back.
+    // MARK: - Encrypted backups
+
     func registerBackupPasskey() async throws {
         guard let session = try await accountAuthService.refreshCurrentSession() else {
             accountAuthState = accountAuthService.state
@@ -6694,6 +6721,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Bug reports & rage shake
+
     func refreshReports() {
         refreshDiagnostics()
         refreshTunnelHealth()
@@ -6837,6 +6866,8 @@ final class AppViewModel: ObservableObject {
         await requestTunnelHealthFlush()
         refreshTunnelHealth(force: true)
     }
+
+    // MARK: - Blocklist catalog sync
 
     func syncCatalog(isBackgroundRefresh: Bool = false) async {
         if let catalogSyncTask {
@@ -8034,6 +8065,8 @@ final class AppViewModel: ObservableObject {
         #endif
     }
 
+    // MARK: - Warm artifact preparation & publish
+
     private func currentSnapshot() -> FilterSnapshot {
         configuration.filterSnapshot(
             blockRules: blockRules,
@@ -8453,6 +8486,8 @@ final class AppViewModel: ObservableObject {
 
         await reportProgress(FilterPreparationProgressUpdate(progress: progress, phase: phase))
     }
+
+    // MARK: - Protection toggle & VPN lifecycle
 
     private func enableProtection(
         logUserAction: Bool = true,
@@ -9249,6 +9284,8 @@ final class AppViewModel: ObservableObject {
         diagnostics = store
         try? DiagnosticsPersistence.save(store, to: diagnosticsURL)
     }
+
+    // MARK: - LavaGuard progress
 
     private func synchronizeLavaGuardProgress(currentStatus: NEVPNStatus) {
         guard configuration.keepLavaGuardProgress else {
@@ -10258,7 +10295,16 @@ final class AppViewModel: ObservableObject {
     /// — this has no stale window and never affects a switch; a wrong read just shows/suppresses one banner.
     func setAppForegroundActive(_ active: Bool) {
         guard !isHeadless else { return }
-        LavaSecAppGroup.sharedDefaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey)
+        let defaults = LavaSecAppGroup.sharedDefaults
+        defaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey)
+        if active {
+            // Pin the language the app UI is CURRENTLY resolved to (honoring any iOS per-app language
+            // override) so the App Intents extension and NE tunnel — separate processes that don't inherit
+            // that override — localize their notifications in the SAME language as the app, not the system
+            // language. Refreshed on every foreground so a language change in iOS Settings takes effect on
+            // the user's next return to the app.
+            LavaNotificationLanguage.publish(LavaNotificationLanguage.currentAppLocalization(), to: defaults)
+        }
     }
 
     /// Foreground-only: apply any pending Focus switch recorded by the headless path. Run on appear, on
@@ -10531,6 +10577,8 @@ final class AppViewModel: ObservableObject {
     // nudgeForegroundReconcile, performHeadlessFocusFilterSwitch, warmSnapshotStillReusableAgainstCachedCatalog)
     // was relocated to LavaSecCore.HeadlessFocusFilterSwitchEngine (LAV-100 Phase 4) so it can run in the
     // App Intents extension with no AppViewModel. The foreground reconcile + persist paths below STAY here.
+
+    // MARK: - Shared-state persistence funnels
 
     @discardableResult
     private func persistSharedState(
@@ -11068,6 +11116,8 @@ final class AppViewModel: ObservableObject {
     private func loadLocalEncryptedBackupEnvelope() -> ZeroKnowledgeBackupEnvelope? {
         backupEnvelopeStore.loadEnvelope()
     }
+
+    // MARK: - Tunnel health & messaging
 
     private func notifyTunnelSnapshotUpdated(operationID: LatencyOperationID? = nil) async {
         await sendTunnelMessage(

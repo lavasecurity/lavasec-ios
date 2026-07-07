@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class ResolverOrchestratorTests: XCTestCase {
     private let query = Data([0x12, 0x34, 0x01, 0x00, 0x00, 0x01])

@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
+@testable import LavaSecDNS
 
 /// SEC-1 connect-time peer-IP validation. The blocklist source fetcher resolves each host
 /// ONCE, refuses unless every resolved address is public, and pins the connection to a

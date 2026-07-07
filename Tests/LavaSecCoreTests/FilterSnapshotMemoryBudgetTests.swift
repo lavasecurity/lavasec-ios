@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class FilterSnapshotMemoryBudgetTests: XCTestCase {
     func testMaxFilterRuleCountMatchesBudgetFormulaAndHonorsAMillionPlus() {

@@ -1,5 +1,6 @@
 import XCTest
 import LavaSecCore
+import LavaSecKit
 
 /// Phase 1 of the design-system foundation: spacing/radius/danger tokens and the
 /// `LavaTier` depth-semantics vocabulary. These pin the token contract so a later

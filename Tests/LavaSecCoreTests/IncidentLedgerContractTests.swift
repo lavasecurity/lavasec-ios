@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// REL-7: the incident-ledger row shape is hand-mirrored between this client
 /// (`IncidentLedgerRecord`) and the Cloudflare worker (`sanitizeIncidentLedgerEntry`). Both

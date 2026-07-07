@@ -365,6 +365,61 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
     }
 
+    func testWakeCaptureRetryHonoursExhaustionCooldownOnChronicallyMaskedNetwork() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let scheduleBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func scheduleDeviceDNSCaptureRetryIfNeeded",
+            endingBefore: "private func armDeviceDNSCaptureRetry"
+        )
+        let retryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func runDeviceDNSCaptureRetry",
+            endingBefore: "private func cancelDeviceDNSCaptureRetry"
+        )
+
+        // UR-48 follow-up log: a sleep/wake-thrashing device (median 5 s wake gap)
+        // restarted the full 5x1 s masked capture-retry cycle on every wake — ~1,500
+        // futile reads + log appends over ~4.7 h, 108 exhaustions, zero recoveries.
+        // A wake-reason restart must honour the exhaustion cooldown; the wake path's
+        // one-shot re-read still samples the network every wake.
+        XCTAssertTrue(
+            scheduleBlock.contains("DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake("),
+            "Wake-triggered retry-cycle restarts must consult the exhaustion cooldown policy."
+        )
+        XCTAssertTrue(
+            scheduleBlock.contains("if reason == \"wake\" {"),
+            "Only the wake reason is cooldown-gated; every other reason means a real change."
+        )
+        XCTAssertTrue(
+            scheduleBlock.contains("deviceDNSCaptureRetryLastMaskedExhaustionAt = nil"),
+            "A non-wake schedule reason (network-path-changed) must clear the exhaustion stamp so a real change always retries."
+        )
+        XCTAssertTrue(
+            scheduleBlock.contains("event: \"device-dns-capture-retry-suppressed\""),
+            "The first suppressed wake after an exhaustion must stay observable in the device log."
+        )
+
+        // The stamp is set exactly at masked exhaustion and cleared on the first
+        // non-empty capture (the mask lifted — future wakes may retry immediately).
+        XCTAssertTrue(
+            retryBlock.contains("deviceDNSCaptureRetryLastMaskedExhaustionAt = Date()"),
+            "Masked exhaustion must stamp the cooldown."
+        )
+        let recaptureRange = try XCTUnwrap(
+            retryBlock.range(of: "if !captured.isEmpty {"),
+            "Expected the non-empty-capture branch in runDeviceDNSCaptureRetry."
+        )
+        let clearRange = try XCTUnwrap(
+            retryBlock.range(of: "deviceDNSCaptureRetryLastMaskedExhaustionAt = nil"),
+            "A non-empty capture must clear the exhaustion stamp."
+        )
+        XCTAssertTrue(
+            recaptureRange.lowerBound < clearRange.lowerBound,
+            "The stamp clear must live in the non-empty-capture branch."
+        )
+    }
+
     func testDeviceDNSRecaptureRestartIsGatedAndProductiveCreditIsPersisted() throws {
         let source = try readSource(.packetTunnelProvider)
 
@@ -2614,6 +2669,121 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             refreshConfigIndex,
             replaceSnapshotIndex,
             "Snapshot reloads must apply config before replacing runtime snapshots so DNS transport state matches the newest config."
+        )
+    }
+
+    func testReloadNoOpGateAcceptsResidentCompiledFromIdenticalInputs() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let gateBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func residentSnapshotSatisfiesReload",
+            endingBefore: "private func readableArtifactStore"
+        )
+
+        // UR-48 follow-up log: with the artifact store lagging the cached catalog
+        // (reuse:inputs miss on every read), the disk-only no-op gate could never
+        // pass, so every appMessage reload repeated the identical in-extension
+        // streaming compile — observed 6.9 s / 356k rules per reload. A resident
+        // compiled from EXACTLY the inputs the reload would compile from must
+        // satisfy the reload without any on-disk artifact.
+        XCTAssertTrue(
+            gateBlock.contains(
+                "residentIdentity.hasSameSnapshotInputs(\n               as: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: cachedCatalog)\n           )"
+            ),
+            "The no-op gate must compare the resident identity against the identity this reload would stamp (same construction as loadCompiledSnapshot)."
+        )
+        // The resident-identity branch must mirror the disk gate's transport check —
+        // hasSameSnapshotInputs deliberately excludes resolverTransport.
+        XCTAssertTrue(
+            gateBlock.contains("residentIdentity.resolverTransport == configuration.resolverPreset.transport"),
+            "A transport change must fall through to a full reload, matching the disk-summary gate."
+        )
+        // Fail-closed residents commit with a nil identity; a nil identity must never
+        // satisfy a reload (recovery reloads must run).
+        XCTAssertTrue(
+            gateBlock.contains("guard let residentIdentity = currentResidentSnapshotIdentity() else {\n            return false\n        }"),
+            "A missing resident identity (fail-closed resident) must never no-op a reload."
+        )
+        // The disk-artifact path is preserved for residents adopted from disk whose
+        // inputs legitimately lag the catalog (e.g. after a pointer publish).
+        XCTAssertTrue(
+            gateBlock.contains("readCompactSnapshotSummary(configuration: configuration)"),
+            "The disk-summary reuse check must remain as the second gate."
+        )
+    }
+
+    func testTunnelRetainsCompiledArtifactAndFastResumesFromIt() throws {
+        let source = try readSource(.packetTunnelProvider)
+
+        // UR-48 root cause: when the app-published artifact store lags the cached
+        // catalog, EVERY tunnel start strict-missed fast-resume, served the transient
+        // fail-closed bootstrap window, and repeated a ~7 s streaming recompile. The
+        // tunnel now retains its own successful compile at a stable path and every
+        // artifact reader accepts it as a LAST, identity-gated candidate.
+
+        // Write side: the in-extension compile passes the retained path into the
+        // compiler (retention is atomic + best-effort inside the compiler).
+        let compileBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func loadCompiledSnapshot(",
+            endingBefore: "private func reusableCompactSnapshot("
+        )
+        XCTAssertTrue(
+            compileBlock.contains("retainedArtifactURL: self?.tunnelCompiledArtifactStore?.compactSnapshotURL"),
+            "The in-extension compile must retain its artifact for the next cold start."
+        )
+        XCTAssertTrue(
+            compileBlock.contains("if let tunnelCompiledStore = retainedTunnelCompiledArtifactStoreIfPresent() {"),
+            "The async load must accept the retained compile as a candidate store."
+        )
+
+        // Read side: cold-start fast-resume tries [resolved, root, tunnel-compiled];
+        // the retained compile is LAST so app-published stores keep precedence.
+        let bootstrapBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func bootstrapResidentSnapshotFromDisk",
+            endingBefore: "private func reusablePreparedSnapshot"
+        )
+        let rootAppendRange = try XCTUnwrap(
+            bootstrapBlock.range(of: "artifactStores.append((store: rootStore, route: \"root\"))"),
+            "Expected the root store append in bootstrapResidentSnapshotFromDisk."
+        )
+        let tunnelAppendRange = try XCTUnwrap(
+            bootstrapBlock.range(of: "artifactStores.append((store: tunnelCompiledStore, route: \"tunnel-compiled\"))"),
+            "Cold-start fast-resume must include the retained tunnel compile."
+        )
+        XCTAssertTrue(
+            rootAppendRange.lowerBound < tunnelAppendRange.lowerBound,
+            "The retained tunnel compile must be the LAST fast-resume candidate."
+        )
+
+        // The no-op / over-budget gates must judge the same candidate set the load
+        // adopts, so the summary reader includes the retained store too.
+        let summaryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func readCompactSnapshotSummary",
+            endingBefore: "private func replaceSnapshotResolver"
+        )
+        XCTAssertTrue(
+            summaryBlock.contains("if let tunnelCompiledStore = retainedTunnelCompiledArtifactStoreIfPresent() {"),
+            "readCompactSnapshotSummary must stay consistent with loadCompiledSnapshot's candidates."
+        )
+
+        // The read-side accessor is presence-gated so devices that never in-extension
+        // compile add no per-start store-miss logging, and the retained artifact lives
+        // under the catalog cache dir — never inside the app-owned store/pointer layout.
+        let accessorBlock = try sourceBlock(
+            in: source,
+            startingAt: "private static let tunnelCompiledArtifactDirectoryName",
+            endingBefore: "private var configurationURL"
+        )
+        XCTAssertTrue(
+            accessorBlock.contains("FileManager.default.fileExists(atPath: store.compactSnapshotURL.path)"),
+            "The retained store must only join the candidate list once a compile was actually retained."
+        )
+        XCTAssertTrue(
+            accessorBlock.contains("catalogCacheURL.map {"),
+            "The retained artifact must live under the catalog cache dir, outside the app-owned artifact store layout."
         )
     }
 

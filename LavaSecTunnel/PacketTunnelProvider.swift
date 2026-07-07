@@ -7,6 +7,8 @@ import Security
 @preconcurrency import UserNotifications
 import LavaSecCore
 
+// MARK: - Completion & helper types
+
 private struct TunnelCompletion: @unchecked Sendable {
     let handler: () -> Void
 
@@ -382,6 +384,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // empty (masked) and superseded on the next network change / wake / reset.
     private var deviceDNSCaptureRetryWorkItem: DispatchWorkItem?
     private var deviceDNSCaptureRetryAttempts = 0
+    // Stamped when a full capture-retry cycle exhausts with the capture still masked, so
+    // wake-triggered restarts of the cycle honour a cooldown on a chronically-masked
+    // network (UR-48 follow-up log: median 5 s wake cadence restarted the 5x1 s cycle
+    // continuously — ~1,500 masked reads over ~4.7 h with 108 exhaustions and zero
+    // recoveries). Cleared on any non-wake schedule reason (a real network change) and
+    // on the first non-empty capture. dnsStateQueue-confined.
+    private var deviceDNSCaptureRetryLastMaskedExhaustionAt: Date?
+    private var deviceDNSCaptureRetryDidLogWakeSuppression = false
     private var networkKind: TunnelNetworkKind = .unknown
     private var lastConfigurationRefreshAt = Date.distantPast
     private var lastProtectionPauseStateRefreshAt = Date.distantPast
@@ -562,6 +572,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var lastQAConnectivitySeverity: ProtectionConnectivitySeverity = .healthy
     private var lastQAConnectivityLogAt = Date.distantPast
     #endif
+
+    // MARK: - Tunnel lifecycle (start / stop / wake)
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         let operationID = Self.latencyOperationID(from: options)
@@ -952,6 +964,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         )
     }
 
+    // MARK: - App messaging (IPC)
+
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         guard let providerMessage = LavaSecProviderMessageCodec.decode(messageData) else {
             let completion = AppMessageCompletion(handler: completionHandler)
@@ -1152,6 +1166,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
     #endif
 
+    // MARK: - Packet read loop & DNS request handling
+
     private func readPackets() {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self else {
@@ -1315,6 +1331,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // that is still A. The authoritative apply path
     // (`refreshDNSRuntimeAfterSnapshotOrConfigurationChange`, invoked from a snapshot
     // reload) is unaffected — it resets the runtime to the new identifier directly.
+    // MARK: - Upstream forwarding & resolution pipeline
+
     private func forward(
         _ request: IPv4UDPDNSPacket,
         protocolNumber: NSNumber,
@@ -1586,6 +1604,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // synchronous plain/device resolvers, and the backoff gate. Per-endpoint
     // debug logging and idle-reset-on-failure live here so the orchestrator
     // stays policy-pure.
+    // MARK: - Resolver runtime & transports (device / plain / DoH / DoT / DoQ)
+
     private func makeResolverExecutors() -> ResolverOrchestrator.Executors {
         let dohResolver = dohResolver
         let dotResolver = dotResolver
@@ -2027,6 +2047,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         prewarmResolverBootstrapIfNeeded()
         scheduleResolverSmokeProbeIfNeeded(reason: "network-settled")
     }
+
+    // MARK: - Encrypted-resolver bootstrap (endpoint hostname resolution)
 
     private func dohEndpointResolvingBootstrapIfNeeded(_ endpoint: DNSOverHTTPSEndpoint) -> DNSOverHTTPSEndpoint {
         // A built-in DoH endpoint ships with bootstrap IPs; a user-typed custom
@@ -2539,6 +2561,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// idle radio energy WITHOUT widening the dead-resolver window is widening this
     /// timer's leeway — measure the coalesced idle cost on-device before changing
     /// even that. NRG-3a already captured the main (live-traffic) win.)
+    // MARK: - Periodic resolver smoke probe
+
     private func startPeriodicResolverSmokeProbe() {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -2722,6 +2746,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         guard onDiskGeneration > lastObservedConfigurationGeneration else { return }
         requestSnapshotReload(reason: "focus-config-poll", force: true)
     }
+
+    // MARK: - Fallback recovery & wedge recovery probes
 
     private func scheduleFallbackRecoverySmokeProbeIfNeeded() {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
@@ -2990,6 +3016,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // and the path is satisfied; superseded on the next handoff/wake/lifecycle
     // reset. A fully-masked network exhausts the cap and falls through to the
     // wedge-recovery probe + on-demand-gated self-reconnect, which are unchanged.
+    // MARK: - Device-DNS capture retry
+
     private func scheduleDeviceDNSCaptureRetryIfNeeded(reason: String) {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -3002,6 +3030,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         guard health.networkPathIsSatisfied, currentConfigurationDependsOnDeviceDNS() else {
             return
+        }
+
+        // A wake alone is not evidence the mask lifted: the one-shot wake re-read
+        // (refreshDeviceDNSResolverAddressesOnDNSQueue) already samples the current
+        // network each wake, so restarting the full retry cycle within the cooldown
+        // of an exhausted-still-masked cycle only repeats reads that just failed.
+        // Any non-wake reason means a real change — clear the cooldown and retry.
+        if reason == "wake" {
+            guard DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: deviceDNSCaptureRetryLastMaskedExhaustionAt,
+                now: Date()
+            ) else {
+                if !deviceDNSCaptureRetryDidLogWakeSuppression {
+                    deviceDNSCaptureRetryDidLogWakeSuppression = true
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-suppressed", details: [
+                        "reason": reason
+                    ])
+                }
+                return
+            }
+        } else {
+            deviceDNSCaptureRetryLastMaskedExhaustionAt = nil
+            deviceDNSCaptureRetryDidLogWakeSuppression = false
         }
 
         deviceDNSCaptureRetryAttempts = 0
@@ -3055,6 +3106,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // them (mirrors the settle path) and fire a confirming smoke probe; a
             // genuine recovery then clears the wedge marker. Either way, stop
             // retrying — the capture is no longer masked.
+            deviceDNSCaptureRetryLastMaskedExhaustionAt = nil
+            deviceDNSCaptureRetryDidLogWakeSuppression = false
             if deviceDNSResolverAddresses != previousAddresses {
                 let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
                 let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
@@ -3108,6 +3161,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 preserveOnEmptyCapture: !routesToEncryptedFallback
             )
             let droppedStale = deviceDNSResolverAddresses != previousAddresses
+            deviceDNSCaptureRetryLastMaskedExhaustionAt = Date()
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-exhausted", details: [
                 "reason": reason,
                 "attempts": "\(deviceDNSCaptureRetryAttempts)",
@@ -3171,6 +3225,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return resolverConfiguration.transport == .deviceDNS
             || currentAppConfiguration().fallbackToDeviceDNS
     }
+
+    // MARK: - Smoke probe scheduling & result application
 
     private func scheduleResolverSmokeProbeIfNeeded(reason: String) {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
@@ -3687,6 +3743,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         ])
     }
 
+    // MARK: - Health reset & network path monitoring
+
     private func resetHealth() {
         dnsStateQueue.async { [weak self] in
             guard let self else {
@@ -3994,6 +4052,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // MARK: - Startup shared state & bootstrap snapshot
+
     private func loadInitialSharedState() -> Bool {
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadInitialSharedState-begin")
 
@@ -4134,6 +4194,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         ])
         return shouldBeginTransientBootstrapDNSWait
     }
+
+    // MARK: - Transient bootstrap DNS wait
 
     private func enqueueTransientBootstrapDNSRequestIfNeeded(
         request: IPv4UDPDNSPacket,
@@ -4401,6 +4463,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         transientBootstrapDNSWaitPendingResponses.removeAll(keepingCapacity: true)
         return pendingResponses
     }
+
+    // MARK: - Diagnostics & upstream health recording
 
     private func recordDiagnostic(
         domain: String,
@@ -4943,6 +5007,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         healthPersistence.flush(force: force)
     }
 
+    // MARK: - Protection notifications & network activity log
+
     private func scheduleProtectionNotificationIfNeeded(now: Date = Date()) {
         let defaults = LavaSecAppGroup.sharedDefaults
         LavaSecAppGroup.migrateProtectionNotificationStateIfNeeded(defaults)
@@ -4992,7 +5058,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             for: assessment,
             health: health,
             history: history,
-            now: now
+            now: now,
+            languageCode: LavaNotificationLanguage.pinnedCode(in: defaults)
         ) else {
             return
         }
@@ -5228,6 +5295,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // process, so attempt history is persisted (in the app group) and read back on
     // the next launch for the cross-restart backoff. Only fires when protection is
     // enabled — Connect-On-Demand is what brings the tunnel back after the cancel.
+    // MARK: - Self-reconnect & guarded teardown
+
     private func selfReconnectIfPolicyAllows(assessment: ProtectionConnectivityAssessment, now: Date) {
         guard !hasRequestedSelfReconnect else {
             return
@@ -5923,6 +5992,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         diagnosticsPersistence.flush(force: force)
     }
 
+    // MARK: - Configuration & device-DNS state accessors
+
     private func currentNetworkKind() -> TunnelNetworkKind {
         if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
             return networkKind
@@ -6152,6 +6223,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         ])
         #endif
     }
+
+    // MARK: - Snapshot reload orchestration
 
     private func requestSnapshotReload(reason: String, force: Bool = false, operationID: LatencyOperationID? = nil) {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
@@ -6569,6 +6642,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // MARK: - Temporary protection pause / resume
+
     private func scheduleProtectionPauseResumeIfNeeded(reason: String) {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -6857,6 +6932,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     )
 
     @discardableResult
+    // MARK: - Resident snapshot state & DNS runtime resets
+
     private func replaceSnapshot(
         _ newSnapshot: any FilterRuntimeSnapshot,
         protectionPolicySnapshot newProtectionPolicySnapshot: (any FilterRuntimeSnapshot)? = nil,
@@ -6960,9 +7037,31 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // the current configuration — i.e. the reload is a no-op and the
     // multi-megabyte decode (and its 2x-resident memory peak) can be skipped.
     private func residentSnapshotSatisfiesReload(configuration: AppConfiguration) -> Bool {
-        guard let residentIdentity = currentResidentSnapshotIdentity(),
-              let summary = readCompactSnapshotSummary(configuration: configuration)
-        else {
+        guard let residentIdentity = currentResidentSnapshotIdentity() else {
+            return false
+        }
+
+        // A resident snapshot compiled from EXACTLY the inputs this reload would compile
+        // from (same configuration inputs + same cached-catalog source versions/hashes)
+        // already satisfies the reload even when NO on-disk artifact is reusable — the
+        // stale-store state UR-48 exposed, where the artifact store lags the cached
+        // catalog and the tunnel compiled in-extension. Identity is stamped from
+        // (configuration, cachedCatalog) at compile, so identical inputs reproduce the
+        // resident byte-for-byte; without this gate every appMessage reload repeats the
+        // same streaming compile (observed 6.9 s / 356 k rules on device) and its
+        // compile-peak for an identical result. A fail-closed resident commits with a
+        // nil identity and a last-known-good resident carries stale source hashes, so
+        // neither can satisfy this gate and recovery reloads still run.
+        if !configuration.enabledBlocklistIDs.isEmpty,
+           residentIdentity.resolverTransport == configuration.resolverPreset.transport,
+           let cachedCatalog = loadCachedCatalogMetadata(),
+           residentIdentity.hasSameSnapshotInputs(
+               as: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: cachedCatalog)
+           ) {
+            return true
+        }
+
+        guard let summary = readCompactSnapshotSummary(configuration: configuration) else {
             return false
         }
 
@@ -7022,9 +7121,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 stores.append(rootStore)
             }
         }
+        // Keep this reader consistent with loadCompiledSnapshot's candidate set: the
+        // no-op and over-budget gates must judge the same artifact the load would
+        // actually adopt, including the tunnel's own retained compile.
+        if let tunnelCompiledStore = retainedTunnelCompiledArtifactStoreIfPresent() {
+            stores.append(tunnelCompiledStore)
+        }
 
         // Return the summary the tunnel would actually load for this configuration: the
-        // first reusable one across [pointer-resolved, root]. A stale shadow (a pointer
+        // first reusable one across [pointer-resolved, root, tunnel-compiled]. A stale shadow (a pointer
         // lagging root, or a generation that no longer covers the config) must NOT drive
         // the reload no-op / over-budget gates — otherwise a partial-publish or rollback
         // could fail-closed on a stale over-budget artifact while root is fresh and fine.
@@ -7247,6 +7352,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // MARK: - Filter decision
+
     private func filterDecision(for domain: String) -> FilterDecision {
         snapshotQueue.sync {
             snapshot.decision(for: domain)
@@ -7308,6 +7415,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return try? JSONDecoder().decode(AppConfiguration.self, from: data)
     }
 
+    // MARK: - Snapshot compile, artifact stores & fast-resume
+
     private func loadCompiledSnapshot(
         configuration: AppConfiguration,
         generation: UInt64
@@ -7337,6 +7446,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             if artifactStores.first?.store.directoryURL != rootStore.directoryURL {
                 artifactStores.append((store: rootStore, route: "root"))
             }
+        }
+        // The tunnel's own retained compile is the LAST candidate: identical identity/
+        // budget gating to the app stores (reusableCompactSnapshot), it only wins when
+        // the app-published stores miss — the stale-store state where the only
+        // alternative is repeating the streaming compile. Being in this list also makes
+        // it a last-known-good candidate for serveLastKnownGoodOrFailClosed, which is
+        // deliberate: it is the user's own previously-compiled, config-exact rules, and
+        // canServeAsLastKnownGood applies the same never-fail-open gates to it.
+        if let tunnelCompiledStore = retainedTunnelCompiledArtifactStoreIfPresent() {
+            artifactStores.append((store: tunnelCompiledStore, route: "tunnel-compiled"))
         }
 
         for (artifactStore, route) in artifactStores {
@@ -7473,12 +7592,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 guard self?.isCurrentSnapshotReloadGeneration(generation) ?? false else {
                     throw SnapshotCompileSuperseded()
                 }
+                // Retain the compiled artifact at the tunnel-compiled path so the NEXT
+                // cold start fast-resumes from this compile instead of repeating it (and
+                // taking the transient fail-closed bootstrap window again). Best-effort
+                // inside the compiler; a superseded compile may briefly retain older
+                // inputs, which every reader rejects via the identity gate until the
+                // winning compile atomically replaces the file.
                 let compiledSnapshot = try await CachedFilterSnapshotCompiler(
                     cacheDirectoryURL: catalogCacheURL
                 ).compile(
                     baseSnapshot: baseSnapshot,
                     configuration: configuration,
-                    stampIdentity: expectedIdentity
+                    stampIdentity: expectedIdentity,
+                    retainedArtifactURL: self?.tunnelCompiledArtifactStore?.compactSnapshotURL
                 )
                 // Post-compile re-check, STILL INSIDE the gate (Codex #213 P1): a reload can be
                 // superseded WHILE this compile runs. Returning the result here would complete
@@ -7677,8 +7803,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let cachedCatalog = loadCachedCatalogMetadata()
         let cap = Self.maxSynchronousBootstrapRuleCount
 
-        // Same [pointer-resolved, root] store order as loadCompiledSnapshot — a stale pointer
-        // must not shadow a fresh root copy.
+        // Same [pointer-resolved, root, tunnel-compiled] store order as
+        // loadCompiledSnapshot — a stale pointer must not shadow a fresh root copy, and
+        // the app-published stores are preferred over the tunnel's own retained compile
+        // (identity gating makes the order correctness-neutral; preference only decides
+        // which equally-reusable copy is decoded).
         var artifactStores: [(store: FilterArtifactStore, route: String)] = []
         if let containerURL = LavaSecAppGroup.containerURL {
             let rootStore = FilterArtifactStore(directoryURL: containerURL)
@@ -7689,6 +7818,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             if artifactStores.first?.store.directoryURL != rootStore.directoryURL {
                 artifactStores.append((store: rootStore, route: "root"))
             }
+        }
+        if let tunnelCompiledStore = retainedTunnelCompiledArtifactStoreIfPresent() {
+            artifactStores.append((store: tunnelCompiledStore, route: "tunnel-compiled"))
         }
 
         // Cheap, skip-only gate BEFORE any reuse/LKG read (which call readSummary). Two reasons
@@ -7882,6 +8014,41 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         )
     }
 
+    // The tunnel's own last successful in-extension compile, retained by
+    // StreamingCompactSnapshotCompiler at a stable path so a later cold start can
+    // fast-resume from it when the app-published artifact store lags the cached
+    // catalog. UR-48 field log: the app had not republished after a catalog rotation,
+    // so EVERY tunnel start strict-missed both app stores (root manifest-missing,
+    // resolved reuse:inputs), served the transient fail-closed bootstrap, and repeated
+    // a ~7 s / 356k-rule recompile — the outage window #294 bounds and this removes.
+    // Read-gated exactly like the app's stores (identity + budget + sync cap), so a
+    // stale retained compile is rejected, never served. Lives under the catalog cache
+    // dir — OUTSIDE the app-owned store/pointer layout, so app publishes and versioned
+    // GC never race it — and is a FilterArtifactStore only to reuse compactSnapshotURL
+    // naming and the shared read helpers (its manifest/prepared slots are never written).
+    private static let tunnelCompiledArtifactDirectoryName = "tunnel-compiled-artifact"
+
+    private var tunnelCompiledArtifactStore: FilterArtifactStore? {
+        catalogCacheURL.map {
+            FilterArtifactStore(directoryURL: $0.appendingPathComponent(
+                Self.tunnelCompiledArtifactDirectoryName,
+                isDirectory: true
+            ))
+        }
+    }
+
+    // Read-side accessor: nil until a compile has actually been retained, so devices
+    // that never in-extension compile (the healthy fast-resume path) add no per-start
+    // store-miss log lines or stat reads for a file that has never existed.
+    private func retainedTunnelCompiledArtifactStoreIfPresent() -> FilterArtifactStore? {
+        guard let store = tunnelCompiledArtifactStore,
+              FileManager.default.fileExists(atPath: store.compactSnapshotURL.path)
+        else {
+            return nil
+        }
+        return store
+    }
+
     private var configurationURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.configurationFilename)
     }
@@ -7908,6 +8075,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return attributes[.modificationDate] as? Date
     }
 }
+
+// MARK: - Private DNS wire, socket & factory types
 
 private struct IPv4UDPDNSPacket: Sendable {
     let sourceAddress: Data

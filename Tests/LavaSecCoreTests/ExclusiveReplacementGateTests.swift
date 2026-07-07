@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Behavioural harness for the configuration-replacement supersession invariant.
 ///

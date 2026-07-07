@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class ZeroKnowledgeBackupEnvelopePRFTests: XCTestCase {
     private let phrase = "mavi nopa rytu seko hula pemi davo ciny"

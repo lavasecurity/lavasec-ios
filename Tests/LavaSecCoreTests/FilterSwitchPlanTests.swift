@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class FilterSwitchPlanTests: XCTestCase {
     private func config(generation: Int = 7) -> AppConfiguration {

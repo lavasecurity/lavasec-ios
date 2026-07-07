@@ -224,12 +224,12 @@ for (const catalogPath of catalogs) {
   }
 }
 
-// LavaSecCore ships widget/Live-Activity/tunnel-notification strings as legacy .strings files
+// LavaSecKit ships widget/Live-Activity/tunnel-notification strings as legacy .strings files
 // (loaded via Bundle.module), one .lproj per locale. Those catalogs live outside the two app
 // xcstrings checked above, so without this pass a core key added EN-only would clear every gate.
 // Enforce key-set parity against the English base + flag values byte-identical to English as
 // likely-untranslated, reusing allowedUntranslatedValues so intentional brand/format strings pass.
-const coreResourcesDir = path.join(iosRoot, "Sources", "LavaSecCore", "Resources");
+const coreResourcesDir = path.join(iosRoot, "Sources", "LavaSecKit", "Resources");
 // Grammar: "<key>" = "<value>"; — backslash escapes are kept intact so an escaped quote inside a
 // value doesn't prematurely close the match. Comment/blank lines simply don't match.
 const stringsEntryPattern = /^\s*"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/;
@@ -249,7 +249,7 @@ const coreStringsByLocale = new Map();
 for (const locale of requiredLocales) {
   const filePath = path.join(coreResourcesDir, `${locale}.lproj`, "Localizable.strings");
   if (!fs.existsSync(filePath)) {
-    fail(`LavaSecCore ${locale}.lproj/Localizable.strings is missing`);
+    fail(`LavaSecKit ${locale}.lproj/Localizable.strings is missing`);
     continue;
   }
   coreStringsByLocale.set(locale, parseStringsFile(filePath));
@@ -265,19 +265,19 @@ if (coreBase) {
 
     for (const key of coreBase.keys()) {
       if (!entries.has(key)) {
-        fail(`LavaSecCore ${locale}.lproj: missing key ${key}`);
+        fail(`LavaSecKit ${locale}.lproj: missing key ${key}`);
       }
     }
     for (const key of entries.keys()) {
       if (!coreBase.has(key)) {
-        fail(`LavaSecCore ${locale}.lproj: extra key not in English base: ${key}`);
+        fail(`LavaSecKit ${locale}.lproj: extra key not in English base: ${key}`);
       }
     }
 
     for (const [key, value] of entries) {
       const english = coreBase.get(key);
       if (english !== undefined && value === english && !allowedUntranslatedValues.has(english)) {
-        fail(`LavaSecCore ${locale}.lproj: ${key} still matches English source`);
+        fail(`LavaSecKit ${locale}.lproj: ${key} still matches English source`);
       }
     }
   }

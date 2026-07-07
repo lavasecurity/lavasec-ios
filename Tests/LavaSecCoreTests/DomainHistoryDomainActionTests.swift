@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DomainHistoryDomainActionTests: XCTestCase {
     func testAddingBlockedDomainRemovesSameAllowedDomain() throws {

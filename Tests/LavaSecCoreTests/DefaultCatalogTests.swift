@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DefaultCatalogTests: XCTestCase {
     func testCuratedSourcesHaveUniqueIDs() {

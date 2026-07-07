@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Locks the core security invariant of the deeplink system: a deeplink can
 /// `navigate` or `stage` (open a review one step before a change), but can never

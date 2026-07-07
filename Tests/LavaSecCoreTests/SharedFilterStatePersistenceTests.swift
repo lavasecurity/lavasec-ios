@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class SharedFilterStatePersistenceTests: XCTestCase {
     private func makeURLs() -> (config: URL, library: URL) {

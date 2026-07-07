@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DebouncedPersistenceControllerTests: XCTestCase {
     /// Records scheduled work so tests fire it deterministically instead of

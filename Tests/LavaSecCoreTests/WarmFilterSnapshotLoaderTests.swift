@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class WarmFilterSnapshotLoaderTests: XCTestCase {
     /// A PLUS configuration (isPaid → allowsCustomBlocklists) with an ENABLED custom list: its bytes are in

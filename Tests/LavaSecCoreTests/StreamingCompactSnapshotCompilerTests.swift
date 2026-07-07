@@ -1,5 +1,7 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
+@testable import LavaSecKit
 
 /// Covers the in-extension streaming compile (`StreamingCompactSnapshotCompiler` via the
 /// `CachedFilterSnapshotCompiler` facade) and the shared on-disk writer

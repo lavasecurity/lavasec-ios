@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class FilterEditDraftEditorTests: XCTestCase {
     private func draft(blocked: Set<String> = [], allowed: Set<String> = []) -> FilterEditDraft {

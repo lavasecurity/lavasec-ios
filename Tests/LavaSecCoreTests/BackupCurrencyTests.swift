@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Behavioural harness for the encrypted-backup currency invariants: which changes re-seal a
 /// backup (and clear its "uploaded" marker) and which must NOT. These exercise the pure logic

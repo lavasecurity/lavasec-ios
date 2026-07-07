@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class TunnelSelfReconnectPolicyTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 100_000)

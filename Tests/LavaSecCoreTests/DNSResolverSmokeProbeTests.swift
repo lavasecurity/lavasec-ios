@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DNSResolverSmokeProbeTests: XCTestCase {
     func testIndicatesResolverFailureIsSliceSafeForNonZeroStartIndexData() {

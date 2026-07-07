@@ -75,38 +75,65 @@ enum SourceFile: String, CaseIterable {
     case softShieldGuardian = "Shared/SoftShieldGuardian.swift"
 
     // MARK: Sources/LavaSecCore
-    case appConfiguration = "Sources/LavaSecCore/AppConfiguration.swift"
-    case backupConfigurationPayload = "Sources/LavaSecCore/BackupConfigurationPayload.swift"
-    case blocklistCatalogSync = "Sources/LavaSecCore/BlocklistCatalogSync.swift"
-    case dnsResponseCache = "Sources/LavaSecCore/DNSResponseCache.swift"
-    case doHTransport = "Sources/LavaSecCore/DoHTransport.swift"
-    case doQTransport = "Sources/LavaSecCore/DoQTransport.swift"
-    case doTTransport = "Sources/LavaSecCore/DoTTransport.swift"
-    case encryptedBackupState = "Sources/LavaSecCore/EncryptedBackupState.swift"
-    case filterArtifactStoreVersioned = "Sources/LavaSecCore/FilterArtifactStoreVersioned.swift"
-    case filterSnapshot = "Sources/LavaSecCore/FilterSnapshot.swift"
-    case filterSnapshotPreparationService = "Sources/LavaSecCore/FilterSnapshotPreparationService.swift"
-    case focusFilterSwitchCoordination = "Sources/LavaSecCore/FocusFilterSwitchCoordination.swift"
-    case headlessFocusFilterSwitchEngine = "Sources/LavaSecCore/HeadlessFocusFilterSwitchEngine.swift"
-    case lavaIconSize = "Sources/LavaSecCore/LavaIconSize.swift"
-    case networkActivityLog = "Sources/LavaSecCore/NetworkActivityLog.swift"
-    case pinnedPublicHTTPSFetcher = "Sources/LavaSecCore/PinnedPublicHTTPSFetcher.swift"
-    case protectionConnectivityPolicy = "Sources/LavaSecCore/ProtectionConnectivityPolicy.swift"
-    case rageShakeQA = "Sources/LavaSecCore/RageShakeQA.swift"
-    case resolverOrchestrator = "Sources/LavaSecCore/ResolverOrchestrator.swift"
-    case securityAccessPolicy = "Sources/LavaSecCore/SecurityAccessPolicy.swift"
-    case shareableFilterConfiguration = "Sources/LavaSecCore/ShareableFilterConfiguration.swift"
-    case sharedFilterStatePersistence = "Sources/LavaSecCore/SharedFilterStatePersistence.swift"
-    case tunnelHealthSignal = "Sources/LavaSecCore/TunnelHealthSignal.swift"
-    case tunnelSelfReconnectPolicy = "Sources/LavaSecCore/TunnelSelfReconnectPolicy.swift"
-    case warmFilterSnapshotLoader = "Sources/LavaSecCore/WarmFilterSnapshotLoader.swift"
-    case zeroKnowledgeBackupEnvelope = "Sources/LavaSecCore/ZeroKnowledgeBackupEnvelope.swift"
+    case appConfiguration = "Sources/LavaSecKit/AppConfiguration.swift"
+    case backupConfigurationPayload = "Sources/LavaSecAppServices/BackupConfigurationPayload.swift"
+    case blocklistCatalogSync = "Sources/LavaSecFilterPipeline/BlocklistCatalogSync.swift"
+    case dnsResponseCache = "Sources/LavaSecDNS/DNSResponseCache.swift"
+    case doHTransport = "Sources/LavaSecDNS/DoHTransport.swift"
+    case doQTransport = "Sources/LavaSecDNS/DoQTransport.swift"
+    case doTTransport = "Sources/LavaSecDNS/DoTTransport.swift"
+    case encryptedBackupState = "Sources/LavaSecAppServices/EncryptedBackupState.swift"
+    case filterArtifactStoreVersioned = "Sources/LavaSecFilterPipeline/FilterArtifactStoreVersioned.swift"
+    case filterSnapshot = "Sources/LavaSecKit/FilterSnapshot.swift"
+    case filterSnapshotPreparationService = "Sources/LavaSecFilterPipeline/FilterSnapshotPreparationService.swift"
+    case focusFilterSwitchCoordination = "Sources/LavaSecFilterPipeline/FocusFilterSwitchCoordination.swift"
+    case headlessFocusFilterSwitchEngine = "Sources/LavaSecFilterPipeline/HeadlessFocusFilterSwitchEngine.swift"
+    case lavaIconSize = "Sources/LavaSecKit/LavaIconSize.swift"
+    case networkActivityLog = "Sources/LavaSecKit/NetworkActivityLog.swift"
+    case pinnedPublicHTTPSFetcher = "Sources/LavaSecDNS/PinnedPublicHTTPSFetcher.swift"
+    case protectionConnectivityPolicy = "Sources/LavaSecKit/ProtectionConnectivityPolicy.swift"
+    case rageShakeQA = "Sources/LavaSecAppServices/RageShakeQA.swift"
+    case resolverOrchestrator = "Sources/LavaSecDNS/ResolverOrchestrator.swift"
+    case securityAccessPolicy = "Sources/LavaSecKit/SecurityAccessPolicy.swift"
+    case shareableFilterConfiguration = "Sources/LavaSecKit/ShareableFilterConfiguration.swift"
+    case sharedFilterStatePersistence = "Sources/LavaSecKit/SharedFilterStatePersistence.swift"
+    case tunnelHealthSignal = "Sources/LavaSecKit/TunnelHealthSignal.swift"
+    case tunnelSelfReconnectPolicy = "Sources/LavaSecKit/TunnelSelfReconnectPolicy.swift"
+    case warmFilterSnapshotLoader = "Sources/LavaSecFilterPipeline/WarmFilterSnapshotLoader.swift"
+    case zeroKnowledgeBackupEnvelope = "Sources/LavaSecAppServices/ZeroKnowledgeBackupEnvelope.swift"
 
     // MARK: LavaSec.xcodeproj
     case xcodeProject = "LavaSec.xcodeproj/project.pbxproj"
 
     // MARK: Vendored cross-platform contracts (pinned in contracts.lock)
     case incidentLedgerContract = "contracts/incident-ledger.json"
+
+    // MARK: GitHub workflows
+    case tagReleaseWorkflow = ".github/workflows/tag-release.yml"
+}
+
+extension SourceFile {
+    /// Registered files that exist ONLY in the internal repo: the public export
+    /// (`scripts/export-public-source.sh`) denylists internal release machinery, and the
+    /// public repo runs this same test suite (byte-identical-lanes rule), so pins on these
+    /// files must skip there — visibly via `XCTSkip`, never a silent pass. Where the
+    /// machinery actually lives, the pin still enforces (INV-REL-1).
+    var isInternalOnly: Bool {
+        switch self {
+        case .tagReleaseWorkflow: true
+        default: false
+        }
+    }
+}
+
+/// True when the suite runs inside a public-export tree. Discriminator: the export script
+/// denylists ITSELF, so its absence is definitional for an exported tree — it cannot rot
+/// without the export changing too. In the internal repo the script exists, so internal
+/// runs never skip and a renamed internal-only file still fails the registry self-check.
+var isPublicExportTree: Bool {
+    !FileManager.default.fileExists(
+        atPath: packageRootURL.appendingPathComponent("scripts/export-public-source.sh").path
+    )
 }
 
 /// Package root, derived once from this file's location (Tests/LavaSecCoreTests/…).
@@ -125,11 +152,19 @@ struct SourceIntrospectionFailure: Error, CustomStringConvertible {
     let description: String
 }
 
-/// Reads a registered repo file as UTF-8 text.
+/// Reads a registered repo file as UTF-8 text. Pins on internal-only files (see
+/// `SourceFile.isInternalOnly`) skip in a public-export tree instead of failing.
 func readSource(_ sourceFile: SourceFile) throws -> String {
     do {
         return try String(contentsOf: sourceFileURL(sourceFile), encoding: .utf8)
     } catch {
+        if sourceFile.isInternalOnly, isPublicExportTree {
+            throw XCTSkip("""
+            SourceFile.\(sourceFile) is internal-only (\(sourceFile.rawValue)) and this is \
+            a public-export tree — the pin enforces in the internal repo, where the file \
+            lives.
+            """)
+        }
         throw SourceIntrospectionFailure(description: """
         SourceFile.\(sourceFile) could not be read at \(sourceFile.rawValue) — if the file \
         moved or was renamed, update its rawValue in SourceIntrospectionSupport.swift \
@@ -175,6 +210,10 @@ final class SourceFileRegistryTests: XCTestCase {
     func testEveryRegisteredSourceFileExistsOnDisk() {
         for sourceFile in SourceFile.allCases
         where !FileManager.default.fileExists(atPath: sourceFileURL(sourceFile).path) {
+            // Internal-only entries legitimately don't exist in a public-export tree (the
+            // export denylists internal release machinery). The internal repo still fails
+            // on a stale path because the export script exists there.
+            if sourceFile.isInternalOnly, isPublicExportTree { continue }
             XCTFail("""
             SourceFile.\(sourceFile) is stale: \(sourceFile.rawValue) does not exist — \
             if the file moved or was renamed, update its rawValue in \

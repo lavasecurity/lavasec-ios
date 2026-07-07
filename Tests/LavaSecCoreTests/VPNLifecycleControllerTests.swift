@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 @MainActor
 final class VPNLifecycleControllerTests: XCTestCase {
