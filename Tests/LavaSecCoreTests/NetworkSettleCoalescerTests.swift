@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class NetworkSettleCoalescerTests: XCTestCase {
     /// Records scheduled work so tests can fire it deterministically instead of

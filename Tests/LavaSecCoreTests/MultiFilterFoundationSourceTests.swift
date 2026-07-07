@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Phase 0 (Foundation) guards. The multi-filter library must be byte-for-byte
 /// today's single-filter behaviour at library size 1; these lock the load-bearing

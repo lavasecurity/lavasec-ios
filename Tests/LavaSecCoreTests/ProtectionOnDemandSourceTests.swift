@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Guards the Connect-On-Demand correctness invariants. On-demand is set on the
 /// NETunnelProviderManager (app target), so it is verified by source shape: the

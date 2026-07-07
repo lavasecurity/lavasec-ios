@@ -1,5 +1,7 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
+@testable import LavaSecKit
 
 final class RuleSetCacheTests: XCTestCase {
     private let sampleHash = String(repeating: "ab", count: 32)

@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class SnapshotCompileGateTests: XCTestCase {
     /// A minimal actor that records the maximum number of bodies running at once. If the gate

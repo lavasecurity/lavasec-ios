@@ -5,12 +5,12 @@
 // (1) User-facing strings at localizing call sites must exist in a bundle the running
 //     target can read:
 //       - LavaSecApp sources  -> app catalog (Localizable/InfoPlist.xcstrings) OR LavaSecCore .strings
-//       - LavaSecWidget + Shared sources -> LavaSecCore .strings ONLY (the widget extension's
-//         Resources phase is empty; it reads LavaSecCore via Bundle.module, NOT the app catalog)
+//       - LavaSecWidget + Shared sources -> LavaSecKit .strings ONLY (the widget extension's
+//         Resources phase is empty; it reads LavaSecKit via Bundle.module, NOT the app catalog)
 //       - AppIntents metadata (LocalizedStringResource / IntentDescription), wherever it lives,
 //         -> app catalog (the OS resolves AppIntents metadata from the registering app target)
 // (2) Every `LavaCoreStrings.localized("key")` / `.localizedFormat("key")` reference must
-//     resolve to a key in LavaSecCore's en Localizable.strings.
+//     resolve to a key in LavaSecKit's en Localizable.strings.
 // (3) Interpolated `.lavaLocalized` literals fail (they form uncatalogued runtime keys); use
 //     a format key (e.g. "Word %lld".lavaLocalizedFormat(n)).
 //
@@ -29,7 +29,7 @@ const scanDirs = [
   path.join(iosRoot, "LavaSecIntents"),
 ];
 const coreStringsFile = path.join(
-  iosRoot, "Sources", "LavaSecCore", "Resources", "en.lproj", "Localizable.strings"
+  iosRoot, "Sources", "LavaSecKit", "Resources", "en.lproj", "Localizable.strings"
 );
 
 const ALLOWED = new Set([

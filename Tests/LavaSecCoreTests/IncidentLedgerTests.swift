@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class IncidentLedgerTests: XCTestCase {
     private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)

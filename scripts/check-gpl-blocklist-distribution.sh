@@ -38,12 +38,12 @@ search_globbed_files() {
   fi
 }
 
-if search "raw_mirror_app_processing|normalized_mirror|modified_mirror" Sources/LavaSecCore; then
+if search "raw_mirror_app_processing|normalized_mirror|modified_mirror" Sources; then
   echo "Third-party blocklists must use source_url_only; Lava must not mirror list bytes." >&2
   exit 1
 fi
 
-if search "/v1/blocklists|download_path|manifest_path|artifact_kind|download_hash" Sources/LavaSecCore; then
+if search "/v1/blocklists|download_path|manifest_path|artifact_kind|download_hash" Sources; then
   echo "App code must not expose Lava-controlled blocklist artifact URLs." >&2
   exit 1
 fi

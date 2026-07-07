@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Characterization tests for the IP-address scope classification behind
 /// `NetworkEndpointValidator`. The `IPAddressScope` enum itself is file-private,

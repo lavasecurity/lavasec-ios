@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
+@testable import LavaSecDNS
 
 /// Behavioral coverage for the length-prefixed DNS wire framing shared by the DoT and DoQ
 /// transports (`DNSLengthPrefixedWireMessage`, RFC 7858 §3.3 / RFC 9250 §4.2 framing).

@@ -1,5 +1,6 @@
 import Foundation
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class FakeProtectionKeyValueStore: ProtectionKeyValueStorage, @unchecked Sendable {
     private var values: [String: Any] = [:]

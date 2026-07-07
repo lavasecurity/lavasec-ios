@@ -1,5 +1,7 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
+@testable import LavaSecKit
 
 final class FilterSnapshotPreparationServiceTests: XCTestCase {
     private let payloadText = "ads.example.com\ntracker.example.net\n"

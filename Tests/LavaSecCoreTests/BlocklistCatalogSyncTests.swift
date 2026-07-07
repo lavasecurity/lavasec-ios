@@ -1,5 +1,7 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
+@testable import LavaSecDNS
 
 final class BlocklistCatalogSyncTests: XCTestCase {
     func testCatalogDecodesWorkerDocument() throws {
@@ -273,6 +275,82 @@ final class BlocklistCatalogSyncTests: XCTestCase {
 
         XCTAssertEqual(tunnelStartupSnapshot.decision(for: "ads.example.com").reason, .blocklist)
         XCTAssertEqual(tunnelStartupSnapshot.decision(for: "phishing.example.com").reason, .localAllowlist)
+    }
+
+    func testCompilerRetainsArtifactForColdStartFastResume() async throws {
+        let source = makeSource(
+            id: "hagezi-multi-pro-mini",
+            sourceHash: "3d439fc6b959423465db4238e7df7ebda7d47a3a9e123ce899faed5e49e4b1eb"
+        )
+        let catalog = BlocklistCatalog(
+            schemaVersion: 2,
+            catalogVersion: "20260516T044815Z",
+            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+            sources: [source],
+            guardrails: []
+        )
+        let cacheURL = try makeTemporaryCacheDirectory()
+        try writeCatalog(catalog, to: cacheURL)
+        try writeLatestBlocklist("ads.example.com\n", sourceID: source.id, to: cacheURL)
+
+        let baseSnapshot = FilterSnapshot(
+            blockRules: DomainRuleSet(),
+            allowRules: DomainRuleSet(),
+            resolver: .cloudflare
+        )
+        let configuration = AppConfiguration(
+            enabledBlocklistIDs: [source.id],
+            resolverPresetID: DNSResolverPreset.cloudflare.id
+        )
+        let retainedURL = cacheURL
+            .appendingPathComponent("tunnel-compiled-artifact", isDirectory: true)
+            .appendingPathComponent("compact-snapshot")
+
+        let compiled = try await CachedFilterSnapshotCompiler(
+            cacheDirectoryURL: cacheURL
+        ).compile(
+            baseSnapshot: baseSnapshot,
+            configuration: configuration,
+            retainedArtifactURL: retainedURL
+        )
+        XCTAssertEqual(compiled.decision(for: "ads.example.com").reason, .blocklist)
+
+        // The artifact survives at the retained path so a FRESH process (a cold start
+        // after a self-reconnect kill) can fast-resume from it instead of recompiling.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retainedURL.path))
+        // Retention promotes the file OUT of scratch — nothing left for the startup sweep.
+        let scratchRoot = cacheURL.appendingPathComponent("streaming-compile-scratch", isDirectory: true)
+        let scratchEntries = (try? FileManager.default.contentsOfDirectory(
+            at: scratchRoot,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        XCTAssertTrue(scratchEntries.isEmpty, "the retained artifact must be promoted out of scratch")
+
+        // A cold-start-style fresh read reproduces the compiled snapshot: the summary
+        // header gates identity reuse and the decode serves the same decisions.
+        let resumedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
+        let resumedSummary = try CompactFilterSnapshot.readSummary(from: resumedData)
+        XCTAssertTrue(resumedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
+        let resumed = try CompactFilterSnapshot.decode(from: resumedData)
+        XCTAssertEqual(resumed.decision(for: "ads.example.com").reason, .blocklist)
+
+        // A later compile with DIFFERENT inputs atomically replaces the retained file,
+        // so a reader can never adopt the old inputs once the new compile lands.
+        let recompiled = try await CachedFilterSnapshotCompiler(
+            cacheDirectoryURL: cacheURL
+        ).compile(
+            baseSnapshot: baseSnapshot,
+            configuration: AppConfiguration(
+                enabledBlocklistIDs: [source.id],
+                blockedDomains: ["manual.example.com"],
+                resolverPresetID: DNSResolverPreset.cloudflare.id
+            ),
+            retainedArtifactURL: retainedURL
+        )
+        let replacedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
+        let replacedSummary = try CompactFilterSnapshot.readSummary(from: replacedData)
+        XCTAssertTrue(replacedSummary.identity.hasSameSnapshotInputs(as: recompiled.identity))
+        XCTAssertFalse(replacedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
     }
 
     func testCachedRawSourceCatalogParsesLocallyForTunnelStartup() async throws {

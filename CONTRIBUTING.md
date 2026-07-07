@@ -23,9 +23,11 @@ Thanks for your interest in contributing.
 
 ## Ground rules
 
-- **Never commit secrets or signing config.** `Config/Lava.xcconfig` is
-  gitignored; keep real Supabase keys, Apple Team IDs, and provisioning profile
-  names out of tracked files.
+- **Never commit secrets or signing config.** `Config/Lava.xcconfig` is a
+  tracked template (build metadata like `MARKETING_VERSION` only); your real
+  values belong in `Config/Lava.local.xcconfig`, which is gitignored. Keep
+  Supabase keys, Apple Team IDs, and provisioning profile names out of tracked
+  files.
 - Run the test suite before opening a PR.
 - Match the style and patterns of the surrounding code.
 

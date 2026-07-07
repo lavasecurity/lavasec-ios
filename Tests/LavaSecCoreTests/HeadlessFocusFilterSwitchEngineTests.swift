@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Unit coverage for the headless Focus-switch DECISION logic — the gate, reseed/target guards, the
 /// already-active record-and-nudge, and the Hybrid defer paths — driven against a seeded temp App Group

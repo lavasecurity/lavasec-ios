@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const iosRoot = path.resolve(__dirname, "..");
 const inputPath = path.join(iosRoot, "Catalog", "blocklist-catalog.json");
-const outputPath = path.join(iosRoot, "Sources", "LavaSecCore", "Generated", "DefaultCatalog+Generated.swift");
+const outputPath = path.join(iosRoot, "Sources", "LavaSecKit", "Generated", "DefaultCatalog+Generated.swift");
 
 // Stable Swift identifiers for each catalog id. The first 14 match names the app and
 // its tests already reference as API — never change those. New ids get a clear name.

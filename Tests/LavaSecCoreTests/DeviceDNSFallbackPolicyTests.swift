@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DeviceDNSFallbackPolicyTests: XCTestCase {
     func testStickyFallbackRequiresMultipleConsecutiveQueryFallbackSuccesses() {
@@ -146,6 +147,79 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
                 attemptsMade: 1,
                 capturedNonEmpty: true
             )
+        )
+    }
+
+    func testWakeRestartAllowedWithNoPriorMaskedExhaustion() {
+        // nil stamp = no cycle has exhausted while masked since the last real
+        // change signal — a wake may always start the retry cycle.
+        XCTAssertTrue(
+            DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: nil,
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+        )
+    }
+
+    func testWakeRestartSuppressedInsideExhaustionCooldown() {
+        // The UR-48 follow-up log's failure shape: wakes every ~5 s each restarting
+        // the full masked retry cycle. Inside the cooldown of an exhausted-still-
+        // masked cycle the wake restart must be suppressed.
+        let exhaustedAt = Date(timeIntervalSince1970: 1_000)
+        XCTAssertFalse(
+            DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: exhaustedAt,
+                now: exhaustedAt.addingTimeInterval(5)
+            )
+        )
+        XCTAssertFalse(
+            DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: exhaustedAt,
+                now: exhaustedAt.addingTimeInterval(
+                    DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown - 1
+                )
+            )
+        )
+    }
+
+    func testWakeRestartResumesOnceCooldownElapses() {
+        let exhaustedAt = Date(timeIntervalSince1970: 1_000)
+        XCTAssertTrue(
+            DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: exhaustedAt,
+                now: exhaustedAt.addingTimeInterval(
+                    DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown
+                )
+            )
+        )
+    }
+
+    func testWakeRestartFailsOpenOnBackwardsClockJump() {
+        // A stamp in the future (clock set backwards) must not suppress retries
+        // indefinitely — fail open to retrying.
+        let exhaustedAt = Date(timeIntervalSince1970: 10_000)
+        XCTAssertTrue(
+            DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
+                lastExhaustedMaskedCaptureAt: exhaustedAt,
+                now: exhaustedAt.addingTimeInterval(-30)
+            )
+        )
+    }
+
+    func testWakeRestartCooldownOutlastsRetryCycleButNotRoutineProbe() {
+        // The cooldown must be longer than one full retry cycle (else it never
+        // actually suppresses a repeat) and shorter than the 300 s routine probe
+        // cadence so a genuinely-recoverable mask is still retried well before the
+        // routine backstop.
+        let cycleWindow = DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
+            * Double(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts)
+        XCTAssertGreaterThan(
+            DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown,
+            cycleWindow
+        )
+        XCTAssertLessThan(
+            DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown,
+            DeviceDNSFallbackPolicy.routineSmokeProbeInterval
         )
     }
 

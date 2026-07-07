@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
     func testDeviceDNSFallbackPostsNoNotification() {
@@ -71,6 +72,36 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertEqual(notification?.identifier, "reconnect-needed:297")
         XCTAssertEqual(notification?.title, "Reconnect Lava")
         XCTAssertEqual(notification?.body, "DNS is not resolving on this network. Tap to reconnect protection.")
+    }
+
+    func testReconnectNotificationHonorsPinnedLanguage() {
+        // With a pinned language code the tunnel-posted reconnect banner renders in the app's language rather
+        // than the process/system language. German strings from de.lproj/Localizable.strings.
+        let now = Date(timeIntervalSince1970: 300)
+        let eventAt = now.addingTimeInterval(-3)
+        let health = TunnelHealthSnapshot(
+            lastDNSSmokeProbeAt: eventAt,
+            lastDNSSmokeProbeSucceeded: false,
+            lastNetworkChangeAt: now.addingTimeInterval(-8)
+        )
+
+        let notification = ProtectionConnectivityNotificationPolicy.notification(
+            for: ProtectionConnectivityAssessment(
+                severity: .needsReconnect,
+                primaryAction: .reconnect
+            ),
+            health: health,
+            history: .empty,
+            now: now,
+            languageCode: "de"
+        )
+
+        XCTAssertEqual(notification?.kind, .reconnectNeeded)
+        XCTAssertEqual(notification?.title, "Lava neu verbinden")
+        XCTAssertEqual(
+            notification?.body,
+            "In diesem Netzwerk werden DNS-Anfragen nicht aufgelöst. Tippe, um den Schutz neu zu verbinden."
+        )
     }
 
     func testNotificationPolicySkipsHealthyDuplicateAndStaleEvents() {

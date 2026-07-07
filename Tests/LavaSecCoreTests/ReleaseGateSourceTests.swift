@@ -1,6 +1,22 @@
 import XCTest
 
 final class ReleaseGateSourceTests: XCTestCase {
+    func testInternalRCTagWorkflowChecksTagAgainstMarketingVersionBeforeDispatch() throws {
+        let workflow = try readSource(.tagReleaseWorkflow)
+        let guardBlock = try sourceBlock(
+            in: workflow,
+            startingAt: "- name: Guard — RC tag must match MARKETING_VERSION and prod floor",
+            endingBefore: "- name: Trigger lavasec-runner internal release"
+        )
+
+        XCTAssertTrue(workflow.contains("uses: actions/checkout@v4"))
+        XCTAssertTrue(guardBlock.contains("Config/Lava.xcconfig"))
+        XCTAssertTrue(guardBlock.contains("MARKETING_VERSION"))
+        XCTAssertTrue(guardBlock.contains("declared_version"))
+        XCTAssertTrue(guardBlock.contains("[ \"$rc_base\" != \"$declared_version\" ]"))
+        XCTAssertFalse(guardBlock.contains("gh workflow run release.yml"))
+    }
+
     func testPhoneQASurfacesAreCompileGatedOutOfRelease() throws {
         let adminQA = try readSource(.adminQAView)
         let settings = try readSource(.settingsView)

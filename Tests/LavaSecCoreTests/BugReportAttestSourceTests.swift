@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 // Source-level guards for the bug-report submit hardening (App Attest headers +
 // friendly rate-limit copy). These live in LavaSecApp (the Xcode app target,

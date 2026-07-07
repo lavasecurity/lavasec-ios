@@ -67,8 +67,15 @@ enum FocusSwitchEnvironment {
         guard !defaults.bool(forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey) else { return }
 
         let category: LavaNotificationCategory = committed ? .filterChanged : .filterCouldNotApply
-        // Localized in LavaSecCore (Bundle.module) so it resolves in the extension's bundle too.
-        let body = LavaEventNotificationPoster.filterSwitchBody(committed: committed, filterName: filterName)
+        // Localized in LavaSecCore (Bundle.module) so it resolves in the extension's bundle too. The pinned
+        // app language (published by the app on foreground) makes the extension render in the SAME language
+        // as the app UI — the extension process does not inherit the app's iOS per-app language override.
+        let languageCode = LavaNotificationLanguage.pinnedCode(in: defaults)
+        let body = LavaEventNotificationPoster.filterSwitchBody(
+            committed: committed,
+            filterName: filterName,
+            languageCode: languageCode
+        )
         let userInfo = [
             LavaSecAppGroup.protectionNotificationRouteUserInfoKey:
                 LavaSecAppGroup.protectionNotificationGuardRouteValue

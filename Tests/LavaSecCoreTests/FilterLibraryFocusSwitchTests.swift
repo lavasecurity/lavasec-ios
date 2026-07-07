@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 /// Unit coverage for the pure `FilterLibrary` operations relocated out of `AppViewModel` (LAV-100
 /// Phase 4) so the foreground switch and the headless Focus engine share ONE definition: the freeze

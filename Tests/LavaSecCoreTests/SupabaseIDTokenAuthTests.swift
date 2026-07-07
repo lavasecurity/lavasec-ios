@@ -1,5 +1,6 @@
 import Foundation
 @testable import LavaSecCore
+@testable import LavaSecKit
 import XCTest
 
 final class SupabaseIDTokenAuthTests: XCTestCase {

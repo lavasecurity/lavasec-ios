@@ -1,6 +1,7 @@
 import XCTest
 import Security
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class GenericKeychainStoreTests: XCTestCase {
     private enum TestError: Error, Equatable, Sendable {

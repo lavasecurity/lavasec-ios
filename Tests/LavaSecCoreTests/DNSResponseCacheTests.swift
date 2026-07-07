@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class DNSResponseCacheTests: XCTestCase {
     private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)

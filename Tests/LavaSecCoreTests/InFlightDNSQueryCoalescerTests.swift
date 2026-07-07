@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecKit
 
 final class InFlightDNSQueryCoalescerTests: XCTestCase {
     private func makeKey(_ domain: String) throws -> DNSCacheKey {
