@@ -434,9 +434,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(feedbackBlock.contains("if isShowingThankYou {\n                thankYouBottomActionBar"))
         XCTAssertTrue(thankYouBlock.contains("FeedbackThankYouMascot()"))
         XCTAssertFalse(thankYouBlock.contains("SoftShieldGuardian(size: 96, state: .grateful, animates: false)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("@EnvironmentObject private var viewModel: AppViewModel"))
+        XCTAssertTrue(thankYouMascotBlock.contains("@EnvironmentObject private var customization: CustomizationController"))
         XCTAssertTrue(thankYouMascotBlock.contains("@State private var mascotState: GuardianMascotState = .awake"))
-        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: viewModel.lavaGuardLook)"))
+        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)"))
         XCTAssertTrue(thankYouMascotBlock.contains("mascotState = .awake"))
         XCTAssertTrue(thankYouMascotBlock.contains("mascotState = .grateful"))
         XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 700_000_000)"))
@@ -484,7 +484,9 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
     func testFeedbackTypingReusesPreparedDiagnosticsInsteadOfRebuildingPerKeystroke() throws {
         let settingsSource = try readSource(.settingsView)
-        let appViewModelSource = try readSource(.appViewModel)
+        // The draft lifecycle (prepare/refresh-context + the prepared-inputs cache)
+        // lives on DiagnosticsController since the Phase D4 peel.
+        let diagnosticsControllerSource = try readSource(.diagnosticsController)
         let feedbackBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct BugReportSettingsView: View",
@@ -501,19 +503,19 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(inputChangedBlock.contains("refreshDraftContext()"))
         XCTAssertFalse(inputChangedBlock.contains("refreshDraft()"))
         XCTAssertTrue(feedbackBlock.contains("private func refreshDraftContext()"))
-        XCTAssertTrue(feedbackBlock.contains("viewModel.refreshBugReportDraftContext(context: currentContext)"))
+        XCTAssertTrue(feedbackBlock.contains("reports.refreshBugReportDraftContext(context: currentContext)"))
         XCTAssertTrue(feedbackBlock.contains(".onChange(of: details) { _, _ in reportInputChanged() }"))
         XCTAssertTrue(feedbackBlock.contains(".onChange(of: affectedSite) { _, _ in reportInputChanged() }"))
 
-        // The view model captures the heavy inputs once in prepareBugReport and
+        // The controller captures the heavy inputs once in prepareBugReport and
         // the cheap path reuses them without another refreshReports()/file read.
         let prepareBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: diagnosticsControllerSource,
             startingAt: "func prepareBugReport(context: BugReportContext)",
             endingBefore: "func refreshBugReportDraftContext(context: BugReportContext)"
         )
         let refreshContextBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: diagnosticsControllerSource,
             startingAt: "func refreshBugReportDraftContext(context: BugReportContext)",
             endingBefore: "func sendBugReport(context: BugReportContext) async"
         )
@@ -523,8 +525,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(refreshContextBlock.contains("guard let inputs = preparedBugReportInputs else"))
         XCTAssertTrue(refreshContextBlock.contains("makeBugReportBundle(context: context, inputs: inputs)"))
         XCTAssertFalse(refreshContextBlock.contains("refreshReports()"))
-        XCTAssertTrue(appViewModelSource.contains("private struct PreparedBugReportInputs"))
-        XCTAssertTrue(appViewModelSource.contains("debugLogEntries: inputs.debugLogEntries"))
+        XCTAssertTrue(diagnosticsControllerSource.contains("private struct PreparedBugReportInputs"))
+        XCTAssertTrue(diagnosticsControllerSource.contains("debugLogEntries: inputs.debugLogEntries"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -595,7 +597,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         // the app-switcher privacy mask is up, and the diagnostics sampling task
         // is gated off while masked. The sheet is presented from RootView with a
         // raw binding (no withhold), and the importer's withhold gate is untouched.
-        XCTAssertTrue(rootSource.contains(".sheet(item: $viewModel.rageShakeDestination)"))
+        XCTAssertTrue(rootSource.contains(".sheet(item: $reports.rageShakeDestination)"))
         XCTAssertTrue(feedbackBlock.contains("security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible"))
         XCTAssertTrue(feedbackBlock.contains("BugReportSheetLockMask("))
         XCTAssertTrue(feedbackBlock.contains("security.authenticateAppUnlockIfNeeded()"))
@@ -678,7 +680,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(accountBlock.contains("LavaInfoPanel("))
-        XCTAssertTrue(accountBlock.contains("title: viewModel.encryptedBackupInfoTitle"))
+        XCTAssertTrue(accountBlock.contains("title: backup.encryptedBackupInfoTitle"))
         XCTAssertFalse(accountBlock.contains("description: viewModel.encryptedBackupInfoDescription"))
         XCTAssertFalse(accountBlock.contains("Latest encrypted settings backup size"))
         XCTAssertTrue(accountBlock.contains("BackupOptionControl("))
@@ -725,7 +727,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testEncryptedBackupStateRecordsLastUploadAndSchedulesAutomaticBackupAfterChanges() throws {
-        let source = try readSource(.appViewModel)
+        // The backup cluster lives in BackupController since the Phase D1 peel; the hub's
+        // persist funnels still schedule through it (pinned in the app source below).
+        let source = try readSource(.backupController)
+        let appSource = try readSource(.appViewModel)
         // EncryptedBackupState moved to LavaSecCore (its copy + state derivation
         // are now covered behaviorally by EncryptedBackupStateTests); pin the
         // synced-case shape and timestamp formatting against the core file.
@@ -733,12 +738,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let preferenceBlock = try sourceBlock(
             in: source,
             startingAt: "func setAutomaticBackupEnabled",
-            endingBefore: "var dnsResolverSummaryText: String"
+            endingBefore: "func loadAutomaticBackupPreference()"
         )
         let uploadBlock = try sourceBlock(
             in: source,
             startingAt: "private func uploadEncryptedBackup(",
-            endingBefore: "private func uploadPendingEncryptedBackupIfPossible()"
+            endingBefore: "func uploadPendingEncryptedBackupIfPossible()"
         )
 
         XCTAssertTrue(stateSource.contains("case synced(estimatedByteSize: Int, uploadedAt: Date)"))
@@ -746,21 +751,25 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("@Published private(set) var isAutomaticBackupEnabled"))
         XCTAssertTrue(source.contains("private var automaticBackupTask: Task<Void, Never>?"))
         XCTAssertTrue(source.contains("private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000"))
-        XCTAssertTrue(source.contains("scheduleAutomaticBackupAfterConfigurationChange()"))
+        XCTAssertTrue(appSource.contains("backup.scheduleAutomaticBackupAfterConfigurationChange()"))
         XCTAssertTrue(source.contains("try? await Task.sleep(nanoseconds: automaticBackupDelay)"))
         XCTAssertTrue(preferenceBlock.contains("UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKey)"))
         XCTAssertFalse(preferenceBlock.contains("scheduleAutomaticBackupAfterConfigurationChange()"))
-        // The marker is recorded through the version-checked helper, so a re-seal during an
-        // in-flight upload can't leave a stale "uploaded" marker for the older envelope.
-        XCTAssertTrue(uploadBlock.contains("recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt:"))
+        // The marker is recorded through the version-checked store helper
+        // (BackupEnvelopeStore.recordUploadIfCurrent — executable in BackupEnvelopeStoreTests
+        // since the Phase D1 peel), so a re-seal during an in-flight upload can't leave a
+        // stale "uploaded" marker for the older envelope.
+        XCTAssertTrue(uploadBlock.contains("backupEnvelopeStore.recordUploadIfCurrent(envelope, at:"))
     }
 
     func testBugReportUsesGenericResolverNameInsteadOfCustomDisplayName() throws {
+        // The bundle ASSEMBLY stayed hub-side with the Phase D4 peel, as the
+        // DiagnosticsHubBridging conformance's makeBugReportBundle (the last member
+        // of the last extension, so the block runs to end-of-file).
         let source = try readSource(.appViewModel)
         let bugReportBlock = try sourceBlock(
             in: source,
-            startingAt: "private func makeBugReportBundle(context: BugReportContext) -> BugReportBundle",
-            endingBefore: "private func submitBugReport"
+            startingAt: "func makeBugReportBundle("
         )
 
         XCTAssertTrue(bugReportBlock.contains("resolverPreset: configuration.resolverDiagnosticDisplayName"))
@@ -1313,7 +1322,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(topicChangeBlock.contains("refreshDraftContext()"))
         XCTAssertFalse(topicChangeBlock.contains("refreshDraft()"))
         XCTAssertTrue(feedbackBlock.contains("private func refreshDraftContext()"))
-        XCTAssertTrue(feedbackBlock.contains("viewModel.refreshBugReportDraftContext(context: currentContext)"))
+        XCTAssertTrue(feedbackBlock.contains("reports.refreshBugReportDraftContext(context: currentContext)"))
     }
 
     func testFeedbackTopicOptionRowSkipsRedundantReRenderViaEquatable() throws {

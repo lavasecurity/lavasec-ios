@@ -5,17 +5,19 @@ import XCTest
 // Source-level guards for the bug-report submit hardening (App Attest headers +
 // friendly rate-limit copy). These live in LavaSecApp (the Xcode app target,
 // not built by `swift test`), so we assert on the source text — the same pattern
-// as SettingsFeedbackSourceTests.
+// as SettingsFeedbackSourceTests. The submit-and-attest surface lives in
+// DiagnosticsController since the Phase D4 diagnostics/bug-report peel.
 final class BugReportAttestSourceTests: XCTestCase {
     func testSubmitAttachesAppAttestHeadersAndFriendlyRateLimitCopy() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.diagnosticsController)
         // Covers submitBugReport plus its attestation helpers (acquireAppAttestation,
-        // fetchAppAttestChallenge) — they all sit before startLavaSecurityPlusStore — so
-        // every assertion below is scoped to the submit-and-attest surface, not the whole file.
+        // fetchAppAttestChallenge) — they all sit before loadBugReportDebugLogEntries,
+        // the same relative order as pre-peel — so every assertion below is scoped to
+        // the submit-and-attest surface, not the whole file.
         let submitAndAttestBlock = try sourceBlock(
             in: source,
             startingAt: "private func submitBugReport(",
-            endingBefore: "private func startLavaSecurityPlusStore"
+            endingBefore: "private func loadBugReportDebugLogEntries"
         )
 
         // App Attest is acquired once (bound to a hash of the exact request body — replay
@@ -38,14 +40,14 @@ final class BugReportAttestSourceTests: XCTestCase {
     }
 
     func testAppAttestClientUsesDeviceCheckAndDegradesGracefully() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.diagnosticsController)
         let clientBlock = try sourceBlock(
             in: source,
             startingAt: "private enum AppAttestClient",
-            // Bound the block to the enum itself — the comment on the line right after its
-            // closing brace. Without this the block ran to EOF, making the fail-open assertion
-            // below match any of the ~60 file-wide `return nil` occurrences (meaningless).
-            endingBefore: "// EncryptedBackupState moved to LavaSecCore"
+            // Bound the block to the enum itself — the protocol declaration right after it.
+            // Without this the block ran to EOF, making the fail-open assertion below match
+            // any of the file-wide `return nil` occurrences (meaningless).
+            endingBefore: "protocol DiagnosticsHubBridging"
         )
 
         XCTAssertTrue(clientBlock.contains("DCAppAttestService.shared"))

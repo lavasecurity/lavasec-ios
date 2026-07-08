@@ -46,7 +46,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         XCTAssertTrue(networkBlock.contains("showingClearActivityConfirmation"))
         XCTAssertTrue(networkBlock.contains("viewModel.clearNetworkActivityLog()"))
         XCTAssertTrue(domainBlock.contains("showingClearHistoryConfirmation"))
-        XCTAssertTrue(domainBlock.contains("viewModel.clearDomainHistory()"))
+        XCTAssertTrue(domainBlock.contains("reports.clearDomainHistory()"))
     }
 
     func testDomainHistoryDoesNotKeepBottomManageClearSection() throws {

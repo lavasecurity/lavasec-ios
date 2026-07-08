@@ -1,0 +1,33 @@
+# Phase C2 lint lane (lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
+# WARNING-ONLY: CI invokes swiftlint with --lenient, so findings annotate PRs but never
+# fail a check. Promote individual rules to blocking deliberately, not by default.
+#
+# missing_docs is enabled ONLY inside the post-split SPM targets via their nested
+# .swiftlint.yml files (Sources/LavaSec{Kit,DNS,FilterPipeline,AppServices}) — matching
+# the CLAUDE.md rule: new public API there carries /// docs; pre-split code is retrofitted
+# opportunistically, never in bulk.
+included:
+  - Sources
+  - Shared
+  - LavaSecApp
+  - LavaSecTunnel
+  - LavaSecWidget
+  - LavaSecIntents
+  - LavaSecUITests
+  - Tests
+excluded:
+  - .build
+  - build
+  - Sources/LavaSecKit/Generated
+
+# Style axes the codebase deliberately doesn't police (dense rationale comments push
+# line/body length; the design system uses long SwiftUI builder chains).
+disabled_rules:
+  - line_length
+  - file_length
+  - type_body_length
+  - function_body_length
+  - cyclomatic_complexity
+  - identifier_name
+  - trailing_comma
+  - todo   # CLAUDE.md already bans TODO/FIXME outright; repo-checks-adjacent, not style

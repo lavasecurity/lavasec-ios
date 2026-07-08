@@ -291,17 +291,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let diagnosticsWriteInterval: TimeInterval = 30
     private let configurationRefreshInterval: TimeInterval = 30
     private let protectionPauseStateRefreshInterval: TimeInterval = 1
-    private static let transientBootstrapDNSWaitTimeout: TimeInterval = 4
-    private static let transientBootstrapDNSWaitMaximumPendingResponses = 64
     // dnsStateQueue-confined, like the dictionaries they replaced.
     private let dnsResponseCache = DNSResponseCache()
     private let inFlightQueryCoalescer = InFlightDNSQueryCoalescer<PendingDNSResponse>()
-    private var transientBootstrapDNSWaitActive = false
-    private var transientBootstrapDNSWaitGeneration: UInt64?
-    private var transientBootstrapDNSWaitExpiredGeneration: UInt64?
-    private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []
-    private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?
-    private var transientBootstrapDNSWaitDidLogOverflow = false
+    // Transient-bootstrap wait STATE machine extracted to TransientBootstrapDNSWait
+    // (Phase E2). The INV-DNS-2 bounds (64-deep / 4 s) and the generation/expired-
+    // generation transitions are executable there (TransientBootstrapDNSWaitTests);
+    // the provider keeps the SERVFAIL writes, the replay through the filter, the
+    // device-log events, and lifecycle-generation ownership (generations are passed
+    // in per call, the machine never reads tunnel state). dnsStateQueue-confined,
+    // with the one-shot timeout armed on the same queue.
+    private lazy var transientBootstrapDNSWait = TransientBootstrapDNSWait<PendingDNSResponse>(
+        queue: dnsStateQueue,
+        scheduleAfter: { [dnsStateQueue] interval, body in
+            let item = DispatchWorkItem(block: body)
+            dnsStateQueue.asyncAfter(deadline: .now() + interval, execute: item)
+            return item
+        }
+    )
     private var resolverBackoffPolicy = ResolverBackoffPolicy()
     private var health = TunnelHealthSnapshot()
     private var diagnostics = DiagnosticsStore()
@@ -351,7 +358,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // is app-only) and a tunnel-side Darwin observer was proven unreliable in the NE extension (0 callbacks /
     // 14 device probes — see PacketTunnelDNSRuntimeSourceTests), so the always-on tunnel POLLS the on-disk
     // configuration generation and reloads through the existing path when it advances. dnsStateQueue-confined.
-    private var focusConfigurationPollTimer: DispatchSourceTimer?
+    // Timer mechanism extracted to QueueConfinedRepeatingTimer (Phase E2); poll
+    // POLICY (interval, tick, watermark rules) stays here with its pins.
+    private lazy var focusConfigurationPollTimer = QueueConfinedRepeatingTimer(queue: dnsStateQueue)
     private var lastObservedConfigurationGeneration = 0
     private var protectionPauseResumeTimer: DispatchSourceTimer?
     private var snapshotReloadGeneration: UInt64 = 0
@@ -382,16 +391,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // Pending bounded device-DNS capture retry (dns-recovery optimization C),
     // armed after a handoff/wake while the in-tunnel capture keeps coming back
     // empty (masked) and superseded on the next network change / wake / reset.
-    private var deviceDNSCaptureRetryWorkItem: DispatchWorkItem?
-    private var deviceDNSCaptureRetryAttempts = 0
+    // Cycle STATE machine extracted to DeviceDNSCaptureRetryCycle (Phase E2, after the
+    // rc5 field log showed the wake-suppression cooldown being bypassed — see
+    // DeviceDNSCaptureRetryCycleTests). The provider keeps the capture WORK.
+    private lazy var deviceDNSCaptureRetryCycle = DeviceDNSCaptureRetryCycle(
+        queue: dnsStateQueue,
+        now: Date.init,
+        scheduleAfter: { [dnsStateQueue] interval, body in
+            let item = DispatchWorkItem(block: body)
+            dnsStateQueue.asyncAfter(deadline: .now() + interval, execute: item)
+            return item
+        }
+    )
     // Stamped when a full capture-retry cycle exhausts with the capture still masked, so
     // wake-triggered restarts of the cycle honour a cooldown on a chronically-masked
     // network (UR-48 follow-up log: median 5 s wake cadence restarted the 5x1 s cycle
     // continuously — ~1,500 masked reads over ~4.7 h with 108 exhaustions and zero
     // recoveries). Cleared on any non-wake schedule reason (a real network change) and
     // on the first non-empty capture. dnsStateQueue-confined.
-    private var deviceDNSCaptureRetryLastMaskedExhaustionAt: Date?
-    private var deviceDNSCaptureRetryDidLogWakeSuppression = false
+    // (exhaustion stamp + suppression-log dedup now live in deviceDNSCaptureRetryCycle)
     private var networkKind: TunnelNetworkKind = .unknown
     private var lastConfigurationRefreshAt = Date.distantPast
     private var lastProtectionPauseStateRefreshAt = Date.distantPast
@@ -2646,27 +2664,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        focusConfigurationPollTimer?.cancel()
         // Do NOT seed the watermark from disk here: the on-disk generation may already reflect a closed-app
         // switch the tunnel has NOT yet ADOPTED (config-leads-pointer), and seeding from it would suppress the
         // retry forever. Leave the watermark at whatever the startup snapshot LOAD adopted — the load advances
         // it at its adopt point — so the first tick reloads iff the on-disk generation is genuinely ahead of
         // what we actually adopted (Codex round 5).
-
-        let timer = DispatchSource.makeTimerSource(queue: dnsStateQueue)
+        //
         // 10 s leeway: the ~60 s Focus-adoption promise tolerates the jitter, no tick is
         // phase-dependent (retry-until-adopt re-fires every tick regardless), and the
         // kernel can coalesce the wake. The poll itself is a hard invariant and stays.
-        timer.schedule(
-            deadline: .now() + Self.focusConfigurationPollInterval,
-            repeating: Self.focusConfigurationPollInterval,
+        // (start() re-arms safely — the driver cancels any prior timer first.)
+        focusConfigurationPollTimer.start(
+            interval: Self.focusConfigurationPollInterval,
             leeway: .seconds(10)
-        )
-        timer.setEventHandler { [weak self] in
+        ) { [weak self] in
             self?.reloadSnapshotIfConfigurationGenerationAdvanced()
         }
-        focusConfigurationPollTimer = timer
-        timer.resume()
     }
 
     private func stopFocusConfigurationPoll() {
@@ -2677,8 +2690,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        focusConfigurationPollTimer?.cancel()
-        focusConfigurationPollTimer = nil
+        focusConfigurationPollTimer.stop()
     }
 
     /// Advance the Focus config-poll watermark to a generation the tunnel has ADOPTED — either via a full
@@ -3037,43 +3049,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // network each wake, so restarting the full retry cycle within the cooldown
         // of an exhausted-still-masked cycle only repeats reads that just failed.
         // Any non-wake reason means a real change — clear the cooldown and retry.
-        if reason == "wake" {
-            guard DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake(
-                lastExhaustedMaskedCaptureAt: deviceDNSCaptureRetryLastMaskedExhaustionAt,
-                now: Date()
-            ) else {
-                if !deviceDNSCaptureRetryDidLogWakeSuppression {
-                    deviceDNSCaptureRetryDidLogWakeSuppression = true
-                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-suppressed", details: [
-                        "reason": reason
-                    ])
-                }
-                return
+        switch deviceDNSCaptureRetryCycle.noteScheduleRequest(isWake: reason == "wake") {
+        case .suppress(let logOnce):
+            if logOnce {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-suppressed", details: [
+                    "reason": reason
+                ])
             }
-        } else {
-            deviceDNSCaptureRetryLastMaskedExhaustionAt = nil
-            deviceDNSCaptureRetryDidLogWakeSuppression = false
+            return
+        case .start:
+            armDeviceDNSCaptureRetry(reason: reason)
         }
-
-        deviceDNSCaptureRetryAttempts = 0
-        armDeviceDNSCaptureRetry(reason: reason)
     }
 
     private func armDeviceDNSCaptureRetry(reason: String) {
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else {
-                return
-            }
-
-            self.deviceDNSCaptureRetryWorkItem = nil
-            self.runDeviceDNSCaptureRetry(reason: reason)
+        deviceDNSCaptureRetryCycle.armAttempt(
+            after: DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
+        ) { [weak self] in
+            self?.runDeviceDNSCaptureRetry(reason: reason)
         }
-
-        deviceDNSCaptureRetryWorkItem = workItem
-        dnsStateQueue.asyncAfter(
-            deadline: .now() + DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval,
-            execute: workItem
-        )
     }
 
     private func runDeviceDNSCaptureRetry(reason: String) {
@@ -3084,7 +3078,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        deviceDNSCaptureRetryAttempts += 1
+        let attemptNumber = deviceDNSCaptureRetryCycle.noteAttemptRan()
         let previousAddresses = deviceDNSResolverAddresses
         let captured = Self.currentSystemDNSServerAddresses()
         deviceDNSResolverAddresses = DeviceDNSFallbackPolicy.refreshedResolverAddresses(
@@ -3095,7 +3089,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry", details: [
             "reason": reason,
-            "attempt": "\(deviceDNSCaptureRetryAttempts)",
+            "attempt": "\(attemptNumber)",
             "capturedCount": "\(captured.count)",
             "activeCount": "\(deviceDNSResolverAddresses.count)"
         ])
@@ -3106,8 +3100,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // them (mirrors the settle path) and fire a confirming smoke probe; a
             // genuine recovery then clears the wedge marker. Either way, stop
             // retrying — the capture is no longer masked.
-            deviceDNSCaptureRetryLastMaskedExhaustionAt = nil
-            deviceDNSCaptureRetryDidLogWakeSuppression = false
+            deviceDNSCaptureRetryCycle.noteCaptureSucceeded(
+                addressesChanged: deviceDNSResolverAddresses != previousAddresses
+            )
             if deviceDNSResolverAddresses != previousAddresses {
                 let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
                 let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
@@ -3121,10 +3116,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        guard DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-            attemptsMade: deviceDNSCaptureRetryAttempts,
-            capturedNonEmpty: false
-        ) else {
+        guard deviceDNSCaptureRetryCycle.shouldContinue(capturedNonEmpty: false) else {
             // Capture stayed masked across the whole window — this is a genuine
             // resolver-changing handoff, not a transient mask. The previous network's
             // resolvers are now unreachable; keeping them serves a dead address, so
@@ -3161,10 +3153,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 preserveOnEmptyCapture: !routesToEncryptedFallback
             )
             let droppedStale = deviceDNSResolverAddresses != previousAddresses
-            deviceDNSCaptureRetryLastMaskedExhaustionAt = Date()
+            deviceDNSCaptureRetryCycle.noteExhausted()
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-exhausted", details: [
                 "reason": reason,
-                "attempts": "\(deviceDNSCaptureRetryAttempts)",
+                "attempts": "\(deviceDNSCaptureRetryCycle.attemptsMade)",
                 "routesToEncryptedFallback": "\(routesToEncryptedFallback)",
                 "droppedStale": "\(droppedStale)"
             ])
@@ -3208,8 +3200,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        deviceDNSCaptureRetryWorkItem?.cancel()
-        deviceDNSCaptureRetryWorkItem = nil
+        deviceDNSCaptureRetryCycle.cancelPendingAttempt()
     }
 
     // True when live queries can route through Device DNS — either it is the
@@ -4197,6 +4188,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     // MARK: - Transient bootstrap DNS wait
 
+    // The wait's STATE machine lives in TransientBootstrapDNSWait (LavaSecDNS,
+    // Phase E2), where the INV-DNS-2 transitions are executable
+    // (TransientBootstrapDNSWaitTests). These wrappers keep everything that must
+    // stay a provider concern: the query-shape guards, the SERVFAIL writes
+    // (writeServerFailures), the replay THROUGH the filter, the device-log events
+    // (names/keys unchanged), the INV-QUEUE-1 dual-entry hops, and
+    // tunnelLifecycleGeneration ownership.
+
     private func enqueueTransientBootstrapDNSRequestIfNeeded(
         request: IPv4UDPDNSPacket,
         protocolNumber: Int,
@@ -4215,49 +4214,40 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         var serverFailure: PendingDNSResponse?
         var serverFailureReason: String?
         let handledByWait = dnsStateQueue.sync {
-            if transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration {
-                serverFailure = PendingDNSResponse(
-                    request: request,
-                    protocolNumber: protocolNumber,
-                    maximumAnswerTTL: nil,
-                    temporaryPauseNormalizedDomain: nil
-                )
-                serverFailureReason = "transient-bootstrap-dns-wait-timeout"
-                return true
-            }
-
-            guard transientBootstrapDNSWaitActive,
-                  transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration
-            else {
-                return false
-            }
-
             let pending = PendingDNSResponse(
                 request: request,
                 protocolNumber: protocolNumber,
                 maximumAnswerTTL: nil,
                 temporaryPauseNormalizedDomain: nil
             )
-            guard transientBootstrapDNSWaitPendingResponses.count < Self.transientBootstrapDNSWaitMaximumPendingResponses else {
+            switch transientBootstrapDNSWait.enqueue(pending, generation: tunnelLifecycleGeneration) {
+            case .rejectExpiredGeneration:
+                serverFailure = pending
+                serverFailureReason = "transient-bootstrap-dns-wait-timeout"
+                return true
+
+            case .notHandled:
+                return false
+
+            case .rejectOverflow(let logOnce, let pendingCount):
                 serverFailure = pending
                 serverFailureReason = "transient-bootstrap-dns-wait-overflow"
-                if !transientBootstrapDNSWaitDidLogOverflow {
-                    transientBootstrapDNSWaitDidLogOverflow = true
+                if logOnce {
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-overflow", details: [
                         "generation": "\(tunnelLifecycleGeneration)",
-                        "pendingResponses": "\(transientBootstrapDNSWaitPendingResponses.count)"
+                        "pendingResponses": "\(pendingCount)"
+                    ])
+                }
+                return true
+
+            case .queued(let isFirst):
+                if isFirst {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-queued", details: [
+                        "generation": "\(tunnelLifecycleGeneration)"
                     ])
                 }
                 return true
             }
-
-            transientBootstrapDNSWaitPendingResponses.append(pending)
-            if transientBootstrapDNSWaitPendingResponses.count == 1 {
-                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-queued", details: [
-                    "generation": "\(tunnelLifecycleGeneration)"
-                ])
-            }
-            return true
         }
 
         if let serverFailure {
@@ -4268,13 +4258,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func drainTransientBootstrapDNSWait(reason: String) {
         let drain = { [self] () -> (pendingResponses: [PendingDNSResponse], replayGeneration: UInt64?) in
-            guard transientBootstrapDNSWaitActive || transientBootstrapDNSWaitExpiredGeneration != nil else {
+            switch transientBootstrapDNSWait.drain(currentGeneration: tunnelLifecycleGeneration) {
+            case .idle:
                 return ([], nil)
-            }
-            guard transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration
-                    || transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration
-            else {
-                let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+
+            case .staleLifecycle(let pendingResponses):
                 if !pendingResponses.isEmpty {
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-stale-lifecycle", details: [
                         "generation": "\(tunnelLifecycleGeneration)",
@@ -4287,18 +4275,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     reason: "transient-bootstrap-dns-wait-stale-lifecycle"
                 )
                 return ([], nil)
-            }
 
-            let replayGeneration = transientBootstrapDNSWaitGeneration ?? transientBootstrapDNSWaitExpiredGeneration
-            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
-            if !pendingResponses.isEmpty {
-                LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-drain", details: [
-                    "generation": "\(tunnelLifecycleGeneration)",
-                    "pendingResponses": "\(pendingResponses.count)",
-                    "reason": reason
-                ])
+            case .replay(let pendingResponses, let replayGeneration):
+                if !pendingResponses.isEmpty {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-drain", details: [
+                        "generation": "\(tunnelLifecycleGeneration)",
+                        "pendingResponses": "\(pendingResponses.count)",
+                        "reason": reason
+                    ])
+                }
+                return (pendingResponses, replayGeneration)
             }
-            return (pendingResponses, replayGeneration)
         }
 
         let result: (pendingResponses: [PendingDNSResponse], replayGeneration: UInt64?)
@@ -4316,20 +4303,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func failTransientBootstrapDNSWait(reason: String, expectedGeneration: UInt64? = nil) {
         let fail = { [self] () -> [PendingDNSResponse] in
-            guard transientBootstrapDNSWaitActive else {
-                return []
-            }
-            if let expectedGeneration, transientBootstrapDNSWaitGeneration != expectedGeneration {
-                return []
-            }
-
-            let generation = transientBootstrapDNSWaitGeneration
-            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
-            if reason == "transient-bootstrap-dns-wait-timeout" {
-                transientBootstrapDNSWaitExpiredGeneration = expectedGeneration ?? generation
-            }
+            // Only the TIMEOUT exit stamps the expired-generation marker (same-
+            // lifecycle latecomers keep receiving SERVFAIL); a snapshot-unavailable
+            // fail leaves no marker, so latecomers take the normal immediate
+            // fail-closed answer. pinned: TransientBootstrapDNSWaitTests
+            let isTimeout = reason == "transient-bootstrap-dns-wait-timeout"
+            let pendingResponses = transientBootstrapDNSWait.fail(
+                expectedGeneration: expectedGeneration,
+                marksGenerationExpired: isTimeout
+            )
             if !pendingResponses.isEmpty {
-                if reason == "transient-bootstrap-dns-wait-timeout" {
+                if isTimeout {
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-timeout", details: [
                         "generation": "\(tunnelLifecycleGeneration)",
                         "pendingResponses": "\(pendingResponses.count)",
@@ -4398,26 +4382,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        let replacedPendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+        let generation = tunnelLifecycleGeneration
+        let replacedPendingResponses = transientBootstrapDNSWait.beginWait(generation: generation) { [weak self] expiredGeneration in
+            self?.failTransientBootstrapDNSWait(
+                reason: "transient-bootstrap-dns-wait-timeout",
+                expectedGeneration: expiredGeneration
+            )
+        }
         writeServerFailures(
             for: replacedPendingResponses,
             reason: "transient-bootstrap-dns-wait-replaced"
         )
-        transientBootstrapDNSWaitExpiredGeneration = nil
-        transientBootstrapDNSWaitActive = true
-        transientBootstrapDNSWaitGeneration = tunnelLifecycleGeneration
-
-        let generation = tunnelLifecycleGeneration
-        let timer = DispatchSource.makeTimerSource(queue: dnsStateQueue)
-        timer.schedule(deadline: .now() + Self.transientBootstrapDNSWaitTimeout)
-        timer.setEventHandler { [weak self] in
-            self?.failTransientBootstrapDNSWait(
-                reason: "transient-bootstrap-dns-wait-timeout",
-                expectedGeneration: generation
-            )
-        }
-        transientBootstrapDNSWaitTimer = timer
-        timer.resume()
 
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-begin", details: [
             "generation": "\(generation)",
@@ -4427,11 +4402,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func cancelTransientBootstrapDNSWait(reason: String) {
         let cancel = { [self] () -> [PendingDNSResponse] in
-            guard transientBootstrapDNSWaitActive || transientBootstrapDNSWaitExpiredGeneration != nil else {
-                return []
-            }
-
-            let pendingResponses = finishTransientBootstrapDNSWaitOnDNSQueue()
+            let pendingResponses = transientBootstrapDNSWait.cancelWait()
             if !pendingResponses.isEmpty {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-cancel", details: [
                     "generation": "\(tunnelLifecycleGeneration)",
@@ -4450,18 +4421,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         writeServerFailures(for: pendingResponses, reason: reason)
-    }
-
-    private func finishTransientBootstrapDNSWaitOnDNSQueue() -> [PendingDNSResponse] {
-        transientBootstrapDNSWaitTimer?.cancel()
-        transientBootstrapDNSWaitTimer = nil
-        transientBootstrapDNSWaitActive = false
-        transientBootstrapDNSWaitGeneration = nil
-        transientBootstrapDNSWaitExpiredGeneration = nil
-        transientBootstrapDNSWaitDidLogOverflow = false
-        let pendingResponses = transientBootstrapDNSWaitPendingResponses
-        transientBootstrapDNSWaitPendingResponses.removeAll(keepingCapacity: true)
-        return pendingResponses
     }
 
     // MARK: - Diagnostics & upstream health recording
@@ -8078,953 +8037,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
 // MARK: - Private DNS wire, socket & factory types
 
-private struct IPv4UDPDNSPacket: Sendable {
-    let sourceAddress: Data
-    let destinationAddress: Data
-    let sourcePort: UInt16
-    let destinationPort: UInt16
-    let identifier: UInt16
-    let dnsPayload: Data
-
-    init?(_ packet: Data) {
-        guard packet.count >= 28 else {
-            return nil
-        }
-
-        let version = packet[0] >> 4
-        let headerLength = Int(packet[0] & 0x0F) * 4
-        guard version == 4, headerLength >= 20, packet.count >= headerLength + 8 else {
-            return nil
-        }
-
-        let totalLength = Int(Self.readUInt16(packet, at: 2))
-        guard totalLength >= headerLength + 8, totalLength <= packet.count else {
-            return nil
-        }
-
-        let flagsAndFragmentOffset = Self.readUInt16(packet, at: 6)
-        let moreFragments = flagsAndFragmentOffset & 0x2000 != 0
-        let fragmentOffset = flagsAndFragmentOffset & 0x1FFF
-        guard !moreFragments, fragmentOffset == 0 else {
-            return nil
-        }
-
-        guard packet[9] == UInt8(IPPROTO_UDP) else {
-            return nil
-        }
-
-        let udpOffset = headerLength
-        let udpLength = Int(Self.readUInt16(packet, at: udpOffset + 4))
-        guard udpLength >= 8, udpOffset + udpLength <= totalLength else {
-            return nil
-        }
-
-        let sourcePort = Self.readUInt16(packet, at: udpOffset)
-        let destinationPort = Self.readUInt16(packet, at: udpOffset + 2)
-        guard destinationPort == 53 else {
-            return nil
-        }
-
-        let payloadStart = udpOffset + 8
-        let payloadEnd = udpOffset + udpLength
-        guard payloadEnd > payloadStart else {
-            return nil
-        }
-
-        self.sourceAddress = Data(packet[12..<16])
-        self.destinationAddress = Data(packet[16..<20])
-        self.sourcePort = sourcePort
-        self.destinationPort = destinationPort
-        self.identifier = Self.readUInt16(packet, at: 4)
-        self.dnsPayload = Data(packet[payloadStart..<payloadEnd])
-    }
-
-    static func response(to request: IPv4UDPDNSPacket, dnsPayload: Data) -> Data? {
-        let ipHeaderLength = 20
-        let udpHeaderLength = 8
-        let totalLength = ipHeaderLength + udpHeaderLength + dnsPayload.count
-        guard totalLength <= UInt16.max else {
-            return nil
-        }
-
-        var packet = Data()
-        packet.reserveCapacity(totalLength)
-
-        packet.append(0x45)
-        packet.append(0)
-        appendUInt16(UInt16(totalLength), to: &packet)
-        appendUInt16(request.identifier, to: &packet)
-        appendUInt16(0, to: &packet)
-        packet.append(64)
-        packet.append(UInt8(IPPROTO_UDP))
-        appendUInt16(0, to: &packet)
-        packet.append(request.destinationAddress)
-        packet.append(request.sourceAddress)
-
-        let checksum = ipv4HeaderChecksum(packet)
-        packet[10] = UInt8((checksum >> 8) & 0xFF)
-        packet[11] = UInt8(checksum & 0xFF)
-
-        appendUInt16(request.destinationPort, to: &packet)
-        appendUInt16(request.sourcePort, to: &packet)
-        appendUInt16(UInt16(udpHeaderLength + dnsPayload.count), to: &packet)
-        appendUInt16(0, to: &packet)
-        packet.append(dnsPayload)
-
-        return packet
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-
-    private static func ipv4HeaderChecksum(_ packet: Data) -> UInt16 {
-        var sum: UInt32 = 0
-        var offset = 0
-
-        while offset + 1 < 20 {
-            sum += UInt32(readUInt16(packet, at: offset))
-            offset += 2
-        }
-
-        while sum >> 16 != 0 {
-            sum = (sum & 0xFFFF) + (sum >> 16)
-        }
-
-        return UInt16(~sum & 0xFFFF)
-    }
-}
-
+// Provider-local naming for the Kit-plan type (predates the split; kept to avoid
+// touching ~40 call sites in this file).
 private typealias ResolverRuntimeConfiguration = DNSResolverRuntimePlan
 
-private struct PendingDNSResponse: Sendable {
-    let request: IPv4UDPDNSPacket
-    let protocolNumber: Int
-    let maximumAnswerTTL: UInt32?
-    let temporaryPauseNormalizedDomain: String?
-}
-
-private struct ResolverEndpoint: Hashable, Sendable {
-    let address: String
-    let family: Int32
-
-    init?(address: String) {
-        var ipv4 = in_addr()
-        if inet_pton(AF_INET, address, &ipv4) == 1 {
-            self.address = address
-            self.family = AF_INET
-            return
-        }
-
-        var ipv6 = in6_addr()
-        if inet_pton(AF_INET6, address, &ipv6) == 1 {
-            self.address = address
-            self.family = AF_INET6
-            return
-        }
-
-        return nil
-    }
-
-    var socketAddressLength: socklen_t {
-        if family == AF_INET6 {
-            return socklen_t(MemoryLayout<sockaddr_in6>.size)
-        }
-
-        return socklen_t(MemoryLayout<sockaddr_in>.size)
-    }
-}
-
-private extension ResolverBackoffPolicy.AttemptOutcome {
-    init(_ outcome: ResolverAttemptOutcome) {
-        switch outcome {
-        case .success:
-            self = .success
-        case .timeout:
-            self = .timeout
-        case .httpStatusFailure:
-            self = .httpStatusFailure
-        case .backedOff:
-            self = .backedOff
-        case .sendFailed:
-            self = .sendFailed
-        case .receiveFailed:
-            self = .receiveFailed
-        case .invalidAddress:
-            self = .invalidAddress
-        case .unsupported:
-            self = .unsupported
-        case .socketUnavailable:
-            self = .socketUnavailable
-        case .mismatchedResponse:
-            self = .mismatchedResponse
-        case .deviceDNSUnavailable:
-            self = .deviceDNSUnavailable
-        }
-    }
-}
-
-private struct DNSUpstreamResponse: Sendable {
-    let response: Data?
-    let outcome: ResolverAttemptOutcome
-}
-
-private final class UDPResolverSocket {
-    private static let maxMismatchedResponses = 8
-    let endpoint: ResolverEndpoint
-    private let fileDescriptor: Int32
-
-    init?(endpoint: ResolverEndpoint, timeoutSeconds: Int) {
-        let descriptor = socket(endpoint.family, SOCK_DGRAM, IPPROTO_UDP)
-        guard descriptor >= 0 else {
-            return nil
-        }
-
-        guard configureSocketTimeouts(descriptor, receive: true, send: false, timeoutSeconds: timeoutSeconds) else {
-            Darwin.close(descriptor)
-            return nil
-        }
-
-        self.endpoint = endpoint
-        self.fileDescriptor = descriptor
-    }
-
-    deinit {
-        Darwin.close(fileDescriptor)
-    }
-
-    func resolve(_ query: Data) -> DNSUpstreamResponse {
-        guard DNSWireMessage.transactionID(in: query) != nil else {
-            return DNSUpstreamResponse(response: nil, outcome: .receiveFailed)
-        }
-
-        let sent = send(query, endpoint: endpoint, fileDescriptor: fileDescriptor)
-
-        guard sent == query.count else {
-            return DNSUpstreamResponse(response: nil, outcome: .sendFailed)
-        }
-
-        let bufferCapacity = 4096
-        var buffer = [UInt8](repeating: 0, count: bufferCapacity)
-        var mismatchedResponseCount = 0
-
-        while true {
-            var sourceAddress = sockaddr_storage()
-            var sourceAddressLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
-            let received = withUnsafeMutablePointer(to: &sourceAddress) { sourcePointer in
-                sourcePointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                    buffer.withUnsafeMutableBytes { bufferBytes in
-                        recvfrom(
-                            fileDescriptor,
-                            bufferBytes.baseAddress,
-                            bufferCapacity,
-                            0,
-                            socketAddress,
-                            &sourceAddressLength
-                        )
-                    }
-                }
-            }
-
-            guard received > 0 else {
-                return DNSUpstreamResponse(response: nil, outcome: receiveFailureOutcome())
-            }
-
-            guard isExpectedSource(sourceAddress, endpoint: endpoint) else {
-                mismatchedResponseCount += 1
-                guard mismatchedResponseCount < Self.maxMismatchedResponses else {
-                    return DNSUpstreamResponse(response: nil, outcome: .mismatchedResponse)
-                }
-                continue
-            }
-
-            let response = Data(buffer.prefix(received))
-            if DNSWireMessage.isValidResponse(response, matching: query) {
-                return DNSUpstreamResponse(response: response, outcome: .success)
-            }
-
-            mismatchedResponseCount += 1
-            guard mismatchedResponseCount < Self.maxMismatchedResponses else {
-                return DNSUpstreamResponse(response: nil, outcome: .mismatchedResponse)
-            }
-        }
-    }
-}
-
-private enum TCPResolver {
-    static func resolve(_ query: Data, endpoint: ResolverEndpoint, timeoutSeconds: Int) -> DNSUpstreamResponse {
-        let descriptor = socket(endpoint.family, SOCK_STREAM, IPPROTO_TCP)
-        guard descriptor >= 0 else {
-            return DNSUpstreamResponse(response: nil, outcome: .socketUnavailable)
-        }
-
-        defer {
-            Darwin.close(descriptor)
-        }
-
-        guard configureSocketTimeouts(descriptor, receive: true, send: true, timeoutSeconds: timeoutSeconds) else {
-            return DNSUpstreamResponse(response: nil, outcome: .socketUnavailable)
-        }
-
-        guard connect(descriptor, endpoint: endpoint, timeoutSeconds: timeoutSeconds) else {
-            return DNSUpstreamResponse(response: nil, outcome: receiveFailureOutcome())
-        }
-
-        var framedQuery = Data()
-        appendUInt16(UInt16(query.count), to: &framedQuery)
-        framedQuery.append(query)
-
-        guard sendAll(framedQuery, fileDescriptor: descriptor) else {
-            return DNSUpstreamResponse(response: nil, outcome: .sendFailed)
-        }
-
-        guard let lengthData = receiveExact(2, fileDescriptor: descriptor) else {
-            return DNSUpstreamResponse(response: nil, outcome: receiveFailureOutcome())
-        }
-
-        let responseLength = Int(readUInt16(lengthData, at: 0))
-        guard responseLength > 0, let response = receiveExact(responseLength, fileDescriptor: descriptor) else {
-            return DNSUpstreamResponse(response: nil, outcome: receiveFailureOutcome())
-        }
-
-        guard DNSWireMessage.isValidResponse(response, matching: query) else {
-            return DNSUpstreamResponse(response: nil, outcome: .mismatchedResponse)
-        }
-
-        return DNSUpstreamResponse(response: response, outcome: .success)
-    }
-
-    private static func connect(_ fileDescriptor: Int32, endpoint: ResolverEndpoint, timeoutSeconds: Int) -> Bool {
-        let originalFlags = fcntl(fileDescriptor, F_GETFL, 0)
-        if originalFlags >= 0 {
-            _ = fcntl(fileDescriptor, F_SETFL, originalFlags | O_NONBLOCK)
-        }
-        defer {
-            if originalFlags >= 0 {
-                _ = fcntl(fileDescriptor, F_SETFL, originalFlags)
-            }
-        }
-
-        let result = connectSocket(fileDescriptor, endpoint: endpoint)
-        if result == 0 {
-            return true
-        }
-
-        guard errno == EINPROGRESS else {
-            return false
-        }
-
-        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
-        let pollResult = poll(&descriptor, 1, Int32(timeoutSeconds * 1_000))
-        guard pollResult > 0 else {
-            errno = ETIMEDOUT
-            return false
-        }
-
-        var socketError: Int32 = 0
-        var socketErrorLength = socklen_t(MemoryLayout<Int32>.size)
-        let optionResult = getsockopt(
-            fileDescriptor,
-            SOL_SOCKET,
-            SO_ERROR,
-            &socketError,
-            &socketErrorLength
-        )
-        guard optionResult == 0, socketError == 0 else {
-            errno = socketError == 0 ? errno : socketError
-            return false
-        }
-
-        return true
-    }
-
-    private static func connectSocket(_ fileDescriptor: Int32, endpoint: ResolverEndpoint) -> Int32 {
-        if endpoint.family == AF_INET6 {
-            var address = sockaddr_in6()
-            address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
-            address.sin6_family = sa_family_t(AF_INET6)
-            address.sin6_port = in_port_t(53).bigEndian
-            guard inet_pton(AF_INET6, endpoint.address, &address.sin6_addr) == 1 else {
-                return -1
-            }
-
-            return withUnsafePointer(to: &address) { addressPointer in
-                addressPointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                    Darwin.connect(fileDescriptor, socketAddress, endpoint.socketAddressLength)
-                }
-            }
-        }
-
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = in_port_t(53).bigEndian
-        guard inet_pton(AF_INET, endpoint.address, &address.sin_addr) == 1 else {
-            return -1
-        }
-
-        return withUnsafePointer(to: &address) { addressPointer in
-            addressPointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                Darwin.connect(fileDescriptor, socketAddress, endpoint.socketAddressLength)
-            }
-        }
-    }
-
-    private static func sendAll(_ data: Data, fileDescriptor: Int32) -> Bool {
-        var sentCount = 0
-        return data.withUnsafeBytes { rawBytes in
-            while sentCount < data.count {
-                guard let baseAddress = rawBytes.baseAddress else {
-                    return false
-                }
-
-                let sent = Darwin.send(
-                    fileDescriptor,
-                    baseAddress.advanced(by: sentCount),
-                    data.count - sentCount,
-                    0
-                )
-
-                guard sent > 0 else {
-                    return false
-                }
-
-                sentCount += sent
-            }
-
-            return true
-        }
-    }
-
-    private static func receiveExact(_ byteCount: Int, fileDescriptor: Int32) -> Data? {
-        var data = Data(count: byteCount)
-        var receivedCount = 0
-
-        while receivedCount < byteCount {
-            let received = data.withUnsafeMutableBytes { rawBytes in
-                guard let baseAddress = rawBytes.baseAddress else {
-                    return 0
-                }
-
-                return recv(
-                    fileDescriptor,
-                    baseAddress.advanced(by: receivedCount),
-                    byteCount - receivedCount,
-                    0
-                )
-            }
-
-            guard received > 0 else {
-                return nil
-            }
-
-            receivedCount += received
-        }
-
-        return data
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-}
-
-private enum DNSMessageTraits {
-    static func isTruncated(_ response: Data) -> Bool {
-        guard response.count >= 4 else {
-            return false
-        }
-
-        let flags = (UInt16(response[2]) << 8) | UInt16(response[3])
-        return flags & 0x0200 != 0
-    }
-}
-
-private func isExpectedSource(_ sourceAddress: sockaddr_storage, endpoint: ResolverEndpoint) -> Bool {
-    guard Int32(sourceAddress.ss_family) == endpoint.family else {
-        return false
-    }
-
-    if endpoint.family == AF_INET6 {
-        var expectedAddress = in6_addr()
-        guard inet_pton(AF_INET6, endpoint.address, &expectedAddress) == 1 else {
-            return false
-        }
-
-        var mutableSourceAddress = sourceAddress
-        return withUnsafePointer(to: &mutableSourceAddress) { sourcePointer in
-            sourcePointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { ipv6Address in
-                guard ipv6Address.pointee.sin6_port == in_port_t(53).bigEndian else {
-                    return false
-                }
-
-                var actualAddress = ipv6Address.pointee.sin6_addr
-                return withUnsafePointer(to: &actualAddress) { actualPointer in
-                    withUnsafePointer(to: &expectedAddress) { expectedPointer in
-                        memcmp(actualPointer, expectedPointer, MemoryLayout<in6_addr>.size) == 0
-                    }
-                }
-            }
-        }
-    }
-
-    var expectedAddress = in_addr()
-    guard inet_pton(AF_INET, endpoint.address, &expectedAddress) == 1 else {
-        return false
-    }
-
-    var mutableSourceAddress = sourceAddress
-    return withUnsafePointer(to: &mutableSourceAddress) { sourcePointer in
-        sourcePointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { ipv4Address in
-            ipv4Address.pointee.sin_port == in_port_t(53).bigEndian
-                && ipv4Address.pointee.sin_addr.s_addr == expectedAddress.s_addr
-        }
-    }
-}
-
-private func send(_ query: Data, endpoint: ResolverEndpoint, fileDescriptor: Int32) -> Int {
-    if endpoint.family == AF_INET6 {
-        var address = sockaddr_in6()
-        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
-        address.sin6_family = sa_family_t(AF_INET6)
-        address.sin6_port = in_port_t(53).bigEndian
-        guard inet_pton(AF_INET6, endpoint.address, &address.sin6_addr) == 1 else {
-            return -1
-        }
-
-        return query.withUnsafeBytes { queryBytes in
-            withUnsafePointer(to: &address) { addressPointer in
-                addressPointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                    sendto(
-                        fileDescriptor,
-                        queryBytes.baseAddress,
-                        query.count,
-                        0,
-                        socketAddress,
-                        endpoint.socketAddressLength
-                    )
-                }
-            }
-        }
-    }
-
-    var address = sockaddr_in()
-    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    address.sin_family = sa_family_t(AF_INET)
-    address.sin_port = in_port_t(53).bigEndian
-    guard inet_pton(AF_INET, endpoint.address, &address.sin_addr) == 1 else {
-        return -1
-    }
-
-    return query.withUnsafeBytes { queryBytes in
-        withUnsafePointer(to: &address) { addressPointer in
-            addressPointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                sendto(
-                    fileDescriptor,
-                    queryBytes.baseAddress,
-                    query.count,
-                    0,
-                    socketAddress,
-                    endpoint.socketAddressLength
-                )
-            }
-        }
-    }
-}
-
-private func configureSocketTimeouts(
-    _ descriptor: Int32,
-    receive: Bool,
-    send: Bool,
-    timeoutSeconds: Int
-) -> Bool {
-    if receive {
-        var receiveTimeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
-        guard setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_RCVTIMEO,
-            &receiveTimeout,
-            socklen_t(MemoryLayout<timeval>.size)
-        ) == 0 else {
-            return false
-        }
-    }
-
-    if send {
-        var sendTimeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
-        guard setsockopt(
-            descriptor,
-            SOL_SOCKET,
-            SO_SNDTIMEO,
-            &sendTimeout,
-            socklen_t(MemoryLayout<timeval>.size)
-        ) == 0 else {
-            return false
-        }
-    }
-
-    return true
-}
-
-private func receiveFailureOutcome() -> ResolverAttemptOutcome {
-    switch errno {
-    case EAGAIN, EWOULDBLOCK, ETIMEDOUT:
-        return .timeout
-    default:
-        return .receiveFailed
-    }
-}
-
-private enum DNSResponseFactory {
-    static func serverFailure(for query: Data) -> Data? {
-        guard let question = try? DNSMessage.parseQuestion(from: query) else {
-            return invalidQueryServerFailure(for: query)
-        }
-
-        let queryFlags = readUInt16(query, at: 2)
-        let recursionDesired = queryFlags & 0x0100
-        let questionBytes = query[question.questionRange]
-
-        var response = Data()
-        appendUInt16(question.transactionID, to: &response)
-        appendUInt16(0x8000 | recursionDesired | 0x0080 | 0x0002, to: &response)
-        appendUInt16(1, to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        response.append(questionBytes)
-        return response
-    }
-
-    private static func invalidQueryServerFailure(for query: Data) -> Data? {
-        guard query.count >= 12 else {
-            return nil
-        }
-
-        let queryFlags = readUInt16(query, at: 2)
-        let recursionDesired = queryFlags & 0x0100
-
-        var response = Data()
-        appendUInt16(readUInt16(query, at: 0), to: &response)
-        appendUInt16(0x8000 | recursionDesired | 0x0080 | 0x0002, to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        return response
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-}
-
-private enum DNSBootstrapAddressExtractor {
-    static func addresses(from response: Data?, matching query: Data, recordType: DNSRecordType) -> [String] {
-        guard let response,
-              response.count >= 12,
-              DNSWireMessage.isValidResponse(response, matching: query)
-        else {
-            return []
-        }
-
-        let questionCount = Int(readUInt16(response, at: 4))
-        let answerCount = Int(readUInt16(response, at: 6))
-        var cursor = 12
-
-        for _ in 0..<questionCount {
-            guard skipName(in: response, cursor: &cursor), cursor + 4 <= response.count else {
-                return []
-            }
-            cursor += 4
-        }
-
-        var addresses: [String] = []
-        var seenAddresses = Set<String>()
-        for _ in 0..<answerCount {
-            guard skipName(in: response, cursor: &cursor), cursor + 10 <= response.count else {
-                return addresses
-            }
-
-            let answerType = readUInt16(response, at: cursor)
-            let answerClass = readUInt16(response, at: cursor + 2)
-            let dataLength = Int(readUInt16(response, at: cursor + 8))
-            cursor += 10
-
-            guard cursor + dataLength <= response.count else {
-                return addresses
-            }
-
-            defer {
-                cursor += dataLength
-            }
-
-            guard answerType == recordType.rawValue,
-                  answerClass == 1,
-                  let address = addressString(from: response[cursor..<(cursor + dataLength)], recordType: recordType),
-                  seenAddresses.insert(address).inserted
-            else {
-                continue
-            }
-
-            addresses.append(address)
-        }
-
-        return addresses
-    }
-
-    private static func addressString(from bytes: Data.SubSequence, recordType: DNSRecordType) -> String? {
-        let family: Int32
-        let expectedByteCount: Int
-        let bufferLength: Int32
-
-        switch recordType {
-        case .a:
-            family = AF_INET
-            expectedByteCount = 4
-            bufferLength = INET_ADDRSTRLEN
-        case .aaaa:
-            family = AF_INET6
-            expectedByteCount = 16
-            bufferLength = INET6_ADDRSTRLEN
-        case .txt, .srv, .svcb, .https, .unknown:
-            return nil
-        }
-
-        guard bytes.count == expectedByteCount else {
-            return nil
-        }
-
-        var rawBytes = Array(bytes)
-        var buffer = [CChar](repeating: 0, count: Int(bufferLength))
-        let converted = rawBytes.withUnsafeMutableBytes { pointer in
-            inet_ntop(family, pointer.baseAddress, &buffer, socklen_t(bufferLength))
-        }
-        guard converted != nil else {
-            return nil
-        }
-
-        let terminatedLength = buffer.firstIndex(of: 0) ?? buffer.count
-        return String(decoding: buffer[..<terminatedLength].map { UInt8(bitPattern: $0) }, as: UTF8.self)
-    }
-
-    private static func skipName(in data: Data, cursor: inout Int) -> Bool {
-        var localCursor = cursor
-        while localCursor < data.count {
-            let length = data[localCursor]
-            localCursor += 1
-
-            if length == 0 {
-                cursor = localCursor
-                return true
-            }
-
-            if length & 0xC0 == 0xC0 {
-                guard localCursor < data.count else {
-                    return false
-                }
-                let pointer = (Int(length & 0x3F) << 8) | Int(data[localCursor])
-                localCursor += 1
-                guard isValidCompressedNameTarget(pointer, in: data) else {
-                    return false
-                }
-                cursor = localCursor
-                return true
-            }
-
-            guard length & 0xC0 == 0, localCursor + Int(length) <= data.count else {
-                return false
-            }
-
-            localCursor += Int(length)
-        }
-
-        return false
-    }
-
-    private static func isValidCompressedNameTarget(_ offset: Int, in data: Data) -> Bool {
-        guard offset >= 0, offset < data.count else {
-            return false
-        }
-
-        var cursor = offset
-        var visitedOffsets: Set<Int> = []
-        while cursor < data.count {
-            guard visitedOffsets.insert(cursor).inserted else {
-                return false
-            }
-
-            let length = data[cursor]
-            cursor += 1
-
-            if length == 0 {
-                return true
-            }
-
-            if length & 0xC0 == 0xC0 {
-                guard cursor < data.count else {
-                    return false
-                }
-                let pointer = (Int(length & 0x3F) << 8) | Int(data[cursor])
-                guard pointer >= 0, pointer < data.count else {
-                    return false
-                }
-                cursor = pointer
-                continue
-            }
-
-            guard length & 0xC0 == 0, cursor + Int(length) <= data.count else {
-                return false
-            }
-
-            cursor += Int(length)
-        }
-
-        return false
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-}
-
-private enum DNSBootstrapResponseFactory {
-    static func response(
-        for query: Data,
-        question: DNSQuestion,
-        endpoint: DNSOverHTTPSEndpoint,
-        ttl: UInt32 = 60
-    ) -> Data? {
-        response(
-            for: query,
-            question: question,
-            ipv4Servers: endpoint.bootstrapIPv4Servers,
-            ipv6Servers: endpoint.bootstrapIPv6Servers,
-            ttl: ttl
-        )
-    }
-
-    static func response(
-        for query: Data,
-        question: DNSQuestion,
-        endpoint: DNSOverQUICEndpoint,
-        ttl: UInt32 = 60
-    ) -> Data? {
-        response(
-            for: query,
-            question: question,
-            ipv4Servers: endpoint.bootstrapIPv4Servers,
-            ipv6Servers: endpoint.bootstrapIPv6Servers,
-            ttl: ttl
-        )
-    }
-
-    static func response(
-        for query: Data,
-        question: DNSQuestion,
-        endpoint: DNSOverTLSEndpoint,
-        ttl: UInt32 = 60
-    ) -> Data? {
-        response(
-            for: query,
-            question: question,
-            ipv4Servers: endpoint.bootstrapIPv4Servers,
-            ipv6Servers: endpoint.bootstrapIPv6Servers,
-            ttl: ttl
-        )
-    }
-
-    private static func response(
-        for query: Data,
-        question: DNSQuestion,
-        ipv4Servers: [String],
-        ipv6Servers: [String],
-        ttl: UInt32
-    ) -> Data? {
-        let answerAddresses: [Data]
-        switch question.recordType {
-        case .a:
-            answerAddresses = ipv4Servers.compactMap {
-                addressData($0, family: AF_INET, byteCount: 4)
-            }
-        case .aaaa:
-            answerAddresses = ipv6Servers.compactMap {
-                addressData($0, family: AF_INET6, byteCount: 16)
-            }
-        case .txt, .srv, .svcb, .https, .unknown:
-            answerAddresses = []
-        }
-
-        let queryFlags = readUInt16(query, at: 2)
-        let recursionDesired = queryFlags & 0x0100
-        let questionBytes = query[question.questionRange]
-
-        var response = Data()
-        appendUInt16(question.transactionID, to: &response)
-        appendUInt16(0x8000 | recursionDesired | 0x0080, to: &response)
-        appendUInt16(1, to: &response)
-        appendUInt16(UInt16(answerAddresses.count), to: &response)
-        appendUInt16(0, to: &response)
-        appendUInt16(0, to: &response)
-        response.append(questionBytes)
-
-        for answerAddress in answerAddresses {
-            response.append(contentsOf: [0xC0, 0x0C])
-            appendUInt16(question.rawRecordType, to: &response)
-            appendUInt16(1, to: &response)
-            appendUInt32(ttl, to: &response)
-            appendUInt16(UInt16(answerAddress.count), to: &response)
-            response.append(answerAddress)
-        }
-
-        return response
-    }
-
-    private static func addressData(_ address: String, family: Int32, byteCount: Int) -> Data? {
-        var bytes = [UInt8](repeating: 0, count: byteCount)
-        let result = bytes.withUnsafeMutableBytes { rawBytes in
-            inet_pton(family, address, rawBytes.baseAddress)
-        }
-
-        guard result == 1 else {
-            return nil
-        }
-
-        return Data(bytes)
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-
-    private static func appendUInt32(_ value: UInt32, to data: inout Data) {
-        data.append(UInt8((value >> 24) & 0xFF))
-        data.append(UInt8((value >> 16) & 0xFF))
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-}
+// The pure DNS wire/socket tail types (IPv4UDPDNSPacket, resolver endpoints,
+// UDP/TCP socket resolvers, DNSMessageTraits, bootstrap wire helpers) moved to
+// LavaSecDNS in Phase E1 — now public API with executable tests instead of
+// source pins. See Sources/LavaSecDNS/.
 
 private final class SendableCompletion: @unchecked Sendable {
     private let handler: (Error?) -> Void

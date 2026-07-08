@@ -58,7 +58,7 @@ final class ActivityMetricsSourceTests: XCTestCase {
 
         XCTAssertTrue(topBlock.contains("viewModel.configuration.keepDomainDiagnostics"))
         XCTAssertTrue(topBlock.contains("selectedFilter: DomainHistoryFilter"))
-        XCTAssertTrue(topBlock.contains("viewModel.diagnostics.topDomains("))
+        XCTAssertTrue(topBlock.contains("reports.diagnostics.topDomains("))
         XCTAssertTrue(topBlock.contains("action: selectedFilter.action"))
         XCTAssertTrue(topBlock.contains("from: rangeStart"))
         XCTAssertTrue(topBlock.contains("to: rangeEnd"))

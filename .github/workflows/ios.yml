@@ -105,6 +105,16 @@ jobs:
       - name: Check UI string catalog coverage (no hardcoded user-facing strings outside the catalog)
         run: node scripts/check-string-coverage.mjs
 
+      - name: SwiftLint (warning-only)
+        # Phase C2 lint lane (lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
+        # --lenient downgrades every violation to a warning, so findings ANNOTATE the PR but
+        # never fail this required check; a broken .swiftlint.yml still fails loudly.
+        # missing_docs is scoped to the post-split SPM targets via their nested configs.
+        # Version-pinned like the other containerized scanners (security.yml).
+        uses: docker://ghcr.io/realm/swiftlint:0.59.1
+        with:
+          args: swiftlint --lenient --reporter github-actions-logging
+
       - name: Merge-up contamination guard
         if: ${{ github.event_name == 'pull_request' }}
         env:

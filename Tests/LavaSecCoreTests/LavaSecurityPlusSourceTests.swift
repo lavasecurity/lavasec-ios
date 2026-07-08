@@ -4,11 +4,14 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     func testUpgradeScreenUsesRealPlusProductsAndRestoreActions() throws {
         let settingsSource = try readSource(.settingsView)
         let viewModelSource = try readSource(.appViewModel)
+        // The billing cluster lives in LavaSecurityPlusController since the Phase D2 peel;
+        // the view actions route through the `plus` environment object.
+        let controllerSource = try readSource(.lavaSecurityPlusController)
 
         XCTAssertFalse(settingsSource.contains("TODO_REPLACE_WITH_APP_STORE_PRODUCT_ID"))
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
-        XCTAssertTrue(settingsSource.contains("viewModel.purchaseLavaSecurityPlus"))
-        XCTAssertTrue(settingsSource.contains("viewModel.restoreLavaSecurityPlusPurchases"))
+        XCTAssertTrue(settingsSource.contains("plus.purchaseLavaSecurityPlus"))
+        XCTAssertTrue(settingsSource.contains("plus.restoreLavaSecurityPlusPurchases"))
         XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Security Plus\")"))
         XCTAssertTrue(settingsSource.contains(".navigationBarTitleDisplayMode(.large)"))
         XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")"))
@@ -17,14 +20,16 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertFalse(settingsSource.contains("title: \"More room for your rules\""))
         XCTAssertFalse(settingsSource.contains("UpgradeLargeTitle()"))
         XCTAssertFalse(settingsSource.contains("Text(\"Lava Security Plus\")\n                        .foregroundStyle(LavaStyle.lavaOrange)\n                    Text(\" unlocks\")"))
-        XCTAssertTrue(viewModelSource.contains("func purchaseLavaSecurityPlus"))
-        XCTAssertTrue(viewModelSource.contains("func restoreLavaSecurityPlusPurchases"))
+        XCTAssertTrue(controllerSource.contains("func purchaseLavaSecurityPlus"))
+        XCTAssertTrue(controllerSource.contains("func restoreLavaSecurityPlusPurchases"))
         XCTAssertTrue(viewModelSource.contains("configuration.hasLavaSecurityPlus ? \"Lava Security Plus\" : \"Free plan\""))
     }
 
     func testUpgradeScreenMasksPurchaseControlsWhenPlusIsActive() throws {
         let settingsSource = try readSource(.settingsView)
-        let viewModelSource = try readSource(.appViewModel)
+        // The entitlement-check state lives on LavaSecurityPlusController (Phase D2 peel);
+        // the paid display gate stays on the hub's persisted configuration.
+        let controllerSource = try readSource(.lavaSecurityPlusController)
         let upgradeViewBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct UpgradeSettingsView: View",
@@ -33,19 +38,19 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
 
         XCTAssertTrue(upgradeViewBlock.contains("if viewModel.configuration.hasLavaSecurityPlus"))
         XCTAssertTrue(upgradeViewBlock.contains("UpgradeThankYouView()"))
-        XCTAssertTrue(upgradeViewBlock.contains("} else if !viewModel.hasCheckedLavaSecurityPlusEntitlements"))
-        XCTAssertTrue(upgradeViewBlock.contains("|| viewModel.isRefreshingLavaSecurityPlusEntitlements {"))
+        XCTAssertTrue(upgradeViewBlock.contains("} else if !plus.hasCheckedLavaSecurityPlusEntitlements"))
+        XCTAssertTrue(upgradeViewBlock.contains("|| plus.isRefreshingLavaSecurityPlusEntitlements {"))
         XCTAssertTrue(upgradeViewBlock.contains("UpgradeEntitlementCheckingView()"))
         XCTAssertTrue(upgradeViewBlock.contains("} else {\n                purchaseOptions"))
         // Entitlements are checked once per session (guarded) to avoid the
         // per-appear flicker/churn; products load only when not already loaded.
-        XCTAssertTrue(upgradeViewBlock.contains("if !viewModel.hasCheckedLavaSecurityPlusEntitlements {\n                await viewModel.refreshLavaSecurityPlusEntitlements()\n            }"))
-        XCTAssertTrue(upgradeViewBlock.contains("await viewModel.loadLavaSecurityPlusProducts()"))
-        XCTAssertFalse(upgradeViewBlock.contains("await viewModel.loadLavaSecurityPlusProducts()\n            await viewModel.refreshLavaSecurityPlusEntitlements()"))
-        XCTAssertTrue(viewModelSource.contains("@Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false"))
-        XCTAssertTrue(viewModelSource.contains("@Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false"))
-        XCTAssertTrue(viewModelSource.contains("hasCheckedLavaSecurityPlusEntitlements = true"))
-        XCTAssertTrue(viewModelSource.contains("defer {\n            isRefreshingLavaSecurityPlusEntitlements = false\n        }"))
+        XCTAssertTrue(upgradeViewBlock.contains("if !plus.hasCheckedLavaSecurityPlusEntitlements {\n                await plus.refreshLavaSecurityPlusEntitlements()\n            }"))
+        XCTAssertTrue(upgradeViewBlock.contains("await plus.loadLavaSecurityPlusProducts()"))
+        XCTAssertFalse(upgradeViewBlock.contains("await plus.loadLavaSecurityPlusProducts()\n            await plus.refreshLavaSecurityPlusEntitlements()"))
+        XCTAssertTrue(controllerSource.contains("@Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false"))
+        XCTAssertTrue(controllerSource.contains("@Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false"))
+        XCTAssertTrue(controllerSource.contains("hasCheckedLavaSecurityPlusEntitlements = true"))
+        XCTAssertTrue(controllerSource.contains("defer {\n            isRefreshingLavaSecurityPlusEntitlements = false\n        }"))
 
         let activePlanBlock = try sourceBlock(
             in: upgradeViewBlock,
@@ -68,7 +73,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(thankYouBlock.contains("UpgradeThankYouMascot()"))
         XCTAssertFalse(thankYouBlock.contains("SoftShieldGuardian(size: 96, state: .grateful"))
         XCTAssertTrue(thankYouMascotBlock.contains("@State private var mascotState: GuardianMascotState = .awake"))
-        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: viewModel.lavaGuardLook)"))
+        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)"))
         XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 650_000_000)"))
         XCTAssertTrue(thankYouMascotBlock.contains("mascotState = .grateful"))
         XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 900_000_000)"))
@@ -127,7 +132,8 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
 
     func testYearlyPaidMonthlyOfferUsesStoreKitBillingPlanPurchaseOption() throws {
         let storeSource = try readSource(.lavaSecurityPlusStore)
-        let viewModelSource = try readSource(.appViewModel)
+        // The published offers array lives on LavaSecurityPlusController (Phase D2 peel).
+        let controllerSource = try readSource(.lavaSecurityPlusController)
         let settingsSource = try readSource(.settingsView)
 
         XCTAssertTrue(storeSource.contains("case .yearlyPaidMonthly"))
@@ -145,13 +151,13 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         // store previously seeded `fallbackOfferOrder` in `init`/`loadProducts`, which kept the
         // paywall's `offers.isEmpty` load guard from ever retrying after a failed launch load.
         XCTAssertFalse(storeSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
-        // The view model must NOT pre-seed offers with the fallback list — doing so froze the
+        // The controller must NOT pre-seed offers with the fallback list — doing so froze the
         // paywall's `offers.isEmpty` load guard so live StoreKit products never loaded. The fallback
         // is supplied by `displayedOffers` in the view instead (asserted below + in
         // LavaSecurityPlusOffersLoadSourceTests).
-        XCTAssertFalse(viewModelSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
+        XCTAssertFalse(controllerSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
-        XCTAssertFalse(viewModelSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map"))
+        XCTAssertFalse(controllerSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.recommendedOfferOrder.map"))
     }
 
     func testYearlySavingsPitchIsComputedFromStoreKitPricesNotHardcoded() throws {
@@ -221,15 +227,17 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
 
     func testStoreKitBoundaryMirrorsEntitlementsAfterLocalVerification() throws {
         let storeSource = try readSource(.lavaSecurityPlusStore)
-        let viewModelSource = try readSource(.appViewModel)
+        // The entitlement sync client + its callers live on LavaSecurityPlusController
+        // (Phase D2 peel).
+        let controllerSource = try readSource(.lavaSecurityPlusController)
 
         XCTAssertTrue(storeSource.contains("Transaction.currentEntitlements"))
         XCTAssertTrue(storeSource.contains("Transaction.updates"))
         XCTAssertTrue(storeSource.contains("AppStore.sync()"))
         XCTAssertTrue(storeSource.contains(".appAccountToken"))
-        XCTAssertTrue(viewModelSource.contains("LavaSecurityPlusEntitlementSyncClient"))
-        XCTAssertTrue(viewModelSource.contains("syncLavaSecurityPlusEntitlementIfPossible"))
-        XCTAssertTrue(viewModelSource.contains("signedTransactionJWS"))
+        XCTAssertTrue(controllerSource.contains("LavaSecurityPlusEntitlementSyncClient"))
+        XCTAssertTrue(controllerSource.contains("syncLavaSecurityPlusEntitlementIfPossible"))
+        XCTAssertTrue(controllerSource.contains("signedTransactionJWS"))
     }
 
     func testCurrentEntitlementsSourceTrustsStoreKitGracePeriodWindow() throws {

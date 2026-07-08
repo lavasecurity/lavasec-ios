@@ -3,8 +3,11 @@
 DNS-filtering iOS app. Five processes share one SPM core: app (`LavaSecApp/`), packet
 tunnel (`LavaSecTunnel/`), widget, App Intents extension, plus `Sources/LavaSecCore`
 (the only compiled-test target). `Shared/` files are compiled into multiple targets by
-pbxproj membership. Read `README.md` for build/test basics and `CONTRIBUTING.md` for
-ground rules; plans live in the `lavasec-infra` repo under `plans/`.
+pbxproj membership. The pbxproj is GENERATED: edit `project.yml` and run
+`xcodegen generate`, never the pbxproj itself (`scripts/check-xcodegen-drift.sh`
+catches drift; see CONTRIBUTING.md). Read `README.md` for build/test basics and
+`CONTRIBUTING.md` for ground rules; plans live in the `lavasec-infra` repo under
+`plans/`.
 
 ## Comment conventions
 

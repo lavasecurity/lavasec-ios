@@ -83,6 +83,26 @@ public struct BackupEnvelopeStore: Sendable {
         storage.set(uploadedAt, forKey: Keys.lastUploadedAt)
     }
 
+    /// Records the upload timestamp ONLY if `uploadedEnvelope` is still the current local
+    /// envelope, returning whether the marker was recorded. A config/library change
+    /// re-seals + saves a new local envelope while an upload is in flight (e.g. the
+    /// turn-on upload or a manual Back Up Now); recording an upload for the older
+    /// envelope would falsely claim the server holds the latest, when the freshly
+    /// re-sealed envelope still needs uploading. The comparison is exact — the envelope
+    /// is `Equatable` and a re-seal always produces a different one (fresh AES-GCM
+    /// ciphertext). Extracted from the app's upload path (Phase D1) so the mid-upload
+    /// re-seal race is executable: BackupEnvelopeStoreTests.
+    public func recordUploadIfCurrent(
+        _ uploadedEnvelope: ZeroKnowledgeBackupEnvelope,
+        at uploadedAt: Date
+    ) -> Bool {
+        guard loadEnvelope() == uploadedEnvelope else {
+            return false
+        }
+        recordUpload(at: uploadedAt)
+        return true
+    }
+
     /// Forgets the recorded upload timestamp while keeping the local envelope.
     /// After this, `currentState()` reports `.waitingForSignIn` for a still-present
     /// envelope — used when the uploaded server copy is cleared but encrypted

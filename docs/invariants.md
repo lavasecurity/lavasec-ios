@@ -33,8 +33,13 @@ After a recent self-reconnect launch that strict-misses fast-resume, DNS request
 queued at most 64-deep for at most 4 s. Every exit except a committed current-lifecycle
 snapshot — timeout, overflow, stale lifecycle, snapshot-unavailable — answers SERVFAIL.
 Queued requests are only ever replayed *through the filter* after a real snapshot commits.
-- Home: `PacketTunnelProvider.swift` — "Transient bootstrap DNS wait" section (#294).
-- Enforced: `PacketTunnelDNSRuntimeSourceTests` transient-bootstrap-wait tests.
+- Home: `Sources/LavaSecDNS/TransientBootstrapDNSWait.swift` (the state machine, Phase E2)
+  + `PacketTunnelProvider.swift` — "Transient bootstrap DNS wait" section (#294) for the
+  SERVFAIL/replay/logging wiring.
+- Enforced: `TransientBootstrapDNSWaitTests` (executable bounds + transitions: 65th
+  enqueue overflows, timeout drains everything SERVFAIL-bound, stale-lifecycle and
+  expired-generation rejection, commit-only replay, teardown reset) +
+  `PacketTunnelDNSRuntimeSourceTests` transient-bootstrap-wait wiring pins.
 
 ### INV-DNS-3 — Last-known-good is config-exact
 LKG reuse tolerates ONLY stale catalog/guardrail content hashes. Enabled-list set, manual

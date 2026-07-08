@@ -22,6 +22,8 @@ final class ReleaseGateSourceTests: XCTestCase {
         let settings = try readSource(.settingsView)
         let root = try readSource(.rootView)
         let viewModel = try readSource(.appViewModel)
+        // The rage-shake routing lives on DiagnosticsController since the Phase D4 peel.
+        let diagnosticsController = try readSource(.diagnosticsController)
         let rageShakeQA = try readSource(.rageShakeQA)
 
         XCTAssertTrue(
@@ -58,12 +60,14 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertFalse(root.contains("#else\n            case .phoneQA:"))
 
         let rageShakeGate = try sourceBlock(
-            in: viewModel,
+            in: diagnosticsController,
             startingAt: "var canOpenPhoneQAFromRageShake: Bool",
             endingBefore: "func handleRageShake()"
         )
         XCTAssertTrue(rageShakeGate.contains("#if DEBUG || LAVA_QA_TOOLS"))
-        XCTAssertTrue(rageShakeGate.contains("return isAccountDeveloper"))
+        // The developer gate itself (isAccountDeveloper) stays a hub constant; the
+        // controller reads it through the bridge inside the same compile gate.
+        XCTAssertTrue(rageShakeGate.contains("return hub.isAccountDeveloper"))
         XCTAssertTrue(rageShakeGate.contains("#else"))
         XCTAssertTrue(rageShakeGate.contains("return false"))
 
@@ -88,10 +92,12 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    @Published private(set) var adminQAStatusMessage"))
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    var qaProbeSummaryText"))
 
+        // The Diagnostics MARK region that followed the QA section now opens with the
+        // hub-side export assembly (clearDiagnostics moved to DiagnosticsController, D4).
         let adminQACommandBlock = try sourceBlock(
             in: viewModel,
             startingAt: "#if DEBUG || LAVA_QA_TOOLS\n    func applyHostedQAProbeSet()",
-            endingBefore: "func clearDiagnostics()"
+            endingBefore: "func makeLocalLogExportArchive"
         )
         XCTAssertTrue(adminQACommandBlock.contains("func applyAdminQAAction(_ action: AdminQAAction)"))
         XCTAssertTrue(adminQACommandBlock.contains("func applyAdminQAVPNProfileAction(_ action: AdminQAVPNProfileAction) async"))
@@ -104,20 +110,25 @@ final class ReleaseGateSourceTests: XCTestCase {
 
     func testReleaseBuildSettingsUseExplicitReleaseCompilationCondition() throws {
         let project = try readSource(.xcodeProject)
-        let releaseConfigurationIDs = [
-            "1A000001000000000000B002 /* Release */",
-            "1A000001000000000000B102 /* Release */",
-            "1A000001000000000000B202 /* Release */",
-            "1A000003000000000000B302 /* Release */",
-            "1A0000080000000000B002 /* Release */",
+        // The pbxproj is generated from project.yml (XcodeGen, Phase C1 of lavasec-infra
+        // plans/2026-07-07-ios-modularization-scaffolding-plan.md), so configuration UUIDs
+        // are deterministic hashes, not durable anchors — resolve each container's Release/
+        // Debug configuration ID through its named configuration-list block instead.
+        // LavaSecUITests is deliberately absent: its Release configuration defines no
+        // compilation conditions (it never ships) — only these five gate RELEASE.
+        let releaseGatedContainers = [
+            "PBXProject \"LavaSec\"",
+            "PBXNativeTarget \"LavaSec\"",
+            "PBXNativeTarget \"LavaSecTunnel\"",
+            "PBXNativeTarget \"LavaSecWidget\"",
+            "PBXNativeTarget \"LavaSecIntents\"",
         ]
-        let productionDebugConfigurationIDs = [
-            "1A000001000000000000B001 /* Debug */",
-            "1A000001000000000000B101 /* Debug */",
-            "1A000001000000000000B201 /* Debug */",
-            "1A000003000000000000B301 /* Debug */",
-            "1A0000080000000000B001 /* Debug */",
-        ]
+        let releaseConfigurationIDs = try releaseGatedContainers.map {
+            try Self.configurationIdentifier(in: project, container: $0, configuration: "Release")
+        }
+        let productionDebugConfigurationIDs = try releaseGatedContainers.map {
+            try Self.configurationIdentifier(in: project, container: $0, configuration: "Debug")
+        }
 
         XCTAssertEqual(
             project.components(separatedBy: "SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;").count - 1,
@@ -176,5 +187,31 @@ final class ReleaseGateSourceTests: XCTestCase {
         let suffix = project[start...]
         let end = try XCTUnwrap(suffix.range(of: "\n\t\t};")?.upperBound)
         return String(suffix[..<end])
+    }
+
+    /// Resolves "UUID /* Release */"-style identifiers from a container's named
+    /// XCConfigurationList block, so the assertions above survive pbxproj regeneration
+    /// (`xcodegen generate` rewrites every UUID; the list comments are stable).
+    private static func configurationIdentifier(
+        in project: String,
+        container: String,
+        configuration: String
+    ) throws -> String {
+        let marker = "/* Build configuration list for \(container) */ = {"
+        let start = try XCTUnwrap(
+            project.range(of: marker)?.upperBound,
+            "No configuration list found for \(container)."
+        )
+        let suffix = project[start...]
+        let end = try XCTUnwrap(suffix.range(of: "};")?.lowerBound)
+        for line in suffix[..<end].split(separator: "\n") {
+            let entry = line.trimmingCharacters(in: .whitespaces)
+            if entry.hasSuffix("/* \(configuration) */,") {
+                return String(entry.dropLast(1))
+            }
+        }
+        throw SourceIntrospectionFailure(
+            description: "No \(configuration) configuration in the list for \(container)."
+        )
     }
 }

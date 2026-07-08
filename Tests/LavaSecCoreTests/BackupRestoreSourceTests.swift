@@ -33,7 +33,7 @@ final class BackupRestoreSourceTests: XCTestCase {
 
     func testRestoreModesUseDevicePasskeyAndRecoveryWithoutLegacyPassword() throws {
         let restoreSource = try readSource(.backupRestoreView)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
 
         XCTAssertTrue(restoreSource.contains("case deviceKey"))
         XCTAssertTrue(restoreSource.contains("case passkey"))
@@ -41,32 +41,35 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertTrue(restoreSource.contains("\"This Device\""))
         XCTAssertTrue(restoreSource.contains("\"Passkey\""))
         XCTAssertTrue(restoreSource.contains("\"Recovery\""))
-        XCTAssertTrue(viewModelSource.contains("case .passkey"))
+        XCTAssertTrue(controllerSource.contains("case .passkey"))
         XCTAssertFalse(restoreSource.contains("case password"))
         XCTAssertFalse(restoreSource.contains("\"Legacy\""))
         XCTAssertFalse(restoreSource.contains("passwordSecret"))
         XCTAssertFalse(restoreSource.contains("Backup password"))
-        XCTAssertFalse(viewModelSource.contains("decryptWithPassword(trimmedSecret)"))
+        XCTAssertFalse(controllerSource.contains("decryptWithPassword(trimmedSecret)"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(viewModelSource.contains("trimmedSecret"))
+        XCTAssertTrue(controllerSource.contains("trimmedSecret"))
     }
 
     func testPasskeyRestoreUsesPRFNotServerEscrow() throws {
         let coordinatorSource = try readSource(.backupPasskeyCoordinator)
         let restoreSource = try readSource(.backupRestoreView)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
+        // The recovery-phrase slot fallback moved to LavaSecAppServices with the D1 peel
+        // (executable in BackupRecoveryPhraseUnlockTests); pin the wiring there.
+        let unlockSource = try readSource(.backupRecoveryPhraseUnlock)
 
         // Restore derives the slot key from a local authenticator PRF assertion — no
         // server-returned recovery secret, no recovery service.
         XCTAssertTrue(coordinatorSource.contains("func assertPasskeyPRFOutput("))
         XCTAssertTrue(coordinatorSource.contains("ASAuthorizationPublicKeyCredentialPRFAssertionInput"))
         XCTAssertTrue(coordinatorSource.contains("assertion.prf"))
-        XCTAssertTrue(viewModelSource.contains("decryptWithPasskeyPRFOutput"))
-        XCTAssertFalse(viewModelSource.contains("decryptWithPasskeySecret"))
-        XCTAssertFalse(viewModelSource.contains("authorizePasskeyBackupRestore"))
-        XCTAssertTrue(viewModelSource.contains("decryptWithAssistedRecoveryPhrase"))
+        XCTAssertTrue(controllerSource.contains("decryptWithPasskeyPRFOutput"))
+        XCTAssertFalse(controllerSource.contains("decryptWithPasskeySecret"))
+        XCTAssertFalse(controllerSource.contains("authorizePasskeyBackupRestore"))
+        XCTAssertTrue(unlockSource.contains("decryptWithAssistedRecoveryPhrase"))
         XCTAssertTrue(restoreSource.contains("case .passkey"))
         XCTAssertTrue(restoreSource.contains("Use your saved passkey"))
     }
@@ -113,7 +116,7 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testWrongRecoveryPhraseUsesFriendlyMessage() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.backupController)
 
         XCTAssertTrue(source.contains("case invalidRecoveryPhrase"))
         XCTAssertTrue(source.contains("That recovery phrase did not unlock this backup. Check the words and try again."))

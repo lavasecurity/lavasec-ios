@@ -28,6 +28,11 @@ enum LavaRootTab: Hashable {
 struct RootView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
+    // The diagnostics + bug-report/rage-shake scope (Phase D4 peel).
+    @EnvironmentObject private var reports: DiagnosticsController
+    // The customization-preferences scope (Phase D5 peel): the app-wide appearance +
+    // text-size overrides below read it, so only customization changes re-render here.
+    @EnvironmentObject private var customization: CustomizationController
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasSeenLavaOnboarding") private var hasSeenLavaOnboarding = false
     @State private var didHandleDebugLaunchRageShake = false
@@ -64,14 +69,14 @@ struct RootView: View {
         }
         .tint(LavaStyle.safeGreen)
         .background(LavaStyle.groupedBackground)
-        .preferredColorScheme(viewModel.preferredColorScheme)
+        .preferredColorScheme(customization.preferredColorScheme)
         // Customization → Text Size. Nil when "Match System" is on (the default), so the system's
         // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
         // so every screen — including sheets/covers presented from it — inherits it.
-        .lavaTextSizeOverride(viewModel.textSizeOverride)
+        .lavaTextSizeOverride(customization.textSizeOverride)
         .overlay {
             RageShakeDetector {
-                viewModel.handleRageShake()
+                reports.handleRageShake()
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -98,7 +103,7 @@ struct RootView: View {
             host.alert(
                 "Send feedback?",
                 isPresented: Binding(
-                    get: { viewModel.pendingRageShakeConfirmation != nil && !security.isAppUnlockBlockingUI },
+                    get: { reports.pendingRageShakeConfirmation != nil && !security.isAppUnlockBlockingUI },
                     set: { isPresented in
                         // A real cancel only when the device is unlocked. While App
                         // Unlock is pending the `get` returns false to withhold the
@@ -107,12 +112,12 @@ struct RootView: View {
                         // confirmation re-surfaces on unlock (matching the sheet)
                         // instead of being silently discarded.
                         if !isPresented && !security.isAppUnlockBlockingUI {
-                            viewModel.cancelRageShakeFeedback()
+                            reports.cancelRageShakeFeedback()
                         }
                     }
                 )
             ) {
-                Button("Send feedback") { viewModel.confirmRageShakeFeedback() }
+                Button("Send feedback") { reports.confirmRageShakeFeedback() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Looks like you shook your phone. Want to tell us what went wrong?")
@@ -126,21 +131,21 @@ struct RootView: View {
         // see `isAppUnlockMaskVisible` there. Unlike the importer, withholding
         // (tearing down) here would lose an accumulating draft, so we mask in
         // place instead of withholding.
-        .sheet(item: $viewModel.rageShakeDestination) { destination in
+        .sheet(item: $reports.rageShakeDestination) { destination in
             switch destination {
 #if DEBUG || LAVA_QA_TOOLS
             case .phoneQA:
                 PhoneQASheetView(
                     showWelcome: {
-                        viewModel.dismissRageShakeDestination()
+                        reports.dismissRageShakeDestination()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             hasSeenLavaOnboarding = false
                         }
                     },
                     showUserBugReport: {
-                        viewModel.dismissRageShakeDestination()
+                        reports.dismissRageShakeDestination()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            viewModel.rageShakeDestination = .bugReport
+                            reports.rageShakeDestination = .bugReport
                         }
                     }
                 )
@@ -235,7 +240,7 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .lavaOpenGuardFromNotification)) { _ in
             hasSeenLavaOnboarding = true
-            viewModel.dismissRageShakeDestination()
+            reports.dismissRageShakeDestination()
             settingsPath = []
             guardNavigationPath = []
             security.resetViewAuthenticationTurn()
@@ -318,7 +323,7 @@ struct RootView: View {
 
     private func handleDeepLink(_ deepLink: LavaAppDeepLink) {
         hasSeenLavaOnboarding = true
-        viewModel.dismissRageShakeDestination()
+        reports.dismissRageShakeDestination()
         security.resetViewAuthenticationTurn()
 
         switch deepLink {
@@ -351,7 +356,7 @@ struct RootView: View {
             if case .feedback = settingsRoute {
                 settingsPath = []
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    viewModel.rageShakeDestination = .bugReport
+                    reports.rageShakeDestination = .bugReport
                 }
                 Task { await security.authenticateAppUnlockIfNeeded() }
                 return
@@ -459,14 +464,14 @@ struct RootView: View {
 
         didHandleDebugLaunchRageShake = true
         hasSeenLavaOnboarding = true
-        viewModel.handleRageShake()
+        reports.handleRageShake()
         // The debug launch arg should land directly on the sheet, so bypass the
         // confirmation dialog the gesture normally shows.
-        if let pending = viewModel.pendingRageShakeConfirmation {
-            viewModel.pendingRageShakeConfirmation = nil
-            viewModel.rageShakeDestination = pending
+        if let pending = reports.pendingRageShakeConfirmation {
+            reports.pendingRageShakeConfirmation = nil
+            reports.rageShakeDestination = pending
         }
-        if let destination = viewModel.rageShakeDestination {
+        if let destination = reports.rageShakeDestination {
             print("LAVA_RAGE_SHAKE_DESTINATION \(destination.id)")
         }
         #endif

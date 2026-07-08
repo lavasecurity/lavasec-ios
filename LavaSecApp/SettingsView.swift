@@ -218,6 +218,9 @@ private struct SettingsSubpageNavigationTitle: ViewModifier {
 
 struct SettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var account: AccountController
+    // The diagnostics + bug-report/rage-shake scope (Phase D4 peel).
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     @Binding private var path: [SettingsRoute]
     private let scrollToTopTrigger: Int
@@ -240,7 +243,7 @@ struct SettingsView: View {
                         route: .account,
                         systemImage: "person.crop.circle",
                         title: "Account & Backup",
-                        summary: viewModel.accountStatusText
+                        summary: account.accountStatusText
                     )
 
                     SettingsNavigationRow(
@@ -299,7 +302,7 @@ struct SettingsView: View {
                         systemImage: "ladybug",
                         title: "Feedback",
                         summary: "Voluntary and anonymized",
-                        action: { viewModel.rageShakeDestination = .bugReport }
+                        action: { reports.rageShakeDestination = .bugReport }
                     )
 
                     SettingsNavigationRow(
@@ -588,7 +591,8 @@ private struct SettingsSystemSettingsRow: View {
 }
 
 private struct AccountSettingsView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var account: AccountController
+    @EnvironmentObject private var backup: BackupController
     @EnvironmentObject private var security: SecurityController
     @State private var isShowingAccountSheet = false
     @State private var isSettingUpBackup = false
@@ -600,7 +604,7 @@ private struct AccountSettingsView: View {
             title: "Account & Backup",
             tier: .calm,
             intro: LavaInfoPanel(
-                title: viewModel.encryptedBackupInfoTitle,
+                title: backup.encryptedBackupInfoTitle,
                 description: "Lava works without an account. Sign in only to back up your settings online — encrypted, so only you can restore them on a new phone.",
                 systemImage: "person.crop.circle"
             )
@@ -612,39 +616,39 @@ private struct AccountSettingsView: View {
                 LavaCondensedList {
                     Button {
                         performAppSettingsMutation(reason: "Edit Account settings") {
-                            if viewModel.isAppleAccountConnected {
+                            if account.isAppleAccountConnected {
                                 isShowingAccountSheet = true
                             } else {
-                                viewModel.beginSignInWithApple()
+                                account.beginSignInWithApple()
                             }
                         }
                     } label: {
                         SettingsActionRow(
-                            title: viewModel.appleSignInActionTitle,
+                            title: account.appleSignInActionTitle,
                             iconTint: LavaStyle.primaryText
                         ) {
                             AppleSignInStatusIcon(
-                                isSigningIn: viewModel.isAppleSignInInProgress
+                                isSigningIn: account.isAppleSignInInProgress
                             )
                         }
                         .lavaRow()
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isAccountSignInInProgress)
+                    .disabled(account.isAccountSignInInProgress)
 
                     LavaCondensedDivider()
 
                     Button {
                         performAppSettingsMutation(reason: "Edit Account settings") {
-                            if viewModel.isGoogleAccountConnected {
+                            if account.isGoogleAccountConnected {
                                 isShowingAccountSheet = true
                             } else {
-                                viewModel.beginSignInWithGoogle()
+                                account.beginSignInWithGoogle()
                             }
                         }
                     } label: {
-                        SettingsActionRow(title: viewModel.googleSignInActionTitle) {
-                            if viewModel.isGoogleSignInInProgress {
+                        SettingsActionRow(title: account.googleSignInActionTitle) {
+                            if account.isGoogleSignInInProgress {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -654,29 +658,29 @@ private struct AccountSettingsView: View {
                         .lavaRow()
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isAccountSignInInProgress)
+                    .disabled(account.isAccountSignInInProgress)
                 }
             }
             .sheet(isPresented: $isShowingAccountSheet) {
                 AccountSheet()
-                    .environmentObject(viewModel)
+                    .environmentObject(account)
             }
             // The backup setup/restore flows present as full bottom sheets (like
             // Import filters) so they cover the tab bar and put their actions on the
             // sheet's footer bar.
             .sheet(isPresented: $isSettingUpBackup) {
                 BackupSetupView()
-                    .environmentObject(viewModel)
+                    .environmentObject(backup)
             }
             .sheet(isPresented: $isRestoringBackup) {
                 BackupRestoreView()
-                    .environmentObject(viewModel)
+                    .environmentObject(backup)
             }
 
             LavaSectionGroup("Encrypted Backup") {
                 VStack(alignment: .leading, spacing: 10) {
                     LavaCondensedList {
-                        if viewModel.isEncryptedBackupConfigured {
+                        if backup.isEncryptedBackupConfigured {
                             Button {
                                 Task {
                                     guard await security.requireAuthentication(
@@ -686,11 +690,11 @@ private struct AccountSettingsView: View {
                                         return
                                     }
 
-                                    await viewModel.backUpNow()
+                                    await backup.backUpNow()
                                 }
                             } label: {
-                                SettingsActionRow(title: viewModel.isBackingUpNow ? "Backing Up" : "Back Up Now") {
-                                    if viewModel.isBackingUpNow {
+                                SettingsActionRow(title: backup.isBackingUpNow ? "Backing Up" : "Back Up Now") {
+                                    if backup.isBackingUpNow {
                                         ProgressView()
                                             .controlSize(.small)
                                     } else {
@@ -701,8 +705,8 @@ private struct AccountSettingsView: View {
                                 .lavaRow()
                             }
                             .buttonStyle(.plain)
-                            .disabled(!viewModel.isAccountSignedIn || viewModel.isBackingUpNow || viewModel.isBackupMaintenanceInProgress)
-                            .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                            .disabled(!account.isAccountSignedIn || backup.isBackingUpNow || backup.isBackupMaintenanceInProgress)
+                            .opacity(account.isAccountSignedIn ? 1 : 0.45)
                         } else {
                             Button {
                                 isSettingUpBackup = true
@@ -714,8 +718,8 @@ private struct AccountSettingsView: View {
                                 .lavaRow()
                             }
                             .buttonStyle(.plain)
-                            .disabled(!viewModel.isAccountSignedIn)
-                            .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                            .disabled(!account.isAccountSignedIn)
+                            .opacity(account.isAccountSignedIn ? 1 : 0.45)
                         }
 
                         LavaCondensedDivider()
@@ -730,8 +734,8 @@ private struct AccountSettingsView: View {
                             .lavaRow()
                         }
                         .buttonStyle(.plain)
-                        .disabled(!viewModel.isAccountSignedIn)
-                        .opacity(viewModel.isAccountSignedIn ? 1 : 0.45)
+                        .disabled(!account.isAccountSignedIn)
+                        .opacity(account.isAccountSignedIn ? 1 : 0.45)
                     }
 
                     BackupOptionControl(
@@ -739,10 +743,10 @@ private struct AccountSettingsView: View {
                         detail: "Lava waits 30 minutes after your last settings change before it tries an automatic upload.",
                         isOn: automaticBackupBinding
                     )
-                    .disabled(!viewModel.isEncryptedBackupConfigured)
-                    .opacity(viewModel.isEncryptedBackupConfigured ? 1 : 0.45)
+                    .disabled(!backup.isEncryptedBackupConfigured)
+                    .opacity(backup.isEncryptedBackupConfigured ? 1 : 0.45)
 
-                    if viewModel.isEncryptedBackupConfigured {
+                    if backup.isEncryptedBackupConfigured {
                         VStack(alignment: .leading, spacing: 8) {
                             LavaCondensedList {
                                 backupMaintenanceButton(.clear)
@@ -786,7 +790,7 @@ private struct AccountSettingsView: View {
             .lavaRow()
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.isBackupMaintenanceInProgress || viewModel.isBackingUpNow)
+        .disabled(backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)
     }
 
     private var backupMaintenanceConfirmationBinding: Binding<Bool> {
@@ -807,19 +811,19 @@ private struct AccountSettingsView: View {
 
             switch target {
             case .clear:
-                await viewModel.clearEncryptedBackup()
+                await backup.clearEncryptedBackup()
             case .disable:
-                await viewModel.disableEncryptedBackup()
+                await backup.disableEncryptedBackup()
             }
         }
     }
 
     private var automaticBackupBinding: Binding<Bool> {
         Binding {
-            viewModel.isAutomaticBackupEnabled
+            backup.isAutomaticBackupEnabled
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit backup settings") {
-                viewModel.setAutomaticBackupEnabled(isEnabled)
+                backup.setAutomaticBackupEnabled(isEnabled)
             }
         }
     }
@@ -949,12 +953,12 @@ private struct LocalLogExportDocument: FileDocument {
 
 private struct AccountSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var account: AccountController
     @EnvironmentObject private var security: SecurityController
     @State private var isConfirmingAccountDeletion = false
 
     var body: some View {
-        let accountConnections = viewModel.accountConnections
+        let accountConnections = account.accountConnections
 
         NavigationStack {
             LavaSheetScaffold(spacing: 14, scrolls: false) {
@@ -972,7 +976,7 @@ private struct AccountSheet: View {
 
                     Button {
                         performAppSettingsMutation(reason: "Edit Account settings") {
-                            viewModel.signOutAccount()
+                            account.signOutAccount()
                             dismiss()
                         }
                     } label: {
@@ -992,11 +996,11 @@ private struct AccountSheet: View {
                         }
                     } label: {
                         SettingsActionRow(
-                            title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
+                            title: account.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
                             iconTint: .red,
                             titleTint: .red
                         ) {
-                            if viewModel.isAccountDeletionInProgress {
+                            if account.isAccountDeletionInProgress {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -1007,7 +1011,7 @@ private struct AccountSheet: View {
                         .lavaRow()
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isAccountDeletionInProgress)
+                    .disabled(account.isAccountDeletionInProgress)
                 }
             }
             .navigationTitle("Account")
@@ -1028,7 +1032,7 @@ private struct AccountSheet: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
                     Task {
-                        if await viewModel.deleteAccount() {
+                        if await account.deleteAccount() {
                             dismiss()
                         }
                     }
@@ -1040,7 +1044,7 @@ private struct AccountSheet: View {
     }
 
     private var accountSheetHeight: CGFloat {
-        viewModel.accountConnections.count > 1 ? 332 : 288
+        account.accountConnections.count > 1 ? 332 : 288
     }
 
     private func performAppSettingsMutation(reason: String, action: @escaping @MainActor () -> Void) {
@@ -1150,6 +1154,7 @@ private struct GoogleSignInIcon: View {
 ///     could adopt the shared row card pending visual QA that it preserves the sales look.
 private struct UpgradeSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var plus: LavaSecurityPlusController
     @EnvironmentObject private var security: SecurityController
 
     var body: some View {
@@ -1167,17 +1172,17 @@ private struct UpgradeSettingsView: View {
             if viewModel.configuration.hasLavaSecurityPlus {
                 UpgradeThankYouView()
                 subscriberManagementSection
-            } else if !viewModel.hasCheckedLavaSecurityPlusEntitlements
-                || viewModel.isRefreshingLavaSecurityPlusEntitlements {
+            } else if !plus.hasCheckedLavaSecurityPlusEntitlements
+                || plus.isRefreshingLavaSecurityPlusEntitlements {
                 UpgradeEntitlementCheckingView()
             } else {
                 purchaseOptions
             }
 
-            if let message = viewModel.lavaSecurityPlusMessage {
+            if let message = plus.lavaSecurityPlusMessage {
                 Text(message)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(viewModel.lavaSecurityPlusMessageIsError ? LavaStyle.errorText : LavaStyle.safeGreen)
+                    .foregroundStyle(plus.lavaSecurityPlusMessageIsError ? LavaStyle.errorText : LavaStyle.safeGreen)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -1185,21 +1190,21 @@ private struct UpgradeSettingsView: View {
         .navigationTitle("Lava Security Plus")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
-            viewModel.clearLavaSecurityPlusMessage()
+            plus.clearLavaSecurityPlusMessage()
         }
         .onDisappear {
-            viewModel.clearLavaSecurityPlusMessage()
+            plus.clearLavaSecurityPlusMessage()
         }
         .task {
             // Check entitlements once per session — re-checking on every appear
             // flips the loading flag (flicker) and re-applies the entitlement,
             // which can churn the paid status. The displayed status is driven by
             // the persisted configuration, which stays truthful between checks.
-            if !viewModel.hasCheckedLavaSecurityPlusEntitlements {
-                await viewModel.refreshLavaSecurityPlusEntitlements()
+            if !plus.hasCheckedLavaSecurityPlusEntitlements {
+                await plus.refreshLavaSecurityPlusEntitlements()
             }
-            if !viewModel.configuration.hasLavaSecurityPlus, viewModel.lavaSecurityPlusOffers.isEmpty {
-                await viewModel.loadLavaSecurityPlusProducts()
+            if !viewModel.configuration.hasLavaSecurityPlus, plus.lavaSecurityPlusOffers.isEmpty {
+                await plus.loadLavaSecurityPlusProducts()
             }
         }
     }
@@ -1227,7 +1232,7 @@ private struct UpgradeSettingsView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isPurchasingLavaSecurityPlus)
+                    .disabled(plus.isPurchasingLavaSecurityPlus)
                 }
 
                 Text("or if you have already made a purchase")
@@ -1241,7 +1246,7 @@ private struct UpgradeSettingsView: View {
                     restorePurchases()
                 } label: {
                     SettingsActionRow(title: "Restore Purchase") {
-                        if viewModel.isPurchasingLavaSecurityPlus {
+                        if plus.isPurchasingLavaSecurityPlus {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
@@ -1251,7 +1256,7 @@ private struct UpgradeSettingsView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.isPurchasingLavaSecurityPlus)
+                .disabled(plus.isPurchasingLavaSecurityPlus)
                 .padding(16)
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
@@ -1263,8 +1268,8 @@ private struct UpgradeSettingsView: View {
     }
 
     private var displayedOffers: [LavaSecurityPlusOffer] {
-        if !viewModel.lavaSecurityPlusOffers.isEmpty {
-            return viewModel.lavaSecurityPlusOffers
+        if !plus.lavaSecurityPlusOffers.isEmpty {
+            return plus.lavaSecurityPlusOffers
         }
 
         return LavaSecurityPlusPolicy.fallbackOfferOrder.map {
@@ -1308,13 +1313,13 @@ private struct UpgradeSettingsView: View {
 
     private func purchase(_ offer: LavaSecurityPlusOffer) {
         performAppSettingsMutation(reason: "Upgrade to Lava Security Plus") {
-            await viewModel.purchaseLavaSecurityPlus(offer)
+            await plus.purchaseLavaSecurityPlus(offer)
         }
     }
 
     private func restorePurchases() {
         performAppSettingsMutation(reason: "Restore Lava Security Plus") {
-            await viewModel.restoreLavaSecurityPlusPurchases()
+            await plus.restoreLavaSecurityPlusPurchases()
         }
     }
 
@@ -1323,7 +1328,7 @@ private struct UpgradeSettingsView: View {
         VStack(spacing: 10) {
             // Manage / cancel is shown only with an active auto-renewable subscription
             // (non-nil expiry); hidden when there is no entitlement.
-            if viewModel.lavaSecurityPlusExpiresAt != nil {
+            if plus.lavaSecurityPlusExpiresAt != nil {
                 Button {
                     manageSubscription()
                 } label: {
@@ -1333,7 +1338,7 @@ private struct UpgradeSettingsView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.isPurchasingLavaSecurityPlus)
+                .disabled(plus.isPurchasingLavaSecurityPlus)
                 .padding(16)
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
@@ -1343,7 +1348,7 @@ private struct UpgradeSettingsView: View {
                 restorePurchases()
             } label: {
                 SettingsActionRow(title: "Restore Purchase") {
-                    if viewModel.isPurchasingLavaSecurityPlus {
+                    if plus.isPurchasingLavaSecurityPlus {
                         ProgressView()
                             .controlSize(.small)
                     } else {
@@ -1353,7 +1358,7 @@ private struct UpgradeSettingsView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isPurchasingLavaSecurityPlus)
+            .disabled(plus.isPurchasingLavaSecurityPlus)
             .padding(16)
             .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
         }
@@ -1375,7 +1380,7 @@ private struct UpgradeSettingsView: View {
             .first(where: { $0.activationState == .foregroundActive }) {
             do {
                 try await AppStore.showManageSubscriptions(in: scene)
-                await viewModel.refreshLavaSecurityPlusEntitlements()
+                await plus.refreshLavaSecurityPlusEntitlements()
                 return
             } catch {
                 // Fall through to the deep link below.
@@ -1431,7 +1436,7 @@ private struct UpgradeLegalFooter: View {
 }
 
 private struct UpgradeThankYouView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var plus: LavaSecurityPlusController
 
     var body: some View {
         LavaPlainCard {
@@ -1449,7 +1454,7 @@ private struct UpgradeThankYouView: View {
                         .foregroundStyle(LavaStyle.secondaryText)
                         .multilineTextAlignment(.center)
 
-                    if let expiresAt = viewModel.lavaSecurityPlusExpiresAt {
+                    if let expiresAt = plus.lavaSecurityPlusExpiresAt {
                         Text("Expiration: %@".lavaLocalizedFormat(expiresAt.formatted(date: .abbreviated, time: .omitted)))
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(LavaStyle.secondaryText)
@@ -1464,11 +1469,11 @@ private struct UpgradeThankYouView: View {
 }
 
 private struct UpgradeThankYouMascot: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var customization: CustomizationController
     @State private var mascotState: GuardianMascotState = .awake
 
     var body: some View {
-        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: viewModel.lavaGuardLook)
+        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)
             .task {
                 mascotState = .awake
                 try? await Task.sleep(nanoseconds: 650_000_000)
@@ -1643,7 +1648,14 @@ private struct UpgradePlanOfferRow: View {
 }
 
 private struct CustomizationSettingsView: View {
+    // The customization-preference state + setters live on `customization` since the
+    // Phase D5 peel. The hub stays observed too — deliberately, even though no property
+    // below reads it textually: the Guard rows' availability inputs (Plus flag, unlock
+    // ledger, LavaGuard progress, keep-progress flag) are HUB state the controller reads
+    // through its bridge per call, so observing the hub is what re-renders this page
+    // when an unlock or purchase lands mid-view — exactly as pre-peel.
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var customization: CustomizationController
     @EnvironmentObject private var security: SecurityController
     // The app's current system Dynamic Type size — reflects the real system setting while "Match
     // System" is on (no override applied), so it seeds the slider on the first opt-out.
@@ -1661,8 +1673,8 @@ private struct CustomizationSettingsView: View {
         ) {
             LavaSectionGroup("Lava Guard") {
                 LavaGuardLookPickerRow(
-                    look: viewModel.lavaGuardLook,
-                    availability: viewModel.lavaGuardAvailability(for: viewModel.lavaGuardLook),
+                    look: customization.lavaGuardLook,
+                    availability: customization.lavaGuardAvailability(for: customization.lavaGuardLook),
                     onSelect: selectLavaGuardLook
                 )
                 .lavaTier(.celebratory)
@@ -1703,7 +1715,7 @@ private struct CustomizationSettingsView: View {
                         )
                         .tint(LavaStyle.safeGreen)
                         .accessibilityLabel("Text Size")
-                        .accessibilityValue(viewModel.textSize.displayName.lavaLocalized)
+                        .accessibilityValue(customization.textSize.displayName.lavaLocalized)
                         Image(systemName: "textformat.size.larger")
                             .foregroundStyle(LavaStyle.secondaryText)
                             .accessibilityHidden(true)
@@ -1712,8 +1724,8 @@ private struct CustomizationSettingsView: View {
                     // Grey out and disable the slider while "Match System" drives the size, so the
                     // control reads as inactive (a Differentiate-Without-Color-friendly state) and
                     // VoiceOver skips a knob that would do nothing.
-                    .disabled(viewModel.textSizeMatchesSystem)
-                    .opacity(viewModel.textSizeMatchesSystem ? 0.4 : 1)
+                    .disabled(customization.textSizeMatchesSystem)
+                    .opacity(customization.textSizeMatchesSystem ? 0.4 : 1)
                 }
             }
 
@@ -1740,7 +1752,7 @@ private struct CustomizationSettingsView: View {
                 }
             }
 
-            if viewModel.canOfferLiveActivities {
+            if customization.canOfferLiveActivities {
                 LavaSectionGroup("Live Activities") {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Use Live Activities", isOn: usesLiveActivitiesBinding)
@@ -1751,12 +1763,12 @@ private struct CustomizationSettingsView: View {
                         Text("Shows Lava status on the Lock Screen and Dynamic Island when available.".lavaLocalized)
                             .lavaQuietNoteText()
 
-                        if viewModel.usesLiveActivities {
+                        if customization.usesLiveActivities {
                             Stepper(
                                 value: liveActivityPauseMinutesBinding,
                                 in: LiveActivityPausePreference.minutesRange
                             ) {
-                                Text(viewModel.liveActivityPauseLengthLabel)
+                                Text(customization.liveActivityPauseLengthLabel)
                                     .font(.headline)
                             }
                             .tint(LavaStyle.safeGreen)
@@ -1781,20 +1793,20 @@ private struct CustomizationSettingsView: View {
 
     private var appearanceBinding: Binding<LavaAppearancePreference> {
         Binding {
-            viewModel.appearancePreference
+            customization.appearancePreference
         } set: { preference in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setAppearancePreference(preference)
+                customization.setAppearancePreference(preference)
             }
         }
     }
 
     private var textSizeMatchesSystemBinding: Binding<Bool> {
         Binding {
-            viewModel.textSizeMatchesSystem
+            customization.textSizeMatchesSystem
         } set: { matchesSystem in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setTextSizeMatchesSystem(
+                customization.setTextSizeMatchesSystem(
                     matchesSystem,
                     seedingFrom: LavaTextSize.matching(systemDynamicTypeSize)
                 )
@@ -1804,55 +1816,55 @@ private struct CustomizationSettingsView: View {
 
     private var textSizeSliderBinding: Binding<Double> {
         Binding {
-            Double(LavaTextSize.allCases.firstIndex(of: viewModel.textSize) ?? 0)
+            Double(LavaTextSize.allCases.firstIndex(of: customization.textSize) ?? 0)
         } set: { newValue in
             let index = min(max(Int(newValue.rounded()), 0), LavaTextSize.allCases.count - 1)
             let size = LavaTextSize.allCases[index]
-            guard size != viewModel.textSize else {
+            guard size != customization.textSize else {
                 return
             }
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setTextSize(size)
+                customization.setTextSize(size)
             }
         }
     }
 
     private var usesLiveActivitiesBinding: Binding<Bool> {
         Binding {
-            viewModel.usesLiveActivities
+            customization.usesLiveActivities
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setUsesLiveActivities(isEnabled)
+                customization.setUsesLiveActivities(isEnabled)
             }
         }
     }
 
     private var liveActivityPauseMinutesBinding: Binding<Int> {
         Binding {
-            viewModel.liveActivityPauseMinutes
+            customization.liveActivityPauseMinutes
         } set: { minutes in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setLiveActivityPauseMinutes(minutes)
+                customization.setLiveActivityPauseMinutes(minutes)
             }
         }
     }
 
     private var updatesAppIconBinding: Binding<Bool> {
         Binding {
-            viewModel.updatesAppIconWithLavaGuard
+            customization.updatesAppIconWithLavaGuard
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setUpdatesAppIconWithLavaGuard(isEnabled)
+                customization.setUpdatesAppIconWithLavaGuard(isEnabled)
             }
         }
     }
 
     private var lavaHapticsBinding: Binding<Bool> {
         Binding {
-            viewModel.usesLavaHaptics
+            customization.usesLavaHaptics
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setUsesLavaHaptics(isEnabled)
+                customization.setUsesLavaHaptics(isEnabled)
             }
         }
     }
@@ -1860,13 +1872,13 @@ private struct CustomizationSettingsView: View {
     private func notificationBinding(for category: LavaNotificationCategory) -> Binding<Bool> {
         Binding {
             switch category {
-            case .filterChanged: return viewModel.notifiesFilterChanges
-            case .filterCouldNotApply: return viewModel.notifiesFilterCouldNotApply
-            case .connectivity: return viewModel.notifiesConnectivity
+            case .filterChanged: return customization.notifiesFilterChanges
+            case .filterCouldNotApply: return customization.notifiesFilterCouldNotApply
+            case .connectivity: return customization.notifiesConnectivity
             }
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit Customization settings") {
-                viewModel.setNotificationCategoryEnabled(category, isEnabled)
+                customization.setNotificationCategoryEnabled(category, isEnabled)
             }
         }
     }
@@ -1883,7 +1895,7 @@ private struct CustomizationSettingsView: View {
 
     private func selectLavaGuardLook(_ look: GuardianShieldStyle) {
         performAppSettingsMutation(reason: "Edit Customization settings") {
-            viewModel.setLavaGuardLook(look)
+            customization.setLavaGuardLook(look)
         }
     }
 }
@@ -1893,6 +1905,7 @@ private struct CustomizationSettingsView: View {
 /// rather than an inline disclosure that pushed the rest of the screen around.
 private struct LavaGuardLookPickerRow: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var customization: CustomizationController
     @EnvironmentObject private var security: SecurityController
     @State private var isPresentingPicker = false
 
@@ -1924,6 +1937,7 @@ private struct LavaGuardLookPickerRow: View {
         .sheet(isPresented: $isPresentingPicker) {
             LavaGuardLookPickerSheet(selectedLook: look, onSelect: onSelect)
                 .environmentObject(viewModel)
+                .environmentObject(customization)
                 .environmentObject(security)
         }
     }
@@ -1933,6 +1947,7 @@ private struct LavaGuardLookPickerRow: View {
 /// Guards are still locked) followed by the radio-style single-select list.
 private struct LavaGuardLookPickerSheet: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var customization: CustomizationController
     @Environment(\.dismiss) private var dismiss
     @State private var showUpgradePage = false
     @State private var showPrivacyDataPage = false
@@ -1955,7 +1970,7 @@ private struct LavaGuardLookPickerSheet: View {
                         LavaPlainCard {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \.element.id) { index, look in
-                                    let availability = viewModel.lavaGuardAvailability(for: look)
+                                    let availability = customization.lavaGuardAvailability(for: look)
                                     Button {
                                         guard availability.isSelectable else {
                                             return
@@ -3428,6 +3443,8 @@ private struct ResolverOptionControl: View {
 
 struct PrivacyDataSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): the store-coupled keep-flags + clears live here.
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     @State private var disableTarget: LocalLogSetting?
     @State private var clearTarget: LocalLogClearTarget?
@@ -3554,7 +3571,7 @@ struct PrivacyDataSettingsView: View {
         } set: { newValue in
             if newValue {
                 performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    viewModel.setKeepFilteringCounts(true)
+                    reports.setKeepFilteringCounts(true)
                 }
             } else {
                 disableTarget = .filteringCounts
@@ -3568,7 +3585,7 @@ struct PrivacyDataSettingsView: View {
         } set: { newValue in
             if newValue {
                 performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    viewModel.setKeepDomainDiagnostics(true)
+                    reports.setKeepDomainDiagnostics(true)
                 }
             } else {
                 disableTarget = .domainHistory
@@ -3628,9 +3645,9 @@ struct PrivacyDataSettingsView: View {
         performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
             switch target {
             case .filteringCounts:
-                viewModel.setKeepFilteringCounts(false)
+                reports.setKeepFilteringCounts(false)
             case .domainHistory:
-                viewModel.setKeepDomainDiagnostics(false)
+                reports.setKeepDomainDiagnostics(false)
             case .networkActivity:
                 viewModel.setKeepNetworkActivity(false)
             case .lavaGuardProgress:
@@ -3666,15 +3683,15 @@ struct PrivacyDataSettingsView: View {
             let didClear: Bool
             switch target {
             case .filteringCounts:
-                didClear = viewModel.clearLocalFilteringCounts()
+                didClear = reports.clearLocalFilteringCounts()
             case .domainHistory:
-                didClear = viewModel.clearDomainHistory()
+                didClear = reports.clearDomainHistory()
             case .networkActivity:
                 didClear = viewModel.clearNetworkActivityLog()
             case .lavaGuardProgress:
                 didClear = viewModel.clearLavaGuardProgress()
             case .all:
-                didClear = viewModel.clearAllLocalLogs()
+                didClear = reports.clearAllLocalLogs()
             }
             // Rows clear in place with no on-screen confirmation, so announce completion for
             // VoiceOver — but ONLY when the clear durably persisted. The VM catches write failures
@@ -4198,6 +4215,8 @@ private enum BugReportStep: Int, CaseIterable, Identifiable {
 struct BugReportSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): the bug-report draft + send state machine lives here.
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     @Binding private var externalIsReportDirty: Bool
     private let onDismissRequested: (() -> Void)?
@@ -4567,7 +4586,7 @@ struct BugReportSettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(FeedbackSecondaryActionButtonStyle())
-                .disabled(viewModel.bugReportSendState.isSending)
+                .disabled(reports.bugReportSendState.isSending)
 
                 Button {
                     submitReport()
@@ -4576,7 +4595,7 @@ struct BugReportSettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(LavaStandaloneActionButtonStyle())
-                .disabled(!canContinueFromContext || viewModel.bugReportSendState.isSending || viewModel.bugReportDraft == nil)
+                .disabled(!canContinueFromContext || reports.bugReportSendState.isSending || reports.bugReportDraft == nil)
             }
         }
     }
@@ -4608,7 +4627,7 @@ struct BugReportSettingsView: View {
 
     @ViewBuilder
     private var bugReportStatusView: some View {
-        switch viewModel.bugReportSendState {
+        switch reports.bugReportSendState {
         case .idle, .sent, .sending:
             EmptyView()
         case .failed(let message):
@@ -4626,7 +4645,7 @@ struct BugReportSettingsView: View {
         if type != .websiteAccess {
             affectedSite = ""
         }
-        viewModel.resetBugReportSendState()
+        reports.resetBugReportSendState()
     }
 
     private func requestDismiss() {
@@ -4661,13 +4680,13 @@ struct BugReportSettingsView: View {
         furthestVisitedStep = .topic
         isShowingThankYou = false
         didCopySubmittedReportID = false
-        viewModel.resetBugReportSendState()
+        reports.resetBugReportSendState()
         refreshDraft()
         syncReportDirtyState()
     }
 
     private func reportInputChanged() {
-        viewModel.resetBugReportSendState()
+        reports.resetBugReportSendState()
         // Typing only changes the user-entered context; reuse the environment
         // snapshot captured on appear/step-change instead of rebuilding the
         // whole diagnostics bundle on every keystroke (UR-5: Feedback typing lag).
@@ -4679,8 +4698,8 @@ struct BugReportSettingsView: View {
         refreshDraft()
         didCopySubmittedReportID = false
         Task {
-            await viewModel.sendBugReport(context: currentContext)
-            if case .sent = viewModel.bugReportSendState {
+            await reports.sendBugReport(context: currentContext)
+            if case .sent = reports.bugReportSendState {
                 isShowingThankYou = true
             }
         }
@@ -4755,7 +4774,7 @@ struct BugReportSettingsView: View {
     }
 
     private var diagnosticPreviewSections: [BugReportPreviewSection] {
-        viewModel.bugReportDraft?.previewSections.filter { $0.id != "context" } ?? []
+        reports.bugReportDraft?.previewSections.filter { $0.id != "context" } ?? []
     }
 
     private var thankYouTitle: String {
@@ -4767,7 +4786,7 @@ struct BugReportSettingsView: View {
     }
 
     private var submittedReportID: String {
-        if case .sent(let reportID) = viewModel.bugReportSendState {
+        if case .sent(let reportID) = reports.bugReportSendState {
             return reportID
         }
 
@@ -4775,7 +4794,7 @@ struct BugReportSettingsView: View {
     }
 
     private var submitButtonTitle: String {
-        switch viewModel.bugReportSendState {
+        switch reports.bugReportSendState {
         case .failed:
             "Retry"
         case .sending:
@@ -4786,11 +4805,11 @@ struct BugReportSettingsView: View {
     }
 
     private func refreshDraft() {
-        viewModel.prepareBugReport(context: currentContext)
+        reports.prepareBugReport(context: currentContext)
     }
 
     private func refreshDraftContext() {
-        viewModel.refreshBugReportDraftContext(context: currentContext)
+        reports.refreshBugReportDraftContext(context: currentContext)
     }
 
     private func syncReportDirtyState() {
@@ -4799,11 +4818,11 @@ struct BugReportSettingsView: View {
 }
 
 private struct FeedbackThankYouMascot: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var customization: CustomizationController
     @State private var mascotState: GuardianMascotState = .awake
 
     var body: some View {
-        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: viewModel.lavaGuardLook)
+        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)
             .task {
                 mascotState = .awake
                 try? await Task.sleep(nanoseconds: 550_000_000)
@@ -5158,7 +5177,8 @@ private enum VersionInfo {
 
 #if DEBUG || LAVA_QA_TOOLS
 private struct PhoneQASettingsView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    // The rage-shake/bug-report destination lives on the diagnostics scope (Phase D4 peel).
+    @EnvironmentObject private var reports: DiagnosticsController
     @AppStorage("hasSeenLavaOnboarding") private var hasSeenLavaOnboarding = false
 
     var body: some View {
@@ -5167,7 +5187,7 @@ private struct PhoneQASettingsView: View {
                 hasSeenLavaOnboarding = false
             },
             showUserBugReport: {
-                viewModel.rageShakeDestination = .bugReport
+                reports.rageShakeDestination = .bugReport
             }
         )
     }

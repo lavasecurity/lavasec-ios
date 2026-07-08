@@ -70,8 +70,10 @@ final class AppDeepLinkSourceTests: XCTestCase {
         // (see BugReportSettingsView). The handler stages the destination and
         // kicks the unlock prompt so the mask drops once the device is unlocked.
         XCTAssertTrue(handlerBlock.contains("case .feedback = settingsRoute"))
-        XCTAssertTrue(handlerBlock.contains("viewModel.rageShakeDestination = .bugReport"))
-        XCTAssertTrue(rootSource.contains(".sheet(item: $viewModel.rageShakeDestination)"))
+        // The rage-shake destination lives on the `reports` environment object since the
+        // Phase D4 diagnostics peel.
+        XCTAssertTrue(handlerBlock.contains("reports.rageShakeDestination = .bugReport"))
+        XCTAssertTrue(rootSource.contains(".sheet(item: $reports.rageShakeDestination)"))
         // The feedback sheet is masked-in-place, NOT withheld — there must be no
         // nil-gate binding that would tear the sheet (and its draft) down on lock.
         XCTAssertFalse(rootSource.contains("var rageShakeSheetItem: Binding<RageShakeDestination?>"))
@@ -98,7 +100,7 @@ final class AppDeepLinkSourceTests: XCTestCase {
         // binding is renamed or removed, those pins pass vacuously. Anchored to the live
         // sheet-item shape (a bare "RageShakeDestination" match would be satisfied by the
         // dismissRageShakeDestination() method-name substring).
-        XCTAssertTrue(rootSource.contains(".sheet(item: $viewModel.rageShakeDestination)"))
+        XCTAssertTrue(rootSource.contains(".sheet(item: $reports.rageShakeDestination)"))
     }
 
     func testSettingsHelpOpensCanonicalSupportPage() throws {

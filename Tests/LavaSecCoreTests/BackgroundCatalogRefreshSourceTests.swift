@@ -95,14 +95,15 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
             endingBefore: "if loadVPNState {"
         )
         // Every side-effecting setup call must follow the !headless gate. This includes
-        // the two that are not obviously writes: loadCustomizationPreferences (persists the
-        // Guard look / app icon to app-group defaults) and loadTemporaryProtectionPause
-        // (pauseController.onPauseCleared removes the app-group pause keys).
+        // the two that are not obviously writes: customization.loadCustomizationPreferences
+        // (the Phase D5 controller's load persists the Guard look / app icon to app-group
+        // defaults) and loadTemporaryProtectionPause (pauseController.onPauseCleared
+        // removes the app-group pause keys).
         let gateIdx = try XCTUnwrap(initBlock.range(of: "if !headless {")?.lowerBound,
                                     "Headless init must gate its side-effecting setup.")
         for call in [
-            "startLavaSecurityPlusStore()",
-            "loadCustomizationPreferences()",
+            "plus.startLavaSecurityPlusStore()",
+            "customization.loadCustomizationPreferences()",
             "loadTemporaryProtectionPause()",
             "scheduleTemporaryProtectionResume()",
         ] {

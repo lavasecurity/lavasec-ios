@@ -3,33 +3,33 @@ import XCTest
 final class BackupSetupSourceTests: XCTestCase {
     func testSetupUsesPasswordlessDeviceSecretFlow() throws {
         let setupSource = try readSource(.backupSetupView)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
         let keychainSource = try readSource(.backupKeychainStore)
 
         XCTAssertTrue(setupSource.contains("BackupRecoveryPhrase.generate()"))
-        XCTAssertTrue(setupSource.contains("try await viewModel.registerBackupPasskey()"))
-        XCTAssertTrue(setupSource.contains("try await viewModel.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)"))
+        XCTAssertTrue(setupSource.contains("try await backup.registerBackupPasskey()"))
+        XCTAssertTrue(setupSource.contains("try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)"))
         XCTAssertFalse(setupSource.contains("BackupPasswordField"))
         XCTAssertFalse(setupSource.contains("BackupPasswordPolicy.validate"))
-        XCTAssertTrue(viewModelSource.contains("BackupDeviceSecret.generate()"))
-        XCTAssertTrue(viewModelSource.contains("ZeroKnowledgeBackupEnvelope.makePasswordless"))
-        XCTAssertTrue(viewModelSource.contains("backupKeychainStore.saveDeviceSecret(deviceSecret)"))
-        XCTAssertTrue(viewModelSource.contains("func registerBackupPasskey() async throws"))
+        XCTAssertTrue(controllerSource.contains("BackupDeviceSecret.generate()"))
+        XCTAssertTrue(controllerSource.contains("ZeroKnowledgeBackupEnvelope.makePasswordless"))
+        XCTAssertTrue(controllerSource.contains("backupKeychainStore.saveDeviceSecret(deviceSecret)"))
+        XCTAssertTrue(controllerSource.contains("func registerBackupPasskey() async throws"))
         XCTAssertTrue(keychainSource.contains("func saveDeviceSecret"))
         XCTAssertTrue(keychainSource.contains("func loadDeviceSecret"))
     }
 
     func testPasskeySetupSplitsRegistrationAndValidationIntoSteps() throws {
         let setupSource = try readSource(.backupSetupView)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
 
         // The two authenticator ceremonies are split across explicit steps: registration on
         // "Set up with Passkey", then a separate "Validate the passkey" step that captures PRF.
-        XCTAssertTrue(viewModelSource.contains("func registerBackupPasskey() async throws"))
-        XCTAssertTrue(viewModelSource.contains("func validateBackupPasskey() async throws"))
-        XCTAssertFalse(viewModelSource.contains("func prepareBackupPasskey"))
+        XCTAssertTrue(controllerSource.contains("func registerBackupPasskey() async throws"))
+        XCTAssertTrue(controllerSource.contains("func validateBackupPasskey() async throws"))
+        XCTAssertFalse(controllerSource.contains("func prepareBackupPasskey"))
         XCTAssertTrue(setupSource.contains("case validatePasskey"))
-        XCTAssertTrue(setupSource.contains("try await viewModel.validateBackupPasskey()"))
+        XCTAssertTrue(setupSource.contains("try await backup.validateBackupPasskey()"))
         XCTAssertTrue(setupSource.contains("Validate the passkey"))
         // Registration advances to the validate step — now routed through the
         // animated `go(to:)` step transition rather than a bare assignment.
@@ -37,11 +37,13 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testRestoreUsesSavedDeviceSecretAndRecoveryPhraseFallback() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.backupController)
 
         XCTAssertTrue(source.contains("case .deviceKey"))
         XCTAssertTrue(source.contains("backupKeychainStore.loadDeviceSecret()"))
         XCTAssertTrue(source.contains("decryptWithKeychainSecret"))
+        // The candidate normalization behind this call is executable now:
+        // BackupRecoveryPhraseUnlockTests (LavaSecAppServices, Phase D1 peel).
         XCTAssertTrue(source.contains("decryptWithNormalizedRecoveryPhrase"))
     }
 
@@ -177,7 +179,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testPasskeySetupUsesPRFDerivedSlotNotServerEscrow() throws {
         let coordinatorSource = try readSource(.backupPasskeyCoordinator)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
 
         // The passkey slot is derived from the authenticator PRF / hmac-secret output (iOS 18+),
         // not a server-stored secret. The coordinator requests PRF at registration and reads the
@@ -190,12 +192,12 @@ final class BackupSetupSourceTests: XCTestCase {
         // is unreliable for iCloud Keychain). The coordinator still exposes the hint, but setup
         // must NOT hard-gate registration on it — doing so regressed the iCloud Keychain path.
         XCTAssertTrue(coordinatorSource.contains("registration.prf?.isSupported"))
-        XCTAssertFalse(viewModelSource.contains("guard registration.supportsPRF"))
+        XCTAssertFalse(controllerSource.contains("guard registration.supportsPRF"))
         // Setup wraps the slot with the PRF output and stores no server recovery secret.
-        XCTAssertTrue(viewModelSource.contains("ZeroKnowledgeBackupEnvelope.makeWithPRF"))
-        XCTAssertTrue(viewModelSource.contains("pendingBackupPasskeyCredentialID"))
-        XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
-        XCTAssertFalse(viewModelSource.contains("BackupPasskeyRecoveryService"))
+        XCTAssertTrue(controllerSource.contains("ZeroKnowledgeBackupEnvelope.makeWithPRF"))
+        XCTAssertTrue(controllerSource.contains("pendingBackupPasskeyCredentialID"))
+        XCTAssertFalse(controllerSource.contains("storeRecoverySecret"))
+        XCTAssertFalse(controllerSource.contains("BackupPasskeyRecoveryService"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -204,24 +206,28 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testRecoveryUsesServerShareInsteadOfStandalonePhraseSlot() throws {
         let source = try readSource(.backupPasskeyCoordinator)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
+        // The candidate loop that tries the assisted-recovery slot (phrase + server share)
+        // before the legacy password-style slot moved to LavaSecAppServices with the D1
+        // peel and is executable there (BackupRecoveryPhraseUnlockTests); pin the wiring.
+        let unlockSource = try readSource(.backupRecoveryPhraseUnlock)
 
         XCTAssertFalse(source.contains("This password manager cannot use Passkey for Lava backup yet."))
-        XCTAssertTrue(viewModelSource.contains("decryptWithAssistedRecoveryPhrase"))
-        XCTAssertTrue(viewModelSource.contains("serverRecoveryShare"))
-        XCTAssertFalse(viewModelSource.contains("decryptWithPasskeySecret(trimmedSecret)"))
+        XCTAssertTrue(unlockSource.contains("decryptWithAssistedRecoveryPhrase"))
+        XCTAssertTrue(controllerSource.contains("serverRecoveryShare"))
+        XCTAssertFalse(controllerSource.contains("decryptWithPasskeySecret(trimmedSecret)"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(viewModelSource.contains("trimmedSecret"))
+        XCTAssertTrue(controllerSource.contains("trimmedSecret"))
     }
 
     func testPasskeyEscrowServiceIsRemoved() throws {
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
 
         // The server-escrow path is gone: no recovery-secret storage, no recovery service.
-        XCTAssertFalse(viewModelSource.contains("storeRecoverySecret"))
-        XCTAssertFalse(viewModelSource.contains("backupPasskeyRecoveryService"))
+        XCTAssertFalse(controllerSource.contains("storeRecoverySecret"))
+        XCTAssertFalse(controllerSource.contains("backupPasskeyRecoveryService"))
 
         let serviceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -303,22 +309,23 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {
         let settingsSource = try readSource(.settingsView)
-        let viewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.backupController)
 
-        XCTAssertTrue(settingsSource.contains("viewModel.isEncryptedBackupConfigured"))
+        XCTAssertTrue(settingsSource.contains("backup.isEncryptedBackupConfigured"))
         XCTAssertTrue(settingsSource.contains("Back Up Now"))
-        XCTAssertTrue(viewModelSource.contains("var isEncryptedBackupConfigured: Bool"))
-        XCTAssertTrue(viewModelSource.contains("func backUpNow() async"))
+        XCTAssertTrue(controllerSource.contains("var isEncryptedBackupConfigured: Bool"))
+        XCTAssertTrue(controllerSource.contains("func backUpNow() async"))
     }
 
     func testSignedInBackupCopyShowsPendingSetupBeforeBackupExists() throws {
-        let source = try readSource(.appViewModel)
-        // The view model still routes its summary through the signed-in-aware
-        // copy; the copy itself moved with EncryptedBackupState into LavaSecCore
-        // (asserted behaviorally in EncryptedBackupStateTests).
+        let source = try readSource(.backupController)
+        // The backup controller still routes its summary through the signed-in-aware
+        // copy (signed-in state read via the hub bridge); the copy itself moved with
+        // EncryptedBackupState into LavaSecCore (asserted behaviorally in
+        // EncryptedBackupStateTests).
         let stateSource = try readSource(.encryptedBackupState)
 
-        XCTAssertTrue(source.contains("encryptedBackupState.displayText(isAccountSignedIn: isAccountSignedIn)"))
+        XCTAssertTrue(source.contains("encryptedBackupState.displayText(isAccountSignedIn: hub.isAccountSignedIn)"))
         XCTAssertTrue(stateSource.contains("Pending setup"))
         XCTAssertTrue(stateSource.contains("Set up encrypted backup for this account."))
     }

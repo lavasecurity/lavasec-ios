@@ -241,10 +241,12 @@ final class AppViewModelSourceTests: XCTestCase {
             startingAt: "private func loadCachedCatalogAfterSyncFailure(",
             endingBefore: "private func rebuildEnabledBlockRules()"
         )
+        // The bug-report machinery that used to follow makeLatencyTrace moved to
+        // DiagnosticsController (Phase D4); the next hub member is the status mapper.
         let latencyHelperBlock = try sourceBlock(
             in: source,
             startingAt: "private func makeLatencyTrace(",
-            endingBefore: "private func makeBugReportBundle"
+            endingBefore: "private func vpnStatusReportDescription"
         )
 
         XCTAssertTrue(latencyHelperBlock.contains("LatencyDebugLogEventSink(operationKind: operationKind)"))
@@ -629,10 +631,15 @@ final class AppViewModelSourceTests: XCTestCase {
             startingAt: "enum ProtectionHapticFeedback",
             endingBefore: "final class AppViewModel"
         )
+        // The toggle setter lives on CustomizationController since the Phase D5 peel;
+        // the ProtectionHapticFeedback choke point (and the protection-outcome play
+        // path) deliberately stays hub-side — the two meet only at the shared
+        // preferenceDefaultsKey.
+        let customizationSource = try readSource(.customizationController)
         let setterBlock = try sourceBlock(
-            in: source,
+            in: customizationSource,
             startingAt: "func setUsesLavaHaptics(_ isEnabled: Bool)",
-            endingBefore: "var protectionTitle: String"
+            endingBefore: "// MARK: - Preference load & notification toggles"
         )
 
         // The single choke point reads the toggle so disabling it silences protection,
@@ -642,6 +649,8 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(hapticBlock.contains("static var isEnabled: Bool"))
         XCTAssertTrue(hapticBlock.contains("UserDefaults.standard.object(forKey: preferenceDefaultsKey) as? Bool ?? true"))
         XCTAssertTrue(hapticBlock.contains("guard isEnabled else {"))
+        // The controller's toggle writes the SAME key the choke point reads.
+        XCTAssertTrue(customizationSource.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey"))
 
         // New outcome cases reuse the four physical feedback patterns.
         XCTAssertTrue(hapticBlock.contains("case actionSucceeded"))
@@ -660,9 +669,13 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.actionFailed)"))
         XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.selectionRejected)"))
 
-        // The removed configuration-backed haptics preference stays gone.
+        // The removed configuration-backed haptics preference stays gone — from the hub
+        // AND from the peeled controller (founder rule: the single usesLavaHaptics
+        // toggle + ProtectionHapticFeedback façade, never playsHapticFeedback).
         XCTAssertFalse(source.contains("playsHapticFeedback"))
         XCTAssertFalse(source.contains("setHapticFeedback"))
+        XCTAssertFalse(customizationSource.contains("playsHapticFeedback"))
+        XCTAssertFalse(customizationSource.contains("setHapticFeedback"))
     }
 
     func testCatalogSyncAndReconnectWaitWithoutBusyPolling() throws {
@@ -902,12 +915,17 @@ final class AppViewModelSourceTests: XCTestCase {
         // The clear-diagnostics error messages interpolate the underlying error, so
         // they go through .lavaLocalizedFormat (a %@ format key) rather than raw
         // string interpolation — otherwise the English literal renders verbatim.
-        XCTAssertTrue(source.contains(
-            "vpnMessage = \"Could not clear local history: %@\".lavaLocalizedFormat(error.localizedDescription)"))
-        XCTAssertTrue(source.contains(
-            "vpnMessage = \"Could not clear local filtering counts: %@\".lavaLocalizedFormat(error.localizedDescription)"))
-        XCTAssertTrue(source.contains(
-            "vpnMessage = \"Could not clear local logs: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        // They live on DiagnosticsController since the Phase D4 peel and reach the
+        // hub's vpnMessage banner through the bridge's presentVPNMessage.
+        let diagnosticsControllerSource = try readSource(.diagnosticsController)
+        XCTAssertTrue(diagnosticsControllerSource.contains(
+            "\"Could not clear local history: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        XCTAssertTrue(diagnosticsControllerSource.contains(
+            "\"Could not clear local filtering counts: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        XCTAssertTrue(diagnosticsControllerSource.contains(
+            "\"Could not clear local logs: %@\".lavaLocalizedFormat(error.localizedDescription)"))
+        // The bridge conformance is what lands them on the banner.
+        XCTAssertTrue(source.contains("func presentVPNMessage(_ message: String, isError: Bool) {\n        vpnMessage = message\n        vpnMessageIsError = isError\n    }"))
     }
 
     func testVPNLifecycleActionsClaimConfiguringBeforeLaunchingAsyncWork() throws {
@@ -963,8 +981,10 @@ final class AppViewModelSourceTests: XCTestCase {
 
     func testNonCriticalAppGroupDefaultsDoNotForceSynchronousFlushes() throws {
         let source = try readSource(.appViewModel)
+        // persistLavaGuardLook lives on CustomizationController since the Phase D5 peel.
+        let customizationSource = try readSource(.customizationController)
         let persistLookBlock = try sourceBlock(
-            in: source,
+            in: customizationSource,
             startingAt: "private func persistLavaGuardLook(_ look: GuardianShieldStyle)",
             endingBefore: "private func syncAppIcon(to look: GuardianShieldStyle)"
         )
@@ -1187,7 +1207,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testClearAndDisableBackupDivergeOnLocalEnvelopeHandling() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.backupController)
         let clearBlock = try sourceBlock(
             in: source,
             startingAt: "func clearEncryptedBackup() async {",
@@ -1196,7 +1216,7 @@ final class AppViewModelSourceTests: XCTestCase {
         let disableBlock = try sourceBlock(
             in: source,
             startingAt: "func disableEncryptedBackup() async {",
-            endingBefore: "private enum RemoteBackupDeletionOutcome {"
+            endingBefore: "func deleteLocalUnlockSecretsAfterAccountDeletion() {"
         )
 
         // Clear keeps the local envelope (only forgets the upload marker), so backup
@@ -1219,11 +1239,11 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testBackupMaintenanceAndUploadsAreMutuallyExclusive() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readSource(.backupController)
         let uploadBlock = try sourceBlock(
             in: source,
             startingAt: "private func uploadEncryptedBackup(",
-            endingBefore: "private func uploadPendingEncryptedBackupIfPossible("
+            endingBefore: "func uploadPendingEncryptedBackupIfPossible("
         )
         let clearBlock = try sourceBlock(
             in: source,
@@ -1233,7 +1253,7 @@ final class AppViewModelSourceTests: XCTestCase {
         let disableBlock = try sourceBlock(
             in: source,
             startingAt: "func disableEncryptedBackup() async {",
-            endingBefore: "private enum RemoteBackupDeletionOutcome {"
+            endingBefore: "func deleteLocalUnlockSecretsAfterAccountDeletion() {"
         )
 
         // Uploads refuse to run while a Clear/Disable is in progress, so an in-flight

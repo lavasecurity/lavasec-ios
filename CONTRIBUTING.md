@@ -21,6 +21,32 @@ Thanks for your interest in contributing.
 2. Open `LavaSec.xcodeproj` in Xcode 26+.
 3. The DNS-filtering core builds without any account configuration.
 
+### The Xcode project is generated
+
+`LavaSec.xcodeproj/project.pbxproj` is **generated** from `project.yml` by
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — never
+edit the pbxproj by hand. To change targets, per-target file membership (including
+which targets a `Shared/` file compiles into), build settings, packages, or the
+shared scheme:
+
+1. Edit `project.yml` (it documents its own conventions).
+2. Run `xcodegen generate` (post-generation fixups run automatically).
+3. Commit `project.yml` **and** the regenerated project together.
+
+The generated project stays committed so checkouts build without XcodeGen and
+because the test suite pins target/embed wiring as pbxproj text.
+`scripts/check-xcodegen-drift.sh` verifies the committed project still matches
+`project.yml`; run it if you touched either side.
+
+### Lint & format
+
+- **SwiftLint** runs warning-only in CI (`Repo Checks`): findings annotate the PR, never
+  block it. Config: `.swiftlint.yml`; `missing_docs` applies only inside the post-split
+  SPM targets (`Sources/LavaSec{Kit,DNS,FilterPipeline,AppServices}` nested configs) —
+  new public API there carries `///` docs.
+- **swift-format** has a committed config (`.swift-format`) for local use
+  (`swift format lint -r Sources` or your editor integration); it is not wired into CI.
+
 ## Ground rules
 
 - **Never commit secrets or signing config.** `Config/Lava.xcconfig` is a

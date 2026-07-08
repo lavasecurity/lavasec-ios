@@ -104,7 +104,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            endingBefore: "private func persistDiagnostics()"
+            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
+            // member after the migrate + generation-reconcile pair is the artifact persist.
+            endingBefore: "private func persistPreparedSnapshotArtifacts("
         )
         XCTAssertTrue(migrateBlock.contains(".seededDefaults(active: .balanced)"),
                       "Absent/empty/old-schema library ⇒ seed the three default filters with Balanced active.")
@@ -758,7 +760,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            endingBefore: "private func persistDiagnostics()"
+            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
+            // member after the migrate + generation-reconcile pair is the artifact persist.
+            endingBefore: "private func persistPreparedSnapshotArtifacts("
         )
         XCTAssertTrue(migrateBlock.contains("if !isHeadless {"),
                       "Migration persist must be gated to foreground (non-headless) instances.")
@@ -830,14 +834,18 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let persistFilterLibraryBlock = try sourceBlock(
             in: app,
             startingAt: "private func persistFilterLibrary(",
-            endingBefore: "private func uploadEncryptedBackup("
+            // loadCustomizationPreferences moved to CustomizationController (Phase D5);
+            // the next hub member after the library-only persist is the progress load.
+            endingBefore: "private func loadLavaGuardProgress()"
         )
         XCTAssertTrue(persistFilterLibraryBlock.contains("persistConfigurationOnly("),
                       "persistFilterLibrary must delegate to persistConfigurationOnly so a library-only edit bumps the shared generation (and the extension's fence can trip).")
         let loadBlock = try sourceBlock(
             in: app,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            endingBefore: "private func persistDiagnostics()"
+            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
+            // member after the migrate + generation-reconcile pair is the artifact persist.
+            endingBefore: "private func persistPreparedSnapshotArtifacts("
         )
         XCTAssertTrue(loadBlock.contains("lostWriteRace(againstConfigurationGeneration: configuration.configurationGeneration)"),
                       "Load must reject a library that lost the two-file write race against the config.")
@@ -856,14 +864,17 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The envelope must re-seal a new payload while keeping every key slot.")
 
         let app = try readSource(.appViewModel)
-        XCTAssertTrue(app.contains("private func refreshLocalEncryptedBackupEnvelope()"))
-        XCTAssertTrue(app.contains("envelope.resealingPayload(payload, deviceSecret: deviceSecret)"),
+        // The backup cluster lives in BackupController since the Phase D1 peel; the hub
+        // keeps the restore-application half (applyRestoredBackupPayload) pinned below.
+        let controller = try readSource(.backupController)
+        XCTAssertTrue(controller.contains("private func refreshLocalEncryptedBackupEnvelope()"))
+        XCTAssertTrue(controller.contains("envelope.resealingPayload(payload, deviceSecret: deviceSecret)"),
                       "Changes must re-seal the local envelope with the current config + library.")
 
         // Re-seal runs even when automatic upload is off, so the local envelope stays current.
         let scheduleBlock = try sourceBlock(
-            in: app,
-            startingAt: "private func scheduleAutomaticBackupAfterConfigurationChange() {",
+            in: controller,
+            startingAt: "func scheduleAutomaticBackupAfterConfigurationChange() {",
             endingBefore: "private func runScheduledAutomaticBackup()"
         )
         let resealIdx = try XCTUnwrap(scheduleBlock.range(of: "refreshLocalEncryptedBackupEnvelope()")?.lowerBound)
@@ -873,7 +884,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertLessThan(resealIdx, configuredGateIdx,
                           "Re-seal must be decoupled from the cached backup state (run before the isConfigured gate).")
 
-        // Restore is library-authoritative: the restored library's active filter regenerates config.
+        // Restore is library-authoritative: the restored library's active filter regenerates
+        // config. This half stays on the HUB (applyRestoredBackupPayload — the bridge method
+        // the controller's restore calls after its gate re-check + envelope staging).
         let restoreBlock = try sourceBlock(
             in: app,
             startingAt: "if let restoredLibrary = payload.restoredFilterLibrary()",
@@ -896,59 +909,72 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // from the store (it was .off on a fresh device); otherwise post-restore edits are gated
         // off by the stale .off state and never re-seal / re-upload.
         let restoreFnBlock = try sourceBlock(
-            in: app,
+            in: controller,
             startingAt: "func restoreEncryptedBackup(secret: String, mode: BackupRestoreMode) async throws {",
             endingBefore: "func clearEncryptedBackup() async {"
         )
         XCTAssertTrue(restoreFnBlock.contains("loadEncryptedBackupState()"),
                       "Restore must refresh the cached backup state from the now-present envelope.")
         // Restore opts into config-first persistence: a partial write must lose the re-restorable
-        // library, never the unreconstructable device-global config.
-        XCTAssertTrue(restoreFnBlock.contains("persistSharedState(prioritizesConfigurationDurability: true)"),
+        // library, never the unreconstructable device-global config. The persist lives in the
+        // hub's applyRestoredBackupPayload (the controller must not touch the persist funnel).
+        let applyRestoredBlock = try sourceBlock(
+            in: app,
+            startingAt: "func applyRestoredBackupPayload(_ payload: BackupConfigurationPayload) async throws {"
+        )
+        XCTAssertTrue(applyRestoredBlock.contains("persistSharedState(prioritizesConfigurationDurability: true)"),
                       "Restore must persist config-first so a partial write can't reset device-global config to defaults.")
 
         // A new-device restore (recovery phrase / passkey) re-keys the envelope's device slot
         // with a fresh device secret so the device can re-seal later (otherwise post-restore
-        // edits silently never back up).
+        // edits silently never back up). The recovery-phrase candidate loop is executable in
+        // BackupRecoveryPhraseUnlockTests (Phase D1 drop-down).
         XCTAssertTrue(core.contains("unlockingAssistedRecoveryPhrase"))
         XCTAssertTrue(core.contains("unlockingPasskeyPRFOutput"))
-        XCTAssertTrue(app.contains("rekeyedEnvelopeWithNormalizedRecoveryPhrase("))
-        XCTAssertTrue(app.contains("unlockingPasskeyPRFOutput: prfOutput"))
+        XCTAssertTrue(controller.contains("rekeyingDeviceSlotWithNormalizedRecoveryPhrase("))
+        XCTAssertTrue(controller.contains("unlockingPasskeyPRFOutput: prfOutput"))
         // The rekey is REQUIRED for recovery/passkey restores (guard/throw), not best-effort: a
         // silent rekey failure would fall into the device-key path with no saved secret, so
         // post-restore edits would silently stop backing up (Codex r22).
-        XCTAssertTrue(restoreFnBlock.contains("guard let rekeyed = rekeyedEnvelopeWithNormalizedRecoveryPhrase("),
+        XCTAssertTrue(restoreFnBlock.contains("guard let rekeyed = envelope.rekeyingDeviceSlotWithNormalizedRecoveryPhrase("),
                       "A failed recovery-phrase rekey must fail the restore, not proceed.")
         XCTAssertTrue(restoreFnBlock.contains("guard let rekeyed = try? envelope.rekeyingDeviceSlot("),
                       "A failed passkey rekey must fail the restore, not proceed.")
-        XCTAssertFalse(restoreFnBlock.contains("if let rekeyed = rekeyedEnvelopeWithNormalizedRecoveryPhrase("),
+        XCTAssertFalse(restoreFnBlock.contains("if let rekeyed = envelope.rekeyingDeviceSlotWithNormalizedRecoveryPhrase("),
                        "The recovery rekey must not be best-effort (if let).")
         // The re-key writes must PROPAGATE (not try?) so a failed persist fails the restore
         // instead of silently leaving a saved secret that can't unwrap the on-disk envelope.
         let rekeyPersist = try sourceBlock(
-            in: app,
+            in: controller,
             startingAt: "if didRekeyDeviceSlot {",
-            endingBefore: "configuration = payload.restoredConfiguration()"
+            endingBefore: "try await hub.applyRestoredBackupPayload(payload)"
         )
         XCTAssertTrue(rekeyPersist.contains("try backupKeychainStore.saveDeviceSecret(freshDeviceSecret)"))
         XCTAssertTrue(rekeyPersist.contains("try saveLocalEncryptedBackupEnvelope(localEnvelope)"))
         XCTAssertFalse(rekeyPersist.contains("try? backupKeychainStore.saveDeviceSecret"))
 
-        // Restore is serialized against switch/import by the shared replacement gate: it claims the
-        // token at entry (superseding a suspended switch) and re-checks it after the unlock awaits,
-        // BEFORE any disk write or app-state mutation, aborting rather than clobbering a newer owner.
-        let beginIdx = try XCTUnwrap(restoreFnBlock.range(of: "let replacementToken = configurationReplacementGate.begin()")?.lowerBound)
-        let recheckIdx = try XCTUnwrap(restoreFnBlock.range(of: "guard configurationReplacementGate.isCurrent(replacementToken) else {")?.lowerBound)
-        let mutateIdx = try XCTUnwrap(restoreFnBlock.range(of: "configuration = payload.restoredConfiguration()")?.lowerBound)
+        // Restore is serialized against switch/import by the shared replacement gate (still
+        // hub-owned; the controller holds only opaque tokens via the bridge): it claims the
+        // token at entry (superseding a suspended switch) and re-checks it after the unlock
+        // awaits, BEFORE any disk write or app-state mutation — the hub-side apply — aborting
+        // rather than clobbering a newer owner.
+        let beginIdx = try XCTUnwrap(restoreFnBlock.range(of: "let replacementToken = hub.beginConfigurationReplacement()")?.lowerBound)
+        let recheckIdx = try XCTUnwrap(restoreFnBlock.range(of: "guard hub.isConfigurationReplacementCurrent(replacementToken) else {")?.lowerBound)
+        let applyIdx = try XCTUnwrap(restoreFnBlock.range(of: "try await hub.applyRestoredBackupPayload(payload)")?.lowerBound)
         XCTAssertLessThan(beginIdx, recheckIdx, "Restore must claim the replacement token at entry.")
-        XCTAssertLessThan(recheckIdx, mutateIdx, "Restore must re-check the token before mutating app state.")
+        XCTAssertLessThan(recheckIdx, applyIdx, "Restore must re-check the token before mutating app state.")
         XCTAssertTrue(restoreFnBlock.contains("throw EncryptedBackupError.supersededByConcurrentConfigurationChange"))
+        // The hub-state mutation happens only inside the bridge's apply, after the token re-check.
+        XCTAssertTrue(applyRestoredBlock.contains("configuration = payload.restoredConfiguration()"))
+        // The bridge maps the tokens straight onto the hub's gate.
+        XCTAssertTrue(app.contains("configurationReplacementGate.begin()"))
+        XCTAssertTrue(app.contains("configurationReplacementGate.isCurrent(token)"))
 
-        // deviceKey reseal-clobber fix: the local envelope is staged BEFORE the persist (whose
-        // re-seal then reflects the restored state), and there is NO post-persist save to clobber it.
+        // deviceKey reseal-clobber fix: the local envelope is staged BEFORE the hub persist
+        // (whose re-seal then reflects the restored state), and there is NO post-persist save
+        // to clobber it.
         let lastStageIdx = try XCTUnwrap(restoreFnBlock.range(of: "saveLocalEncryptedBackupEnvelope(localEnvelope)", options: .backwards)?.lowerBound)
-        let persistIdx = try XCTUnwrap(restoreFnBlock.range(of: "persistSharedState(prioritizesConfigurationDurability: true)")?.lowerBound)
-        XCTAssertLessThan(lastStageIdx, persistIdx,
+        XCTAssertLessThan(lastStageIdx, applyIdx,
                           "Every local-envelope save must precede the persist so the persist's re-seal isn't clobbered.")
     }
 
@@ -1205,8 +1231,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Re-seal clears the upload marker so currentState() doesn't report a stale .synced after a
         // local change (Settings would otherwise claim the latest backup is already uploaded).
+        // (Backup cluster: BackupController since the Phase D1 peel.)
+        let controller = try readSource(.backupController)
         let resealBlock = try sourceBlock(
-            in: app,
+            in: controller,
             startingAt: "private func refreshLocalEncryptedBackupEnvelope()",
             endingBefore: "private func loadLocalEncryptedBackupEnvelope()"
         )
@@ -1226,23 +1254,20 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // PST-5 (Codex #218 round 2): a RESTORE that hits a newer-schema payload (correct unlock secret
         // but undecodable schema) must surface a DISTINCT actionable error, not be mislabeled as a wrong
         // device key / phrase / passkey. A dedicated case + the restore decrypt paths mapping to it.
-        XCTAssertTrue(app.contains("case unsupportedBackupSchema"),
+        XCTAssertTrue(controller.contains("case unsupportedBackupSchema"),
                       "A newer-schema restore needs its own actionable 'update the app' error.")
-        XCTAssertTrue(app.contains("throw EncryptedBackupError.unsupportedBackupSchema"),
+        XCTAssertTrue(controller.contains("throw EncryptedBackupError.unsupportedBackupSchema"),
                       "The restore decrypt paths must map unsupportedSchemaVersion to that distinct error, " +
                       "before the generic invalid-unlock catch.")
 
         // An in-flight upload must version-check the local envelope before recording .synced, so a
         // re-seal during the upload can't leave a stale "uploaded" marker for the older envelope.
-        XCTAssertTrue(app.contains("recordEncryptedBackupUploadIfStillCurrent("),
+        // The version check itself (was AppViewModel.recordEncryptedBackupUploadIfStillCurrent) is
+        // BackupEnvelopeStore.recordUploadIfCurrent since the Phase D1 peel, executable in
+        // BackupEnvelopeStoreTests.testRecordUploadIfCurrentRefusesWhenEnvelopeWasResealedMidUpload;
+        // here, pin only that the upload path routes through it.
+        XCTAssertTrue(controller.contains("backupEnvelopeStore.recordUploadIfCurrent(envelope, at: uploadedAt)"),
                       "Upload must only record the marker if the uploaded envelope is still current.")
-        let uploadGuard = try sourceBlock(
-            in: app,
-            startingAt: "private func recordEncryptedBackupUploadIfStillCurrent(",
-            endingBefore: "private func scheduleAutomaticBackupAfterConfigurationChange()"
-        )
-        XCTAssertTrue(uploadGuard.contains("loadLocalEncryptedBackupEnvelope() == uploadedEnvelope"),
-                      "The marker guard must compare the uploaded envelope to the current local one.")
 
         // Domain History applies through the shared review flow with its own origin, and its cover
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.

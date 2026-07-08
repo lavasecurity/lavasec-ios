@@ -1,0 +1,478 @@
+# LavaSec.xcodeproj — XcodeGen source of truth.
+#
+# `LavaSec.xcodeproj/project.pbxproj` is GENERATED from this file and committed;
+# edit HERE and run `xcodegen generate` (see CONTRIBUTING.md). The generated pbxproj
+# stays committed because the source-introspection suite pins target/embed wiring as
+# text (FocusFilterIntentWiringSourceTests reads it via SourceIntrospectionSupport),
+# and because checkouts must build without a generator install.
+# `scripts/check-xcodegen-drift.sh` fails when the committed pbxproj drifts from this
+# spec. Phase C1 of lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md.
+#
+# Conventions this spec preserves deliberately:
+# - Source lists are EXPLICIT (no directory globs): `Shared/` files compile into
+#   multiple targets by membership, and a stray file on disk must never silently
+#   join a target — membership stays a reviewed act, exactly as with the hand-kept
+#   pbxproj. pinned: FocusFilterIntentWiringSourceTests
+# - `settingPresets: none`: every build setting below is copied verbatim from the
+#   pre-C1 hand-kept pbxproj so the generated project is setting-for-setting
+#   identical. Do not re-enable presets — they would inject defaults the drift
+#   check (and the release pipeline) never reviewed.
+
+name: LavaSec
+
+options:
+  settingPresets: none
+  xcodeVersion: "26.3"
+  developmentLanguage: en
+  defaultConfig: Release
+  # Two project properties XcodeGen 2.45.4 cannot express (knownRegions, Icon
+  # Composer file types) are patched in as part of generation — see the fixups
+  # script for the full rationale of each.
+  postGenCommand: python3 scripts/xcodegen-fixups.py
+  # Icon Composer bundles: treat the .icon directory as a single file-like resource
+  # (like .xcassets); without this XcodeGen would recurse into it and add its inner
+  # JSON files as loose resources.
+  fileTypes:
+    icon:
+      file: true
+      buildPhase: resources
+
+configs:
+  Debug: debug
+  Release: release
+  # QA = Release-shaped internal build with the LAVA_QA_TOOLS admin surface compiled
+  # in and a separate com.lavasec.dev.qa.* identity. Never distributed publicly.
+  QA: release
+
+# Base xcconfigs. Config/Lava.xcconfig ends with `#include? "Lava.local.xcconfig"`
+# (gitignored; local signing via $LAVA_DEVELOPMENT_TEAM) — referencing the same
+# tracked files preserves that indirection unchanged.
+configFiles:
+  Debug: Config/Lava.xcconfig
+  Release: Config/Lava.xcconfig
+  QA: Config/Lava.QA.xcconfig
+
+packages:
+  # The repo-root Swift package (library product LavaSecCore + its split layers).
+  LavaSecPackage:
+    path: .
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    majorVersion: 9.1.0
+
+# Project-level settings, verbatim from the pre-C1 pbxproj (Phase C1 baseline).
+# SWIFT_EMIT_CONST_VALUE_PROTOCOLS is intentionally EMPTY at project level and set to
+# the full Xcode default list on the AppIntents-bearing targets below — a narrowed
+# list breaks appintentsmetadataprocessor (#142).
+# pinned: FocusFilterIntentWiringSourceTests.testConstValueProtocolsIncludeQueryProtocols
+settings:
+  base:
+    ALWAYS_SEARCH_USER_PATHS: "NO"
+    CLANG_ANALYZER_NONNULL: "YES"
+    CLANG_ENABLE_MODULES: "YES"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING: "YES"
+    CLANG_WARN_BOOL_CONVERSION: "YES"
+    CLANG_WARN_COMMA: "YES"
+    CLANG_WARN_CONSTANT_CONVERSION: "YES"
+    CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS: "YES"
+    CLANG_WARN_DIRECT_OBJC_ISA_USAGE: "YES_ERROR"
+    CLANG_WARN_DOCUMENTATION_COMMENTS: "YES"
+    CLANG_WARN_EMPTY_BODY: "YES"
+    CLANG_WARN_ENUM_CONVERSION: "YES"
+    CLANG_WARN_INFINITE_RECURSION: "YES"
+    CLANG_WARN_INT_CONVERSION: "YES"
+    CLANG_WARN_NON_LITERAL_NULL_CONVERSION: "YES"
+    CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: "YES"
+    CLANG_WARN_OBJC_LITERAL_CONVERSION: "YES"
+    CLANG_WARN_OBJC_ROOT_CLASS: "YES_ERROR"
+    CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: "YES"
+    CLANG_WARN_RANGE_LOOP_ANALYSIS: "YES"
+    CLANG_WARN_STRICT_PROTOTYPES: "YES"
+    CLANG_WARN_SUSPICIOUS_MOVE: "YES"
+    CLANG_WARN_UNGUARDED_AVAILABILITY: "YES_AGGRESSIVE"
+    CLANG_WARN_UNREACHABLE_CODE: "YES"
+    CLANG_WARN__DUPLICATE_METHOD_MATCH: "YES"
+    COPY_PHASE_STRIP: "NO"
+    ENABLE_STRICT_OBJC_MSGSEND: "YES"
+    GCC_C_LANGUAGE_STANDARD: gnu17
+    GCC_NO_COMMON_BLOCKS: "YES"
+    GCC_WARN_64_TO_32_BIT_CONVERSION: "YES"
+    GCC_WARN_ABOUT_RETURN_TYPE: "YES_ERROR"
+    GCC_WARN_UNDECLARED_SELECTOR: "YES"
+    GCC_WARN_UNINITIALIZED_AUTOS: "YES_AGGRESSIVE"
+    GCC_WARN_UNUSED_FUNCTION: "YES"
+    GCC_WARN_UNUSED_VARIABLE: "YES"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    SDKROOT: iphoneos
+    SWIFT_EMIT_CONST_VALUE_PROTOCOLS: ""
+    SWIFT_VERSION: "6.0"
+  configs:
+    Debug:
+      DEBUG_INFORMATION_FORMAT: dwarf
+      ENABLE_TESTABILITY: "YES"
+      GCC_DYNAMIC_NO_PIC: "NO"
+      GCC_OPTIMIZATION_LEVEL: "0"
+      GCC_PREPROCESSOR_DEFINITIONS:
+        - "DEBUG=1"
+        - "$(inherited)"
+      MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
+      ONLY_ACTIVE_ARCH: "YES"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    Release:
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      ENABLE_NS_ASSERTIONS: "NO"
+      MTL_ENABLE_DEBUG_INFO: "NO"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
+      SWIFT_COMPILATION_MODE: wholemodule
+      VALIDATE_PRODUCT: "YES"
+    QA:
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      ENABLE_NS_ASSERTIONS: "NO"
+      ENABLE_TESTABILITY: "NO"
+      GCC_DYNAMIC_NO_PIC: "NO"
+      GCC_OPTIMIZATION_LEVEL: s
+      GCC_PREPROCESSOR_DEFINITIONS:
+        - "LAVA_QA_TOOLS=1"
+        - "$(inherited)"
+      MTL_ENABLE_DEBUG_INFO: "NO"
+      ONLY_ACTIVE_ARCH: "NO"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE LAVA_QA_TOOLS
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      VALIDATE_PRODUCT: "YES"
+
+targets:
+  LavaSec:
+    type: application
+    platform: iOS
+    sources:
+      # App target proper.
+      - path: LavaSecApp/AccountAuthService.swift
+      - path: LavaSecApp/AccountController.swift
+      - path: LavaSecApp/AccountSessionKeychainStore.swift
+      - path: LavaSecApp/AdminQAView.swift
+      - path: LavaSecApp/AppViewModel.swift
+      - path: LavaSecApp/BackupController.swift
+      - path: LavaSecApp/BackupKeychainStore.swift
+      - path: LavaSecApp/BackupPasskeyCoordinator.swift
+      - path: LavaSecApp/BackupRestoreView.swift
+      - path: LavaSecApp/BackupSetupView.swift
+      - path: LavaSecApp/BackupSyncService.swift
+      - path: LavaSecApp/CustomizationController.swift
+      - path: LavaSecApp/DarwinNotificationObserver.swift
+      - path: LavaSecApp/DeveloperPreviewViews.swift
+      - path: LavaSecApp/DiagnosticsController.swift
+      - path: LavaSecApp/DiagnosticsView.swift
+      - path: LavaSecApp/FilterPreparationPresentation.swift
+      - path: LavaSecApp/FilterReviewFlowView.swift
+      - path: LavaSecApp/FiltersView.swift
+      - path: LavaSecApp/GuardView.swift
+      - path: LavaSecApp/LavaCondensedList.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaComponents.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaConfirmationDialog.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaIcon.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaScaffold.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaSelectableRow.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaTokens.swift
+      - path: LavaSecApp/LavaLiveActivityController.swift
+      - path: LavaSecApp/LavaSecApp.swift
+      - path: LavaSecApp/LavaSecurityPlusController.swift
+      - path: LavaSecApp/LavaSecurityPlusStore.swift
+      - path: LavaSecApp/LavaStrings.swift
+      - path: LavaSecApp/OnboardingFlowView.swift
+      - path: LavaSecApp/ProtectionConnectivityPresentation.swift
+      - path: LavaSecApp/ProtectionPlatformSeams.swift
+      - path: LavaSecApp/RageShakeDetector.swift
+      - path: LavaSecApp/RootView.swift
+      - path: LavaSecApp/SecurityController.swift
+      - path: LavaSecApp/SettingsView.swift
+      - path: LavaSecApp/ShareableFiltersUI.swift
+      - path: LavaSecApp/TemporaryProtectionPauseController.swift
+      # Shared/ files compiled into the app process (each Shared file lists every
+      # process it compiles into; keep the per-target lists in sync when adding one).
+      - path: Shared/AppGroup.swift
+      - path: Shared/FocusSwitchEnvironment.swift
+      - path: Shared/LavaActivityAttributes.swift
+      - path: Shared/LavaLiveActivityActionRequest.swift
+      - path: Shared/LavaLiveActivityIntents.swift
+      - path: Shared/LavaProtectionCommandService.swift
+      - path: Shared/SoftShieldGuardian.swift
+      # Resources.
+      - path: LavaSecApp/Assets.xcassets
+      - path: LavaSecApp/Localizable.xcstrings
+      - path: LavaSecApp/InfoPlist.xcstrings
+      - path: LavaSecApp/AppIcon.icon
+      - path: LavaSecApp/AppIconFireOpal.icon
+      - path: LavaSecApp/AppIconAmethyst.icon
+      - path: LavaSecApp/AppIconObsidian.icon
+      - path: LavaSecApp/AppIconCherryQuartz.icon
+      - path: LavaSecApp/AppIconEmerald.icon
+      - path: LavaSecApp/AppIconKiwiCreme.icon
+      - path: LavaSecApp/AppIcon-QA.icon
+      # Project-browser reference only (signed at build via CODE_SIGN_ENTITLEMENTS).
+      - path: LavaSecApp/LavaSecApp.entitlements
+        buildPhase: none
+    dependencies:
+      # Both appexes embed with RemoveHeadersOnCopy only (no CodeSignOnCopy) —
+      # signing is deferred to the outer app signing pass, matching the pre-C1
+      # project and the release pipeline's expectations.
+      - target: LavaSecTunnel
+        embed: true
+        codeSign: false
+      - target: LavaSecWidget
+        embed: true
+        codeSign: false
+      # ExtensionKit extension: embeds via the separate "Embed ExtensionKit
+      # Extensions" phase into $(EXTENSIONS_FOLDER_PATH).
+      # pinned: FocusFilterIntentWiringSourceTests.testIntentIsHostedInAnExtensionKitAppIntentsExtension
+      - target: LavaSecIntents
+        embed: true
+        codeSign: false
+      - package: LavaSecPackage
+        product: LavaSecCore
+      - package: GoogleSignIn
+        product: GoogleSignIn
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "NO"
+        CODE_SIGN_ENTITLEMENTS: LavaSecApp/LavaSecApp.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(inherited)"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: LavaSecApp/Info.plist
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        LAVA_DISPLAY_NAME: Lava Security
+        LAVA_GOOGLE_IOS_CLIENT_ID: "$(inherited)"
+        LAVA_GOOGLE_REVERSED_CLIENT_ID: "$(inherited)"
+        LAVA_GOOGLE_SERVER_CLIENT_ID: "$(inherited)"
+        LAVA_SUPABASE_ANON_KEY: "$(inherited)"
+        LAVA_SUPABASE_URL: "$(inherited)"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+        MARKETING_VERSION: "$(inherited)"
+        PRODUCT_NAME: LavaSec
+        # Full Xcode-default list — never narrow (#142, appintentsmetadataprocessor).
+        SWIFT_EMIT_CONST_VALUE_PROTOCOLS: AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app
+        Release:
+          ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_APP_PROFILE)"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
+        QA:
+          ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-QA
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa
+
+  LavaSecTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LavaSecTunnel/PacketTunnelProvider.swift
+      - path: LavaSecTunnel/DeviceDNSResolver.c
+      - path: Shared/AppGroup.swift
+      - path: Shared/LavaActivityAttributes.swift
+      - path: LavaSecTunnel/Info.plist
+        buildPhase: none
+      - path: LavaSecTunnel/LavaSecTunnel.entitlements
+        buildPhase: none
+    dependencies:
+      - package: LavaSecPackage
+        product: LavaSecCore
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        CODE_SIGN_ENTITLEMENTS: LavaSecTunnel/LavaSecTunnel.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(inherited)"
+        INFOPLIST_FILE: LavaSecTunnel/Info.plist
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
+        # The NE process never hosts App Intents; skipping metadata extraction keeps
+        # the appex link step lean.
+        LM_SKIP_METADATA_EXTRACTION: "YES"
+        MARKETING_VERSION: "$(inherited)"
+        OTHER_LDFLAGS: "$(inherited) -lresolv"
+        PRODUCT_NAME: LavaSecTunnel
+        SKIP_INSTALL: "YES"
+        SWIFT_VERSION: "6.0"
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.tunnel
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.tunnel
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_TUNNEL_PROFILE)"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
+        QA:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.tunnel
+
+  LavaSecWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LavaSecWidget/LavaSecWidget.swift
+      - path: Shared/AppGroup.swift
+      - path: Shared/SoftShieldGuardian.swift
+      - path: Shared/LavaActivityAttributes.swift
+      - path: Shared/LavaLiveActivityActionRequest.swift
+      - path: Shared/LavaLiveActivityIntents.swift
+      - path: Shared/LavaProtectionCommandService.swift
+      - path: LavaSecWidget/Info.plist
+        buildPhase: none
+      - path: LavaSecWidget/LavaSecWidget.entitlements
+        buildPhase: none
+    dependencies:
+      - package: LavaSecPackage
+        product: LavaSecCore
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        CODE_SIGN_ENTITLEMENTS: LavaSecWidget/LavaSecWidget.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(inherited)"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: LavaSecWidget/Info.plist
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
+        MARKETING_VERSION: "$(inherited)"
+        PRODUCT_NAME: LavaSecWidget
+        SKIP_INSTALL: "YES"
+        # Widget hosts Live Activity intents — needs the full default list (#142).
+        SWIFT_EMIT_CONST_VALUE_PROTOCOLS: AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.widget
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.widget
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_WIDGET_PROFILE)"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
+        QA:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.widget
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE LAVA_QA_TOOLS
+
+  LavaSecIntents:
+    # ExtensionKit App Intents extension — must NOT be a legacy app-extension, or
+    # perform() only runs while the app is foregrounded (LAV-100 Phase 4).
+    # pinned: FocusFilterIntentWiringSourceTests.testIntentIsHostedInAnExtensionKitAppIntentsExtension
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - path: LavaSecIntents/FocusFilterIntent.swift
+      - path: LavaSecIntents/LavaSecIntentsExtension.swift
+      - path: Shared/AppGroup.swift
+      - path: Shared/FocusSwitchEnvironment.swift
+      - path: LavaSecIntents/Localizable.xcstrings
+      - path: LavaSecIntents/Info.plist
+        buildPhase: none
+      - path: LavaSecIntents/LavaSecIntents.entitlements
+        buildPhase: none
+    dependencies:
+      - package: LavaSecPackage
+        product: LavaSecCore
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        CODE_SIGN_ENTITLEMENTS: LavaSecIntents/LavaSecIntents.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(inherited)"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: LavaSecIntents/Info.plist
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+          - "@executable_path/../../Frameworks"
+        MARKETING_VERSION: "$(inherited)"
+        PRODUCT_NAME: LavaSecIntents
+        SKIP_INSTALL: "YES"
+        # Full default list — EntityQuery/DynamicOptionsProvider must stay or the
+        # metadata processor loses the AppEntity query (#142).
+        # pinned: FocusFilterIntentWiringSourceTests.testConstValueProtocolsIncludeQueryProtocols
+        SWIFT_EMIT_CONST_VALUE_PROTOCOLS: AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.intents
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.intents
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_INTENTS_PROFILE)"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
+        QA:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.intents
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE LAVA_QA_TOOLS
+
+  LavaSecUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LavaSecUITests/SecuritySettingsUITests.swift
+      - path: LavaSecUITests/CoreFlowDeviceTests.swift
+    dependencies:
+      - target: LavaSec
+        embed: false
+      - package: LavaSecPackage
+        product: LavaSecCore
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: "$(inherited)"
+        GENERATE_INFOPLIST_FILE: "YES"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        MARKETING_VERSION: "$(inherited)"
+        PRODUCT_NAME: "$(TARGET_NAME)"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        TEST_TARGET_NAME: LavaSec
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.uitests
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app.uitests
+        QA:
+          PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.uitests
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG LAVA_QA_TOOLS
+
+# The one shared scheme committed pre-C1 (LavaSec.xcodeproj/xcshareddata/xcschemes).
+# Xcode auto-creates per-target and package (LavaSecCore) schemes locally.
+schemes:
+  LavaSec:
+    build:
+      parallelizeBuild: true
+      buildImplicitDependencies: true
+      targets:
+        LavaSec: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LavaSecUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+      revealArchiveInOrganizer: true

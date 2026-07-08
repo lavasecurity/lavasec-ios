@@ -1,6 +1,4 @@
 import Darwin
-import CryptoKit
-import DeviceCheck
 import Foundation
 import SwiftUI
 import UIKit
@@ -56,133 +54,9 @@ enum ProtectionPauseDuration: CaseIterable, Identifiable {
     }
 }
 
-enum LavaAppearancePreference: String, CaseIterable, Identifiable {
-    case light
-    case dark
-    case system
-
-    var id: Self {
-        self
-    }
-
-    var displayName: String {
-        switch self {
-        case .light:
-            "Light"
-        case .dark:
-            "Dark"
-        case .system:
-            "System"
-        }
-    }
-
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .light:
-            .light
-        case .dark:
-            .dark
-        case .system:
-            nil
-        }
-    }
-}
-
-/// In-app Dynamic Type override for the Customization → Text Size control. Covers the seven
-/// standard content sizes (the same range as iOS Settings → Display & Brightness → Text Size).
-/// Larger accessibility sizes stay reachable through the system's Larger Text setting, which the
-/// app respects whenever "Match System" is on — so this control never has to reproduce them.
-enum LavaTextSize: String, CaseIterable, Identifiable {
-    case xSmall
-    case small
-    case medium
-    case large
-    case xLarge
-    case xxLarge
-    case xxxLarge
-
-    var id: Self {
-        self
-    }
-
-    /// Matches the system's out-of-the-box Dynamic Type size, so turning "Match System" off does
-    /// not jump the text until the user actually moves the slider.
-    static let systemDefault: LavaTextSize = .large
-
-    var dynamicTypeSize: DynamicTypeSize {
-        switch self {
-        case .xSmall:
-            .xSmall
-        case .small:
-            .small
-        case .medium:
-            .medium
-        case .large:
-            .large
-        case .xLarge:
-            .xLarge
-        case .xxLarge:
-            .xxLarge
-        case .xxxLarge:
-            .xxxLarge
-        }
-    }
-
-    /// A short, localized name for the size, announced to VoiceOver as the Text Size slider's value
-    /// so a non-sighted user knows which size they've chosen (the slider is otherwise just a 0–6
-    /// numeric position). Rendered via `.lavaLocalized` at the call site, like the appearance names.
-    var displayName: String {
-        switch self {
-        case .xSmall:
-            "Extra Small"
-        case .small:
-            "Small"
-        case .medium:
-            "Medium"
-        case .large:
-            "Large"
-        case .xLarge:
-            "Extra Large"
-        case .xxLarge:
-            "Extra Extra Large"
-        case .xxxLarge:
-            "Largest"
-        }
-    }
-
-    /// The in-app size closest to a system `DynamicTypeSize`, clamping the larger accessibility
-    /// sizes (which this control does not expose) down to the largest in-range size. Used to seed
-    /// the slider from the current system size the first time "Match System" is turned off, so
-    /// nothing jumps for users whose iOS text size isn't the default.
-    static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize {
-        switch dynamicTypeSize {
-        case .xSmall:
-            .xSmall
-        case .small:
-            .small
-        case .medium:
-            .medium
-        case .large:
-            .large
-        case .xLarge:
-            .xLarge
-        case .xxLarge:
-            .xxLarge
-        case .xxxLarge:
-            .xxxLarge
-        default:
-            .xxxLarge
-        }
-    }
-}
-
-struct LavaGuardAvailability: Equatable {
-    let isSelectable: Bool
-    let isRevealed: Bool
-    let progress: LavaGuardGoalProgress?
-    let isProgressEnabled: Bool
-    let showsProgressDetail: Bool
-}
+// LavaAppearancePreference, LavaTextSize, and LavaGuardAvailability moved to
+// CustomizationController.swift with the Phase D5 customization peel (they are
+// customization-only models; the controller file is their single consumer's home).
 
 @MainActor
 private final class ProtectionUserNotificationController {
@@ -423,264 +297,20 @@ enum FilterPreparationState: Equatable {
     }
 }
 
-enum BugReportSendState: Equatable {
-    case idle
-    case sending
-    case sent(reportID: String)
-    case failed(message: String)
+// BugReportSendState and the bug-report submit types (BugReportSubmitResponse,
+// BugReportSubmissionError, BugReportRateLimitedError, AppAttestHeaders,
+// AppAttestClient) moved to DiagnosticsController.swift with the Phase D4
+// diagnostics/bug-report peel — the controller owns the send state machine and
+// the attested submit end to end.
 
-    var isSending: Bool {
-        if case .sending = self {
-            return true
-        }
+// LavaSecurityPlusEntitlementSyncClient (+ its request/error types) moved to
+// LavaSecurityPlusController.swift with the Phase D2 billing peel — the controller
+// owns the server entitlement sync end to end.
 
-        return false
-    }
-}
-
-private struct BugReportSubmitResponse: Decodable {
-    let reportID: String
-
-    private enum CodingKeys: String, CodingKey {
-        case reportID = "report_id"
-    }
-}
-
-private struct LavaSecurityPlusEntitlementSyncClient: Sendable {
-    let urlSession: URLSession
-
-    func sync(
-        entitlement: LavaSecurityPlusEntitlement,
-        session: BackupAccountSession
-    ) async throws {
-        guard let productID = entitlement.productID,
-              let transactionID = entitlement.transactionID,
-              let originalTransactionID = entitlement.originalTransactionID,
-              let signedTransactionJWS = entitlement.signedTransactionJWS,
-              !signedTransactionJWS.isEmpty
-        else {
-            return
-        }
-
-        let body = LavaSecurityPlusEntitlementSyncRequest(
-            productID: productID,
-            transactionID: transactionID,
-            originalTransactionID: originalTransactionID,
-            signedTransactionJWS: signedTransactionJWS,
-            active: entitlement.isActive,
-            expiresAt: entitlement.expiresAt,
-            environment: entitlement.environment
-        )
-        let requestBody = try Self.makeJSONEncoder().encode(body)
-        var lastError: Error?
-
-        for endpoint in Self.syncEndpointURLs {
-            do {
-                var request = URLRequest(url: endpoint)
-                request.httpMethod = "POST"
-                request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("application/json", forHTTPHeaderField: "Accept")
-                request.httpBody = requestBody
-
-                let (responseData, response) = try await urlSession.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw LavaSecurityPlusEntitlementSyncError.invalidResponse
-                }
-
-                guard 200..<300 ~= httpResponse.statusCode else {
-                    let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body"
-                    throw LavaSecurityPlusEntitlementSyncError.requestFailed(
-                        statusCode: httpResponse.statusCode,
-                        message: serverMessage
-                    )
-                }
-
-                return
-            } catch {
-                lastError = error
-            }
-        }
-
-        throw lastError ?? LavaSecurityPlusEntitlementSyncError.invalidResponse
-    }
-
-    private static var syncEndpointURLs: [URL] {
-        [LavaSecAPI.productionBaseURL, LavaSecAPI.fallbackBaseURL].map {
-            $0
-                .appendingPathComponent("v1")
-                .appendingPathComponent("account")
-                .appendingPathComponent("entitlements")
-                .appendingPathComponent("app-store-sync")
-        }
-    }
-
-    private static func makeJSONEncoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-}
-
-private struct LavaSecurityPlusEntitlementSyncRequest: Encodable {
-    let productID: String
-    let transactionID: String
-    let originalTransactionID: String
-    let signedTransactionJWS: String
-    let active: Bool
-    let expiresAt: Date?
-    let environment: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case productID = "product_id"
-        case transactionID = "transaction_id"
-        case originalTransactionID = "original_transaction_id"
-        case signedTransactionJWS = "signed_transaction_jws"
-        case active
-        case expiresAt = "expires_at"
-        case environment
-    }
-}
-
-private enum LavaSecurityPlusEntitlementSyncError: Error, LocalizedError {
-    case invalidResponse
-    case requestFailed(statusCode: Int, message: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            "The subscription sync server response was not valid."
-        case .requestFailed(let statusCode, let message):
-            "Subscription sync returned HTTP \(statusCode): \(message)"
-        }
-    }
-}
-
-private struct BugReportSubmissionError: LocalizedError {
-    let message: String
-
-    var errorDescription: String? {
-        message
-    }
-}
-
-// A 429 is terminal: it must NOT fail over to the fallback endpoint (both share
-// the same per-IP limiter, and failing over would either bypass the throttle if
-// they ever diverge or replace the friendly copy with the fallback's raw error).
-// Thrown inside the per-endpoint loop and rethrown by a dedicated catch.
-private struct BugReportRateLimitedError: Error {}
-
-// The Apple App Attest headers attached to a bug-report submit. `keyId` is the
-// base64 key identifier from DCAppAttestService (the server base64-decodes it to
-// the 32-byte SHA256 of the attested public key); `attestationBase64` is the
-// base64 CBOR attestation object; `challenge` is the one-time token we attested
-// over. Server side: backend/worker/src/app-attest.ts.
-private struct AppAttestHeaders {
-    let challenge: String
-    let keyId: String
-    let attestationBase64: String
-
-    func apply(to request: inout URLRequest) {
-        request.setValue(challenge, forHTTPHeaderField: "X-Lava-Attest-Challenge")
-        request.setValue(keyId, forHTTPHeaderField: "X-Lava-Attest-Key-Id")
-        request.setValue(attestationBase64, forHTTPHeaderField: "X-Lava-Attest-Object")
-    }
-}
-
-private enum AppAttestClient {
-    // False on the Simulator and on hardware without the Secure Enclave; callers
-    // must degrade gracefully (submit unattested) rather than block the user.
-    static var isSupported: Bool {
-        DCAppAttestService.shared.isSupported
-    }
-
-    // Generate a fresh hardware-backed key and attest it over the server
-    // challenge. We attest per submission (a new key each time) rather than
-    // registering a key and asserting against it, so nothing device-linked is
-    // stored server-side. Returns nil on any failure.
-    //
-    // Replay hardening: the attestation is bound to BOTH the one-time challenge and
-    // SHA256(the exact request body) via clientDataHash, so a captured attestation
-    // cannot be replayed against a different report body. The server recomputes the
-    // identical clientDataHash — keep the two in lockstep (backend/worker/src/app-attest.ts).
-    //   clientDataHash = SHA256( utf8(challenge) ‖ bodyHash ), bodyHash = SHA256(body)
-    static func attest(challenge: String, bodyHash: Data) async -> AppAttestHeaders? {
-        let service = DCAppAttestService.shared
-        guard service.isSupported else {
-            return nil
-        }
-        do {
-            let keyId = try await service.generateKey()
-            var clientData = Data(challenge.utf8)
-            clientData.append(bodyHash)
-            let clientDataHash = Data(SHA256.hash(data: clientData))
-            let attestation = try await service.attestKey(keyId, clientDataHash: clientDataHash)
-            return AppAttestHeaders(
-                challenge: challenge,
-                keyId: keyId,
-                attestationBase64: attestation.base64EncodedString()
-            )
-        } catch {
-            return nil
-        }
-    }
-}
-
-// EncryptedBackupState moved to LavaSecCore (EncryptedBackupState.swift) so its
-// signed-in/signed-out copy branching is unit-tested rather than source-pinned.
-
-enum EncryptedBackupError: Error, LocalizedError {
-    case noBackupAvailable
-    case noSavedDeviceSecret
-    case invalidDeviceUnlock
-    case invalidRecoveryPhrase
-    case noPasskeyRecovery
-    case invalidPasskeyUnlock
-    case passkeyRestoreRequiresSignIn
-    case supersededByConcurrentConfigurationChange
-    // The unlock secret was correct but the backup PAYLOAD is a newer schema this build can't
-    // decode (PST-5, Codex #218). Distinct from the invalid-unlock errors so the user is told to
-    // update the app, not that their device key / phrase / passkey is wrong.
-    case unsupportedBackupSchema
-
-    var errorDescription: String? {
-        switch self {
-        case .supersededByConcurrentConfigurationChange:
-            "Your filter changed while the backup was restoring. Try the restore again."
-        case .unsupportedBackupSchema:
-            "This backup was created by a newer version of Lava. Update the app to restore it."
-        case .noBackupAvailable:
-            "No encrypted backup is available on this device yet. Sign in is needed to download a server backup."
-        case .noSavedDeviceSecret:
-            "No saved device unlock is available on this device. Use the recovery phrase instead."
-        case .invalidDeviceUnlock:
-            "This device could not unlock the backup. Use the recovery phrase instead."
-        case .invalidRecoveryPhrase:
-            "That recovery phrase did not unlock this backup. Check the words and try again."
-        case .noPasskeyRecovery:
-            "This backup was not protected with Passkey. Use this device's keychain or Recovery instead."
-        case .invalidPasskeyUnlock:
-            "That Passkey did not unlock this backup. Use Recovery instead."
-        case .passkeyRestoreRequiresSignIn:
-            "Sign in to use Passkey restore."
-        }
-    }
-}
-
-private struct PendingBackupPasskey: Equatable {
-    let credentialID: String
-    /// Non-secret PRF input persisted in the envelope slot.
-    let prfSalt: Data
-    /// Authenticator PRF output captured at setup; transient, never persisted or uploaded.
-    let prfOutput: Data
-}
-
-/// A registered (PRF-capable) passkey awaiting the explicit validation step that captures its
-/// PRF output. Holds only the credential ID and the non-secret salt — no key material yet.
-private struct RegisteredBackupPasskey: Equatable {
-    let credentialID: String
-    let prfSalt: Data
-}
+// EncryptedBackupState moved to LavaSecCore (EncryptedBackupState.swift); the whole
+// encrypted-backup feature (EncryptedBackupError, passkey setup, upload/restore, the
+// automatic-backup debounce) now lives in BackupController.swift (Phase D1 backup peel) —
+// this hub keeps only the BackupHubBridging conformance at the bottom of this file.
 
 @MainActor
 private final class FilterPreparationProgressPresenter {
@@ -1031,7 +661,6 @@ final class AppViewModel: ObservableObject {
     // or frozen mid-prepare is a dead end (retrying re-fails), so it surfaces a non-retryable
     // failure; ordinary transient failures stay retryable.
     @Published private(set) var filterPreparationFailureIsRetryable = true
-    @Published var diagnostics = DiagnosticsStore()
     @Published private(set) var networkActivityLog = NetworkActivityLog()
     @Published var allowlistDraft = ""
     #if DEBUG || LAVA_QA_TOOLS
@@ -1061,10 +690,6 @@ final class AppViewModel: ObservableObject {
     // this so only the originating surface presents — otherwise the always-mounted Filters cover
     // would also fire for a Domain History action (wrong origin / missing "back to review").
     @Published private(set) var filterPreparationOrigin: FilterReviewOrigin = .filters
-    @Published var rageShakeDestination: RageShakeDestination?
-    @Published var pendingRageShakeConfirmation: RageShakeDestination?
-    @Published private(set) var bugReportDraft: BugReportBundle?
-    @Published private(set) var bugReportSendState: BugReportSendState = .idle
     #if DEBUG || LAVA_QA_TOOLS
     @Published private(set) var adminQAStatusMessage: String?
     #endif
@@ -1082,20 +707,14 @@ final class AppViewModel: ObservableObject {
     @Published var vpnMessage: String?
     @Published var vpnMessageIsError = false
     @Published private(set) var temporaryProtectionPauseUntil: Date?
-    @Published private(set) var appearancePreference: LavaAppearancePreference = .system
-    @Published private(set) var textSizeMatchesSystem: Bool = true
-    @Published private(set) var textSize: LavaTextSize = .systemDefault
-    @Published private(set) var lavaGuardLook: GuardianShieldStyle = .original
+    // The customization-preference @Published state (appearance, text size, LavaGuard
+    // look, app icon, Live-Activities toggle + pause length, the haptics toggle, and the
+    // Customization → Notifications mirrors) lives on `customization`
+    // (CustomizationController) since the Phase D5 customization peel — same pattern as
+    // the D1–D4 controllers below. `lavaGuardProgress` stays HERE: the usage-accrual
+    // engine (synchronizeLavaGuardProgress) and the diagnostics-driven refresh write it,
+    // and the controller only reads it through the bridge for availability rows.
     @Published private(set) var lavaGuardProgress = LavaGuardProgress()
-    @Published private(set) var updatesAppIconWithLavaGuard = true
-    @Published private(set) var usesLiveActivities = false
-    @Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes
-    @Published private(set) var usesLavaHaptics = true
-    /// Customization → Notifications per-category toggles. SwiftUI-bindable mirrors of the cross-process
-    /// app-group store (`LavaNotificationPreferences`) the extension + tunnel read; default ON.
-    @Published private(set) var notifiesFilterChanges = true
-    @Published private(set) var notifiesFilterCouldNotApply = true
-    @Published private(set) var notifiesConnectivity = true
     @Published private(set) var isSyncingCatalog = false
     private var catalogSyncTask: Task<Void, Never>?
     /// Whether a catalog sync is queued or in progress. `catalogSyncTask` is assigned synchronously
@@ -1114,37 +733,20 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var compiledRuleCount = 0
     @Published private(set) var protectedRuleCount = 0
     @Published private(set) var compiledBlocklistRuleCount = 0
-    @Published private(set) var accountAuthState: AccountAuthState = .signedOut
-    @Published private(set) var accountSignInProviderInProgress: AccountAuthProvider?
-    @Published private(set) var accountAuthMessage: String?
-    @Published private(set) var accountAuthMessageIsError = false
-    @Published private(set) var isAccountDeletionInProgress = false
-    @Published private(set) var encryptedBackupState: EncryptedBackupState = .off
-    @Published private(set) var isBackingUpNow = false
-    @Published private(set) var isBackupMaintenanceInProgress = false
-    // Tracks any in-flight server write (manual, automatic, setup, or sign-in
-    // upload) so Clear/Disable never overlap an upload that could resurrect the
-    // row being deleted.
-    private var isUploadingEncryptedBackup = false
-    @Published private(set) var isAutomaticBackupEnabled = false
-    // Starts EMPTY on purpose — it holds offers actually loaded from StoreKit, not the display
-    // fallback. The paywall's on-appear guard loads products only while this is empty, and
-    // `displayedOffers` substitutes the hardcoded fallback list whenever it's empty, so the UI
-    // still shows something before the load completes. Pre-seeding it with the fallback offers (as
-    // it was) made `.isEmpty` never true, so `loadLavaSecurityPlusProducts()` never ran and the
-    // paywall showed hardcoded fallback prices ($3.99/$29.99) forever instead of live StoreKit
-    // prices — and never surfaced the yearly-paid-monthly offer.
-    @Published private(set) var lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = []
-    @Published private(set) var isLoadingLavaSecurityPlusProducts = false
-    @Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false
-    @Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false
-    /// Expiry of the active auto-renewable Lava Security Plus entitlement (nil when
-    /// there is no active entitlement). Drives the subscriber "Expiration" line and
-    /// gates the Manage Subscription control.
-    @Published private(set) var lavaSecurityPlusExpiresAt: Date?
-    @Published private(set) var isPurchasingLavaSecurityPlus = false
-    @Published private(set) var lavaSecurityPlusMessage: String?
-    @Published private(set) var lavaSecurityPlusMessageIsError = false
+    // The backup @Published state (encryptedBackupState, isBackingUpNow,
+    // isBackupMaintenanceInProgress, isAutomaticBackupEnabled) lives on `backup`
+    // (BackupController), which views observe as its own environment object.
+    // The LavaSecurity+ billing @Published state (offers, product-load / entitlement-check /
+    // purchase flags, expiry, paywall messages) lives on `plus` (LavaSecurityPlusController)
+    // since the Phase D2 billing peel — same pattern.
+    // The account @Published state (auth state, per-provider sign-in progress, status
+    // messages, deletion progress) lives on `account` (AccountController) since the
+    // Phase D3 account peel — same pattern.
+    // The diagnostics @Published state (the DiagnosticsStore, the rage-shake
+    // destination/confirmation, the bug-report draft + send state) lives on `reports`
+    // (DiagnosticsController) since the Phase D4 diagnostics/bug-report peel — same
+    // pattern. The hub still writes `reports.diagnostics` from its own uptime/demo
+    // paths (see the property's comment there).
 
     private var blockRules = DomainRuleSet()
     private var threatGuardrail = DomainRuleSet()
@@ -1204,21 +806,13 @@ final class AppViewModel: ObservableObject {
     private var isForegroundManualSwitchInFlight = false
     // (The foreground-active scene flag + its 60s heartbeat were REMOVED 2026-06-29 — the headless switch is
     // state-agnostic now, so nothing reads a foreground-active hint. See HeadlessFocusFilterSwitchEngine.)
-    private var automaticBackupTask: Task<Void, Never>?
     private let vpnConfigurationName = LavaTunnelConfigurationIdentity.currentDisplayName
     private let protectionStatusRefreshInterval: TimeInterval = 8
     private let catalogSyncFreshnessInterval: TimeInterval = 7 * 24 * 60 * 60
-    private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
-    private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
-    private let textSizeMatchesSystemDefaultsKey = "lavasec.customization.textSizeMatchesSystem"
-    private let textSizeDefaultsKey = "lavasec.customization.textSize"
-    private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey
+    // The customization-preference defaults keys moved to CustomizationController with
+    // their setters (Phase D5); only the progress key stays with the hub-owned accrual.
     private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
-    private let updatesAppIconWithLavaGuardDefaultsKey = "lavasec.customization.updatesAppIconWithLavaGuard"
-    private let usesLiveActivitiesDefaultsKey = "lavasec.customization.liveActivities"
-    private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey
-    private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000
     private let defaults = UserDefaults.standard
     private let appGroupDefaults = LavaSecAppGroup.sharedDefaults
     // Single source of truth for session and pause state, shared with the
@@ -1252,31 +846,76 @@ final class AppViewModel: ObservableObject {
             #endif
         }
     )
-    // Device-local persistence + state derivation for the encrypted backup
-    // envelope (JSON + last-upload timestamp). Crypto, upload, passkey, and the
-    // automatic-backup timer stay in this view model's orchestration.
-    private let backupEnvelopeStore = BackupEnvelopeStore()
-    private let backupKeychainStore = BackupKeychainStore()
-    private let backupPasskeyCoordinator = BackupPasskeyCoordinator()
-    private var pendingBackupPasskeyCredentialID: String?
-    private var pendingBackupPasskey: PendingBackupPasskey?
-    private var registeredBackupPasskey: RegisteredBackupPasskey?
-    private let accountAuthService: AccountAuthService
-    private let backupSyncService: (any BackupSyncServicing)?
-    private let lavaSecurityPlusStore = LavaSecurityPlusStore()
-    private let lavaSecurityPlusEntitlementSyncClient = LavaSecurityPlusEntitlementSyncClient(urlSession: .shared)
+    // The account/sign-in feature (the Apple/Google sign-in flows, sign-out, deletion,
+    // the account presentation state, and ownership of AccountAuthService — the ONE
+    // canonical Supabase identity) lives in AccountController (Phase D3, same plan).
+    // Cross-feature reactions stay hub-orchestrated through the AccountHubBridging
+    // conformance at the bottom of this file, and the backup/plus bridges reach the
+    // session by delegating through this controller. Lazy so `self` is fully
+    // initialized when the bridge is wired; on the HEADLESS instances (background
+    // catalog refresh) nothing touches it — the pre-peel hub constructed
+    // AccountAuthService eagerly in init, but that init is a pure keychain-session
+    // read, so deferring construction to first use changes no behavior there.
+    private(set) lazy var account = AccountController(hub: self)
+    // The encrypted-backup feature (envelope persistence, crypto orchestration, passkey
+    // setup, upload/restore, the automatic-backup debounce) lives in BackupController
+    // (Phase D1, lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
+    // The hub stays the owner of the library / replacement gate — the controller reaches
+    // them, and the AccountController-owned session (Phase D3), only through the
+    // BackupHubBridging conformance at the bottom of this file. Lazy so `self` is fully
+    // initialized when the bridge is wired; on the HEADLESS instances (background catalog
+    // refresh) nothing touches it — those paths never persist shared state — matching the
+    // pre-peel always-present-but-never-loaded backup fields.
+    private(set) lazy var backup = BackupController(
+        hub: self,
+        supabaseConfiguration: account.supabaseConfiguration
+    )
+    // The LavaSecurity+ billing/paywall feature (the local LavaSecurityPlusStore's
+    // product + entitlement boundary, purchase/restore, the server entitlement sync)
+    // lives in LavaSecurityPlusController (Phase D2, same plan). The hub stays the
+    // owner of the configuration/paid flag and the Supabase session — the controller
+    // reaches them only through the LavaSecurityPlusHubBridging conformance at the
+    // bottom of this file. Lazy so `self` is fully initialized when the bridge is
+    // wired; on the HEADLESS instances (background catalog refresh) nothing touches
+    // it — `plus.startLavaSecurityPlusStore()` is gated behind `!headless` below, so
+    // the entitlement listener (→ persistConfigurationOnly) never installs there.
+    private(set) lazy var plus = LavaSecurityPlusController(hub: self)
+    // The diagnostics + bug-report/rage-shake feature (the DiagnosticsStore read/prune
+    // lifecycle, local-log clears, keep-flags, bug-report draft/send, rage-shake
+    // routing) lives in DiagnosticsController (Phase D4, same plan). The hub stays the
+    // owner of the configuration, tunnel messaging, VPN status, network-activity log,
+    // and LavaGuard progress — the controller reaches them only through the
+    // DiagnosticsHubBridging conformance at the bottom of this file, while the hub's
+    // own uptime/demo paths keep writing `reports.diagnostics` directly (hub→controller
+    // is the allowed direction). Lazy so `self` is fully initialized when the bridge is
+    // wired; construction is side-effect free (an empty DiagnosticsStore + value
+    // defaults), and on the HEADLESS instances (background catalog refresh) nothing
+    // touches it — matching the pre-peel always-present-but-never-refreshed
+    // diagnostics fields.
+    private(set) lazy var reports = DiagnosticsController(hub: self)
+    // The customization-preference feature (appearance, text size, LavaGuard look +
+    // app icon + the icon personalizer seam, Live-Activities toggle/pause length,
+    // haptics toggle, notification-category mirrors, and the launch preference load)
+    // lives in CustomizationController (Phase D5, same plan). The hub stays the owner
+    // of the configuration (Plus flag / unlock ledger / keep-progress), the LavaGuard
+    // progress accrual, the Live Activity reconcile machinery, and the protection-
+    // outcome haptic play path — the controller reaches them only through the
+    // CustomizationHubBridging conformance at the bottom of this file. Lazy so `self`
+    // is fully initialized when the bridge is wired; construction is side-effect free
+    // (value defaults only), and on the HEADLESS instances (background catalog refresh)
+    // nothing touches it — `customization.loadCustomizationPreferences()` is gated
+    // behind `!headless` below, so the load-time app-group writes (persistLavaGuardLook
+    // / syncAppIcon / the Live-Activities clamp) never run there, matching the pre-peel
+    // gating of loadCustomizationPreferences.
+    private(set) lazy var customization = CustomizationController(hub: self)
     private let protectionUserNotifications = ProtectionUserNotificationController()
     private let liveActivityController: AmbientProtectionPresenter = LavaLiveActivityController()
-    private let iconPersonalizer: IconPersonalizing = UIKitIconPersonalizer()
     private var isRefreshingProtectionStatus = false
     private var needsProtectionStatusRefresh = false
     private var lastProtectionStatusRefresh: Date?
     private var awaitsProtectionOnHaptic = false
-    private var diagnosticsReadGate = FileModificationReadGate()
-    // A fine-grained prune was performed in memory but could NOT be written because the tunnel then
-    // owned diagnostics.json (stop-pending). Persist it on a later refresh once the app owns the file
-    // again, or the expired rows linger on disk until an unrelated write (Codex #225 / UX-4).
-    private var diagnosticsPrunePersistDeferred = false
+    // The diagnostics read gate + deferred-prune flag moved to DiagnosticsController
+    // with the store's refresh lifecycle (Phase D4 peel).
     private var tunnelHealthReadGate = FileModificationReadGate()
     private var networkActivityLogReadGate = FileModificationReadGate()
 
@@ -1295,14 +934,6 @@ final class AppViewModel: ObservableObject {
 
     init(loadVPNState: Bool = true, headless: Bool = false) {
         isHeadless = headless
-        accountAuthService = AccountAuthService()
-        accountAuthState = accountAuthService.state
-
-        if let supabaseConfiguration = accountAuthService.supabaseConfiguration {
-            backupSyncService = SupabaseBackupSyncService(configuration: supabaseConfiguration)
-        } else {
-            backupSyncService = nil
-        }
 
         loadPersistedConfiguration()
         #if DEBUG || LAVA_QA_TOOLS
@@ -1312,8 +943,10 @@ final class AppViewModel: ObservableObject {
         // side-effecting init work. Beyond loadPersistedConfiguration() above (a pure
         // read), every call here either writes shared state or schedules work that does,
         // any of which could clobber state the foreground/intents process owns:
-        //   • startLavaSecurityPlusStore       — entitlement listener → persistConfigurationOnly
-        //   • loadCustomizationPreferences      — persistLavaGuardLook / syncAppIcon / defaults.set (app-group)
+        //   • plus.startLavaSecurityPlusStore  — entitlement listener → persistConfigurationOnly
+        //     (via the LavaSecurityPlusHubBridging paid-plan persist)
+        //   • customization.loadCustomizationPreferences — persistLavaGuardLook / syncAppIcon /
+        //     defaults.set (app-group)
         //   • loadTemporaryProtectionPause      — pauseController.onPauseCleared() removes the app-group
         //     pause keys, so a bg refresh seeing no pause would clear one the foreground just wrote
         //     (read→cleanup race)
@@ -1323,11 +956,11 @@ final class AppViewModel: ObservableObject {
         // read-only but unneeded headless. The sync/publish path depends on none of these: it
         // re-reads the live config and rebuilds rules from the sync results.
         if !headless {
-            startLavaSecurityPlusStore()
-            loadCustomizationPreferences()
+            plus.startLavaSecurityPlusStore()
+            customization.loadCustomizationPreferences()
             loadLavaGuardProgress()
-            loadAutomaticBackupPreference()
-            loadEncryptedBackupState()
+            backup.loadAutomaticBackupPreference()
+            backup.loadEncryptedBackupState()
             loadTemporaryProtectionPause()
             scheduleTemporaryProtectionResume()
             // One-shot disk maintenance: superseded parsed-rules version trees. A parser
@@ -1442,8 +1075,9 @@ final class AppViewModel: ObservableObject {
     }
 
     deinit {
-        automaticBackupTask?.cancel()
-        // pauseController cancels its own resume timer in its deinit.
+        // backup (BackupController) cancels its own automatic-backup task in its deinit;
+        // pauseController cancels its own resume timer in its deinit; plus's
+        // LavaSecurityPlusStore cancels its Transaction.updates task in ITS deinit.
         Task { @MainActor [liveActivityController] in
             liveActivityController.stopObservingAuthorizationChanges()
         }
@@ -1488,325 +1122,20 @@ final class AppViewModel: ObservableObject {
     }
     #endif
 
-    // MARK: - LavaSecurity+ paywall & billing
+    // The LavaSecurity+ paywall & billing feature (product/offer loading, entitlement
+    // refresh, purchase/restore, the store lifecycle + server entitlement sync) lives
+    // in LavaSecurityPlusController.swift (Phase D2 billing peel) — this hub keeps only
+    // the LavaSecurityPlusHubBridging conformance at the bottom of this file.
 
-    func loadLavaSecurityPlusProducts() async {
-        isLoadingLavaSecurityPlusProducts = true
-        await lavaSecurityPlusStore.loadProducts()
-        lavaSecurityPlusOffers = lavaSecurityPlusStore.offers
-        isLoadingLavaSecurityPlusProducts = false
-    }
-
-    func refreshLavaSecurityPlusEntitlements() async {
-        guard !isRefreshingLavaSecurityPlusEntitlements else {
-            return
-        }
-
-        isRefreshingLavaSecurityPlusEntitlements = true
-        defer {
-            isRefreshingLavaSecurityPlusEntitlements = false
-        }
-
-        let entitlement = await lavaSecurityPlusStore.refreshEntitlements()
-        applyLavaSecurityPlusEntitlement(entitlement)
-        hasCheckedLavaSecurityPlusEntitlements = true
-        await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
-    }
-
-    func purchaseLavaSecurityPlus(_ offer: LavaSecurityPlusOffer) async {
-        guard !isPurchasingLavaSecurityPlus else {
-            return
-        }
-
-        isPurchasingLavaSecurityPlus = true
-        lavaSecurityPlusMessage = nil
-        lavaSecurityPlusMessageIsError = false
-        defer {
-            isPurchasingLavaSecurityPlus = false
-        }
-
-        do {
-            let appAccountToken = await currentLavaSecurityPlusAppAccountToken()
-            let result = try await lavaSecurityPlusStore.purchase(
-                offer,
-                appAccountToken: appAccountToken
-            )
-            lavaSecurityPlusOffers = lavaSecurityPlusStore.offers
-
-            switch result {
-            case .purchased(let entitlement):
-                applyLavaSecurityPlusEntitlement(entitlement)
-                await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
-                if entitlement.isActive {
-                    // The subscriber thank-you section already announces the
-                    // active state, so skip the redundant confirmation line.
-                    lavaSecurityPlusMessage = nil
-                    lavaSecurityPlusMessageIsError = false
-                } else {
-                    // Producer-side status strings localize AT ASSIGNMENT: the render is a
-                    // verbatim Text(variable) on the Upgrade page, which resolves no key
-                    // (the i18n round-3 render-path class), and interpolations must be
-                    // format keys at the producer.
-                    lavaSecurityPlusMessage = "No active Lava Security Plus purchase was found.".lavaLocalized
-                    lavaSecurityPlusMessageIsError = true
-                }
-            case .pending:
-                lavaSecurityPlusMessage = "The App Store purchase is pending approval.".lavaLocalized
-                lavaSecurityPlusMessageIsError = false
-            case .cancelled:
-                lavaSecurityPlusMessage = "Purchase cancelled".lavaLocalized
-                lavaSecurityPlusMessageIsError = false
-            }
-        } catch {
-            lavaSecurityPlusMessage = "Could not complete purchase: %@".lavaLocalizedFormat(error.localizedDescription)
-            lavaSecurityPlusMessageIsError = true
-        }
-    }
-
-    func restoreLavaSecurityPlusPurchases() async {
-        guard !isPurchasingLavaSecurityPlus else {
-            return
-        }
-
-        isPurchasingLavaSecurityPlus = true
-        lavaSecurityPlusMessage = "Checking the App Store for purchases.".lavaLocalized
-        lavaSecurityPlusMessageIsError = false
-        defer {
-            isPurchasingLavaSecurityPlus = false
-        }
-
-        do {
-            let entitlement = try await lavaSecurityPlusStore.restorePurchases()
-            applyLavaSecurityPlusEntitlement(entitlement)
-            await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
-            lavaSecurityPlusMessage = entitlement.isActive
-                ? "Lava Security Plus is restored.".lavaLocalized
-                : "No active Lava Security Plus purchase was found.".lavaLocalized
-            lavaSecurityPlusMessageIsError = !entitlement.isActive
-        } catch {
-            lavaSecurityPlusMessage = "Could not restore purchases: %@".lavaLocalizedFormat(error.localizedDescription)
-            lavaSecurityPlusMessageIsError = true
-        }
-    }
-
-    func clearLavaSecurityPlusMessage() {
-        lavaSecurityPlusMessage = nil
-        lavaSecurityPlusMessageIsError = false
-    }
-
-    var customizationSummaryText: String {
-        let appearance = appearancePreference.displayName.lavaLocalized
-        guard canOfferLiveActivities else {
-            return appearance
-        }
-
-        return usesLiveActivities
-            ? "%@, Live Activities on".lavaLocalizedFormat(appearance)
-            : "%@, Live Activities off".lavaLocalizedFormat(appearance)
-    }
+    // The customization-preferences feature (the `MARK: - Customization preferences`
+    // region — appearance/text-size/LavaGuard-look/icon/Live-Activities/haptics setters,
+    // the availability derivations, customizationSummaryText/preferredColorScheme, and
+    // the preference load + notification-category toggles) lives in
+    // CustomizationController.swift (Phase D5 customization peel) — this hub keeps only
+    // the CustomizationHubBridging conformance at the bottom of this file.
 
     var canOfferLiveActivities: Bool {
         liveActivityController.canOfferLiveActivities
-    }
-
-    var preferredColorScheme: ColorScheme? {
-        appearancePreference.colorScheme
-    }
-
-    // MARK: - Customization preferences (appearance, LavaGuard look, icon, haptics)
-
-    func setAppearancePreference(_ preference: LavaAppearancePreference) {
-        guard appearancePreference != preference else {
-            return
-        }
-
-        appearancePreference = preference
-        defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)
-    }
-
-    /// The Dynamic Type size to force app-wide, or `nil` to follow the system (the default).
-    /// `RootView` applies this only when it is non-nil, so "Match System" leaves the system's
-    /// Larger Text setting fully in charge.
-    var textSizeOverride: DynamicTypeSize? {
-        textSizeMatchesSystem ? nil : textSize.dynamicTypeSize
-    }
-
-    /// Toggles "Match System". `systemTextSize` is the app's *current* system Dynamic Type size
-    /// (read from the environment at the call site): the first time Match System is turned off with
-    /// no saved Lava-specific size, the slider is seeded from it so the app doesn't jump before the
-    /// user has chosen a size. A previously-saved Lava size always wins over the seed.
-    func setTextSizeMatchesSystem(_ matchesSystem: Bool, seedingFrom systemTextSize: LavaTextSize) {
-        guard textSizeMatchesSystem != matchesSystem else {
-            return
-        }
-
-        if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil {
-            textSize = systemTextSize
-            defaults.set(systemTextSize.rawValue, forKey: textSizeDefaultsKey)
-        }
-
-        textSizeMatchesSystem = matchesSystem
-        defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKey)
-    }
-
-    func setTextSize(_ size: LavaTextSize) {
-        guard textSize != size else {
-            return
-        }
-
-        textSize = size
-        defaults.set(size.rawValue, forKey: textSizeDefaultsKey)
-    }
-
-    func setLavaGuardLook(_ look: GuardianShieldStyle) {
-        guard isLavaGuardLookSelectable(look) else {
-            return
-        }
-
-        guard lavaGuardLook != look else {
-            persistLavaGuardLook(look)
-            syncAppIcon(to: look)
-            reconcileLiveActivity()
-            return
-        }
-
-        lavaGuardLook = look
-        persistLavaGuardLook(look)
-        syncAppIcon(to: look)
-        reconcileLiveActivity()
-    }
-
-    func lavaGuardAvailability(for look: GuardianShieldStyle) -> LavaGuardAvailability {
-        let isSelectable = LavaGuardAvailabilityPolicy.isAvailable(
-            guardID: look.lavaGuardID,
-            isOriginal: look == .original,
-            hasLavaSecurityPlus: configuration.hasLavaSecurityPlus,
-            ledger: configuration.lavaGuardUnlocks,
-            courtesyGuardID: lavaGuardLook.lavaGuardID
-        )
-        let showsProgressDetail = look.lavaGuardID == nextLavaGuardProgressDetailGuardID
-
-        return LavaGuardAvailability(
-            isSelectable: isSelectable,
-            isRevealed: isSelectable,
-            progress: lavaGuardProgress.progress(
-                for: look.lavaGuardID,
-                ledger: configuration.lavaGuardUnlocks
-            ),
-            isProgressEnabled: configuration.keepLavaGuardProgress,
-            showsProgressDetail: showsProgressDetail
-        )
-    }
-
-    private var nextLavaGuardProgressDetailGuardID: String? {
-        guard configuration.keepLavaGuardProgress else {
-            return nil
-        }
-
-        for goal in LavaGuardProgressPolicy.unlockGoals {
-            let isAvailable = LavaGuardAvailabilityPolicy.isAvailable(
-                guardID: goal.guardID,
-                isOriginal: false,
-                hasLavaSecurityPlus: configuration.hasLavaSecurityPlus,
-                ledger: configuration.lavaGuardUnlocks,
-                courtesyGuardID: lavaGuardLook.lavaGuardID
-            )
-            if !isAvailable {
-                return goal.guardID
-            }
-        }
-
-        return nil
-    }
-
-    private func isLavaGuardLookSelectable(_ look: GuardianShieldStyle) -> Bool {
-        lavaGuardAvailability(for: look).isSelectable
-    }
-
-    func setUpdatesAppIconWithLavaGuard(_ isEnabled: Bool) {
-        guard updatesAppIconWithLavaGuard != isEnabled else {
-            syncAppIcon(to: lavaGuardLook)
-            return
-        }
-
-        updatesAppIconWithLavaGuard = isEnabled
-        defaults.set(isEnabled, forKey: updatesAppIconWithLavaGuardDefaultsKey)
-        syncAppIcon(to: lavaGuardLook)
-    }
-
-    private func persistLavaGuardLook(_ look: GuardianShieldStyle) {
-        defaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)
-        appGroupDefaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)
-    }
-
-    private func syncAppIcon(to look: GuardianShieldStyle) {
-        guard iconPersonalizer.supportsAppIconPersonalization else {
-            return
-        }
-
-        let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil
-        guard iconPersonalizer.currentAppIconName != targetIconName else {
-            return
-        }
-
-        Task {
-            do {
-                try await iconPersonalizer.setAppIcon(targetIconName)
-            } catch {
-                #if DEBUG
-                print("Failed to switch Lava app icon: \(error.localizedDescription)")
-                #endif
-            }
-        }
-    }
-
-    func setUsesLiveActivities(_ isEnabled: Bool) {
-        let canEnableLiveActivities = canOfferLiveActivities && isEnabled
-
-        guard usesLiveActivities != canEnableLiveActivities else {
-            return
-        }
-
-        usesLiveActivities = canEnableLiveActivities
-        defaults.set(canEnableLiveActivities, forKey: usesLiveActivitiesDefaultsKey)
-        reconcileLiveActivity()
-    }
-
-    /// User-facing label for the Live Activity pause-length stepper, e.g.
-    /// "Pause length: 5 min".
-    var liveActivityPauseLengthLabel: String {
-        "Pause length: %d min".lavaLocalizedFormat(liveActivityPauseMinutes)
-    }
-
-    func setLiveActivityPauseMinutes(_ minutes: Int) {
-        let clampedMinutes = LiveActivityPausePreference.clamp(minutes)
-        guard liveActivityPauseMinutes != clampedMinutes else {
-            return
-        }
-
-        liveActivityPauseMinutes = clampedMinutes
-        // Persisted in the app-group defaults so the widget button label and the
-        // pause intent (both out of process) resolve the same length.
-        LiveActivityPausePreference.setMinutes(
-            clampedMinutes,
-            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)
-        )
-        reconcileLiveActivity()
-    }
-
-    func setUsesLavaHaptics(_ isEnabled: Bool) {
-        guard usesLavaHaptics != isEnabled else {
-            return
-        }
-
-        usesLavaHaptics = isEnabled
-        defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)
-
-        // Play a sample tap when turning haptics on so the user feels what they just
-        // enabled. Turning off stays silent — `play` is already gated by the new value.
-        if isEnabled {
-            ProtectionHapticFeedback.play(.selectionConfirmed)
-        }
     }
 
     /// The tunnel is DOWN (`.disconnected`) but Connect-On-Demand is confirmed armed, so iOS will
@@ -2252,27 +1581,11 @@ final class AppViewModel: ObservableObject {
             : "%d changes".lavaLocalizedFormat(count)
     }
 
-    var blockRateText: String {
-        diagnostics.summary.blockRate.formatted(.percent.precision(.fractionLength(0)))
-    }
-
-    var activityDigestTitle: String {
-        let blocked = diagnostics.summary.blockedCount
-        guard blocked > 0 else {
-            return "Nothing blocked yet today"
-        }
-
-        return (blocked == 1 ? "Lava blocked %@ domain today" : "Lava blocked %@ domains today").lavaLocalizedFormat(blocked.formatted())
-    }
-
-    var activityDigestSubtitle: String {
-        let allowed = diagnostics.summary.allowedCount
-        guard diagnostics.summary.totalCount > 0 else {
-            return "Once protection sees DNS activity, Lava will summarize it here."
-        }
-
-        return "\(allowed.formatted()) allowed locally. All local logs stay on this phone."
-    }
+    // The diagnostics-derived digest text (blockRateText, activityDigestTitle,
+    // activityDigestSubtitle, guardActivityRowStat) lives on `reports`
+    // (DiagnosticsController) since the Phase D4 peel — it reads only the
+    // controller-owned DiagnosticsStore, and views must observe the controller
+    // for it to re-render.
 
     /// Glanceable stat under the Guard "How Lava filters" row — the number of
     /// rules currently compiled into protection. Uses `compiledRuleCount` (the
@@ -2287,20 +1600,6 @@ final class AppViewModel: ObservableObject {
         return count == 1
             ? "%@ rule active".lavaLocalizedFormat(count.formatted())
             : "%@ rules active".lavaLocalizedFormat(count.formatted())
-    }
-
-    /// Glanceable stat under the Guard "What Lava has caught" row — how many
-    /// domains Lava has blocked on this phone today.
-    var guardActivityRowStat: String {
-        let blocked = diagnostics.summary.blockedCount
-        guard blocked > 0 else {
-            return "Nothing blocked yet today"
-        }
-
-        let percent = diagnostics.summary.blockRate.formatted(
-            .percent.precision(.fractionLength(0))
-        )
-        return "%@ blocked today".lavaLocalizedFormat("\(blocked.formatted()) (\(percent))")
     }
 
     var localLogsStatusText: String {
@@ -2330,134 +1629,9 @@ final class AppViewModel: ObservableObject {
         configuration.hasLavaSecurityPlus ? "Lava Security Plus" : "Free plan"
     }
 
-    var accountStatusText: String {
-        switch accountAuthState {
-        case .signedIn(let connections),
-             .signingIn(let connections, _):
-            if connections.apple != nil && connections.google != nil {
-                return "Signed in with Apple and Google"
-            }
-            if connections.apple != nil {
-                return "Signed in with Apple"
-            }
-            if connections.google != nil {
-                return "Signed in with Google"
-            }
-            return "Signing in"
-        case .notConfigured:
-            return "Account setup pending"
-        case .signedOut:
-            return "Continue without account"
-        }
-    }
-
-    var accountStatusDetailText: String {
-        if let accountAuthMessage {
-            return accountAuthMessage
-        }
-
-        return switch accountAuthState {
-        case .signedIn,
-             .signingIn where isAccountSignedIn:
-            if let signedInProviderName {
-                "Signed in with \(signedInProviderName). Encrypted backup can upload to your account."
-            } else {
-                "Encrypted backup can upload to your account."
-            }
-        case .signingIn:
-            "Opening sign-in."
-        case .notConfigured:
-            "Account login needs the Supabase URL and publishable key in the app configuration."
-        case .signedOut:
-            "Sign in only when you want encrypted backup upload or account services."
-        }
-    }
-
-    var signedInProviderName: String? {
-        let providers = accountAuthState.connections.all.map(\.provider.displayName)
-        switch providers.count {
-        case 0:
-            return nil
-        case 1:
-            return providers[0]
-        default:
-            return providers.dropLast().joined(separator: ", ") + " and " + providers.last!
-        }
-    }
-
-    var accountConnections: [AccountAuthConnection] {
-        accountAuthState.connections.all
-    }
-
-    var isAccountSignInInProgress: Bool {
-        if accountSignInProviderInProgress != nil {
-            return true
-        }
-
-        return accountAuthState.signingInProvider != nil
-    }
-
-    var isAppleSignInInProgress: Bool {
-        (accountSignInProviderInProgress ?? accountAuthState.signingInProvider) == .apple
-    }
-
-    var isGoogleSignInInProgress: Bool {
-        (accountSignInProviderInProgress ?? accountAuthState.signingInProvider) == .google
-    }
-
-    var isAppleAccountConnected: Bool {
-        accountAuthState.connections[.apple] != nil
-    }
-
-    var isGoogleAccountConnected: Bool {
-        accountAuthState.connections[.google] != nil
-    }
-
-    var isAccountSignedIn: Bool {
-        !accountAuthState.connections.isEmpty
-    }
-
-    var isEncryptedBackupConfigured: Bool {
-        encryptedBackupState.isConfigured
-    }
-
-    var appleSignInActionTitle: String {
-        if isAppleAccountConnected {
-            return "Signed in with Apple"
-        }
-
-        return isAppleSignInInProgress ? "Opening Apple sign-in" : "Sign in with Apple"
-    }
-
-    var googleSignInActionTitle: String {
-        if isGoogleAccountConnected {
-            return "Signed in with Google"
-        }
-
-        return isGoogleSignInInProgress ? "Opening Google sign-in" : "Sign in with Google"
-    }
-
-    var encryptedBackupSummaryText: String {
-        encryptedBackupState.displayText(isAccountSignedIn: isAccountSignedIn).summary
-    }
-
-    var encryptedBackupInfoTitle: String {
-        encryptedBackupSummaryText
-    }
-
-    func setAutomaticBackupEnabled(_ isEnabled: Bool) {
-        guard isAutomaticBackupEnabled != isEnabled else {
-            return
-        }
-
-        isAutomaticBackupEnabled = isEnabled
-        UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKey)
-
-        if !isEnabled {
-            automaticBackupTask?.cancel()
-            automaticBackupTask = nil
-        }
-    }
+    // The account presentation state (status/detail text, connection + per-provider
+    // progress flags, sign-in action titles) lives on `account` (AccountController)
+    // since the Phase D3 account peel — views observe it as its own environment object.
 
     var dnsResolverSummaryText: String {
         guard configuration.fallbackToDeviceDNS,
@@ -3641,7 +2815,7 @@ final class AppViewModel: ObservableObject {
             library = previousLibrary
             return false
         }
-        scheduleAutomaticBackupAfterConfigurationChange()
+        backup.scheduleAutomaticBackupAfterConfigurationChange()
         return true
     }
 
@@ -4538,49 +3712,9 @@ final class AppViewModel: ObservableObject {
     }
     #endif
 
-    var canOpenPhoneQAFromRageShake: Bool {
-        #if DEBUG || LAVA_QA_TOOLS
-        return isAccountDeveloper
-        #else
-        return false
-        #endif
-    }
-
-    func handleRageShake() {
-        let destination = RageShakeRouter.destination(allowsAdminQA: canOpenPhoneQAFromRageShake)
-        if RageShakeRouter.requiresFeedbackConfirmation(for: destination) {
-            pendingRageShakeConfirmation = destination
-        } else {
-            rageShakeDestination = destination
-        }
-    }
-
-    func confirmRageShakeFeedback() {
-        guard let destination = pendingRageShakeConfirmation else {
-            return
-        }
-        pendingRageShakeConfirmation = nil
-        // Let the confirmation alert finish dismissing before presenting the
-        // sheet; presenting in the same runloop tick can drop it. Mirrors the
-        // phone-QA -> bug-report hand-off below.
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            guard let self, self.pendingRageShakeConfirmation == nil else {
-                // A fresh shake re-armed the confirmation while we waited; let
-                // that newer gesture win instead of stacking a sheet under it.
-                return
-            }
-            self.rageShakeDestination = destination
-        }
-    }
-
-    func cancelRageShakeFeedback() {
-        pendingRageShakeConfirmation = nil
-    }
-
-    func dismissRageShakeDestination() {
-        rageShakeDestination = nil
-    }
+    // The rage-shake routing (canOpenPhoneQAFromRageShake, handleRageShake, the
+    // confirm/cancel/dismiss handlers) lives on `reports` (DiagnosticsController)
+    // since the Phase D4 peel.
 
     func performProtectionPrimaryAction() {
         if isProtectionTemporarilyPaused {
@@ -4692,13 +3826,17 @@ final class AppViewModel: ObservableObject {
         let protectionState = liveActivityProtectionState(restartInFlightDeadline: restartDeadline)
         let resumeDate = protectionState == .restarting ? restartDeadline : temporaryProtectionPauseUntil
 
+        // The three preference reads live on `customization` since the Phase D5 peel
+        // (hub→controller is the allowed direction — the hub owns the controller);
+        // the reconcile machinery itself stays here because it reads VPN status +
+        // pause state and is called from the status observation paths.
         Task {
             await liveActivityController.reconcile(
-                usesLiveActivities: usesLiveActivities,
+                usesLiveActivities: customization.usesLiveActivities,
                 protectionState: protectionState,
                 resumeDate: resumeDate,
-                shieldStyle: lavaGuardLook,
-                pauseMinutes: liveActivityPauseMinutes,
+                shieldStyle: customization.lavaGuardLook,
+                pauseMinutes: customization.liveActivityPauseMinutes,
                 pauseRequiresAuthentication: SecurityProtectedSurfaceStorage.isProtected(
                     .protectionPause,
                     defaults: appGroupDefaults
@@ -5528,13 +4666,13 @@ final class AppViewModel: ObservableObject {
             setResolver(.cloudflareDoT)
             adminQAStatusMessage = "Cloudflare DoT is active."
         case .enableLocalDomainHistory:
-            setKeepDomainDiagnostics(true, clearHistory: false)
+            reports.setKeepDomainDiagnostics(true, clearHistory: false)
             adminQAStatusMessage = "Local domain history is enabled."
         case .disableLocalDomainHistory:
-            setKeepDomainDiagnostics(false)
+            reports.setKeepDomainDiagnostics(false)
             adminQAStatusMessage = "Local domain history is disabled and cleared."
         case .clearLocalActivity:
-            clearDiagnostics()
+            reports.clearDiagnostics()
             adminQAStatusMessage = "Local activity rows cleared."
         case .setPaidPlan:
             setQAPlanMode(isPaid: true)
@@ -5545,7 +4683,7 @@ final class AppViewModel: ObservableObject {
             configuration.isPaid = false
             configuration.resolverPresetID = DNSResolverPreset.google.id
             configuration.keepDomainDiagnostics = false
-            clearDiagnostics()
+            reports.clearDiagnostics()
             adminQAStatusMessage = "QA state cleared."
             persistFilterChanges()
         }
@@ -5693,105 +4831,25 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Diagnostics & local log export
 
-    func clearDiagnostics() {
-        clearAllLocalLogs()
-    }
-
-    /// Returns whether the clear durably persisted. A write failure is caught here (surfacing an
-    /// error banner + failure haptic) rather than thrown, so callers that need to confirm the clear
-    /// to the user — e.g. a VoiceOver announcement — must gate on this result, not assume success.
-    @discardableResult
-    func clearDomainHistory() -> Bool {
-        // One timestamp for both the store's applied-marker and the control request, so
-        // the tunnel's force-apply gate reads `requestedAt > marker` = false (PST-1).
-        let clearedAt = Date()
-        diagnostics.clearDomainHistory(clearedAt: clearedAt)
-
-        do {
-            try writeDiagnosticsClearControl(clearDomainHistory: true, at: clearedAt)
-            try persistDiagnostics()
-            diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
-            Task {
-                await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
-            }
-            ProtectionHapticFeedback.play(.actionSucceeded)
-            return true
-        } catch {
-            vpnMessage = "Could not clear local history: %@".lavaLocalizedFormat(error.localizedDescription)
-            vpnMessageIsError = true
-            ProtectionHapticFeedback.play(.actionFailed)
-            return false
-        }
-    }
-
-    /// Returns whether the clear durably persisted (see `clearDomainHistory`).
-    @discardableResult
-    func clearLocalFilteringCounts() -> Bool {
-        let clearedAt = Date()
-        diagnostics.clearFilteringCounts(startedAt: clearedAt)
-
-        do {
-            try writeDiagnosticsClearControl(clearFilteringCounts: true, at: clearedAt)
-            try persistDiagnostics()
-            diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
-            Task {
-                await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
-            }
-            ProtectionHapticFeedback.play(.actionSucceeded)
-            return true
-        } catch {
-            vpnMessage = "Could not clear local filtering counts: %@".lavaLocalizedFormat(error.localizedDescription)
-            vpnMessageIsError = true
-            ProtectionHapticFeedback.play(.actionFailed)
-            return false
-        }
-    }
-
-    /// Returns whether the primary diagnostics clear durably persisted (see `clearDomainHistory`).
-    @discardableResult
-    func clearAllLocalLogs() -> Bool {
-        let clearedAt = Date()
-        diagnostics.clearFilteringCounts(startedAt: clearedAt)
-        diagnostics.clearDomainHistory(clearedAt: clearedAt)
-        clearNetworkActivityLog(notifyTunnel: false)
-        clearLavaGuardProgress()
-        clearIncidentLedger()
-        clearDeviceDebugLog()
-        clearSelfReconnectGapMarkers()
-
-        do {
-            try writeDiagnosticsClearControl(clearDomainHistory: true, clearFilteringCounts: true, at: clearedAt)
-            try persistDiagnostics()
-            diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
-            Task {
-                await self.sendTunnelMessage(LavaSecAppGroup.clearDiagnosticsMessage)
-                await self.sendTunnelMessage(LavaSecAppGroup.clearFilteringCountsMessage)
-                await self.sendTunnelMessage(LavaSecAppGroup.clearNetworkActivityLogMessage)
-                // The tunnel drains its deferred incident writes then clears, so a queued
-                // recordIncident can't resurrect the ledger the app just wiped (CON-1).
-                await self.sendTunnelMessage(LavaSecAppGroup.clearIncidentLedgerMessage)
-            }
-            ProtectionHapticFeedback.play(.actionSucceeded)
-            return true
-        } catch {
-            vpnMessage = "Could not clear local logs: %@".lavaLocalizedFormat(error.localizedDescription)
-            vpnMessageIsError = true
-            ProtectionHapticFeedback.play(.actionFailed)
-            return false
-        }
-    }
+    // The clear flows (clearDiagnostics, clearDomainHistory, clearLocalFilteringCounts,
+    // clearAllLocalLogs — including the incident-ledger/device-debug-log/gap-marker
+    // wipes and their CON-1/#200 clear-ordering contract), the two diagnostics-coupled
+    // keep-flag setters, and refreshDiagnostics live on `reports`
+    // (DiagnosticsController) since the Phase D4 peel. The export archive below stays
+    // hub-side by design (bridge-width judgement): it SNAPSHOTS wide hub state and
+    // calls back into the controller for the pieces the controller owns.
 
     func makeLocalLogExportArchive(generatedAt: Date = Date()) throws -> LocalLogExportArchive {
-        refreshDiagnostics()
+        reports.refreshDiagnostics()
         refreshNetworkActivityLog(force: true)
         synchronizeLavaGuardProgress(currentStatus: vpnStatus)
 
         return try LocalLogExportArchive.make(
-            diagnostics: diagnostics,
+            diagnostics: reports.diagnostics,
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: configuration.lavaGuardUnlocks,
-            deviceDebugLog: loadDeviceDebugLogEntriesForExport(),
+            deviceDebugLog: reports.loadDeviceDebugLogEntriesForExport(),
             metadata: makeLocalLogExportMetadata(),
             generatedAt: generatedAt
         )
@@ -5813,55 +4871,9 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    // The local export carries far more debug-log history than the Feedback
-    // report (which caps at 40 to bound its upload payload): the export is a
-    // local, user-controlled diagnostic file, so a deep trace is the point.
-    // Same redaction (BugReportDebugLogEntry keeps only allowlisted detail keys).
-    private func loadDeviceDebugLogEntriesForExport() -> [BugReportDebugLogEntry] {
-        BugReportDebugLogEntry.parseJSONLines(
-            concatenating: deviceDebugLogGenerations(),
-            limit: 5_000
-        )
-    }
-
-    // The 8 MB rotation boundary can land between an incident and the report/export
-    // (LavaSecDeviceDebugLog.rotate keeps one previous generation for exactly this case);
-    // reading only the current file makes a just-rotated log look near-empty. Rotated
-    // generation first: the entry cap keeps the newest lines via suffix, and both callers
-    // bound the result by entry count, so the extra generation costs parse time only.
-    //
-    // A rotation can also land BETWEEN the two reads (the tunnel's appendLine moves
-    // current -> .1 at the size cap): reading .1 first and current second would then return
-    // the old rotated generation plus the brand-new current file, dropping the generation
-    // that held the incident window. rotate() replaces the .1 inode, and a rename preserves
-    // the moved file's own mtime — so the .1 file identity (inode) is the rotation signal:
-    // re-read when it changed mid-read, and after repeated churn fall back to the last
-    // (possibly gapped) read, which is still no worse than the pre-rotation-aware loader.
-    private func deviceDebugLogGenerations() -> [Data] {
-        guard let containerURL = LavaSecAppGroup.containerURL else {
-            return []
-        }
-        let generationURLs = [
-            containerURL.appendingPathComponent(LavaSecAppGroup.vpnDebugLogRotatedFilename),
-            containerURL.appendingPathComponent(LavaSecAppGroup.vpnDebugLogFilename),
-        ]
-        var generations: [Data] = []
-        for _ in 0..<3 {
-            let identityBefore = fileIdentity(at: generationURLs[0])
-            generations = generationURLs.compactMap { try? Data(contentsOf: $0) }
-            if fileIdentity(at: generationURLs[0]) == identityBefore {
-                break
-            }
-        }
-        return generations
-    }
-
-    private func fileIdentity(at url: URL) -> UInt64? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
-            return nil
-        }
-        return (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
-    }
+    // The device debug-log reads (loadDeviceDebugLogEntriesForExport, the
+    // rotation-aware deviceDebugLogGenerations) moved to DiagnosticsController
+    // with the Phase D4 peel — the export assembly above calls back into it.
 
     func refreshNetworkActivityLog(force: Bool = false) {
         guard configuration.keepNetworkActivity else {
@@ -5927,40 +4939,6 @@ final class AppViewModel: ObservableObject {
         return true
     }
 
-    func setKeepFilteringCounts(_ keepFilteringCounts: Bool, clearCounts: Bool = true) {
-        configuration.keepFilteringCounts = keepFilteringCounts
-        do {
-            try persistConfigurationOnly()
-            Task {
-                await self.sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)
-            }
-        } catch {
-            vpnMessage = error.localizedDescription
-            vpnMessageIsError = true
-        }
-
-        if !keepFilteringCounts && clearCounts {
-            clearLocalFilteringCounts()
-        }
-    }
-
-    func setKeepDomainDiagnostics(_ keepDomainDiagnostics: Bool, clearHistory: Bool = true) {
-        configuration.keepDomainDiagnostics = keepDomainDiagnostics
-        do {
-            try persistConfigurationOnly()
-            Task {
-                await self.sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)
-            }
-        } catch {
-            vpnMessage = error.localizedDescription
-            vpnMessageIsError = true
-        }
-
-        if !keepDomainDiagnostics && clearHistory {
-            clearDomainHistory()
-        }
-    }
-
     func setKeepNetworkActivity(_ keepNetworkActivity: Bool, clearActivity: Bool = true) {
         configuration.keepNetworkActivity = keepNetworkActivity
         do {
@@ -5994,796 +4972,30 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Account & sign-in
+    // The account/sign-in feature (beginSignInWithApple/Google, signOutAccount,
+    // deleteAccount, and ownership of AccountAuthService) lives in
+    // AccountController.swift (Phase D3 account peel) — this hub keeps only the
+    // AccountHubBridging conformance at the bottom of this file plus the session
+    // delegations on the backup bridge.
 
-    func beginSignInWithApple() {
-        Task {
-            accountSignInProviderInProgress = .apple
-            defer { accountSignInProviderInProgress = nil }
-            accountAuthState = .signingIn(connections: accountAuthState.connections, provider: .apple)
-            accountAuthMessage = "Opening Apple's sign-in sheet."
-            accountAuthMessageIsError = false
+    // MARK: - Report surfaces refresh
 
-            do {
-                accountAuthState = try await accountAuthService.signInWithApple()
-                accountSignInProviderInProgress = nil
-                accountAuthMessage = "Signed in with Apple."
-                accountAuthMessageIsError = false
-                ProtectionHapticFeedback.play(.actionSucceeded)
-                await uploadPendingEncryptedBackupIfPossible()
-                await syncLavaSecurityPlusEntitlementIfPossible(lavaSecurityPlusStore.entitlement)
-            } catch AccountAuthError.cancelled {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Sign in was cancelled."
-                accountAuthMessageIsError = false
-            } catch AccountAuthError.notConfigured {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
-                accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
-            } catch {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
-                accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
-            }
-        }
-    }
-
-    func beginSignInWithGoogle() {
-        Task {
-            accountSignInProviderInProgress = .google
-            defer { accountSignInProviderInProgress = nil }
-            accountAuthState = .signingIn(connections: accountAuthState.connections, provider: .google)
-            accountAuthMessage = "Opening Google sign-in."
-            accountAuthMessageIsError = false
-
-            do {
-                accountAuthState = try await accountAuthService.signInWithGoogle()
-                accountSignInProviderInProgress = nil
-                accountAuthMessage = "Signed in with Google."
-                accountAuthMessageIsError = false
-                ProtectionHapticFeedback.play(.actionSucceeded)
-                await uploadPendingEncryptedBackupIfPossible()
-                await syncLavaSecurityPlusEntitlementIfPossible(lavaSecurityPlusStore.entitlement)
-            } catch AccountAuthError.cancelled {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Sign in was cancelled."
-                accountAuthMessageIsError = false
-            } catch AccountAuthError.notConfigured {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
-                accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
-            } catch AccountAuthError.googleClientIDNotConfigured {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Google sign-in needs the Google iOS and Web client IDs in the app configuration."
-                accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
-            } catch {
-                accountAuthState = accountAuthService.state
-                accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
-                accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
-            }
-        }
-    }
-
-    func signOutAccount() {
-        accountAuthService.signOut()
-        accountAuthState = accountAuthService.state
-        accountAuthMessage = "Signed out."
-        accountAuthMessageIsError = false
-        loadEncryptedBackupState()
-    }
-
-    func deleteAccount() async -> Bool {
-        guard !isAccountDeletionInProgress else {
-            return false
-        }
-
-        isAccountDeletionInProgress = true
-        accountAuthMessage = "Deleting your Lava account."
-        accountAuthMessageIsError = false
-        defer { isAccountDeletionInProgress = false }
-
-        do {
-            try await accountAuthService.deleteAccount()
-            try? backupKeychainStore.deleteRecoveryCode()
-            try? backupKeychainStore.deleteDeviceSecret()
-            try? backupKeychainStore.deletePasskeyCredentialID()
-            accountAuthState = accountAuthService.state
-            accountAuthMessage = "Deleted your Lava account."
-            accountAuthMessageIsError = false
-            loadEncryptedBackupState()
-            ProtectionHapticFeedback.play(.actionSucceeded)
-            return true
-        } catch {
-            accountAuthState = accountAuthService.state
-            accountAuthMessage = "Could not delete account: \(error.localizedDescription)"
-            accountAuthMessageIsError = true
-            ProtectionHapticFeedback.play(.actionFailed)
-            return false
-        }
-    }
-
-    /// Step 1 of passkey setup: create the passkey (first authenticator ceremony) and confirm it
-    /// supports PRF. The PRF output is captured separately in `validateBackupPasskey()` so the two
-    /// biometric ceremonies are split across explicit UI steps rather than fired back-to-back.
-    // MARK: - Encrypted backups
-
-    func registerBackupPasskey() async throws {
-        guard let session = try await accountAuthService.refreshCurrentSession() else {
-            accountAuthState = accountAuthService.state
-            throw BackupPasskeyError.missingAccount
-        }
-        accountAuthState = accountAuthService.state
-
-        // Zero-knowledge passkey backup requires the authenticator PRF extension (iOS 18+,
-        // iCloud Keychain). The passkey is created locally — no server registration.
-        guard #available(iOS 18.0, *) else {
-            throw BackupPasskeyError.prfUnavailable
-        }
-
-        let registration = try await backupPasskeyCoordinator.registerPasskey(
-            userID: session.userID,
-            name: backupPasskeyAccountName,
-            challenge: try BackupPasskeyCoordinator.makeChallengeString()
-        )
-
-        // Do NOT hard-gate on registration-time PRF support. ASAuthorization reports
-        // `prf.isSupported` unreliably at credential *creation* for the platform authenticator —
-        // iCloud Keychain frequently reports false even though PRF works at assertion — so gating
-        // here regressed the iCloud Keychain happy path ("can't start passkey"). The validation
-        // assertion is the reliable authority: `validateBackupPasskey()` throws `.prfUnavailable`
-        // when a provider genuinely returns no PRF output (e.g. Bitwarden), surfacing a clear
-        // "not supported" message on the validation step. (`registration.supportsPRF` remains
-        // available as a non-blocking hint only.)
-
-        pendingBackupPasskeyCredentialID = registration.credentialID
-        pendingBackupPasskey = nil
-        registeredBackupPasskey = RegisteredBackupPasskey(
-            credentialID: registration.credentialID,
-            prfSalt: try BackupPasskeyCoordinator.makePRFSalt()
-        )
-        try backupKeychainStore.savePasskeyCredentialID(registration.credentialID)
-    }
-
-    /// Step 2 of passkey setup: assert the registered passkey (second authenticator ceremony) to
-    /// capture the PRF output that wraps the backup slot. This is the same operation a new-device
-    /// restore performs, so it doubles as a validation that the passkey can unlock the backup.
-    func validateBackupPasskey() async throws {
-        guard #available(iOS 18.0, *) else {
-            throw BackupPasskeyError.prfUnavailable
-        }
-        guard let registered = registeredBackupPasskey else {
-            throw BackupPasskeyError.invalidCredentialID
-        }
-
-        let prfOutput = try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
-            credentialID: registered.credentialID,
-            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
-            saltInput: registered.prfSalt
-        )
-
-        pendingBackupPasskey = PendingBackupPasskey(
-            credentialID: registered.credentialID,
-            prfSalt: registered.prfSalt,
-            prfOutput: prfOutput
-        )
-    }
-
-    func clearPendingBackupPasskey() {
-        pendingBackupPasskeyCredentialID = nil
-        pendingBackupPasskey = nil
-        registeredBackupPasskey = nil
-    }
-
-    private var backupPasskeyAccountName: String {
-        if let email = accountAuthState.connections.all.compactMap(\.email).first {
-            return email
-        }
-
-        return BackupPasskeyConfiguration.displayName
-    }
-
-    func turnOnEncryptedBackup(recoveryPhrase: String) async throws {
-        let payload = BackupConfigurationPayload(
-            configuration: configuration,
-            catalogVersionHint: catalogVersion,
-            filterLibrary: library
-        )
-        let deviceSecret = try BackupDeviceSecret.generate()
-        let serverRecoveryShare = try BackupAssistedRecoverySecret.makeServerShare()
-        let normalizedRecoveryPhrase = BackupRecoveryPhrase.phrase(
-            from: BackupRecoveryPhrase.words(from: recoveryPhrase)
-        )
-
-        // Zero-knowledge: when a PRF-capable passkey was prepared, wrap the backup slot with its
-        // authenticator PRF output (HKDF) — no server-held secret. Otherwise create a passkey-free
-        // envelope (keychain + assisted recovery only). Either way, nothing the server stores can
-        // decrypt the backup.
-        let envelope: ZeroKnowledgeBackupEnvelope
-        if let passkey = pendingBackupPasskey {
-            envelope = try ZeroKnowledgeBackupEnvelope.makeWithPRF(
-                payload: payload,
-                deviceSecret: deviceSecret,
-                serverRecoveryShare: serverRecoveryShare,
-                recoveryPhrase: normalizedRecoveryPhrase,
-                passkeyPRFOutput: passkey.prfOutput,
-                passkeyPRFSalt: passkey.prfSalt,
-                passkeyCredentialID: passkey.credentialID
-            )
-            try? backupKeychainStore.savePasskeyCredentialID(passkey.credentialID)
-        } else {
-            envelope = try ZeroKnowledgeBackupEnvelope.makePasswordless(
-                payload: payload,
-                deviceSecret: deviceSecret,
-                serverRecoveryShare: serverRecoveryShare,
-                recoveryPhrase: normalizedRecoveryPhrase
-            )
-        }
-
-        let estimatedByteSize = try ZeroKnowledgeBackupEnvelope.estimatedByteSize(
-            for: payload,
-            keySlotCount: envelope.keySlots.count
-        )
-
-        try backupKeychainStore.saveDeviceSecret(deviceSecret)
-        try saveLocalEncryptedBackupEnvelope(envelope)
-        clearPendingBackupPasskey()
-        encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-
-        if backupSyncService != nil {
-            Task {
-                await uploadEncryptedBackup(envelope, estimatedByteSize: estimatedByteSize)
-            }
-        }
-    }
-
-    func backUpNow() async {
-        guard !isBackingUpNow, !isBackupMaintenanceInProgress else {
-            return
-        }
-
-        guard let envelope = loadLocalEncryptedBackupEnvelope() else {
-            encryptedBackupState = .off
-            return
-        }
-
-        isBackingUpNow = true
-        defer { isBackingUpNow = false }
-
-        await uploadEncryptedBackup(
-            envelope,
-            estimatedByteSize: backupEnvelopeStore.estimatedByteSize(for: envelope)
-        )
-    }
-
-    func restoreEncryptedBackup(secret: String, mode: BackupRestoreMode) async throws {
-        // Claim the configuration-replacement token at entry: a filter switch suspended at its
-        // async prepare is now superseded, so when it resumes its commit/rollback gate bails
-        // instead of reverting this restore. Re-checked below after the unlock awaits (before any
-        // disk write or app-state mutation) to cover the reverse ordering — a switch/import that
-        // starts WHILE this restore awaits its envelope/passkey unlock.
-        let replacementToken = configurationReplacementGate.begin()
-        let envelope = try await loadAvailableEncryptedBackupEnvelope()
-
-        let trimmedSecret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        let payload: BackupConfigurationPayload
-        // A recovery-phrase / passkey restore lands on a device with NO device secret, so the
-        // fetched envelope's keychain slot can't be re-sealed later (silently dropping every
-        // post-restore edit). Re-key the keychain slot with a fresh device secret for THIS
-        // device using the unlock material we just verified; persist it so re-seal works.
-        let freshDeviceSecret = try BackupDeviceSecret.generate()
-        var localEnvelope = envelope
-        var didRekeyDeviceSlot = false
-        switch mode {
-        case .deviceKey:
-            guard let deviceSecret = try backupKeychainStore.loadDeviceSecret() else {
-                throw EncryptedBackupError.noSavedDeviceSecret
-            }
-            do {
-                payload = try envelope.decryptWithKeychainSecret(deviceSecret)
-            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
-                throw EncryptedBackupError.unsupportedBackupSchema
-            } catch {
-                throw EncryptedBackupError.invalidDeviceUnlock
-            }
-            // Device secret already present + working — no re-key needed.
-        case .recoveryCode:
-            do {
-                payload = try decryptWithNormalizedRecoveryPhrase(trimmedSecret, envelope: envelope)
-            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
-                throw EncryptedBackupError.unsupportedBackupSchema
-            } catch {
-                throw EncryptedBackupError.invalidRecoveryPhrase
-            }
-            // A recovery-phrase restore lands on a device with no working device secret, so the
-            // re-key MUST succeed: without it there's no secret to re-seal with and every
-            // post-restore edit silently stops backing up. Fail the restore (before any disk write
-            // or app-state mutation) rather than half-restoring into that silent-drop state.
-            guard let rekeyed = rekeyedEnvelopeWithNormalizedRecoveryPhrase(
-                trimmedSecret, envelope: envelope, newDeviceSecret: freshDeviceSecret
-            ) else {
-                throw EncryptedBackupError.invalidRecoveryPhrase
-            }
-            localEnvelope = rekeyed
-            didRekeyDeviceSlot = true
-        case .passkey:
-            let prfOutput = try await passkeyPRFOutputForRestore(envelope: envelope)
-            do {
-                payload = try envelope.decryptWithPasskeyPRFOutput(prfOutput)
-            } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
-                throw EncryptedBackupError.unsupportedBackupSchema
-            } catch {
-                throw EncryptedBackupError.invalidPasskeyUnlock
-            }
-            // Same as recovery: a passkey restore must establish a working device secret on this
-            // device, or post-restore edits silently stop backing up. Fail rather than half-restore.
-            guard let rekeyed = try? envelope.rekeyingDeviceSlot(
-                newDeviceSecret: freshDeviceSecret, unlockingPasskeyPRFOutput: prfOutput
-            ) else {
-                throw EncryptedBackupError.invalidPasskeyUnlock
-            }
-            localEnvelope = rekeyed
-            didRekeyDeviceSlot = true
-        }
-
-        // A switch/import that started while we awaited the envelope/passkey unlock now owns the
-        // configuration. Abort BEFORE writing the device secret or mutating app state, rather than
-        // clobbering the newer owner (the reverse of the entry-token supersession above).
-        guard configurationReplacementGate.isCurrent(replacementToken) else {
-            throw EncryptedBackupError.supersededByConcurrentConfigurationChange
-        }
-
-        if didRekeyDeviceSlot {
-            // A recovery-phrase / passkey restore re-keyed the envelope's .keychain slot with a
-            // fresh device secret. Both the secret AND the re-keyed envelope must reach disk before
-            // we mutate app state — otherwise the saved secret can't unwrap the on-disk envelope and
-            // every post-restore edit silently stops backing up. Fail the restore if either write
-            // fails so the user retries rather than landing in that silent-drop state.
-            try backupKeychainStore.saveDeviceSecret(freshDeviceSecret)
-            try saveLocalEncryptedBackupEnvelope(localEnvelope)
-        } else {
-            // deviceKey restore: the device secret already works, so just stage the (unchanged)
-            // envelope locally — but BEFORE the persist below, not after. The persist's re-seal
-            // (scheduleAutomaticBackupAfterConfigurationChange) reseals THIS local envelope to the
-            // restored config/library and clears the stale upload marker; saving it AFTER the
-            // persist (the prior ordering) clobbered that fresh re-seal with the pre-restore copy.
-            // Best-effort: a failed local-copy write only defers the next re-seal, never corrupts.
-            try? saveLocalEncryptedBackupEnvelope(localEnvelope)
-        }
-
-        configuration = payload.restoredConfiguration()
-        // Restore the whole filter library (multi-filter), so every hosted filter — not
-        // just the active one — survives a restore on a new device. A pre-multi-filter
-        // backup carries no library, so migrate the restored config into one "Default"
-        // filter. persistSharedState below writes both files; library-authoritative load
-        // then regenerates the config mirror from this restored library.
-        // Migrate known custom blocklists to catalog sources across EVERY hosted filter — the
-        // same rewrite restoredConfiguration() applies to the active/top-level config — so a
-        // backup restored onto a new device doesn't leave non-active filters pinned to raw
-        // custom-URL lists that this device already ships as curated catalog sources.
-        // Normalize BEFORE checking validity, exactly as the launch load path does: a backup
-        // with filters but a stale activeFilterID is invalid only until normalized() repoints
-        // the active id to the first filter. Checking isValid on the raw library would reject
-        // it and fall through to migrating just the top-level config — discarding every other
-        // hosted filter from the backup.
-        if let restoredLibrary = payload.restoredFilterLibrary()?
-            .migratingKnownCustomBlocklistsToCatalogSources()
-            .normalized(), restoredLibrary.isValid {
-            library = restoredLibrary
-            // A backup may carry an OLDER-schema library (e.g. a pre-three-defaults v1 library).
-            // Restoring it is a DELIBERATE recovery of the user's own data — distinct from the
-            // on-upgrade reset — so stamp it to the current schema; otherwise the launch migration
-            // guard (schemaVersion >= currentSchemaVersion) would reject and reseed it on the next
-            // relaunch, and the restored filters would survive only until restart.
-            library.schemaVersion = FilterLibrary.currentSchemaVersion
-            // Library-authoritative: the restored library's active filter — not the legacy
-            // top-level config fields — is the source of truth, so regenerate config's four
-            // filter-scoped fields from it before persisting. This recovers the active id
-            // and its contents together (the device-global config fields are untouched).
-            mirrorActiveFilterIntoConfiguration()
-        } else {
-            library = FilterLibrary(migratingLegacy: configuration)
-        }
-        // Restore replaces the whole library, so every per-filter draft + the detail target are
-        // stale — wipe them so a preserved edit can't overwrite the just-restored state.
-        filterEditDrafts.removeAll()
-        filterEditTargetID = nil
-        // Config-first persist: the restored configuration carries device-global fields the
-        // library can't reconstruct, so a partial write must lose the re-restorable library, not
-        // the config (see persistSharedState).
-        // Config-first persist (prioritizesConfigurationDurability). Its re-seal step now operates
-        // on the local envelope staged above (both restore modes), so the saved envelope reflects
-        // the restored state and the upload marker is correctly cleared — no post-persist save can
-        // clobber it.
-        try await persistSharedState(prioritizesConfigurationDurability: true)
-        // An envelope + working device secret are now on disk, so backup IS configured on this
-        // device. Refresh the cached state from the store (it was .off on a fresh device and the
-        // restore never updates it otherwise), so Settings reflects "on" AND post-restore edits
-        // pass the auto-backup gate instead of the stale .off short-circuiting the re-seal/upload.
-        loadEncryptedBackupState()
-
-        Task {
-            await self.notifyTunnelSnapshotUpdated()
-        }
-
-        if let backupSyncService {
-            if let session = try await accountAuthService.currentBackupSession() {
-                try? await backupSyncService.markRestored(session: session)
-            }
-        }
-    }
-
-    /// Permanently deletes the uploaded backup copy stored for this account while
-    /// keeping encrypted backup configured on this device. Only when the server copy
-    /// is confirmed gone do we forget the upload marker (state returns to "not
-    /// uploaded yet" and the next backup re-uploads a fresh copy). If the delete
-    /// can't be confirmed, nothing local changes and the failure is surfaced — we
-    /// never claim a backup was cleared when it may still exist on the server.
-    func clearEncryptedBackup() async {
-        guard !isBackupMaintenanceInProgress, !isBackingUpNow, !isUploadingEncryptedBackup else {
-            return
-        }
-        isBackupMaintenanceInProgress = true
-        defer { isBackupMaintenanceInProgress = false }
-
-        switch await deleteRemoteEncryptedBackup() {
-        case .deleted:
-            backupEnvelopeStore.clearUploadMarker()
-            loadEncryptedBackupState()
-        case .unconfirmed:
-            encryptedBackupState = .failed(
-                message: "Couldn't delete the backup stored for your account — you may be offline or signed out. The backup was left in place; try again when you're back online."
-            )
-        }
-    }
-
-    /// Turns encrypted backup off on this device: permanently deletes the uploaded
-    /// copy, then tears down every local unlock (device secret, passkey credential,
-    /// recovery code) plus the local envelope, and stops automatic backup. The local
-    /// teardown only runs once the server copy is confirmed gone, so a failed delete
-    /// leaves backup intact rather than silently orphaning the server copy.
-    func disableEncryptedBackup() async {
-        guard !isBackupMaintenanceInProgress, !isBackingUpNow, !isUploadingEncryptedBackup else {
-            return
-        }
-        isBackupMaintenanceInProgress = true
-        defer { isBackupMaintenanceInProgress = false }
-
-        switch await deleteRemoteEncryptedBackup() {
-        case .deleted:
-            try? backupKeychainStore.deleteRecoveryCode()
-            try? backupKeychainStore.deleteDeviceSecret()
-            try? backupKeychainStore.deletePasskeyCredentialID()
-            backupEnvelopeStore.deleteEnvelope()
-            setAutomaticBackupEnabled(false)
-            loadEncryptedBackupState()
-        case .unconfirmed:
-            encryptedBackupState = .failed(
-                message: "Couldn't delete the backup stored for your account — you may be offline or signed out. Backup is still on; try again when you're back online."
-            )
-        }
-    }
-
-    private enum RemoteBackupDeletionOutcome {
-        case deleted        // confirmed gone from the server, or no server copy exists
-        case unconfirmed    // couldn't reach/authorize the server — a copy may remain
-    }
-
-    // Hard-deletes the server copy and reports whether it is confirmed gone, so
-    // callers never claim deletion they couldn't verify. `.deleted` when the row is
-    // removed (or there is no sync service, so no server copy exists); `.unconfirmed`
-    // when signed out or the request fails. Mirrors uploadEncryptedBackup's single
-    // 401 refresh-retry.
-    private func deleteRemoteEncryptedBackup() async -> RemoteBackupDeletionOutcome {
-        guard let backupSyncService else {
-            return .deleted
-        }
-
-        do {
-            guard let session = try await accountAuthService.currentBackupSession() else {
-                accountAuthState = accountAuthService.state
-                return .unconfirmed
-            }
-            accountAuthState = accountAuthService.state
-            try await backupSyncService.deleteRemote(session: session)
-            return .deleted
-        } catch BackupSyncServiceError.requestFailed(let statusCode) where statusCode == 401 {
-            guard let refreshedSession = try? await accountAuthService.refreshCurrentSession() else {
-                accountAuthState = accountAuthService.state
-                return .unconfirmed
-            }
-            accountAuthState = accountAuthService.state
-            do {
-                try await backupSyncService.deleteRemote(session: refreshedSession)
-                return .deleted
-            } catch {
-                return .unconfirmed
-            }
-        } catch {
-            accountAuthState = accountAuthService.state
-            return .unconfirmed
-        }
-    }
-
-    /// Re-key the envelope's device slot with a fresh device secret, recovering the payload
-    /// key via the recovery phrase (trying the same normalized candidates as decrypt, and
-    /// both the assisted-recovery and password-style recovery slots). Returns the re-keyed
-    /// envelope, or `nil` if no candidate worked.
-    private func rekeyedEnvelopeWithNormalizedRecoveryPhrase(
-        _ secret: String,
-        envelope: ZeroKnowledgeBackupEnvelope,
-        newDeviceSecret: String
-    ) -> ZeroKnowledgeBackupEnvelope? {
-        let normalizedPhrase = BackupRecoveryPhrase.phrase(
-            from: BackupRecoveryPhrase.words(from: secret)
-        )
-        let candidates = [
-            normalizedPhrase,
-            secret.trimmingCharacters(in: .whitespacesAndNewlines),
-            secret.uppercased()
-        ].filter { !$0.isEmpty }
-
-        for candidate in candidates {
-            if let rekeyed = try? envelope.rekeyingDeviceSlot(
-                newDeviceSecret: newDeviceSecret, unlockingAssistedRecoveryPhrase: candidate
-            ) {
-                return rekeyed
-            }
-            if let rekeyed = try? envelope.rekeyingDeviceSlot(
-                newDeviceSecret: newDeviceSecret, unlockingRecoveryPhrase: candidate
-            ) {
-                return rekeyed
-            }
-        }
-        return nil
-    }
-
-    private func decryptWithNormalizedRecoveryPhrase(
-        _ secret: String,
-        envelope: ZeroKnowledgeBackupEnvelope
-    ) throws -> BackupConfigurationPayload {
-        let normalizedPhrase = BackupRecoveryPhrase.phrase(
-            from: BackupRecoveryPhrase.words(from: secret)
-        )
-        let candidates = [
-            normalizedPhrase,
-            secret.trimmingCharacters(in: .whitespacesAndNewlines),
-            secret.uppercased()
-        ].filter { !$0.isEmpty }
-
-        var lastError: Error = ZeroKnowledgeBackupEnvelopeError.missingKeySlot
-        for candidate in candidates {
-            do {
-                return try envelope.decryptWithAssistedRecoveryPhrase(candidate)
-            } catch let error as BackupConfigurationPayloadError {
-                // Reaching the payload decode means this candidate DID unwrap the envelope — the phrase
-                // is correct, the schema is just newer than we support. Rethrow immediately so a later
-                // wrong candidate's crypto error can't overwrite it and mislabel this as a bad phrase (PST-5).
-                throw error
-            } catch {
-                lastError = error
-            }
-
-            do {
-                return try envelope.decryptWithRecoveryPhrase(candidate)
-            } catch let error as BackupConfigurationPayloadError {
-                throw error
-            } catch {
-                lastError = error
-            }
-        }
-
-        throw lastError
-    }
-
-    /// Derive the passkey slot's unwrapping material locally: assert the passkey with the slot's
-    /// stored PRF salt and return the authenticator PRF output. No server release of any secret —
-    /// the server never held one. Sign-in already gated the ciphertext download upstream.
-    private func passkeyPRFOutputForRestore(
-        envelope: ZeroKnowledgeBackupEnvelope
-    ) async throws -> Data {
-        guard let passkeySlot = envelope.keySlots.first(where: { $0.kind == .passkey }),
-              let credentialID = passkeySlot.credentialID,
-              !credentialID.isEmpty,
-              let saltInput = Data(base64Encoded: passkeySlot.salt)
-        else {
-            throw EncryptedBackupError.noPasskeyRecovery
-        }
-
-        guard #available(iOS 18.0, *) else {
-            throw EncryptedBackupError.invalidPasskeyUnlock
-        }
-
-        return try await backupPasskeyCoordinator.assertPasskeyPRFOutput(
-            credentialID: credentialID,
-            challenge: try BackupPasskeyCoordinator.makeChallengeString(),
-            saltInput: saltInput
-        )
-    }
-
-    func refreshDiagnostics() {
-        // The incident ledger ages on the same local-log lifecycle as the diagnostics
-        // store's fine-grained prune below (the tunnel's startup sweep never runs while
-        // the VPN is disabled). Two-phase corroborated — cannot delete off one reading.
-        sweepIncidentLedgerRetention()
-        guard let diagnosticsURL else {
-            diagnosticsReadGate.reset()
-            return
-        }
-
-        let shouldForceHistoryClear = !configuration.keepDomainDiagnostics && !diagnostics.recentEvents.isEmpty
-        let shouldForceCountsClear = !configuration.keepFilteringCounts && diagnostics.hasFilteringCountData
-        let shouldForceLocalLogClear = shouldForceHistoryClear || shouldForceCountsClear
-        guard let modifiedAt = modificationDate(for: diagnosticsURL) else {
-            diagnosticsReadGate.reset()
-            if shouldForceHistoryClear {
-                clearDomainHistory()
-            }
-            if shouldForceCountsClear {
-                clearLocalFilteringCounts()
-            }
-            return
-        }
-
-        // While the tunnel is connected it OWNS the diagnostics file: it prunes on
-        // every debounced write and on its stop-flush, and those writes are NOT
-        // cross-process locked. The app therefore must not write a pruned copy back
-        // over the tunnel's live writes — a prune write-back landing between the
-        // tunnel's final stop-flush load and save would permanently lose the last
-        // few Domain History events (UX-4 / PST-3). It's safe to defer: the app
-        // still prunes IN MEMORY for display, and persists its prune once it owns the
-        // file (i.e. when protection is off, the only writer). No permanent on-disk
-        // staleness results, since the tunnel keeps the file pruned while connected.
-        //
-        // Ownership spans the whole NON-stopped lifecycle, NOT just .connected (Codex #218-class
-        // review): the finding's only PERMANENT lost-update is the tunnel's final stop-flush
-        // (cleanUpTunnelRuntimeAfterStop → persistDiagnosticsIfNeeded(force:true)) which runs while
-        // vpnStatus is .disconnecting. Guarding only .connected would close the transient
-        // steady-state clobber (the tunnel re-adds those from its in-memory store) and leave the
-        // harmful teardown one open. isProtectionStopPendingStatus is true for .connected /
-        // .connecting / .reasserting / .disconnecting and false for .disconnected / .invalid, so
-        // the app defers while the tunnel may still write and catches up as sole writer once stopped.
-        let tunnelOwnsDiagnosticsFile = isProtectionStopPendingStatus(vpnStatus)
-
-        guard diagnosticsReadGate.shouldRead(modifiedAt: modifiedAt, force: shouldForceLocalLogClear) else {
-            // File UNCHANGED since our last read, so the in-memory `diagnostics` still
-            // matches disk except for prunes we applied in memory but couldn't persist
-            // while the tunnel owned the file. Two reasons to write now, both safe only
-            // because in-memory == disk here (no tunnel writes to clobber):
-            //   1. A deferred prune from an earlier refresh (`diagnosticsPrunePersistDeferred`)
-            //      whose flag we carried until we regained ownership (Codex #225).
-            //   2. A fresh expiry: the clock may have crossed the 7-day window while the
-            //      app sat idle with no new DNS writes, so Top Domains/exports never show
-            //      stale detail.
-            // Persist only when the app owns the file (see `tunnelOwnsDiagnosticsFile`);
-            // otherwise remember the pending prune for a later refresh. We must NOT flush
-            // ahead of the read gate: if the tunnel had written the file, this stale
-            // in-memory copy would overwrite its final Domain History events (Codex P1 #225).
-            let prunedNow = diagnostics.pruneExpiredFineGrainedData()
-            if !tunnelOwnsDiagnosticsFile, diagnosticsPrunePersistDeferred || prunedNow {
-                try? persistDiagnostics()
-                diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
-                diagnosticsPrunePersistDeferred = false
-            } else if prunedNow {
-                // Pruned in memory but the tunnel owns the file — persist on a later refresh.
-                diagnosticsPrunePersistDeferred = true
-            }
-            return
-        }
-
-        // File CHANGED (the tunnel wrote to it): the on-disk store is authoritative and
-        // supersedes any prune we deferred against the previous in-memory copy. Drop the
-        // flag; the fresh load below re-prunes expired rows and persists them once we own
-        // the file, so nothing lingers and no stale write-back can lose the tunnel's data.
-        diagnosticsPrunePersistDeferred = false
-
-        var store = DiagnosticsPersistence.load(from: diagnosticsURL)
-        store.pruneExpiredFineGrainedData()
-        diagnosticsReadGate.markRead(modifiedAt: modifiedAt)
-        // Persist when any fine-grained prune removed events — including one
-        // `load` already performed in its day-rollover reset — so aged-out domain
-        // history does not linger in the file past the 7-day window. Skip the
-        // prune-only write-back while the tunnel owns the file (the config-driven
-        // clears below still persist — they are coordinated with the tunnel via the
-        // diagnostics-control file + IPC, not an unsynchronized prune). The pending
-        // flag is always consumed (transient bookkeeping on this local store copy),
-        // then gated on ownership so it never drives a write while connected.
-        let prunePending = store.consumePendingFineGrainedPrunePersist()
-        var shouldPersistClearedLogs = prunePending && !tunnelOwnsDiagnosticsFile
-
-        if !configuration.keepFilteringCounts, store.hasFilteringCountData {
-            store.clearFilteringCounts()
-            shouldPersistClearedLogs = true
-        }
-
-        if !configuration.keepDomainDiagnostics {
-            shouldPersistClearedLogs = shouldPersistClearedLogs
-                || !store.recentEvents.isEmpty
-                || !diagnostics.recentEvents.isEmpty
-            store.clearDomainHistory()
-        }
-
-        diagnostics = store
-        refreshLavaGuardProgressFromDiagnostics()
-        if shouldPersistClearedLogs {
-            try? persistDiagnostics()
-            diagnosticsReadGate.markRead(modifiedAt: modificationDate(for: diagnosticsURL))
-            diagnosticsPrunePersistDeferred = false
-        } else if prunePending {
-            // A prune couldn't be persisted because the tunnel owns the file — remember it so the
-            // top-of-function flush writes it once the app owns the file again (Codex #225). The
-            // pruned `store` is now live in `diagnostics`, so that flush persists the pruned view.
-            diagnosticsPrunePersistDeferred = true
-        }
-    }
-
-    // MARK: - Bug reports & rage shake
+    // refreshDiagnostics (the DiagnosticsStore read/prune lifecycle) and the whole
+    // bug-report draft/send + rage-shake feature live on `reports`
+    // (DiagnosticsController) since the Phase D4 peel. These two refreshers stay
+    // hub-side because they fan out across BOTH owners: the controller's diagnostics
+    // plus the hub-owned tunnel health and network-activity log.
 
     func refreshReports() {
-        refreshDiagnostics()
+        reports.refreshDiagnostics()
         refreshTunnelHealth()
         refreshNetworkActivityLog()
     }
 
     func sampleReports() async {
-        refreshDiagnostics()
+        reports.refreshDiagnostics()
         await sampleTunnelHealth()
         refreshNetworkActivityLog(force: true)
-    }
-
-    func prepareBugReport(context: BugReportContext) {
-        refreshReports()
-        let inputs = PreparedBugReportInputs(
-            snapshot: currentSnapshot(),
-            debugLogEntries: loadBugReportDebugLogEntries(),
-            selfReconnectTimes: loadSelfReconnectAttemptTimes()
-        )
-        preparedBugReportInputs = inputs
-        bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
-        bugReportSendState = .idle
-    }
-
-    /// Cheap per-keystroke draft refresh: re-wrap the user-entered `context`
-    /// around the environment snapshot captured by the last `prepareBugReport`,
-    /// instead of re-reading the diagnostics/health/debug-log files and
-    /// rebuilding the full blocklist union on every keystroke (UR-5: Feedback
-    /// typing lag). Only the affected-site decision is recomputed, and that is a
-    /// lookup against the already-built snapshot. Falls back to a full prepare
-    /// when no snapshot has been captured yet.
-    func refreshBugReportDraftContext(context: BugReportContext) {
-        guard let inputs = preparedBugReportInputs else {
-            prepareBugReport(context: context)
-            return
-        }
-
-        bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
-        bugReportSendState = .idle
-    }
-
-    func sendBugReport(context: BugReportContext) async {
-        let bundle = BugReportSubmissionBundlePolicy.bundleToSubmit(
-            draft: bugReportDraft,
-            currentContext: context
-        ) { [self] in
-            makeBugReportBundle(context: context)
-        }
-        bugReportDraft = bundle
-        bugReportSendState = .sending
-
-        do {
-            let reportID = try await submitBugReport(bundle)
-            bugReportSendState = .sent(reportID: reportID)
-        } catch {
-            bugReportSendState = .failed(message: error.localizedDescription)
-        }
-    }
-
-    func resetBugReportSendState() {
-        bugReportSendState = .idle
     }
 
     func refreshFilterNumberSummaries() async {
@@ -7323,7 +5535,9 @@ final class AppViewModel: ObservableObject {
     func recordDemo(domain: String) {
         let snapshot = currentSnapshot()
         let decision = snapshot.decision(for: domain)
-        diagnostics.record(
+        // The store lives on the diagnostics controller since the Phase D4 peel; the
+        // hub still writes it directly (hub→controller is the allowed direction).
+        reports.diagnostics.record(
             domain: domain,
             decision: decision,
             keepFilteringCounts: configuration.keepFilteringCounts,
@@ -7546,406 +5760,16 @@ final class AppViewModel: ObservableObject {
         #endif
     }
 
-    /// The heavy, user-input-independent inputs to a bug-report bundle: the
-    /// compiled filter snapshot (the full blocklist union) and the parsed
-    /// lifecycle debug-log entries. Captured once per `prepareBugReport` so the
-    /// per-keystroke draft refresh can reuse them (UR-5).
-    private struct PreparedBugReportInputs {
-        let snapshot: FilterSnapshot
-        let debugLogEntries: [BugReportDebugLogEntry]
-        let selfReconnectTimes: [Date]
-    }
+    // The bug-report draft/send machinery (the prepared-inputs cache, submitBugReport
+    // + its App Attest helpers, the debug-log reads, and the incident-ledger /
+    // self-reconnect-gap observability reads with their clear-all wipes) moved to
+    // DiagnosticsController.swift (Phase D4 diagnostics/bug-report peel). The hub keeps
+    // only the wide-hub-state bundle ASSEMBLY — the DiagnosticsHubBridging conformance
+    // at the bottom of this file.
 
-    private var preparedBugReportInputs: PreparedBugReportInputs?
-
-    private func makeBugReportBundle(context: BugReportContext) -> BugReportBundle {
-        makeBugReportBundle(
-            context: context,
-            inputs: PreparedBugReportInputs(
-                snapshot: currentSnapshot(),
-                debugLogEntries: loadBugReportDebugLogEntries(),
-                selfReconnectTimes: loadSelfReconnectAttemptTimes()
-            )
-        )
-    }
-
-    /// Read-only snapshot of the tunnel's persisted self-reconnect attempt timeline (shared
-    /// app-group defaults). Surfaced in the bug report's incident summary (LAV-94 B); never
-    /// written here — the tunnel owns the key, the app only reads it.
-    private func loadSelfReconnectAttemptTimes() -> [Date] {
-        let raw = LavaSecAppGroup.sharedDefaults.array(
-            forKey: LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey
-        ) as? [Double] ?? []
-        return raw.map(Date.init(timeIntervalSince1970:))
-    }
-
-    private func makeBugReportBundle(
-        context: BugReportContext,
-        inputs: PreparedBugReportInputs
-    ) -> BugReportBundle {
-        let identity = PreparedFilterSnapshotIdentity.make(
-            configuration: configuration,
-            catalog: currentCatalog
-        )
-        let snapshotVersion = String(identity.fingerprint.prefix(12))
-        let affectedSiteDecision = BugReportAffectedSiteFilterDecision.make(
-            rawAffectedSite: context.normalizedAffectedSite,
-            snapshot: inputs.snapshot
-        )
-
-        return BugReportBundle(
-            context: context,
-            app: BugReportAppSnapshot(
-                version: Self.bundleInfoValue("CFBundleShortVersionString"),
-                build: Self.bundleInfoValue("CFBundleVersion")
-            ),
-            device: BugReportDeviceSnapshot(
-                iosVersion: "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
-                deviceFamily: Self.deviceFamilyDescription(UIDevice.current.userInterfaceIdiom),
-                locale: Locale.current.identifier
-            ),
-            vpn: BugReportVPNSnapshot(
-                status: vpnStatusReportDescription(vpnStatus),
-                resolverPreset: configuration.resolverDiagnosticDisplayName,
-                health: tunnelHealth
-            ),
-            filters: BugReportFilterSummary(
-                catalogVersion: catalogVersion,
-                enabledListIDs: configuration.enabledBlocklistIDs.sorted(),
-                snapshotVersion: snapshotVersion,
-                compiledRuleCount: compiledRuleCount,
-                blocklistRuleCount: compiledBlocklistRuleCount,
-                customBlocklistCount: configuration.customBlocklists.count,
-                enabledCustomBlocklistCount: configuration.customBlocklists.filter {
-                    configuration.enabledBlocklistIDs.contains($0.id)
-                }.count,
-                affectedSiteDecision: affectedSiteDecision
-            ),
-            diagnostics: diagnostics,
-            localHistoryEnabled: configuration.keepDomainDiagnostics,
-            debugLogEntries: inputs.debugLogEntries,
-            selfReconnectTimes: inputs.selfReconnectTimes,
-            // Privacy-safe Focus-switch diagnostic (LAV-100 Phase 4): the extension records the last
-            // attempt's outcome to the shared app group, so a closed-app failure is debuggable from the
-            // (Release) bug report without a device or the QA device log.
-            lastFocusSwitch: FocusSwitchDiagnostics.last(in: LavaSecAppGroup.sharedDefaults),
-            selfReconnectGap: loadSelfReconnectGapRecord(),
-            recentIncidents: loadRecentIncidentLedgerRecords()
-        )
-    }
-
-    /// Report view of the tunnel's incident ledger (OBS R2): the timeline that survives
-    /// the policy stores' by-design forgetting. The READ is a pure view — `recentRecords`
-    /// filters to the 7-day report window and never writes back, so a skewed clock at
-    /// report time cannot wipe evidence (COH-4). On-disk retention is the SEPARATE
-    /// corroborated sweep below, run first: a report can be the first ledger touch in
-    /// days when the VPN is off.
-    private func loadRecentIncidentLedgerRecords() -> [IncidentLedgerRecord] {
-        guard let containerURL = LavaSecAppGroup.containerURL else {
-            return []
-        }
-        sweepIncidentLedgerRetention()
-        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
-        return IncidentLedgerPersistence.load(from: ledgerURL).recentRecords()
-    }
-
-    /// App-side lifecycle hook for the ledger's two-phase retention sweep (arm → 24 h
-    /// corroborated confirm — see `IncidentLedger.sweepExpired`): with the VPN disabled
-    /// or simply never relaunched, tunnel starts stop happening, so the app must also
-    /// age the file or expired rows outlive the Local Logs 7-day promise on disk.
-    /// Skew-safe by construction — a single (possibly lying) clock reading can at most
-    /// ARM, never delete — so unlike the report read, running this anywhere is harmless.
-    private func sweepIncidentLedgerRetention() {
-        guard let containerURL = LavaSecAppGroup.containerURL else {
-            return
-        }
-        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
-        IncidentLedgerPersistence.sweepExpired(at: ledgerURL)
-    }
-
-    /// Clear-all-logs privacy contract: the ledger is a local log like the others, so the
-    /// user's clear wipes it too. The app's OWN removal here is the reliable one — blocking,
-    /// off the tunnel's DNS/teardown path. Because the tunnel also defers incident writes
-    /// onto its serial IO queue (CON-1), a queued pre-clear write could recreate the file, so
-    /// `clearAllLocalLogs` ALSO sends `clearIncidentLedgerMessage` — the tunnel drains that
-    /// queue, then best-effort `tryClear`s (non-blocking, so it can never stall the
-    /// self-reconnect teardown — Codex #200 P2). If that rare drop leaves a drained pre-clear
-    /// record behind, the corroborated retention sweep ages it out.
-    private func clearIncidentLedger() {
-        guard let containerURL = LavaSecAppGroup.containerURL else {
-            return
-        }
-        let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
-        IncidentLedgerPersistence.clear(at: ledgerURL)
-    }
-
-    /// PST-6: the device debug log (`vpn-debug-log.jsonl` + its rotated `.1` generation) is
-    /// the store that carries the resolver endpoints (incl. custom DNS) and the network-change
-    /// timeline a post-clear export would otherwise still ship. Clear-all now wipes it too.
-    /// Both the app and the tunnel append via a single `O_APPEND` `write(2)` with no in-memory
-    /// buffer, so removing the files is race-safe: a concurrent or subsequent tunnel append
-    /// just `O_CREAT`s a fresh, post-clear file — no pre-clear line can be resurrected.
-    private func clearDeviceDebugLog() {
-        LavaSecDeviceDebugLog.reset()
-    }
-
-    /// PST-6: the LAV-92/93 self-reconnect gap markers (started / ended / count) are durable
-    /// observability written by the tunnel. They are observability-ONLY — the recovery/cap
-    /// policy never reads them — so the app clears them directly (last-writer-wins app-group
-    /// defaults, no deferred queue); the tunnel writes fresh markers on the next gap, and a
-    /// stray `ended` with no `started` is ignored by `loadSelfReconnectGapRecord`. Deliberately
-    /// NOT cleared: `selfReconnectAttemptTimes` (the cap/cooldown policy READS it — wiping it
-    /// would perturb the founder-frozen recovery control flow) and the tunnel-health snapshot
-    /// (operational fail-closed state, not carried in the local export, same frozen-control-flow
-    /// reason). Those hold no resolver endpoints or domains, so they are not a privacy leak.
-    private func clearSelfReconnectGapMarkers() {
-        let defaults = LavaSecAppGroup.sharedDefaults
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
-    }
-
-    /// Read-only view of the tunnel's durable self-reconnect gap markers (LAV-92/93): the
-    /// rate-limiter's attempt store forgets by design (productive credit + 600 s prune), so
-    /// these keys are the only record that survives to a late-filed report. Written by the
-    /// tunnel only; the app just reads.
-    private func loadSelfReconnectGapRecord() -> SelfReconnectGapRecord? {
-        let defaults = LavaSecAppGroup.sharedDefaults
-        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
-        guard startedAtRaw > 0 else {
-            return nil
-        }
-        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
-        return SelfReconnectGapRecord(
-            startedAt: Date(timeIntervalSince1970: startedAtRaw),
-            // Accept an end only if it is AFTER the start read alongside it: the tunnel's
-            // open/close are separate cross-process defaults writes, so a racy read (or an
-            // extension killed mid-open) can pair a new start with the PREVIOUS gap's end —
-            // a bogus "closed" gap that would mask a still-open outage. Stale end = open.
-            endedAt: endedAtRaw > startedAtRaw ? Date(timeIntervalSince1970: endedAtRaw) : nil,
-            cumulativeCount: defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
-        )
-    }
-
-    private func submitBugReport(_ bundle: BugReportBundle) async throws -> String {
-        let body = bundle.makeRequestBody()
-        let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-        // Best-effort App Attest: prove this is a genuine build on real hardware.
-        // nil on unsupported devices/simulators or any failure — the server is
-        // fail-open during rollout, so we simply submit without the headers then.
-        // Bind the attestation to SHA256(this exact body) so a captured attestation can't be
-        // replayed against a different report; the server recomputes the same clientDataHash.
-        let bodyHash = Data(SHA256.hash(data: data))
-        let attestation = await Self.acquireAppAttestation(bodyHash: bodyHash)
-        var lastError: Error?
-
-        for endpoint in Self.bugReportEndpointURLs {
-            do {
-                var request = URLRequest(url: endpoint)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                attestation?.apply(to: &request)
-                request.httpBody = data
-
-                let (responseData, response) = try await URLSession.shared.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw BugReportSubmissionError(message: "The server returned an invalid response.")
-                }
-
-                guard 200..<300 ~= httpResponse.statusCode else {
-                    // A 429 is terminal — surface it now instead of retrying the
-                    // fallback (see BugReportRateLimitedError).
-                    if httpResponse.statusCode == 429 {
-                        throw BugReportRateLimitedError()
-                    }
-                    let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body"
-                    throw BugReportSubmissionError(
-                        message: "The server returned HTTP \(httpResponse.statusCode): \(serverMessage)"
-                    )
-                }
-
-                let decoded = try JSONDecoder().decode(BugReportSubmitResponse.self, from: responseData)
-                return decoded.reportID
-            } catch is BugReportRateLimitedError {
-                // Give a rate-limited caller a friendly, actionable message and stop —
-                // do not fail over to the fallback endpoint.
-                throw BugReportSubmissionError(
-                    message: "Please wait a moment and try again."
-                )
-            } catch {
-                lastError = error
-            }
-        }
-
-        throw lastError ?? BugReportSubmissionError(message: "Could not send the bug report.")
-    }
-
-    // Fetch a one-time challenge from the API and produce an Apple App Attest
-    // attestation over it. Returns nil (submit proceeds unattested) when App
-    // Attest is unsupported, no challenge could be fetched, or attestation fails.
-    private static func acquireAppAttestation(bodyHash: Data) async -> AppAttestHeaders? {
-        guard AppAttestClient.isSupported else {
-            return nil
-        }
-        guard let challenge = await fetchAppAttestChallenge() else {
-            return nil
-        }
-        return await AppAttestClient.attest(challenge: challenge, bodyHash: bodyHash)
-    }
-
-    // Cap each challenge fetch so a slow or blackholed /v1/attest-challenge cannot
-    // hold the feedback sheet in "Submitting". Attestation is best-effort, so a
-    // timeout just falls through to the next endpoint and ultimately to nil (submit
-    // proceeds unattested) rather than waiting out URLSession's default ~60s.
-    private static let appAttestChallengeTimeout: TimeInterval = 3
-
-    // The App Attest challenge is a globally-shared, stateless HMAC token: the SAME worker
-    // (same signing secret) sits behind both the production and workers.dev-fallback base
-    // URLs, so a challenge issued by either host verifies at either submit endpoint. That lets
-    // us race both hosts concurrently and take production's result (or the fallback's if
-    // production yields nil) — capping the worst-case wait at one timeout (~3s) instead of two
-    // sequential ones when a host is slow or blackholed.
-    private static func fetchAppAttestChallenge() async -> String? {
-        async let production = fetchAppAttestChallenge(from: LavaSecAPI.productionBaseURL)
-        async let fallback = fetchAppAttestChallenge(from: LavaSecAPI.fallbackBaseURL)
-        if let challenge = await production {
-            return challenge
-        }
-        return await fallback
-    }
-
-    private static func fetchAppAttestChallenge(from base: URL) async -> String? {
-        let url = base
-            .appendingPathComponent("v1")
-            .appendingPathComponent("attest-challenge")
-        var request = URLRequest(url: url)
-        request.timeoutInterval = appAttestChallengeTimeout
-        // Best-effort and intentionally silent on failure: attestation is fail-open (a nil
-        // challenge just submits the report unattested, never blocking the user), and the
-        // server already records the outcome (`app_attest_ok` / `app_attest_soft_fail`), so a
-        // client-side log of the fetch failure would be redundant.
-        do {
-            let (responseData, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-                return nil
-            }
-            if let object = try JSONSerialization.jsonObject(with: responseData) as? [String: Any],
-               let challenge = object["challenge"] as? String, !challenge.isEmpty {
-                return challenge
-            }
-            return nil
-        } catch {
-            return nil
-        }
-    }
-
-    private func startLavaSecurityPlusStore() {
-        lavaSecurityPlusOffers = lavaSecurityPlusStore.offers
-        lavaSecurityPlusStore.entitlementChanged = { [weak self] entitlement in
-            Task { @MainActor [weak self] in
-                guard let self else {
-                    return
-                }
-
-                self.applyLavaSecurityPlusEntitlement(entitlement)
-                await self.syncLavaSecurityPlusEntitlementIfPossible(entitlement)
-            }
-        }
-        lavaSecurityPlusStore.start()
-
-        Task { [weak self] in
-            guard let self else {
-                return
-            }
-
-            await self.loadLavaSecurityPlusProducts()
-            await self.refreshLavaSecurityPlusEntitlements()
-        }
-    }
-
-    private func applyLavaSecurityPlusEntitlement(_ entitlement: LavaSecurityPlusEntitlement) {
-        // Surface the auto-renewable expiry (nil when there is no active entitlement)
-        // before the early-return below, so the subscriber UI stays current even when the
-        // active flag itself is unchanged (e.g. a renewal that only moves the expiry date).
-        let nextExpiresAt = entitlement.isActive ? entitlement.expiresAt : nil
-        if lavaSecurityPlusExpiresAt != nextExpiresAt {
-            lavaSecurityPlusExpiresAt = nextExpiresAt
-        }
-
-        let hasLavaSecurityPlus = entitlement.isActive
-        guard configuration.hasLavaSecurityPlus != hasLavaSecurityPlus else {
-            return
-        }
-
-        configuration.isPaid = hasLavaSecurityPlus
-
-        // The paid flag only drives app-side tier limits and UI; the tunnel
-        // never reads isPaid. Persist it so the status survives launches, but do
-        // NOT signal a configuration reload — that reapplies tunnel network
-        // settings (a visible reconnect) and would fire spuriously on every
-        // entitlement change.
-        do {
-            try persistConfigurationOnly()
-        } catch {
-            lavaSecurityPlusMessage = "Could not save plan state: \(error.localizedDescription)"
-            lavaSecurityPlusMessageIsError = true
-        }
-    }
-
-    private func currentLavaSecurityPlusAppAccountToken() async -> UUID? {
-        guard let session = try? await accountAuthService.currentBackupSession() else {
-            accountAuthState = accountAuthService.state
-            return nil
-        }
-
-        accountAuthState = accountAuthService.state
-        return UUID(uuidString: session.userID)
-    }
-
-    private func syncLavaSecurityPlusEntitlementIfPossible(
-        _ entitlement: LavaSecurityPlusEntitlement
-    ) async {
-        guard entitlement.isActive,
-              let signedTransactionJWS = entitlement.signedTransactionJWS,
-              !signedTransactionJWS.isEmpty
-        else {
-            return
-        }
-
-        do {
-            guard let session = try await accountAuthService.currentBackupSession() else {
-                accountAuthState = accountAuthService.state
-                return
-            }
-
-            accountAuthState = accountAuthService.state
-            try await lavaSecurityPlusEntitlementSyncClient.sync(
-                entitlement: entitlement,
-                session: session
-            )
-        } catch LavaSecurityPlusEntitlementSyncError.requestFailed(let statusCode, _) where statusCode == 401 {
-            do {
-                guard let refreshedSession = try await accountAuthService.refreshCurrentSession() else {
-                    accountAuthState = accountAuthService.state
-                    return
-                }
-
-                accountAuthState = accountAuthService.state
-                try await lavaSecurityPlusEntitlementSyncClient.sync(
-                    entitlement: entitlement,
-                    session: refreshedSession
-                )
-            } catch {
-                accountAuthState = accountAuthService.state
-            }
-        } catch {
-            accountAuthState = accountAuthService.state
-        }
-    }
-
-    private func loadBugReportDebugLogEntries() -> [BugReportDebugLogEntry] {
-        BugReportDebugLogEntry.parseJSONLines(concatenating: deviceDebugLogGenerations())
-    }
+    // startLavaSecurityPlusStore / applyLavaSecurityPlusEntitlement /
+    // currentLavaSecurityPlusAppAccountToken / syncLavaSecurityPlusEntitlementIfPossible
+    // moved to LavaSecurityPlusController.swift (Phase D2 billing peel).
 
     private func vpnStatusReportDescription(_ status: NEVPNStatus) -> String {
         switch status {
@@ -7963,14 +5787,6 @@ final class AppViewModel: ObservableObject {
             "disconnecting"
         @unknown default:
             "unknown-\(status.rawValue)"
-        }
-    }
-
-    private static var bugReportEndpointURLs: [URL] {
-        [LavaSecAPI.productionBaseURL, LavaSecAPI.fallbackBaseURL].map {
-            $0
-                .appendingPathComponent("v1")
-                .appendingPathComponent("bug-reports")
         }
     }
 
@@ -9255,7 +7071,13 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        guard let diagnosticsURL else {
+        // Derived inline since the Phase D4 peel moved the shared `diagnosticsURL`
+        // computed to DiagnosticsController with the store's refresh lifecycle; this
+        // uptime mirror is the hub's only remaining direct reader of the file. The
+        // store writes below publish onto `reports.diagnostics` (hub→controller is
+        // the allowed direction), exactly as they published the pre-peel hub property.
+        guard let diagnosticsURL = LavaSecAppGroup.containerURL?
+            .appendingPathComponent(LavaSecAppGroup.diagnosticsFilename) else {
             return
         }
 
@@ -9269,19 +7091,19 @@ final class AppViewModel: ObservableObject {
 
         if isRunning {
             guard !store.isLocalProtectionUptimeActive else {
-                diagnostics = store
+                reports.diagnostics = store
                 return
             }
             store.startLocalProtectionUptime()
         } else {
             guard store.isLocalProtectionUptimeActive else {
-                diagnostics = store
+                reports.diagnostics = store
                 return
             }
             store.stopLocalProtectionUptime()
         }
 
-        diagnostics = store
+        reports.diagnostics = store
         try? DiagnosticsPersistence.save(store, to: diagnosticsURL)
     }
 
@@ -9312,12 +7134,15 @@ final class AppViewModel: ObservableObject {
         applyLavaGuardProgress(nextProgress, ledger: nextLedger)
     }
 
-    private func refreshLavaGuardProgressFromDiagnostics() {
+    // Internal (not private) since the Phase D4 peel: it is a DiagnosticsHubBridging
+    // requirement — the diagnostics controller calls it right after a fresh store load
+    // replaces `reports.diagnostics`, in the exact pre-peel slot.
+    func refreshLavaGuardProgressFromDiagnostics() {
         guard configuration.keepLavaGuardProgress else {
             return
         }
 
-        let usageDayKeys = diagnostics.localProtectionUsageDayKeys()
+        let usageDayKeys = reports.diagnostics.localProtectionUsageDayKeys()
         guard !usageDayKeys.isEmpty else {
             return
         }
@@ -9694,34 +7519,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func persistDiagnostics() throws {
-        guard let diagnosticsURL else {
-            throw LavaSecAppError.appGroupUnavailable
-        }
-
-        try DiagnosticsPersistence.save(diagnostics, to: diagnosticsURL)
-    }
-
-    private func writeDiagnosticsClearControl(
-        clearDomainHistory: Bool = false,
-        clearFilteringCounts: Bool = false,
-        at now: Date = Date()
-    ) throws {
-        guard let diagnosticsControlURL else {
-            throw LavaSecAppError.appGroupUnavailable
-        }
-
-        let existingControl = DiagnosticsControlPersistence.load(from: diagnosticsControlURL)
-        // `now` matches the timestamp stamped into the store's applied-marker by the
-        // paired clear call, so the tunnel's force-apply gate dedups exactly (PST-1).
-        try DiagnosticsControlPersistence.save(
-            DiagnosticsControl(
-                clearDomainHistoryRequestedAt: clearDomainHistory ? now : existingControl.clearDomainHistoryRequestedAt,
-                clearFilteringCountsRequestedAt: clearFilteringCounts ? now : existingControl.clearFilteringCountsRequestedAt
-            ),
-            to: diagnosticsControlURL
-        )
-    }
+    // persistDiagnostics and writeDiagnosticsClearControl (the PST-1 paired-timestamp
+    // control write) moved to DiagnosticsController.swift with the clear flows
+    // (Phase D4 peel).
 
     // Encode and writes run inside FilterSnapshotPreparationService, off the
     // main actor (the encode + compact rebuild was measured at ~1.1s for large
@@ -10450,7 +8250,7 @@ final class AppViewModel: ObservableObject {
         // single debounced automaticBackupTask and content-gates its re-seal, so overlapping calls coalesce to
         // one upload rather than double-firing (founder review P2-2). Then clear the (now-applied) marker.
         guard request.targetFilterID != library.activeFilterID else {
-            scheduleAutomaticBackupAfterConfigurationChange()
+            backup.scheduleAutomaticBackupAfterConfigurationChange()
             // Re-notify the tunnel BEFORE clearing: disk shows the target active, but the running tunnel may
             // still hold the OLD in-memory snapshot if the headless commit's notify was killed (App Intent
             // terminated after persistSharedState) or swallowed a send error. Clearing without this would
@@ -10570,7 +8370,7 @@ final class AppViewModel: ObservableObject {
         appendAppNetworkActivity(.changeFilters)
         await notifyTunnelSnapshotUpdated()
         await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
-        scheduleAutomaticBackupAfterConfigurationChange()
+        backup.scheduleAutomaticBackupAfterConfigurationChange()
     }
 
     // The headless Focus warm-switch orchestration (FocusWarmSwitchCatalogMovedError,
@@ -10649,7 +8449,7 @@ final class AppViewModel: ObservableObject {
         // backup envelope here would mishandle it (same hazard as the launch-time persists). The
         // foreground reconcile re-seals + schedules the upload for the committed change instead.
         if schedulesAutomaticBackup {
-            scheduleAutomaticBackupAfterConfigurationChange()
+            backup.scheduleAutomaticBackupAfterConfigurationChange()
         }
 
         // The artifact-publish outcome of the flip below. `.published` for a config-only persist (no flip,
@@ -10717,7 +8517,7 @@ final class AppViewModel: ObservableObject {
         configuration = written.configuration
         library = written.library
         if schedulesAutomaticBackup {
-            scheduleAutomaticBackupAfterConfigurationChange()
+            backup.scheduleAutomaticBackupAfterConfigurationChange()
         }
     }
 
@@ -10772,179 +8572,8 @@ final class AppViewModel: ObservableObject {
         try persistConfigurationOnly(schedulesAutomaticBackup: false)
     }
 
-    private func uploadEncryptedBackup(
-        _ envelope: ZeroKnowledgeBackupEnvelope,
-        estimatedByteSize: Int
-    ) async {
-        // Never write to the server while a Clear/Disable is removing it — otherwise
-        // an in-flight upload could re-create the row the user just deleted.
-        guard !isBackupMaintenanceInProgress else {
-            return
-        }
-        guard let backupSyncService else {
-            encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-            return
-        }
-
-        isUploadingEncryptedBackup = true
-        defer { isUploadingEncryptedBackup = false }
-
-        do {
-            guard let session = try await accountAuthService.currentBackupSession() else {
-                accountAuthState = accountAuthService.state
-                encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-                return
-            }
-
-            accountAuthState = accountAuthService.state
-            try await backupSyncService.upload(envelope, session: session)
-            let uploadedAt = Date()
-            guard recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt: uploadedAt) else {
-                // A re-seal replaced the local envelope mid-upload; the newer one still needs
-                // uploading (the re-seal already cleared the marker / scheduled its own upload).
-                encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-                return
-            }
-            encryptedBackupState = .synced(estimatedByteSize: estimatedByteSize, uploadedAt: uploadedAt)
-        } catch BackupSyncServiceError.requestFailed(let statusCode) where statusCode == 401 {
-            do {
-                guard let refreshedSession = try await accountAuthService.refreshCurrentSession() else {
-                    accountAuthState = accountAuthService.state
-                    encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-                    return
-                }
-
-                accountAuthState = accountAuthService.state
-                try await backupSyncService.upload(envelope, session: refreshedSession)
-                let uploadedAt = Date()
-                guard recordEncryptedBackupUploadIfStillCurrent(envelope, uploadedAt: uploadedAt) else {
-                    encryptedBackupState = .waitingForSignIn(estimatedByteSize: estimatedByteSize)
-                    return
-                }
-                encryptedBackupState = .synced(estimatedByteSize: estimatedByteSize, uploadedAt: uploadedAt)
-            } catch {
-                accountAuthState = accountAuthService.state
-                encryptedBackupState = .failed(message: "Encrypted locally, but upload failed: \(error.localizedDescription)")
-            }
-        } catch {
-            accountAuthState = accountAuthService.state
-            encryptedBackupState = .failed(message: "Encrypted locally, but upload failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func uploadPendingEncryptedBackupIfPossible() async {
-        guard let envelope = loadLocalEncryptedBackupEnvelope() else {
-            return
-        }
-
-        await uploadEncryptedBackup(
-            envelope,
-            estimatedByteSize: backupEnvelopeStore.estimatedByteSize(for: envelope)
-        )
-    }
-
-    private func loadAvailableEncryptedBackupEnvelope() async throws -> ZeroKnowledgeBackupEnvelope {
-        if let envelope = loadLocalEncryptedBackupEnvelope() {
-            return envelope
-        }
-
-        guard let backupSyncService
-        else {
-            accountAuthState = accountAuthService.state
-            throw EncryptedBackupError.noBackupAvailable
-        }
-
-        guard let session = try await accountAuthService.currentBackupSession() else {
-            accountAuthState = accountAuthService.state
-            throw EncryptedBackupError.noBackupAvailable
-        }
-
-        accountAuthState = accountAuthService.state
-
-        if let envelope = try await backupSyncService.fetchLatest(session: session) {
-            return envelope
-        }
-
-        throw EncryptedBackupError.noBackupAvailable
-    }
-
-    private func loadEncryptedBackupState() {
-        encryptedBackupState = backupEnvelopeStore.currentState()
-    }
-
-    private func loadAutomaticBackupPreference() {
-        isAutomaticBackupEnabled = UserDefaults.standard.object(forKey: automaticBackupEnabledDefaultsKey) as? Bool ?? false
-    }
-
-    private func loadCustomizationPreferences() {
-        if let rawValue = defaults.string(forKey: appearancePreferenceDefaultsKey),
-           let preference = LavaAppearancePreference(rawValue: rawValue) {
-            appearancePreference = preference
-        } else {
-            appearancePreference = .system
-        }
-
-        if defaults.object(forKey: textSizeMatchesSystemDefaultsKey) != nil {
-            textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKey)
-        } else {
-            textSizeMatchesSystem = true
-        }
-
-        if let rawValue = defaults.string(forKey: textSizeDefaultsKey),
-           let size = LavaTextSize(rawValue: rawValue) {
-            textSize = size
-        } else {
-            textSize = .systemDefault
-        }
-
-        if let rawValue = defaults.string(forKey: lavaGuardLookDefaultsKey)
-            ?? appGroupDefaults.string(forKey: lavaGuardLookDefaultsKey),
-           let look = GuardianShieldStyle(rawValue: rawValue) {
-            lavaGuardLook = look
-            persistLavaGuardLook(look)
-        } else {
-            lavaGuardLook = .original
-            persistLavaGuardLook(.original)
-        }
-
-        updatesAppIconWithLavaGuard = defaults.object(forKey: updatesAppIconWithLavaGuardDefaultsKey) as? Bool ?? true
-        if !updatesAppIconWithLavaGuard {
-            syncAppIcon(to: lavaGuardLook)
-        }
-
-        let persistedUsesLiveActivities = defaults.object(forKey: usesLiveActivitiesDefaultsKey) as? Bool ?? false
-        usesLiveActivities = canOfferLiveActivities && persistedUsesLiveActivities
-        if !canOfferLiveActivities {
-            defaults.set(false, forKey: usesLiveActivitiesDefaultsKey)
-        }
-
-        liveActivityPauseMinutes = LiveActivityPausePreference.minutes(
-            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)
-        )
-
-        usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true
-
-        // Notification toggles live in the SHARED app-group defaults (the extension + tunnel read them);
-        // mirror them into the @Published properties for the Customization → Notifications section.
-        notifiesFilterChanges = LavaNotificationPreferences.isEnabled(.filterChanged, in: appGroupDefaults)
-        notifiesFilterCouldNotApply = LavaNotificationPreferences.isEnabled(.filterCouldNotApply, in: appGroupDefaults)
-        notifiesConnectivity = LavaNotificationPreferences.isEnabled(.connectivity, in: appGroupDefaults)
-    }
-
-    /// Set a Customization → Notifications category toggle: persist to the shared app-group store (so the
-    /// extension + tunnel see it), update the @Published mirror, and — when ENABLING — request notification
-    /// permission contextually (the user just asked for this kind of alert), mirroring onboarding's request.
-    func setNotificationCategoryEnabled(_ category: LavaNotificationCategory, _ enabled: Bool) {
-        LavaNotificationPreferences.setEnabled(enabled, for: category, in: appGroupDefaults)
-        switch category {
-        case .filterChanged: notifiesFilterChanges = enabled
-        case .filterCouldNotApply: notifiesFilterCouldNotApply = enabled
-        case .connectivity: notifiesConnectivity = enabled
-        }
-        if enabled {
-            Task { _ = await protectionUserNotifications.requestAuthorization() }
-        }
-    }
+    // loadCustomizationPreferences + setNotificationCategoryEnabled moved to
+    // CustomizationController (Phase D5 peel) with the preference cluster they load/write.
 
     private func loadLavaGuardProgress() {
         guard let data = defaults.data(forKey: lavaGuardProgressDefaultsKey),
@@ -10992,129 +8621,6 @@ final class AppViewModel: ObservableObject {
         pauseController.scheduleResume(until: temporaryProtectionPauseUntil, retryDelay: retryDelay) { [weak self] in
             await self?.resumeTemporaryProtectionIfExpired()
         }
-    }
-
-    private func recordEncryptedBackupUpload(uploadedAt: Date) {
-        backupEnvelopeStore.recordUpload(at: uploadedAt)
-    }
-
-    /// Record a successful upload ONLY if the envelope we uploaded is still the current local one.
-    /// A config/library change re-seals + saves a new local envelope while an upload is in flight
-    /// (e.g. the turn-on upload or a manual Back Up Now); recording .synced for the older envelope
-    /// would falsely claim the server holds the latest, when the freshly re-sealed envelope still
-    /// needs uploading. Returns whether the marker was recorded (the envelope is comparable —
-    /// ZeroKnowledgeBackupEnvelope is Equatable — and a re-seal always produces a different one).
-    private func recordEncryptedBackupUploadIfStillCurrent(
-        _ uploadedEnvelope: ZeroKnowledgeBackupEnvelope,
-        uploadedAt: Date
-    ) -> Bool {
-        guard loadLocalEncryptedBackupEnvelope() == uploadedEnvelope else {
-            return false
-        }
-        recordEncryptedBackupUpload(uploadedAt: uploadedAt)
-        return true
-    }
-
-    private func scheduleAutomaticBackupAfterConfigurationChange() {
-        // Re-seal the LOCAL envelope with the current config + library on every change, BEFORE
-        // consulting the cached backup state. The envelope is otherwise sealed only at
-        // turn-on/restore, so without this the next upload (automatic OR manual) backs up stale
-        // state and a restore silently loses every post-turn-on edit (new filters, renames,
-        // blocklist changes). Gate the re-seal on the LIVE store, not the in-memory
-        // encryptedBackupState: that cached value is stale (.off) right after a restore until the
-        // next launch re-derives it, so an early isConfigured guard here would short-circuit the
-        // re-seal and drop every post-restore edit. refreshLocalEncryptedBackupEnvelope no-ops
-        // safely when no local envelope / device secret is present, so calling it
-        // unconditionally is correct.
-        refreshLocalEncryptedBackupEnvelope()
-
-        guard encryptedBackupState.isConfigured, isAutomaticBackupEnabled else {
-            return
-        }
-
-        automaticBackupTask?.cancel()
-        let automaticBackupDelay = automaticBackupDelay
-        automaticBackupTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: automaticBackupDelay)
-            guard !Task.isCancelled else {
-                return
-            }
-
-            await self?.runScheduledAutomaticBackup()
-        }
-    }
-
-    private func runScheduledAutomaticBackup() async {
-        automaticBackupTask = nil
-        guard isAutomaticBackupEnabled else {
-            return
-        }
-
-        await backUpNow()
-    }
-
-    private func saveLocalEncryptedBackupEnvelope(_ envelope: ZeroKnowledgeBackupEnvelope) throws {
-        try backupEnvelopeStore.saveEnvelope(envelope)
-    }
-
-    /// Re-seal the local encrypted-backup envelope with the current config + library
-    /// (keeping every key slot), so a backup reflects post-turn-on changes. Recovers the
-    /// payload key via the stored device secret — no user interaction. Best-effort: if there
-    /// is no local envelope or device secret, leave the existing envelope untouched.
-    private func refreshLocalEncryptedBackupEnvelope() {
-        guard let envelope = loadLocalEncryptedBackupEnvelope() else {
-            return
-        }
-        let storedDeviceSecret = try? backupKeychainStore.loadDeviceSecret()
-        guard let deviceSecret = storedDeviceSecret ?? nil else {
-            return
-        }
-        let payload = BackupConfigurationPayload(
-            configuration: configuration,
-            catalogVersionHint: catalogVersion,
-            filterLibrary: library
-        )
-        // Skip the re-seal entirely when the backup CONTENT is unchanged. resealingPayload mints a
-        // fresh AES-GCM ciphertext every time and the marker-clear below then flips an
-        // already-uploaded backup to "not uploaded"; without this gate a non-user persist (e.g.
-        // reconcileTunnelSnapshotAfterLaunch on launch) would churn the backup state and schedule a
-        // redundant upload with no actual change. hasSameBackupContent ignores protectionEnabledHint
-        // (a frequently-toggled advisory hint) and the library's already-stripped local cache
-        // tokens, so a protection pause/resume or a compile-token restamp no longer churns the
-        // marker. Compare against the currently-sealed payload (recovered via the same device secret).
-        // PST-5 (Codex #218): a NEWER app may have sealed a payload schema this build can't decode.
-        // decryptWithKeychainSecret then throws `unsupportedSchemaVersion`; if we swallowed that and
-        // fell through, resealingPayload would overwrite the newer local envelope with our schema-1
-        // payload and clear its upload marker — the exact downgrade-clobber the schema ceiling exists
-        // to prevent. Distinguish it and SKIP the reseal, leaving the newer envelope + marker intact.
-        // Other decode failures fall through as before (treat as changed content → re-seal fresh).
-        let currentPayload: BackupConfigurationPayload?
-        do {
-            currentPayload = try envelope.decryptWithKeychainSecret(deviceSecret)
-        } catch BackupConfigurationPayloadError.unsupportedSchemaVersion {
-            return
-        } catch {
-            currentPayload = nil
-        }
-        if let currentPayload, currentPayload.hasSameBackupContent(as: payload) {
-            return
-        }
-        guard let resealed = try? envelope.resealingPayload(payload, deviceSecret: deviceSecret) else {
-            return
-        }
-        try? saveLocalEncryptedBackupEnvelope(resealed)
-        // The re-sealed local envelope is newer than any uploaded copy, so the prior upload marker
-        // is stale. Clear it (and refresh the cached state) — otherwise currentState() keeps
-        // reporting .synced and Settings claims the latest backup is uploaded while the server
-        // still holds the pre-change envelope. The automatic-upload path records a fresh marker
-        // after a successful upload; with automatic backup off the state correctly stays
-        // "encrypted locally, not yet uploaded" until a manual Back Up Now.
-        backupEnvelopeStore.clearUploadMarker()
-        loadEncryptedBackupState()
-    }
-
-    private func loadLocalEncryptedBackupEnvelope() -> ZeroKnowledgeBackupEnvelope? {
-        backupEnvelopeStore.loadEnvelope()
     }
 
     // MARK: - Tunnel health & messaging
@@ -11437,16 +8943,12 @@ final class AppViewModel: ObservableObject {
         return persisted.filters.compactMap(\.lastCompiledToken)
     }
 
-    private var diagnosticsURL: URL? {
-        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.diagnosticsFilename)
-    }
+    // diagnosticsURL / diagnosticsControlURL moved to DiagnosticsController.swift with
+    // the store lifecycle + clear flows (Phase D4 peel); the uptime mirror above derives
+    // the diagnostics path inline.
 
     private var networkActivityLogURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.networkActivityLogFilename)
-    }
-
-    private var diagnosticsControlURL: URL? {
-        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.diagnosticsControlFilename)
     }
 
     private func modificationDate(for url: URL?) -> Date? {
@@ -11596,11 +9098,8 @@ extension AppViewModel {
 }
 #endif
 
-private extension GuardianShieldStyle {
-    var lavaGuardID: String {
-        rawValue
-    }
-}
+// The private GuardianShieldStyle.lavaGuardID extension moved to
+// CustomizationController.swift with its only callers (Phase D5 peel).
 
 private extension NEVPNStatus {
     var protectionLifecycleStatus: ProtectionLifecycleStatus {
@@ -11623,7 +9122,10 @@ private extension NEVPNStatus {
     }
 }
 
-private enum LavaSecAppError: LocalizedError {
+// Internal (not `private`) since the Phase D4 peel: DiagnosticsController's
+// persistDiagnostics / writeDiagnosticsClearControl throw the same
+// `.appGroupUnavailable` their pre-peel hub bodies threw.
+enum LavaSecAppError: LocalizedError {
     case appGroupUnavailable
     case vpnStillStopping
 
@@ -11750,3 +9252,334 @@ struct ProtectionStatusChangeWaiter: VPNStatusChangeWaiting {
 // `HeadlessFocusFilterSwitchEngine`. perform() runs in the extension even while Lava is closed (WWDC22
 // §10121), so there is no app-target switch entry; the app keeps only the foreground reconcile
 // (`reconcilePendingFilterSwitch`), the manual `switchToFilter`, and the non-active warm-keep helper.
+
+// MARK: - Backup hub bridge
+
+// The hub side of the Phase D1 backup peel (BackupController owns the backup feature;
+// see BackupHubBridging's protocol doc in BackupController.swift). Conformance lives in
+// this file so the bridge can reach the hub's private state — the compiler-enforced
+// boundary is the protocol surface, which is exactly the backup cluster's historical
+// non-backup couplings: payload building (configuration + catalogVersion + library),
+// the ExclusiveReplacementGate tokens, Supabase session access + the accountAuthState
+// mirror, and the tunnel snapshot notify. Since the Phase D3 account peel the session
+// and account state live on AccountController, so the account-facing members here are
+// one-line delegations through `account` — the bridge signatures (and their callers in
+// BackupController) are unchanged, and the hub remains the single routing point.
+extension AppViewModel: BackupHubBridging {
+    var isAccountSignedIn: Bool {
+        account.isAccountSignedIn
+    }
+
+    var accountEmailForBackupPasskey: String? {
+        account.accountEmailForBackupPasskey
+    }
+
+    func makeBackupConfigurationPayload() -> BackupConfigurationPayload {
+        BackupConfigurationPayload(
+            configuration: configuration,
+            catalogVersionHint: catalogVersion,
+            filterLibrary: library
+        )
+    }
+
+    func beginConfigurationReplacement() -> Int {
+        configurationReplacementGate.begin()
+    }
+
+    func isConfigurationReplacementCurrent(_ token: Int) -> Bool {
+        configurationReplacementGate.isCurrent(token)
+    }
+
+    // Raw pass-throughs + a separate state mirror (NOT a combined call-then-mirror), so
+    // the controller preserves the pre-peel `accountAuthState = accountAuthService.state`
+    // ordering exactly at every call site. Delegated to AccountController (which owns
+    // AccountAuthService since Phase D3) with identical semantics; the service-facing
+    // bodies live on the controller's hub-bridge backing section.
+    func currentBackupSession() async throws -> BackupAccountSession? {
+        try await account.currentBackupSession()
+    }
+
+    func refreshCurrentBackupSession() async throws -> BackupAccountSession? {
+        try await account.refreshCurrentBackupSession()
+    }
+
+    func mirrorAccountAuthState() {
+        account.mirrorAccountAuthState()
+    }
+
+    func notifyTunnelSnapshotUpdatedAfterRestore() async {
+        await notifyTunnelSnapshotUpdated()
+    }
+
+    /// Apply a decrypted backup payload to the live app state: restore the configuration
+    /// and the whole filter library, wipe stale drafts, and persist config-first. Runs
+    /// AFTER the controller's gate re-check and local envelope/secret staging — the
+    /// restore path's only hub-state mutation point.
+    func applyRestoredBackupPayload(_ payload: BackupConfigurationPayload) async throws {
+        configuration = payload.restoredConfiguration()
+        // Restore the whole filter library (multi-filter), so every hosted filter — not
+        // just the active one — survives a restore on a new device. A pre-multi-filter
+        // backup carries no library, so migrate the restored config into one "Default"
+        // filter. persistSharedState below writes both files; library-authoritative load
+        // then regenerates the config mirror from this restored library.
+        // Migrate known custom blocklists to catalog sources across EVERY hosted filter — the
+        // same rewrite restoredConfiguration() applies to the active/top-level config — so a
+        // backup restored onto a new device doesn't leave non-active filters pinned to raw
+        // custom-URL lists that this device already ships as curated catalog sources.
+        // Normalize BEFORE checking validity, exactly as the launch load path does: a backup
+        // with filters but a stale activeFilterID is invalid only until normalized() repoints
+        // the active id to the first filter. Checking isValid on the raw library would reject
+        // it and fall through to migrating just the top-level config — discarding every other
+        // hosted filter from the backup.
+        if let restoredLibrary = payload.restoredFilterLibrary()?
+            .migratingKnownCustomBlocklistsToCatalogSources()
+            .normalized(), restoredLibrary.isValid {
+            library = restoredLibrary
+            // A backup may carry an OLDER-schema library (e.g. a pre-three-defaults v1 library).
+            // Restoring it is a DELIBERATE recovery of the user's own data — distinct from the
+            // on-upgrade reset — so stamp it to the current schema; otherwise the launch migration
+            // guard (schemaVersion >= currentSchemaVersion) would reject and reseed it on the next
+            // relaunch, and the restored filters would survive only until restart.
+            library.schemaVersion = FilterLibrary.currentSchemaVersion
+            // Library-authoritative: the restored library's active filter — not the legacy
+            // top-level config fields — is the source of truth, so regenerate config's four
+            // filter-scoped fields from it before persisting. This recovers the active id
+            // and its contents together (the device-global config fields are untouched).
+            mirrorActiveFilterIntoConfiguration()
+        } else {
+            library = FilterLibrary(migratingLegacy: configuration)
+        }
+        // Restore replaces the whole library, so every per-filter draft + the detail target are
+        // stale — wipe them so a preserved edit can't overwrite the just-restored state.
+        filterEditDrafts.removeAll()
+        filterEditTargetID = nil
+        // Config-first persist: the restored configuration carries device-global fields the
+        // library can't reconstruct, so a partial write must lose the re-restorable library, not
+        // the config (see persistSharedState).
+        // Config-first persist (prioritizesConfigurationDurability). Its re-seal step now operates
+        // on the local envelope the controller staged before this call (both restore modes), so the
+        // saved envelope reflects the restored state and the upload marker is correctly cleared —
+        // no post-persist save can clobber it.
+        try await persistSharedState(prioritizesConfigurationDurability: true)
+    }
+}
+
+// MARK: - LavaSecurity+ hub bridge
+
+// The hub side of the Phase D2 billing peel (LavaSecurityPlusController owns the
+// paywall/billing feature; see LavaSecurityPlusHubBridging's protocol doc in
+// LavaSecurityPlusController.swift). Conformance lives in this file so the bridge can
+// reach the hub's private state — the compiler-enforced boundary is the protocol
+// surface, which is exactly the billing cluster's historical non-billing couplings:
+// the configuration's paid-plan flag + its persist-only funnel, and Supabase session
+// access + the accountAuthState mirror. The session pass-throughs
+// (currentBackupSession / refreshCurrentBackupSession / mirrorAccountAuthState) are
+// requirements shared with BackupHubBridging and are implemented ONCE in that
+// conformance above — Swift satisfies both protocols with the same members, keeping
+// one canonical Supabase identity path.
+extension AppViewModel: LavaSecurityPlusHubBridging {
+    var hasLavaSecurityPlus: Bool {
+        configuration.hasLavaSecurityPlus
+    }
+
+    /// Applies the entitlement outcome to the persisted plan. The paid flag only
+    /// drives app-side tier limits and UI; the tunnel never reads isPaid. Persist it
+    /// so the status survives launches, but do NOT signal a configuration reload —
+    /// that reapplies tunnel network settings (a visible reconnect) and would fire
+    /// spuriously on every entitlement change. (Moved with the code from the pre-peel
+    /// applyLavaSecurityPlusEntitlement; the controller keeps the do/catch + paywall
+    /// message semantics around this call.)
+    func persistPaidPlanFlag(_ isPaid: Bool) throws {
+        configuration.isPaid = isPaid
+        try persistConfigurationOnly()
+    }
+}
+
+// MARK: - Account hub bridge
+
+// The hub side of the Phase D3 account peel (AccountController owns sign-in/sign-out/
+// deletion and AccountAuthService; see AccountHubBridging's protocol doc in
+// AccountController.swift). These hooks are the account cluster's historical
+// cross-FEATURE reactions, kept hub-orchestrated so feature controllers never
+// reference each other: the account controller reports the event; the hub routes it
+// to the affected features in the exact pre-peel order.
+extension AppViewModel: AccountHubBridging {
+    /// Sign-in success follow-ups, pre-peel order preserved: upload any local
+    /// encrypted backup that was waiting for a session, THEN push the current StoreKit
+    /// entitlement to the server sync (both no-op quietly when there is nothing to do).
+    func accountDidSignIn() async {
+        await backup.uploadPendingEncryptedBackupIfPossible()
+        await plus.syncCurrentLavaSecurityPlusEntitlementIfPossible()
+    }
+
+    /// The server row died with the account, so drop the device-local backup unlock
+    /// material. Runs between the confirmed service delete and the controller's state
+    /// mirror — exactly where the pre-peel deleteAccount called it.
+    func accountWillCompleteDeletion() {
+        backup.deleteLocalUnlockSecretsAfterAccountDeletion()
+    }
+
+    /// Sign-out and completed deletion re-derive the backup presentation state (its
+    /// signed-in/signed-out copy branches on the session).
+    func reloadEncryptedBackupStateAfterAccountChange() {
+        backup.loadEncryptedBackupState()
+    }
+}
+
+// MARK: - Diagnostics hub bridge
+
+// The hub side of the Phase D4 diagnostics/bug-report peel (DiagnosticsController owns
+// the store lifecycle, clears, bug-report draft/send, and rage-shake routing; see
+// DiagnosticsHubBridging's protocol doc in DiagnosticsController.swift). Conformance
+// lives in this file so the bridge can reach the hub's private state — the
+// compiler-enforced boundary is the protocol surface, which is exactly the diagnostics
+// cluster's historical non-diagnostics couplings: the two config keep-flags (read +
+// persist-only write), the VPN-status file-ownership signal, tunnel messaging, the
+// vpnMessage banner, the cross-feature clears (network activity, LavaGuard progress),
+// the report-surfaces refresh, the compiled-snapshot capture, and the wide-hub-state
+// bug-report bundle ASSEMBLY kept hub-side by design (bridge-width judgement: peeling
+// it would have needed a sprawling read surface — configuration, catalog, health,
+// status, rule counts — for one function). `refreshReports`,
+// `clearNetworkActivityLog(notifyTunnel:)`, `clearLavaGuardProgress()`, and
+// `isAccountDeveloper` are witnessed by the hub's existing members above.
+extension AppViewModel: DiagnosticsHubBridging {
+    var keepsDomainDiagnostics: Bool {
+        configuration.keepDomainDiagnostics
+    }
+
+    var keepsFilteringCounts: Bool {
+        configuration.keepFilteringCounts
+    }
+
+    /// True while the tunnel may still write diagnostics.json (UX-4 / PST-3): the whole
+    /// NON-stopped lifecycle, not just `.connected` — see the ownership comment in the
+    /// controller's `refreshDiagnostics`.
+    var isProtectionStopPending: Bool {
+        isProtectionStopPendingStatus(vpnStatus)
+    }
+
+    /// Writes the keep-counts flag and persists config-only. The flag only gates the
+    /// app/tunnel's local-log recording; the controller keeps the reload-message +
+    /// clear semantics around this call (moved with the code from the pre-peel
+    /// setKeepFilteringCounts).
+    func persistKeepFilteringCountsFlag(_ keepFilteringCounts: Bool) throws {
+        configuration.keepFilteringCounts = keepFilteringCounts
+        try persistConfigurationOnly()
+    }
+
+    /// Same funnel for the keep-domain-history flag (pre-peel setKeepDomainDiagnostics).
+    func persistKeepDomainDiagnosticsFlag(_ keepDomainDiagnostics: Bool) throws {
+        configuration.keepDomainDiagnostics = keepDomainDiagnostics
+        try persistConfigurationOnly()
+    }
+
+    /// Relay onto the hub-owned provider-message channel (the full-signature private
+    /// sendTunnelMessage keeps its default fallback copy + latency tracing; the explicit
+    /// nil operationID selects that overload — same defaults as every pre-peel call
+    /// site — instead of recursing into this wrapper).
+    func sendTunnelMessage(_ message: String) async {
+        await sendTunnelMessage(message, operationID: nil)
+    }
+
+    /// The clears' failure surface stays the hub's banner (vpnMessage), exactly where
+    /// the pre-peel clear flows wrote it.
+    func presentVPNMessage(_ message: String, isError: Bool) {
+        vpnMessage = message
+        vpnMessageIsError = isError
+    }
+
+    func currentFilterSnapshot() -> FilterSnapshot {
+        currentSnapshot()
+    }
+
+    /// The bug-report bundle ASSEMBLY — a SNAPSHOT of wide hub state, kept hub-side by
+    /// design (Phase D4 bridge-width judgement). The controller passes in everything it
+    /// owns (`BugReportBundleInputs`): the prepared heavy inputs (UR-5 cache) plus the
+    /// live local-observability reads (its DiagnosticsStore, the LAV-92/93 gap record,
+    /// the incident-ledger report view). Body otherwise verbatim from the pre-peel
+    /// makeBugReportBundle(context:inputs:).
+    func makeBugReportBundle(
+        context: BugReportContext,
+        inputs: BugReportBundleInputs
+    ) -> BugReportBundle {
+        let identity = PreparedFilterSnapshotIdentity.make(
+            configuration: configuration,
+            catalog: currentCatalog
+        )
+        let snapshotVersion = String(identity.fingerprint.prefix(12))
+        let affectedSiteDecision = BugReportAffectedSiteFilterDecision.make(
+            rawAffectedSite: context.normalizedAffectedSite,
+            snapshot: inputs.snapshot
+        )
+
+        return BugReportBundle(
+            context: context,
+            app: BugReportAppSnapshot(
+                version: Self.bundleInfoValue("CFBundleShortVersionString"),
+                build: Self.bundleInfoValue("CFBundleVersion")
+            ),
+            device: BugReportDeviceSnapshot(
+                iosVersion: "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
+                deviceFamily: Self.deviceFamilyDescription(UIDevice.current.userInterfaceIdiom),
+                locale: Locale.current.identifier
+            ),
+            vpn: BugReportVPNSnapshot(
+                status: vpnStatusReportDescription(vpnStatus),
+                resolverPreset: configuration.resolverDiagnosticDisplayName,
+                health: tunnelHealth
+            ),
+            filters: BugReportFilterSummary(
+                catalogVersion: catalogVersion,
+                enabledListIDs: configuration.enabledBlocklistIDs.sorted(),
+                snapshotVersion: snapshotVersion,
+                compiledRuleCount: compiledRuleCount,
+                blocklistRuleCount: compiledBlocklistRuleCount,
+                customBlocklistCount: configuration.customBlocklists.count,
+                enabledCustomBlocklistCount: configuration.customBlocklists.filter {
+                    configuration.enabledBlocklistIDs.contains($0.id)
+                }.count,
+                affectedSiteDecision: affectedSiteDecision
+            ),
+            diagnostics: inputs.diagnostics,
+            localHistoryEnabled: configuration.keepDomainDiagnostics,
+            debugLogEntries: inputs.debugLogEntries,
+            selfReconnectTimes: inputs.selfReconnectTimes,
+            // Privacy-safe Focus-switch diagnostic (LAV-100 Phase 4): the extension records the last
+            // attempt's outcome to the shared app group, so a closed-app failure is debuggable from the
+            // (Release) bug report without a device or the QA device log.
+            lastFocusSwitch: FocusSwitchDiagnostics.last(in: LavaSecAppGroup.sharedDefaults),
+            selfReconnectGap: inputs.selfReconnectGap,
+            recentIncidents: inputs.recentIncidents
+        )
+    }
+}
+
+// MARK: - Customization hub bridge
+
+// The hub side of the Phase D5 customization peel (CustomizationController owns the
+// preference cluster; see CustomizationHubBridging's protocol doc in
+// CustomizationController.swift). Conformance lives in this file so the bridge can
+// reach the hub's private state — the compiler-enforced boundary is the protocol
+// surface, which is exactly the customization cluster's historical non-customization
+// couplings: the configuration's Plus flag / unlock ledger / keep-progress flag and the
+// hub-owned LavaGuard progress (availability inputs), the Live Activity device-class
+// gate + reconcile, and the contextual notification-permission request.
+// `hasLavaSecurityPlus` (shared with LavaSecurityPlusHubBridging), `lavaGuardProgress`
+// (the stored @Published above), `canOfferLiveActivities`, and `reconcileLiveActivity()`
+// are witnessed by the hub's existing members.
+extension AppViewModel: CustomizationHubBridging {
+    var lavaGuardUnlocks: LavaGuardAchievementLedger {
+        configuration.lavaGuardUnlocks
+    }
+
+    var keepsLavaGuardProgress: Bool {
+        configuration.keepLavaGuardProgress
+    }
+
+    /// The contextual permission request for an enabled Customization → Notifications
+    /// toggle — the same hub-owned controller onboarding's request goes through, so
+    /// there is one notification-authorization path.
+    @discardableResult func requestNotificationAuthorization() async -> Bool {
+        await protectionUserNotifications.requestAuthorization()
+    }
+}

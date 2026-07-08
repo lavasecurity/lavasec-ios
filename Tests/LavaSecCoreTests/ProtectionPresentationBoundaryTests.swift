@@ -61,11 +61,15 @@ final class ProtectionPresentationBoundaryTests: XCTestCase {
         let controller = try readSource(.lavaLiveActivityController)
         XCTAssertTrue(controller.contains("final class LavaLiveActivityController: AmbientProtectionPresenter"))
         let vm = try readSource(.appViewModel)
-        XCTAssertTrue(vm.contains("private let iconPersonalizer: IconPersonalizing"))
+        // The icon-personalizer seam moved to CustomizationController with the icon
+        // sync (Phase D5 peel); the Live Activity presenter stays hub-owned.
+        let customization = try readSource(.customizationController)
+        XCTAssertTrue(customization.contains("private let iconPersonalizer: IconPersonalizing"))
         XCTAssertTrue(vm.contains("private let liveActivityController: AmbientProtectionPresenter"))
-        // The view model no longer calls UIKit's alternate-icon API directly.
+        // Neither the hub nor the controller calls UIKit's alternate-icon API directly.
         XCTAssertFalse(vm.contains("UIApplication.shared.setAlternateIconName"))
-        XCTAssertTrue(vm.contains("iconPersonalizer.setAppIcon"))
+        XCTAssertFalse(customization.contains("UIApplication.shared.setAlternateIconName"))
+        XCTAssertTrue(customization.contains("iconPersonalizer.setAppIcon"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.

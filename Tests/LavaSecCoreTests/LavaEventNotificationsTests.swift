@@ -54,7 +54,7 @@ final class LavaEventNotificationsTests: XCTestCase {
     func testFilterSwitchBodyHonorsPinnedLanguageIndependentOfProcessLocale() {
         // The whole point of the pin: an explicit languageCode selects the matching .lproj regardless of the
         // running process's locale, so an extension/tunnel renders in the app's language. Uses the committed
-        // strings from de/ja/zh-Hans .lproj (see Sources/LavaSecCore/Resources/*.lproj/Localizable.strings).
+        // strings from de/ja/zh-Hans .lproj (see Sources/LavaSecKit/Resources/*.lproj/Localizable.strings).
         XCTAssertEqual(
             LavaEventNotificationPoster.filterSwitchBody(committed: true, filterName: "Work", languageCode: "de"),
             "Filter zu Work gewechselt"

@@ -16,7 +16,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
     func testLavaGuardLooksDeclareAlternateAppIcons() throws {
         let attributes = try readSource(.lavaActivityAttributes)
-        let appViewModel = try readSource(.appViewModel)
+        // The look → app-icon sync (and the personalizer seam) lives on
+        // CustomizationController since the Phase D5 customization peel.
+        let customizationController = try readSource(.customizationController)
         let project = try readSource(.xcodeProject)
         let iconNames = [
             "AppIconFireOpal",
@@ -37,12 +39,12 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(attributes.contains("case .emerald:\n            \"AppIconEmerald\""))
         XCTAssertTrue(attributes.contains("case .kiwiCreme:\n            \"AppIconKiwiCreme\""))
 
-        XCTAssertTrue(appViewModel.contains("private func syncAppIcon(to look: GuardianShieldStyle)"))
-        XCTAssertTrue(appViewModel.contains("iconPersonalizer.supportsAppIconPersonalization"))
-        XCTAssertTrue(appViewModel.contains("iconPersonalizer.currentAppIconName"))
-        XCTAssertTrue(appViewModel.contains("let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil"))
-        XCTAssertTrue(appViewModel.contains("iconPersonalizer.setAppIcon(targetIconName)"))
-        XCTAssertTrue(appViewModel.contains("syncAppIcon(to: look)"))
+        XCTAssertTrue(customizationController.contains("private func syncAppIcon(to look: GuardianShieldStyle)"))
+        XCTAssertTrue(customizationController.contains("iconPersonalizer.supportsAppIconPersonalization"))
+        XCTAssertTrue(customizationController.contains("iconPersonalizer.currentAppIconName"))
+        XCTAssertTrue(customizationController.contains("let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil"))
+        XCTAssertTrue(customizationController.contains("iconPersonalizer.setAppIcon(targetIconName)"))
+        XCTAssertTrue(customizationController.contains("syncAppIcon(to: look)"))
 
         let alternateIconSetting = "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"\(iconNames.joined(separator: " "))\";"
         XCTAssertEqual(project.components(separatedBy: alternateIconSetting).count - 1, 3)
@@ -152,12 +154,12 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("Text(preference.displayName.lavaLocalized)"))
         XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
         XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))
-        XCTAssertFalse(customizationBlock.contains("viewModel.configuration.playsHapticFeedback"))
-        XCTAssertFalse(customizationBlock.contains("viewModel.setHapticFeedback(isEnabled)"))
+        XCTAssertFalse(customizationBlock.contains("playsHapticFeedback"))
+        XCTAssertFalse(customizationBlock.contains("setHapticFeedback"))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Lava Guard\")"))
         XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerRow("))
-        XCTAssertTrue(customizationBlock.contains("look: viewModel.lavaGuardLook"))
-        XCTAssertTrue(customizationBlock.contains("availability: viewModel.lavaGuardAvailability(for: viewModel.lavaGuardLook)"))
+        XCTAssertTrue(customizationBlock.contains("look: customization.lavaGuardLook"))
+        XCTAssertTrue(customizationBlock.contains("availability: customization.lavaGuardAvailability(for: customization.lavaGuardLook)"))
         XCTAssertTrue(customizationBlock.contains("Keep Lava protecting you to unlock more Guards, or [**Upgrade**](lavasecurity://settings/upgrade) to unlock them all."))
         XCTAssertTrue(customizationBlock.contains("Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)"))
         XCTAssertTrue(customizationBlock.contains("VStack(alignment: .leading, spacing: 4)"))
@@ -180,14 +182,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains(".lavaQuietNoteText()"))
         XCTAssertTrue(customizationBlock.contains("Toggle(\"Match App Icon to Lava Guard\""))
         XCTAssertTrue(customizationBlock.contains("isOn: updatesAppIconBinding"))
-        XCTAssertTrue(customizationBlock.contains("viewModel.setUpdatesAppIconWithLavaGuard(isEnabled)"))
+        XCTAssertTrue(customizationBlock.contains("customization.setUpdatesAppIconWithLavaGuard(isEnabled)"))
         // The catalog now opens as a bottom sheet (radio-style single select) rather
         // than an inline disclosure: the row presents LavaGuardLookPickerSheet, which
         // lists every Guard and applies the selection before dismissing.
         XCTAssertTrue(customizationBlock.contains(".sheet(isPresented: $isPresentingPicker)"))
         XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerSheet(selectedLook: look, onSelect: onSelect)"))
         XCTAssertTrue(customizationBlock.contains("ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(customizationBlock.contains("viewModel.setLavaGuardLook(look)"))
+        XCTAssertTrue(customizationBlock.contains("customization.setLavaGuardLook(look)"))
         XCTAssertTrue(customizationBlock.contains("guard availability.isSelectable else"))
         XCTAssertTrue(customizationBlock.contains("onSelect(look)"))
         XCTAssertTrue(customizationBlock.contains("dismiss()"))
@@ -257,10 +259,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(customizationBlock.contains("Capsule()"))
         XCTAssertFalse(customizationBlock.contains("Image(systemName: isSelected ? \"checkmark.circle.fill\" : \"circle\")"))
         XCTAssertFalse(customizationBlock.contains("Picker(\"Lava Guard looks\""))
-        XCTAssertTrue(customizationBlock.contains("if viewModel.canOfferLiveActivities"))
+        XCTAssertTrue(customizationBlock.contains("if customization.canOfferLiveActivities"))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Live Activities\")"))
         XCTAssertTrue(customizationBlock.contains("Toggle(\"Use Live Activities\""))
-        XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLiveActivities(isEnabled)"))
+        XCTAssertTrue(customizationBlock.contains("customization.setUsesLiveActivities(isEnabled)"))
         XCTAssertTrue(customizationBlock.contains("Shows Lava status on the Lock Screen and Dynamic Island when available."))
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Language\")"))
         // Section order (Customization reorder): Lava Guard, Appearance, Text Size, Notifications,
@@ -312,13 +314,13 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(customizationBlock.contains("LavaSectionGroup(\"Appearance & Haptics\")"))
         XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
         XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))
-        XCTAssertFalse(customizationBlock.contains("viewModel.configuration.playsHapticFeedback"))
-        XCTAssertFalse(customizationBlock.contains("viewModel.setHapticFeedback(isEnabled)"))
+        XCTAssertFalse(customizationBlock.contains("playsHapticFeedback"))
+        XCTAssertFalse(customizationBlock.contains("setHapticFeedback"))
 
         // Binding routes through the same auth-gated mutation as the other toggles.
         XCTAssertTrue(customizationBlock.contains("private var lavaHapticsBinding: Binding<Bool>"))
-        XCTAssertTrue(customizationBlock.contains("viewModel.usesLavaHaptics"))
-        XCTAssertTrue(customizationBlock.contains("viewModel.setUsesLavaHaptics(isEnabled)"))
+        XCTAssertTrue(customizationBlock.contains("customization.usesLavaHaptics"))
+        XCTAssertTrue(customizationBlock.contains("customization.setUsesLavaHaptics(isEnabled)"))
 
         let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
         let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
@@ -330,6 +332,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     func testLiveActivityPauseLengthStepperIsGatedToLiveActivitiesSection() throws {
         let settings = try readSource(.settingsView)
         let appViewModel = try readSource(.appViewModel)
+        // The pause-length preference lives on CustomizationController (Phase D5 peel);
+        // the hub's reconcile still threads it into the published content state.
+        let customizationController = try readSource(.customizationController)
         let presenter = try readSource(.protectionPlatformSeams)
         let controller = try readSource(.lavaLiveActivityController)
         let customizationBlock = try sourceBlock(
@@ -346,23 +351,23 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // The stepper lives inside the Live Activities section, only when the
         // feature is on (the Pause button it tunes only exists then), and binds
         // through the same auth-gated mutation as the toggle.
-        XCTAssertTrue(liveActivitiesSection.contains("if viewModel.usesLiveActivities {"))
+        XCTAssertTrue(liveActivitiesSection.contains("if customization.usesLiveActivities {"))
         XCTAssertTrue(liveActivitiesSection.contains("Stepper("))
         XCTAssertTrue(liveActivitiesSection.contains("value: liveActivityPauseMinutesBinding"))
         XCTAssertTrue(liveActivitiesSection.contains("in: LiveActivityPausePreference.minutesRange"))
-        XCTAssertTrue(liveActivitiesSection.contains("Text(viewModel.liveActivityPauseLengthLabel)"))
+        XCTAssertTrue(liveActivitiesSection.contains("Text(customization.liveActivityPauseLengthLabel)"))
         XCTAssertTrue(customizationBlock.contains("private var liveActivityPauseMinutesBinding: Binding<Int>"))
-        XCTAssertTrue(customizationBlock.contains("viewModel.setLiveActivityPauseMinutes(minutes)"))
+        XCTAssertTrue(customizationBlock.contains("customization.setLiveActivityPauseMinutes(minutes)"))
 
-        // View-model side: published value, clamped persistence to the app group,
-        // a reconcile so the live button relabels, and the format-string label.
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes"))
-        XCTAssertTrue(appViewModel.contains("func setLiveActivityPauseMinutes(_ minutes: Int)"))
-        XCTAssertTrue(appViewModel.contains("let clampedMinutes = LiveActivityPausePreference.clamp(minutes)"))
-        XCTAssertTrue(appViewModel.contains("LiveActivityPausePreference.setMinutes(\n            clampedMinutes,\n            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
-        XCTAssertTrue(appViewModel.contains("\"Pause length: %d min\".lavaLocalizedFormat(liveActivityPauseMinutes)"))
-        XCTAssertTrue(appViewModel.contains("liveActivityPauseMinutes = LiveActivityPausePreference.minutes(\n            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
-        XCTAssertTrue(appViewModel.contains("pauseMinutes: liveActivityPauseMinutes"))
+        // Controller side (Phase D5): published value, clamped persistence to the app
+        // group, a hub reconcile so the live button relabels, and the format-string label.
+        XCTAssertTrue(customizationController.contains("@Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes"))
+        XCTAssertTrue(customizationController.contains("func setLiveActivityPauseMinutes(_ minutes: Int)"))
+        XCTAssertTrue(customizationController.contains("let clampedMinutes = LiveActivityPausePreference.clamp(minutes)"))
+        XCTAssertTrue(customizationController.contains("LiveActivityPausePreference.setMinutes(\n            clampedMinutes,\n            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
+        XCTAssertTrue(customizationController.contains("\"Pause length: %d min\".lavaLocalizedFormat(liveActivityPauseMinutes)"))
+        XCTAssertTrue(customizationController.contains("liveActivityPauseMinutes = LiveActivityPausePreference.minutes(\n            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
+        XCTAssertTrue(appViewModel.contains("pauseMinutes: customization.liveActivityPauseMinutes"))
 
         // The configured length is threaded through the presenter seam into the
         // published content state.
@@ -443,6 +448,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
     func testLiveActivitiesToggleIsGatedToSupportedDeviceClasses() throws {
         let appViewModel = try readSource(.appViewModel)
+        // The toggle/load clamp lives on CustomizationController (Phase D5 peel); the
+        // device-class gate itself stays a hub read (it owns the presenter), and the
+        // controller reaches it through the bridge.
+        let customizationController = try readSource(.customizationController)
         let controller = try readSource(.lavaLiveActivityController)
         let settings = try readSource(.settingsView)
 
@@ -454,63 +463,70 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         XCTAssertTrue(appViewModel.contains("var canOfferLiveActivities: Bool"))
         XCTAssertTrue(appViewModel.contains("liveActivityController.canOfferLiveActivities"))
-        XCTAssertTrue(appViewModel.contains("guard canOfferLiveActivities else"))
-        XCTAssertTrue(appViewModel.contains("let canEnableLiveActivities = canOfferLiveActivities && isEnabled"))
-        XCTAssertTrue(appViewModel.contains("usesLiveActivities = canOfferLiveActivities && persistedUsesLiveActivities"))
+        // Every controller-side read of the gate delegates to the hub's one witness.
+        XCTAssertTrue(customizationController.contains("hub.canOfferLiveActivities"))
+        XCTAssertTrue(customizationController.contains("guard canOfferLiveActivities else"))
+        XCTAssertTrue(customizationController.contains("let canEnableLiveActivities = canOfferLiveActivities && isEnabled"))
+        XCTAssertTrue(customizationController.contains("usesLiveActivities = canOfferLiveActivities && persistedUsesLiveActivities"))
 
-        XCTAssertTrue(settings.contains("if viewModel.canOfferLiveActivities"))
+        XCTAssertTrue(settings.contains("if customization.canOfferLiveActivities"))
     }
 
     func testAppearanceAndLiveActivityPreferencesPersistInAppGroupDefaults() throws {
+        // The preference cluster (models, @Published, keys, setters, load) lives on
+        // CustomizationController since the Phase D5 peel; the hub keeps only the
+        // LavaGuard PROGRESS value + key (the accrual engine writes them).
         let appViewModel = try readSource(.appViewModel)
+        let customizationController = try readSource(.customizationController)
         let appGroup = try readSource(.appGroup)
         let rootView = try readSource(.rootView)
         let persistLookBlock = try sourceBlock(
-            in: appViewModel,
+            in: customizationController,
             startingAt: "private func persistLavaGuardLook(_ look: GuardianShieldStyle)",
             endingBefore: "private func syncAppIcon(to look: GuardianShieldStyle)"
         )
 
-        XCTAssertTrue(appViewModel.contains("enum LavaAppearancePreference: String, CaseIterable, Identifiable"))
-        XCTAssertTrue(appViewModel.contains("case light"))
-        XCTAssertTrue(appViewModel.contains("case dark"))
-        XCTAssertTrue(appViewModel.contains("case system"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var appearancePreference: LavaAppearancePreference = .system"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var usesLiveActivities = false"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var usesLavaHaptics = true"))
-        XCTAssertTrue(appViewModel.contains("private let appearancePreferenceDefaultsKey = \"lavasec.customization.appearance\""))
-        XCTAssertTrue(appViewModel.contains("private let usesLiveActivitiesDefaultsKey = \"lavasec.customization.liveActivities\""))
-        XCTAssertTrue(appViewModel.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey"))
-        XCTAssertTrue(appViewModel.contains("func setUsesLavaHaptics(_ isEnabled: Bool)"))
-        XCTAssertTrue(appViewModel.contains("defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)"))
-        XCTAssertTrue(appViewModel.contains("usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var lavaGuardLook: GuardianShieldStyle = .original"))
+        XCTAssertTrue(customizationController.contains("enum LavaAppearancePreference: String, CaseIterable, Identifiable"))
+        XCTAssertTrue(customizationController.contains("case light"))
+        XCTAssertTrue(customizationController.contains("case dark"))
+        XCTAssertTrue(customizationController.contains("case system"))
+        XCTAssertTrue(customizationController.contains("@Published private(set) var appearancePreference: LavaAppearancePreference = .system"))
+        XCTAssertTrue(customizationController.contains("@Published private(set) var usesLiveActivities = false"))
+        XCTAssertTrue(customizationController.contains("@Published private(set) var usesLavaHaptics = true"))
+        XCTAssertTrue(customizationController.contains("private let appearancePreferenceDefaultsKey = \"lavasec.customization.appearance\""))
+        XCTAssertTrue(customizationController.contains("private let usesLiveActivitiesDefaultsKey = \"lavasec.customization.liveActivities\""))
+        XCTAssertTrue(customizationController.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey"))
+        XCTAssertTrue(customizationController.contains("func setUsesLavaHaptics(_ isEnabled: Bool)"))
+        XCTAssertTrue(customizationController.contains("defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)"))
+        XCTAssertTrue(customizationController.contains("usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true"))
+        XCTAssertTrue(customizationController.contains("@Published private(set) var lavaGuardLook: GuardianShieldStyle = .original"))
         XCTAssertTrue(appViewModel.contains("@Published private(set) var lavaGuardProgress = LavaGuardProgress()"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var updatesAppIconWithLavaGuard = true"))
+        XCTAssertTrue(customizationController.contains("@Published private(set) var updatesAppIconWithLavaGuard = true"))
         XCTAssertTrue(appGroup.contains("customizationLavaGuardLookDefaultsKey = \"lavasec.customization.lavaGuardLook\""))
-        XCTAssertTrue(appViewModel.contains("private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey"))
-        XCTAssertTrue(appViewModel.contains("private let updatesAppIconWithLavaGuardDefaultsKey = \"lavasec.customization.updatesAppIconWithLavaGuard\""))
+        XCTAssertTrue(customizationController.contains("private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey"))
+        XCTAssertTrue(customizationController.contains("private let updatesAppIconWithLavaGuardDefaultsKey = \"lavasec.customization.updatesAppIconWithLavaGuard\""))
         XCTAssertTrue(appViewModel.contains("private let lavaGuardProgressDefaultsKey = \"lavasec.customization.lavaGuardProgress\""))
-        XCTAssertTrue(appViewModel.contains("defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)"))
-        XCTAssertTrue(appViewModel.contains("private func persistLavaGuardLook(_ look: GuardianShieldStyle)"))
+        XCTAssertTrue(customizationController.contains("defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)"))
+        XCTAssertTrue(customizationController.contains("private func persistLavaGuardLook(_ look: GuardianShieldStyle)"))
         XCTAssertTrue(persistLookBlock.contains("defaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
         XCTAssertTrue(persistLookBlock.contains("appGroupDefaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
         XCTAssertFalse(persistLookBlock.contains("appGroupDefaults.synchronize()"))
-        XCTAssertTrue(appViewModel.contains("persistLavaGuardLook(look)"))
-        XCTAssertTrue(appViewModel.contains("func setLavaGuardLook(_ look: GuardianShieldStyle)"))
-        XCTAssertTrue(appViewModel.contains("guard isLavaGuardLookSelectable(look) else"))
-        XCTAssertTrue(appViewModel.contains("func lavaGuardAvailability(for look: GuardianShieldStyle) -> LavaGuardAvailability"))
-        XCTAssertTrue(appViewModel.contains("LavaGuardAvailabilityPolicy.isAvailable("))
-        XCTAssertTrue(appViewModel.contains("let showsProgressDetail = look.lavaGuardID == nextLavaGuardProgressDetailGuardID"))
-        XCTAssertTrue(appViewModel.contains("private var nextLavaGuardProgressDetailGuardID: String?"))
-        XCTAssertTrue(appViewModel.contains("for goal in LavaGuardProgressPolicy.unlockGoals"))
-        XCTAssertTrue(appViewModel.contains("func setUpdatesAppIconWithLavaGuard(_ isEnabled: Bool)"))
-        XCTAssertTrue(appViewModel.contains("defaults.set(isEnabled, forKey: updatesAppIconWithLavaGuardDefaultsKey)"))
-        XCTAssertTrue(appViewModel.contains("syncAppIcon(to: lavaGuardLook)"))
+        XCTAssertTrue(customizationController.contains("persistLavaGuardLook(look)"))
+        XCTAssertTrue(customizationController.contains("func setLavaGuardLook(_ look: GuardianShieldStyle)"))
+        XCTAssertTrue(customizationController.contains("guard isLavaGuardLookSelectable(look) else"))
+        XCTAssertTrue(customizationController.contains("func lavaGuardAvailability(for look: GuardianShieldStyle) -> LavaGuardAvailability"))
+        XCTAssertTrue(customizationController.contains("LavaGuardAvailabilityPolicy.isAvailable("))
+        XCTAssertTrue(customizationController.contains("let showsProgressDetail = look.lavaGuardID == nextLavaGuardProgressDetailGuardID"))
+        XCTAssertTrue(customizationController.contains("private var nextLavaGuardProgressDetailGuardID: String?"))
+        XCTAssertTrue(customizationController.contains("for goal in LavaGuardProgressPolicy.unlockGoals"))
+        XCTAssertTrue(customizationController.contains("func setUpdatesAppIconWithLavaGuard(_ isEnabled: Bool)"))
+        XCTAssertTrue(customizationController.contains("defaults.set(isEnabled, forKey: updatesAppIconWithLavaGuardDefaultsKey)"))
+        XCTAssertTrue(customizationController.contains("syncAppIcon(to: lavaGuardLook)"))
         XCTAssertTrue(appViewModel.contains("reconcileLiveActivity()"))
-        XCTAssertTrue(appViewModel.contains("defaults.set(canEnableLiveActivities, forKey: usesLiveActivitiesDefaultsKey)"))
-        XCTAssertTrue(appViewModel.contains("var preferredColorScheme: ColorScheme?"))
-        XCTAssertTrue(rootView.contains(".preferredColorScheme(viewModel.preferredColorScheme)"))
+        XCTAssertTrue(customizationController.contains("hub.reconcileLiveActivity()"))
+        XCTAssertTrue(customizationController.contains("defaults.set(canEnableLiveActivities, forKey: usesLiveActivitiesDefaultsKey)"))
+        XCTAssertTrue(customizationController.contains("var preferredColorScheme: ColorScheme?"))
+        XCTAssertTrue(rootView.contains(".preferredColorScheme(customization.preferredColorScheme)"))
     }
 
     func testMascotShieldStyleAddsNamedLooksWithoutDuplicatingEmotions() throws {
@@ -591,8 +607,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: ".tint(LavaStyle.safeGreen)"
         )
 
-        XCTAssertTrue(guardView.contains("SoftShieldGuardian(\n                    size: 96,\n                    state: guardianOverrideState ?? guardianState,\n                    shieldStyle: viewModel.lavaGuardLook\n                )"))
-        XCTAssertTrue(settings.contains("shieldStyle: viewModel.lavaGuardLook"))
+        XCTAssertTrue(guardView.contains("SoftShieldGuardian(\n                    size: 96,\n                    state: guardianOverrideState ?? guardianState,\n                    shieldStyle: customization.lavaGuardLook\n                )"))
+        XCTAssertTrue(settings.contains("shieldStyle: customization.lavaGuardLook"))
         XCTAssertTrue(settings.contains(".foregroundStyle(availability.titleColor(for: look))"))
         XCTAssertTrue(settings.contains("case .cherryQuartz:"))
         XCTAssertTrue(settings.contains("case .emerald:"))
@@ -604,7 +620,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(tabViewBlock.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))
-        XCTAssertFalse(tabViewBlock.contains("shieldStyle: viewModel.lavaGuardLook"))
+        XCTAssertFalse(tabViewBlock.contains("shieldStyle: customization.lavaGuardLook"))
         XCTAssertFalse(tabViewBlock.contains("@EnvironmentObject private var viewModel: AppViewModel"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
@@ -1076,6 +1092,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     func testLiveActivityControllerStartsUpdatesEndsAndPublishesPauseAuthState() throws {
         let controller = try readSource(.lavaLiveActivityController)
         let appViewModel = try readSource(.appViewModel)
+        // The hub's reconcile reads the three preferences off the Phase D5 controller.
+        let customizationController = try readSource(.customizationController)
 
         XCTAssertTrue(controller.contains("import ActivityKit"))
         XCTAssertTrue(controller.contains("ActivityAuthorizationInfo()"))
@@ -1092,7 +1110,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         XCTAssertTrue(appViewModel.contains("private let liveActivityController: AmbientProtectionPresenter = LavaLiveActivityController()"))
         XCTAssertTrue(appViewModel.contains("reconcileLiveActivity()"))
-        XCTAssertTrue(appViewModel.contains("shieldStyle: lavaGuardLook"))
+        XCTAssertTrue(customizationController.contains("hub.reconcileLiveActivity()"))
+        XCTAssertTrue(appViewModel.contains("shieldStyle: customization.lavaGuardLook"))
         XCTAssertTrue(appViewModel.contains("performLiveActivityActionRequest(_ request: LavaLiveActivityActionRequest)"))
         XCTAssertTrue(appViewModel.contains("SecurityProtectedSurfaceStorage.isProtected(\n                    .protectionPause"))
         XCTAssertTrue(appViewModel.contains("pauseProtectionTemporarily(for: .fiveMinutes)"))
