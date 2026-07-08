@@ -113,6 +113,12 @@ jobs:
         # Version-pinned like the other containerized scanners (security.yml).
         uses: docker://ghcr.io/realm/swiftlint:0.59.1
         with:
+          # The leading `swiftlint` token is REQUIRED for this pinned image: 0.59.1 is
+          # CMD-style (no ENTRYPOINT), so args form the whole container command — dropping
+          # the token fails at docker exec (`"--lenient": executable file not found`,
+          # run 2026-07-08 on this repo). Upstream added an ENTRYPOINT after 0.59.1
+          # (Codex P1 on lavasec-ios#50 cited main); if this pin is ever bumped to an
+          # ENTRYPOINT image, drop the token or the binary name doubles.
           args: swiftlint --lenient --reporter github-actions-logging
 
       - name: Merge-up contamination guard
