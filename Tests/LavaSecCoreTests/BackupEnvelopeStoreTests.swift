@@ -69,6 +69,50 @@ final class BackupEnvelopeStoreTests: XCTestCase {
         XCTAssertEqual(store.lastUploadedAt(), uploadedAt)
     }
 
+    func testRecordUploadIfCurrentRecordsForTheCurrentEnvelope() throws {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        let envelope = makeEnvelope(ciphertextByteSize: 2_000)
+        let uploadedAt = Date(timeIntervalSince1970: 1_700_500_000)
+        try store.saveEnvelope(envelope)
+
+        XCTAssertTrue(store.recordUploadIfCurrent(envelope, at: uploadedAt))
+        XCTAssertEqual(store.lastUploadedAt(), uploadedAt)
+        XCTAssertEqual(
+            store.currentState(),
+            .synced(estimatedByteSize: 2_000 + 1_024, uploadedAt: uploadedAt)
+        )
+    }
+
+    func testRecordUploadIfCurrentRefusesWhenEnvelopeWasResealedMidUpload() throws {
+        // The mid-upload re-seal race (Phase D1, was AppViewModel's
+        // recordEncryptedBackupUploadIfStillCurrent): a config/library change re-seals +
+        // saves a NEWER local envelope while an older one is still uploading. Recording the
+        // older upload would falsely report .synced while the newer envelope still needs
+        // uploading — the marker must be refused and the state stay "not yet uploaded".
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        let uploadingEnvelope = makeEnvelope(ciphertextByteSize: 2_000)
+        try store.saveEnvelope(uploadingEnvelope)
+        let resealedEnvelope = makeEnvelope(ciphertextByteSize: 3_000)
+        try store.saveEnvelope(resealedEnvelope)
+
+        XCTAssertFalse(
+            store.recordUploadIfCurrent(uploadingEnvelope, at: Date(timeIntervalSince1970: 1_700_500_000))
+        )
+        XCTAssertNil(store.lastUploadedAt())
+        XCTAssertEqual(store.currentState(), .waitingForSignIn(estimatedByteSize: 3_000 + 1_024))
+    }
+
+    func testRecordUploadIfCurrentRefusesWhenNoEnvelopeIsSaved() {
+        let store = BackupEnvelopeStore(storage: InMemoryBackupEnvelopeStorage())
+
+        XCTAssertFalse(
+            store.recordUploadIfCurrent(makeEnvelope(), at: Date(timeIntervalSince1970: 1_700_500_000))
+        )
+        XCTAssertNil(store.lastUploadedAt())
+    }
+
     func testEstimatedByteSizeAddsReservedOverhead() {
         let store = BackupEnvelopeStore(storage: InMemoryBackupEnvelopeStorage())
         let envelope = makeEnvelope(ciphertextByteSize: 4_096)

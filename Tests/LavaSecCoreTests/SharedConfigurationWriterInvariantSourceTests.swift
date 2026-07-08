@@ -96,7 +96,9 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         let persistFilterLibrary = try sourceBlock(
             in: appViewModel,
             startingAt: "private func persistFilterLibrary(",
-            endingBefore: "private func uploadEncryptedBackup("
+            // loadCustomizationPreferences moved to CustomizationController (Phase D5);
+            // the next hub member after the library-only persist is the progress load.
+            endingBefore: "private func loadLavaGuardProgress()"
         )
         XCTAssertEqual(
             persistFilterLibrary.components(separatedBy: "persistConfigurationOnly(").count - 1, 1,

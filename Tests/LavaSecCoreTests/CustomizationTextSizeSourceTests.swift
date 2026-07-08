@@ -14,7 +14,7 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     func testRootViewAppliesTextSizeOverrideWithStableIdentity() throws {
         let source = try readSource(.rootView)
 
-        XCTAssertTrue(source.contains(".lavaTextSizeOverride(viewModel.textSizeOverride)"),
+        XCTAssertTrue(source.contains(".lavaTextSizeOverride(customization.textSizeOverride)"),
                       "RootView must apply the Customization text-size override app-wide.")
         XCTAssertTrue(source.contains("func lavaTextSizeOverride(_ size: DynamicTypeSize?)"),
                       "The override helper must take an optional size.")
@@ -40,7 +40,9 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     // MARK: Model — Match-System gating + persistence
 
     func testTextSizeOverrideIsNilWhileMatchingSystem() throws {
-        let source = try readSource(.appViewModel)
+        // The text-size preference cluster lives on CustomizationController since the
+        // Phase D5 customization peel.
+        let source = try readSource(.customizationController)
 
         XCTAssertTrue(source.contains("textSizeMatchesSystem ? nil : textSize.dynamicTypeSize"),
                       "textSizeOverride must be nil while Match System is on, so the system setting stays in charge.")
@@ -57,10 +59,10 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     /// The first time Match System is turned off with no saved Lava size, the slider is seeded from
     /// the current system size so the app doesn't jump for users whose iOS text size isn't `.large`.
     func testFirstOptOutSeedsFromSystemSize() throws {
-        let viewModelSource = try readSource(.appViewModel)
-        XCTAssertTrue(viewModelSource.contains("static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize"),
+        let controllerSource = try readSource(.customizationController)
+        XCTAssertTrue(controllerSource.contains("static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize"),
                       "There must be a system-size → LavaTextSize mapping to seed from.")
-        XCTAssertTrue(viewModelSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil"),
+        XCTAssertTrue(controllerSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil"),
                       "The seed must run only on opt-out and only when no Lava size was ever saved (a saved size wins).")
 
         let settingsSource = try readSource(.settingsView)
@@ -82,13 +84,13 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
 
         // The slider greys out (opacity) and is disabled while matching the system — reads as
         // inactive without relying on color, and VoiceOver skips a knob that would do nothing.
-        XCTAssertTrue(source.contains(".disabled(viewModel.textSizeMatchesSystem)"),
+        XCTAssertTrue(source.contains(".disabled(customization.textSizeMatchesSystem)"),
                       "The Text Size slider must be disabled while Match System is on.")
-        XCTAssertTrue(source.contains(".opacity(viewModel.textSizeMatchesSystem ? 0.4 : 1)"),
+        XCTAssertTrue(source.contains(".opacity(customization.textSizeMatchesSystem ? 0.4 : 1)"),
                       "The Text Size slider must grey out while Match System is on.")
         XCTAssertTrue(source.contains(".accessibilityLabel(\"Text Size\")"),
                       "The slider needs a meaningful accessibility label.")
-        XCTAssertTrue(source.contains(".accessibilityValue(viewModel.textSize.displayName.lavaLocalized)"),
+        XCTAssertTrue(source.contains(".accessibilityValue(customization.textSize.displayName.lavaLocalized)"),
                       "The slider must announce the selected size (Small, Large, …) to VoiceOver, not a raw 0–6 value.")
     }
 

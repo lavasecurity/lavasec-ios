@@ -24,28 +24,31 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testSignInRowsUseProviderSpecificProgressState() throws {
+        // The account cluster lives in AccountController since the Phase D3 peel; the
+        // view rows observe the `account` environment object.
         let settingsViewSource = try readSource(.settingsView)
-        let appViewModelSource = try readSource(.appViewModel)
+        let controllerSource = try readSource(.accountController)
 
-        XCTAssertTrue(appViewModelSource.contains("var isAppleSignInInProgress: Bool"))
-        XCTAssertTrue(appViewModelSource.contains("var isGoogleSignInInProgress: Bool"))
-        XCTAssertTrue(settingsViewSource.contains("isSigningIn: viewModel.isAppleSignInInProgress"))
-        XCTAssertTrue(settingsViewSource.contains("if viewModel.isGoogleSignInInProgress"))
-        XCTAssertFalse(settingsViewSource.contains("isSigningIn: viewModel.isAccountSignInInProgress"))
-        XCTAssertFalse(settingsViewSource.contains("if viewModel.isAccountSignInInProgress"))
+        XCTAssertTrue(controllerSource.contains("var isAppleSignInInProgress: Bool"))
+        XCTAssertTrue(controllerSource.contains("var isGoogleSignInInProgress: Bool"))
+        XCTAssertTrue(settingsViewSource.contains("isSigningIn: account.isAppleSignInInProgress"))
+        XCTAssertTrue(settingsViewSource.contains("if account.isGoogleSignInInProgress"))
+        XCTAssertFalse(settingsViewSource.contains("isSigningIn: account.isAccountSignInInProgress"))
+        XCTAssertFalse(settingsViewSource.contains("if account.isAccountSignInInProgress"))
     }
 
     func testSignInTitlesOnlyShowOpeningForActiveProvider() throws {
-        let appViewModelSource = try readSource(.appViewModel)
+        // The sign-in action titles live on AccountController since the Phase D3 peel.
+        let controllerSource = try readSource(.accountController)
         let appleTitleBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "var appleSignInActionTitle: String",
             endingBefore: "var googleSignInActionTitle: String"
         )
         let googleTitleBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "var googleSignInActionTitle: String",
-            endingBefore: "var encryptedBackupSummaryText: String"
+            endingBefore: "// MARK: - Account & sign-in"
         )
 
         XCTAssertTrue(appleTitleBlock.contains("isAppleSignInInProgress ? \"Opening Apple sign-in\" : \"Sign in with Apple\""))
@@ -55,43 +58,46 @@ final class AccountSignInSourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(appViewModelSource.contains("isAccountSignInInProgress"))
+        XCTAssertTrue(controllerSource.contains("isAccountSignInInProgress"))
     }
 
     func testConnectedTitlesAreProviderSpecific() throws {
         let settingsViewSource = try readSource(.settingsView)
-        let appViewModelSource = try readSource(.appViewModel)
+        // The connection flags + action titles live on AccountController since the
+        // Phase D3 peel; the view reads them off the `account` environment object.
+        let controllerSource = try readSource(.accountController)
         let appleTitleBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "var appleSignInActionTitle: String",
             endingBefore: "var googleSignInActionTitle: String"
         )
         let googleTitleBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "var googleSignInActionTitle: String",
-            endingBefore: "var encryptedBackupSummaryText: String"
+            endingBefore: "// MARK: - Account & sign-in"
         )
 
-        XCTAssertTrue(appViewModelSource.contains("var isAppleAccountConnected: Bool"))
-        XCTAssertTrue(appViewModelSource.contains("var isGoogleAccountConnected: Bool"))
+        XCTAssertTrue(controllerSource.contains("var isAppleAccountConnected: Bool"))
+        XCTAssertTrue(controllerSource.contains("var isGoogleAccountConnected: Bool"))
         XCTAssertTrue(appleTitleBlock.contains("if isAppleAccountConnected"))
         XCTAssertTrue(appleTitleBlock.contains("return \"Signed in with Apple\""))
         XCTAssertFalse(appleTitleBlock.contains("signedInProviderName.map"))
         XCTAssertTrue(googleTitleBlock.contains("if isGoogleAccountConnected"))
         XCTAssertTrue(googleTitleBlock.contains("return \"Signed in with Google\""))
         XCTAssertFalse(googleTitleBlock.contains("signedInProviderName.map"))
-        XCTAssertTrue(settingsViewSource.contains("if viewModel.isAppleAccountConnected"))
-        XCTAssertTrue(settingsViewSource.contains("if viewModel.isGoogleAccountConnected"))
+        XCTAssertTrue(settingsViewSource.contains("if account.isAppleAccountConnected"))
+        XCTAssertTrue(settingsViewSource.contains("if account.isGoogleAccountConnected"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(appViewModelSource.contains("signedInProviderName"))
+        XCTAssertTrue(controllerSource.contains("signedInProviderName"))
     }
 
     func testAccountStatusTextUsesProviderLabelsInsteadOfEmailAddresses() throws {
-        let appViewModelSource = try readSource(.appViewModel)
+        // The account status presentation lives on AccountController (Phase D3 peel).
+        let controllerSource = try readSource(.accountController)
         let statusBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "var accountStatusText: String",
             endingBefore: "var accountStatusDetailText: String"
         )
@@ -106,7 +112,9 @@ final class AccountSignInSourceTests: XCTestCase {
     func testAccountSheetsShowProviderEmailRows() throws {
         let settingsViewSource = try readSource(.settingsView)
         let onboardingSource = try readSource(.onboardingFlowView)
-        let appViewModelSource = try readSource(.appViewModel)
+        // The published connections live on AccountController (Phase D3 peel); both
+        // sheets read them off the `account` environment object.
+        let controllerSource = try readSource(.accountController)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountSheet: View",
@@ -114,12 +122,12 @@ final class AccountSignInSourceTests: XCTestCase {
         )
         let onboardingSignedInBlock = try sourceBlock(
             in: onboardingSource,
-            startingAt: "if viewModel.isAccountSignedIn {",
+            startingAt: "if account.isAccountSignedIn {",
             endingBefore: "} else {"
         )
 
-        XCTAssertTrue(appViewModelSource.contains("var accountConnections: [AccountAuthConnection]"))
-        XCTAssertTrue(settingsSheetBlock.contains("let accountConnections = viewModel.accountConnections"))
+        XCTAssertTrue(controllerSource.contains("var accountConnections: [AccountAuthConnection]"))
+        XCTAssertTrue(settingsSheetBlock.contains("let accountConnections = account.accountConnections"))
         XCTAssertTrue(settingsSheetBlock.contains("AccountConnectionRow(connection: connection)"))
         XCTAssertTrue(settingsViewSource.contains("Text(connection.email ??"))
         XCTAssertTrue(settingsViewSource.contains("Image(systemName: \"apple.logo\")"))
@@ -169,23 +177,26 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertFalse(onboardingConnectionRowBlock.contains(".minimumScaleFactor(0.82)"))
 
         XCTAssertTrue(settingsSheetBlock.contains("performAppSettingsMutation(reason: \"Edit Account settings\")"))
-        XCTAssertTrue(settingsSheetBlock.contains("viewModel.signOutAccount()"))
+        XCTAssertTrue(settingsSheetBlock.contains("account.signOutAccount()"))
         XCTAssertTrue(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: LavaStyle.secondaryText)"))
         XCTAssertFalse(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: .red, titleTint: .red)"))
-        XCTAssertTrue(onboardingSheetBlock.contains("Button {\n                                viewModel.signOutAccount()"))
+        XCTAssertTrue(onboardingSheetBlock.contains("Button {\n                                account.signOutAccount()"))
         XCTAssertTrue(onboardingSheetBlock.contains("title: \"Sign out of all accounts\",\n                                    systemImage: \"rectangle.portrait.and.arrow.right\",\n                                    tint: LavaStyle.ink"))
         XCTAssertFalse(onboardingSheetBlock.contains("title: \"Sign out of all accounts\",\n                                    systemImage: \"rectangle.portrait.and.arrow.right\",\n                                    tint: .red"))
     }
 
     func testStartingOneProviderSignInPreservesExistingConnectedProviders() throws {
-        let appViewModelSource = try readSource(.appViewModel)
+        // The sign-in flows live on AccountController since the Phase D3 peel; the
+        // bodies (and the connection-preserving .signingIn transition pinned here)
+        // moved verbatim.
+        let controllerSource = try readSource(.accountController)
         let appleSignInBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "func beginSignInWithApple()",
             endingBefore: "func beginSignInWithGoogle()"
         )
         let googleSignInBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "func beginSignInWithGoogle()",
             endingBefore: "func signOutAccount()"
         )
@@ -231,38 +242,69 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testBackupSyncUsesCurrentSupabaseIdentityOnce() throws {
+        // Phase D1 peel: the backup cluster lives in BackupController and reaches the
+        // session only through the hub bridge. Since the Phase D3 account peel that
+        // bridge is a delegation CHAIN — hub conformance → AccountController →
+        // AccountAuthService — and every link must map to the ONE canonical Supabase
+        // identity (currentBackupSession, never the per-provider currentBackupSessions).
+        let controllerSource = try readSource(.backupController)
         let appViewModelSource = try readSource(.appViewModel)
+        let accountControllerSource = try readSource(.accountController)
         let uploadBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "private func uploadEncryptedBackup(",
-            endingBefore: "private func uploadPendingEncryptedBackupIfPossible()"
+            endingBefore: "func uploadPendingEncryptedBackupIfPossible()"
         )
         let restoreBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "func restoreEncryptedBackup(",
-            endingBefore: "func refreshDiagnostics()"
+            endingBefore: "func clearEncryptedBackup() async {"
         )
         let fetchBlock = try sourceBlock(
-            in: appViewModelSource,
+            in: controllerSource,
             startingAt: "private func loadAvailableEncryptedBackupEnvelope()",
-            endingBefore: "private func loadEncryptedBackupState()"
+            endingBefore: "func loadEncryptedBackupState()"
         )
 
-        XCTAssertTrue(uploadBlock.contains("guard let session = try await accountAuthService.currentBackupSession()"))
+        XCTAssertTrue(uploadBlock.contains("guard let session = try await hub.currentBackupSession()"))
         XCTAssertFalse(uploadBlock.contains("currentBackupSessions()"))
         XCTAssertFalse(uploadBlock.contains("for session in sessions"))
-        XCTAssertTrue(fetchBlock.contains("guard let session = try await accountAuthService.currentBackupSession()"))
+        XCTAssertTrue(fetchBlock.contains("guard let session = try await hub.currentBackupSession()"))
         XCTAssertFalse(fetchBlock.contains("currentBackupSessions()"))
         XCTAssertFalse(fetchBlock.contains("for session in sessions"))
-        XCTAssertTrue(restoreBlock.contains("if let session = try await accountAuthService.currentBackupSession()"))
+        XCTAssertTrue(restoreBlock.contains("if let session = try await hub.currentBackupSession()"))
         XCTAssertFalse(restoreBlock.contains("currentBackupSessions()"))
         XCTAssertFalse(restoreBlock.contains("for session in sessions"))
+
+        // Hub link: the BackupHubBridging conformance delegates through the `account`
+        // controller (signatures unchanged for the D1/D2 callers).
+        let bridgeBlock = try sourceBlock(
+            in: appViewModelSource,
+            startingAt: "extension AppViewModel: BackupHubBridging"
+        )
+        XCTAssertTrue(bridgeBlock.contains("try await account.currentBackupSession()"))
+        XCTAssertTrue(bridgeBlock.contains("try await account.refreshCurrentBackupSession()"))
+        XCTAssertFalse(bridgeBlock.contains("currentBackupSessions()"))
+        XCTAssertFalse(bridgeBlock.contains("refreshCurrentSessions()"))
+
+        // Controller link: AccountController owns AccountAuthService and its
+        // pass-throughs hit the single-session service API only.
+        let sessionPassThroughBlock = try sourceBlock(
+            in: accountControllerSource,
+            startingAt: "// MARK: - Hub-bridge backing"
+        )
+        XCTAssertTrue(sessionPassThroughBlock.contains("try await accountAuthService.currentBackupSession()"))
+        XCTAssertTrue(sessionPassThroughBlock.contains("try await accountAuthService.refreshCurrentSession()"))
+        XCTAssertFalse(accountControllerSource.contains("currentBackupSessions()"))
+        XCTAssertFalse(accountControllerSource.contains("refreshCurrentSessions()"))
     }
 
     func testAccountDeletionIsExposedFromAccountSheets() throws {
         let settingsViewSource = try readSource(.settingsView)
         let onboardingSource = try readSource(.onboardingFlowView)
         let appViewModelSource = try readSource(.appViewModel)
+        // The deleteAccount flow lives on AccountController since the Phase D3 peel.
+        let accountControllerSource = try readSource(.accountController)
         let serviceSource = try readSource(.accountAuthService)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
@@ -287,20 +329,36 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(onboardingSheetBlock.contains("Button(\"Delete\", role: .destructive)"))
         XCTAssertFalse(settingsSheetBlock.contains(".confirmationDialog("))
         XCTAssertFalse(onboardingSheetBlock.contains(".confirmationDialog("))
-        XCTAssertTrue(appViewModelSource.contains("@Published private(set) var isAccountDeletionInProgress"))
-        XCTAssertTrue(appViewModelSource.contains("func deleteAccount() async -> Bool"))
-        XCTAssertTrue(appViewModelSource.contains("backupKeychainStore.deleteRecoveryCode()"))
+        XCTAssertTrue(accountControllerSource.contains("@Published private(set) var isAccountDeletionInProgress"))
+        XCTAssertTrue(accountControllerSource.contains("func deleteAccount() async -> Bool"))
+        // Account deletion still tears down the device-local backup unlock material — the
+        // keychain deletes moved to BackupController with the D1 peel, and since the D3
+        // peel the deleting AccountController reports accountWillCompleteDeletion() to
+        // the hub, which routes it to the backup controller (hub-orchestrated; feature
+        // controllers never reference each other).
+        XCTAssertTrue(accountControllerSource.contains("hub.accountWillCompleteDeletion()"))
+        XCTAssertTrue(appViewModelSource.contains("backup.deleteLocalUnlockSecretsAfterAccountDeletion()"))
+        let backupControllerSource = try readSource(.backupController)
+        let accountDeletionBlock = try sourceBlock(
+            in: backupControllerSource,
+            startingAt: "func deleteLocalUnlockSecretsAfterAccountDeletion() {",
+            endingBefore: "private enum RemoteBackupDeletionOutcome {"
+        )
+        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deleteRecoveryCode()"))
+        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deleteDeviceSecret()"))
+        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deletePasskeyCredentialID()"))
         XCTAssertTrue(serviceSource.contains("func deleteAccount() async throws"))
         XCTAssertTrue(serviceSource.contains("v1/account/delete"))
         XCTAssertTrue(serviceSource.contains("Authorization"))
     }
 
     func testBeginSignInTracksActiveProviderUntilFlowFinishes() throws {
-        let appViewModelSource = try readSource(.appViewModel)
+        // The per-provider progress state lives on AccountController (Phase D3 peel).
+        let controllerSource = try readSource(.accountController)
 
-        XCTAssertTrue(appViewModelSource.contains("@Published private(set) var accountSignInProviderInProgress: AccountAuthProvider?"))
-        XCTAssertTrue(appViewModelSource.contains("accountSignInProviderInProgress = .apple"))
-        XCTAssertTrue(appViewModelSource.contains("accountSignInProviderInProgress = .google"))
-        XCTAssertTrue(appViewModelSource.contains("defer { accountSignInProviderInProgress = nil }"))
+        XCTAssertTrue(controllerSource.contains("@Published private(set) var accountSignInProviderInProgress: AccountAuthProvider?"))
+        XCTAssertTrue(controllerSource.contains("accountSignInProviderInProgress = .apple"))
+        XCTAssertTrue(controllerSource.contains("accountSignInProviderInProgress = .google"))
+        XCTAssertTrue(controllerSource.contains("defer { accountSignInProviderInProgress = nil }"))
     }
 }

@@ -178,6 +178,8 @@ struct FilterReviewChangeRow: View {
 
 struct FilterPreparationScreen: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The mascot look lives on the customization controller (Phase D5 peel).
+    @EnvironmentObject private var customization: CustomizationController
     // Gate the bar's eased fill + the checkmark reveal on Reduce Motion, matching the sibling
     // PreparationTickerTitle and the app-wide LavaFlowTransition.incidental convention: under Reduce
     // Motion the quarters land instantly (no sliding sweep, no dead-hold) — the fade to the checkmark
@@ -206,7 +208,7 @@ struct FilterPreparationScreen: View {
 
                 switch viewModel.filterPreparationState {
                 case .idle:
-                    SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
+                    SoftShieldGuardian(size: 76, state: .waking, shieldStyle: customization.lavaGuardLook)
                     PreparationTickerTitle(FilterPreparationPresentation.message(for: .downloading))
 
                 case .preparing(let progress, let message):
@@ -220,7 +222,7 @@ struct FilterPreparationScreen: View {
                     } else {
                         // Still filling — including the Success sweep (3/4 → full) before the glyph
                         // takes over. The eased animation makes every step a smooth slide, not a jump.
-                        SoftShieldGuardian(size: 76, state: .waking, shieldStyle: viewModel.lavaGuardLook)
+                        SoftShieldGuardian(size: 76, state: .waking, shieldStyle: customization.lavaGuardLook)
                         PreparationTickerTitle(progress >= 1 ? "Success" : message)
 
                         ProgressView(value: progress, total: 1)

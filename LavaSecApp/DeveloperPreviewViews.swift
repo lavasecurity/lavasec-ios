@@ -160,6 +160,11 @@ struct WebsiteAssetCaptureRootView: View {
         .background(LavaStyle.groupedBackground)
         .preferredColorScheme(.light)
         .environmentObject(viewModel)
+        .environmentObject(viewModel.backup)
+        .environmentObject(viewModel.plus)
+        .environmentObject(viewModel.account)
+        .environmentObject(viewModel.reports)
+        .environmentObject(viewModel.customization)
         .environmentObject(security)
         .onAppear {
             startCaptureStateIfNeeded()
@@ -199,7 +204,8 @@ struct WebsiteAssetCaptureRootView: View {
 #endif
 
 struct GentleProtectionDiagram: View {
-    @EnvironmentObject private var viewModel: AppViewModel
+    // The mascot look lives on the customization controller (Phase D5 peel).
+    @EnvironmentObject private var customization: CustomizationController
 
     let blockedText: String
     let allowedText: String
@@ -225,7 +231,7 @@ struct GentleProtectionDiagram: View {
                     size: isCompact ? 54 : 62,
                     state: .awake,
                     animates: false,
-                    shieldStyle: viewModel.lavaGuardLook
+                    shieldStyle: customization.lavaGuardLook
                 )
 
                 DiagramEndpoint(

@@ -7,140 +7,145 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1A0000010000000000000001 /* LavaSecApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001001 /* LavaSecApp.swift */; };
-		1A0000010000000000000002 /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001002 /* AppViewModel.swift */; };
-		1A0000010000000000000011 /* AccountAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001011 /* AccountAuthService.swift */; };
-		1A0000010000000000000012 /* BackupKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001012 /* BackupKeychainStore.swift */; };
-		1A0000010000000000000013 /* BackupSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001013 /* BackupSyncService.swift */; };
-		1A0000010000000000000014 /* BackupSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001014 /* BackupSetupView.swift */; };
-		1A0000010000000000000015 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001015 /* BackupRestoreView.swift */; };
-		1A000001000000000000001D /* BackupPasskeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101B /* BackupPasskeyCoordinator.swift */; };
-		1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001016 /* AccountSessionKeychainStore.swift */; };
-		1A0000010000000000000018 /* LavaStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001017 /* LavaStrings.swift */; };
-		1A000001000000000000001B /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007004 /* GoogleSignIn */; };
-		1A000001000000000000001C /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101A /* OnboardingFlowView.swift */; };
-		1A0000010000000000000003 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001003 /* RootView.swift */; };
-		1A0000010000000000000030 /* FilterPreparationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001030 /* FilterPreparationPresentation.swift */; };
-		1A0000010000000000000029 /* LavaIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001029 /* LavaIcon.swift */; };
-		1A0000010000000000000028 /* ProtectionPlatformSeams.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001028 /* ProtectionPlatformSeams.swift */; };
-		1A0000010000000000000027 /* ProtectionConnectivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */; };
-		1A0000010000000000000025 /* GuardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001025 /* GuardView.swift */; };
-		1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001026 /* DeveloperPreviewViews.swift */; };
-		1A0000010000000000000022 /* LavaTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001022 /* LavaTokens.swift */; };
-		1A0000010000000000000023 /* LavaScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001023 /* LavaScaffold.swift */; };
-		1A00000100000000000000F2 /* LavaSelectableRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010F2 /* LavaSelectableRow.swift */; };
-		1A00000100000000000000F0 /* LavaConfirmationDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010F0 /* LavaConfirmationDialog.swift */; };
-		1A0000010000000000000024 /* LavaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001024 /* LavaComponents.swift */; };
-		1A0000010000000000000010 /* LavaCondensedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001010 /* LavaCondensedList.swift */; };
-		1A0000010000000000000004 /* FiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001004 /* FiltersView.swift */; };
-		1A0000080000000000003001 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000005001 /* LavaSecIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		1A0000080000000000001101 /* LavaSecIntentsExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000001001 /* LavaSecIntentsExtension.swift */; };
-		1A0000080000000000001102 /* FocusFilterIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001FFF /* FocusFilterIntent.swift */; };
-		1A0000080000000000001103 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
-		1A0000080000000000001104 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000002001 /* FocusSwitchEnvironment.swift */; };
-		1A0000080000000000001105 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000080000000000007008 /* LavaSecCore */; };
-		1A00000100000000000000D0 /* ShareableFiltersUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010D0 /* ShareableFiltersUI.swift */; };
-		1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000101D /* FilterReviewFlowView.swift */; };
-		1A0000010000000000000020 /* SecurityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001020 /* SecurityController.swift */; };
-		1A00000100000000000000A1 /* TemporaryProtectionPauseController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */; };
-		1A0000010000000000000021 /* LavaSecurityPlusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001021 /* LavaSecurityPlusStore.swift */; };
-		1A000003000000000000000D /* LavaLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000001004 /* LavaLiveActivityController.swift */; };
-		1A00000300000000000000F1 /* DarwinNotificationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A00000300000000000010F1 /* DarwinNotificationObserver.swift */; };
-		1A0000010000000000000005 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001005 /* DiagnosticsView.swift */; };
-		1A0000010000000000000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001006 /* SettingsView.swift */; };
-		1A0000010000000000000007 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
-		1A0000080000000000000001 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000002001 /* FocusSwitchEnvironment.swift */; };
-		1A0000030000000000000005 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002002 /* SoftShieldGuardian.swift */; };
-		1A0000030000000000000007 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002003 /* LavaActivityAttributes.swift */; };
-		1A0000030000000000000009 /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */; };
-		1A000003000000000000000B /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002005 /* LavaLiveActivityIntents.swift */; };
-		1A0000040000000000000001 /* LavaProtectionCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000040000000000002001 /* LavaProtectionCommandService.swift */; };
-		1A000001000000000000000E /* AdminQAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001009 /* AdminQAView.swift */; };
-		1A000001000000000000000F /* RageShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000100A /* RageShakeDetector.swift */; };
-		1A0000010000000000000008 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000003001 /* PacketTunnelProvider.swift */; };
-		1A0000010000000000000009 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
-		1A0000010000000000000017 /* DeviceDNSResolver.c in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000003004 /* DeviceDNSResolver.c */; };
-		1A0000050000000000000001 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002003 /* LavaActivityAttributes.swift */; };
-		1A000001000000000000000A /* LavaSecTunnel.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000005002 /* LavaSecTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		1A0000030000000000000002 /* LavaSecWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000005001 /* LavaSecWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		1A000001000000000000000B /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007002 /* LavaSecCore */; };
-		1A000001000000000000000C /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000010000000000007003 /* LavaSecCore */; };
-		1A0000030000000000000003 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000030000000000007007 /* LavaSecCore */; };
-		1A000001000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001008 /* Assets.xcassets */; };
-		1A0000060000000000000001 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001001 /* AppIcon.icon */; };
-		1A0000060000000000000002 /* AppIconFireOpal.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001002 /* AppIconFireOpal.icon */; };
-		1A0000060000000000000003 /* AppIconAmethyst.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001003 /* AppIconAmethyst.icon */; };
-		1A0000060000000000000004 /* AppIconObsidian.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001004 /* AppIconObsidian.icon */; };
-		1A0000060000000000000005 /* AppIconCherryQuartz.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001005 /* AppIconCherryQuartz.icon */; };
-		1A0000060000000000000006 /* AppIconEmerald.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001006 /* AppIconEmerald.icon */; };
-		1A0000060000000000000007 /* AppIconKiwiCreme.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001007 /* AppIconKiwiCreme.icon */; };
-		1A0000060000000000000008 /* AppIcon-QA.icon in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000060000000000001008 /* AppIcon-QA.icon */; };
-		1A0000030000000000000001 /* LavaSecWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000001001 /* LavaSecWidget.swift */; };
-		1A0000030000000000000004 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000002001 /* AppGroup.swift */; };
-		1A0000030000000000000006 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002002 /* SoftShieldGuardian.swift */; };
-		1A0000030000000000000008 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002003 /* LavaActivityAttributes.swift */; };
-		1A000003000000000000000A /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */; };
-		1A000003000000000000000C /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000030000000000002005 /* LavaLiveActivityIntents.swift */; };
-		1A0000040000000000000002 /* LavaProtectionCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000040000000000002001 /* LavaProtectionCommandService.swift */; };
-			1A0000010000000000000019 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001018 /* Localizable.xcstrings */; };
-		1A0000080000000000000019 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000080000000000001018 /* Localizable.xcstrings */; };
-			1A000001000000000000001A /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000001019 /* InfoPlist.xcstrings */; };
-			1A0000020000000000000001 /* SecuritySettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000001001 /* SecuritySettingsUITests.swift */; };
-			1A0000020000000000000002 /* CoreFlowDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000001002 /* CoreFlowDeviceTests.swift */; };
-			1A0000020000000000000003 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000020000000000007006 /* LavaSecCore */; };
+		0392569A8795B4EBDC2B77D0 /* ProtectionPlatformSeams.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC4BDFBADFBFFA9E8F01CE02 /* ProtectionPlatformSeams.swift */; };
+		04A591451D08C0D97A7D9A65 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */; };
+		0BEC6C839FC5808F6CD3B150 /* ProtectionConnectivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE5788769192F41A62C8FBB /* ProtectionConnectivityPresentation.swift */; };
+		0FD1F5BDB46AAF8D1E79EAE1 /* LavaSecWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E61E81E0049BC464964CD618 /* LavaSecWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		18A7D521C5FFCA77A3957B88 /* AccountAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1684C162C60DB73CD1C5176 /* AccountAuthService.swift */; };
+		19EBDB26B5F1BD7AE6A7B5E3 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 05F233E527344169F47CC27F /* LavaSecCore */; };
+		1B430ED2EFA66562C6323199 /* FiltersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65DA81562188BC2A4F30EF79 /* FiltersView.swift */; };
+		1BAB439F93C845E61F6EFF18 /* CustomizationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3243A36B97CE35B1E1CF083 /* CustomizationController.swift */; };
+		2018C1F3BD903D586D86FA87 /* TemporaryProtectionPauseController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A9A1E8579A9360795AE2BFE /* TemporaryProtectionPauseController.swift */; };
+		22BE365D7FAA7E80D4699AE2 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2B24A38AB6289CC278FB512C /* LavaSecCore */; };
+		22E2AC46225A09D859737264 /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631308081BEDBCB9110A86FB /* LavaLiveActivityActionRequest.swift */; };
+		2C270B1939D9E69B0AB32170 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
+		3848BA4B978A21ABE812D640 /* LavaSecurityPlusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FB3410530DA6E54514EA0C /* LavaSecurityPlusStore.swift */; };
+		3E3256140A0F37C7440015B4 /* SecurityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29C2940C84A12870A4B1167 /* SecurityController.swift */; };
+		439409D46616592FC49A3166 /* LavaIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABCAEA160F90F5A448A5106 /* LavaIcon.swift */; };
+		448DA58FF28701012497AABB /* LavaProtectionCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D974530B9A8B79A6BA6BDFB6 /* LavaProtectionCommandService.swift */; };
+		4516E79CC0891D448A5E8FFF /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */; };
+		486193D35FE048DB04CF8D7E /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 4A0E5F380B28F3E11E46BE82 /* Localizable.xcstrings */; };
+		48CCE8111E3701E3845AFD87 /* FilterPreparationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377227FF19AD51CBBA46D14F /* FilterPreparationPresentation.swift */; };
+		48F2BA34C61849B6B0ED67B5 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = B20E7F70A51B40B48535E757 /* LavaSecIntents.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		490DA8B239CBB16916A8C4B6 /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631308081BEDBCB9110A86FB /* LavaLiveActivityActionRequest.swift */; };
+		4B054E0FE98760FB5E87E0C2 /* AdminQAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39388C8EDBF998A359692447 /* AdminQAView.swift */; };
+		55E5A66725DBA15F370FFF40 /* AccountSessionKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFC146695FE7F2000BBD1D8 /* AccountSessionKeychainStore.swift */; };
+		59A0193FF7EF22C0865162C8 /* LavaSecurityPlusController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2CD5D67F59378D1DF3FD348 /* LavaSecurityPlusController.swift */; };
+		60E6CF21D875196E34046D9F /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
+		61C16EA9951BCB8DB7FEE549 /* AccountController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB298B6CD215B94D98BEC40 /* AccountController.swift */; };
+		6836A51EF239AD3A95B66BC0 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0FA3A1980DA87565BA72E48D /* LavaSecCore */; };
+		69BF9CFD7C2FCC7B530EF075 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 2698AE790B2EC125F392D467 /* Localizable.xcstrings */; };
+		6BCE45D9FBE8F3288C77B4CF /* BackupSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B2E6D0E367F6E6B19F50B88 /* BackupSyncService.swift */; };
+		6BDADAD92704D57D416724ED /* GuardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F68DBF8431223971A6D6A3B8 /* GuardView.swift */; };
+		6E74B1C99D1B509A8F1461C3 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FC4E06343769194B51B6F66 /* DiagnosticsView.swift */; };
+		70FE7A2B60CA1872BDA4B7CD /* LavaSecTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 942481FBD1187F268A1B17B6 /* LavaSecTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7610F8020E3FFC929D2545BA /* DarwinNotificationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2BF04367698AD931D1CBA3 /* DarwinNotificationObserver.swift */; };
+		775A367E44D46A2DDF7074CF /* LavaSecApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74243102EA37FA0885E082F /* LavaSecApp.swift */; };
+		7C48199EEFE3E16A9E159D10 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
+		7D61B31D5B5CAF457D42E4CC /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */; };
+		7E6A4E307AFA5800542D80F5 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */; };
+		8504C3B9EE9B428047C2006B /* AppIconAmethyst.icon in Resources */ = {isa = PBXBuildFile; fileRef = 3BD7C830CC4B06E1022AF041 /* AppIconAmethyst.icon */; };
+		90BB4006A0A359A5B2CABE85 /* BackupSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB7C47FB0203698017A6DC5 /* BackupSetupView.swift */; };
+		9578FB4C9CD4249502947686 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 62014BEC1308590DBDFDC281 /* InfoPlist.xcstrings */; };
+		9A1E26FDC73B89F7FE0357DA /* DeveloperPreviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 989ABE7F8DA88E49932EFB5C /* DeveloperPreviewViews.swift */; };
+		9F61E25E969D4E8764F16A97 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 92A55F77631CEC03A1B76E38 /* LavaSecCore */; };
+		9F62E49B0BD6D783DD1E1F8F /* ShareableFiltersUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAA78F82CA320CA83BB68828 /* ShareableFiltersUI.swift */; };
+		A08759F423EA9A7C7D34FEC8 /* LavaSelectableRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01C449F904108483AB3F643 /* LavaSelectableRow.swift */; };
+		A763D73C86209D51A42977A3 /* LavaTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1DF12CD3B98331E69F8B85A /* LavaTokens.swift */; };
+		A8F8BF5B218F192293225391 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E90F37FD03A59436C87C9 /* SoftShieldGuardian.swift */; };
+		A96F5E3A787610CA1F279DE0 /* DeviceDNSResolver.c in Sources */ = {isa = PBXBuildFile; fileRef = A476E049796876A09CC94771 /* DeviceDNSResolver.c */; };
+		AA6B1293710F79C682DA3D46 /* LavaSecCore in Frameworks */ = {isa = PBXBuildFile; productRef = 135580B4385ACEED7B9D1813 /* LavaSecCore */; };
+		AABDEA6D0CED5E3C1B72989A /* LavaConfirmationDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452EDA71ED48695D8F66ECC8 /* LavaConfirmationDialog.swift */; };
+		AD391D05F13421503355D4F6 /* AppIcon-QA.icon in Resources */ = {isa = PBXBuildFile; fileRef = 44E905933618F39CD5CD5AFD /* AppIcon-QA.icon */; };
+		AE698E4EE549C3F63972590B /* AppViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEE0C6FB11D872B41CF42592 /* AppViewModel.swift */; };
+		AF0781428B2CA5DD1846BA19 /* AppIconFireOpal.icon in Resources */ = {isa = PBXBuildFile; fileRef = A4A36223276900C821F9A46C /* AppIconFireOpal.icon */; };
+		B0995E4A0EF007AFDABBD466 /* LavaComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23F650CEEB2D9299F83D202 /* LavaComponents.swift */; };
+		B269895D027C1C596B60418A /* AppIconEmerald.icon in Resources */ = {isa = PBXBuildFile; fileRef = 766203DF4A4069F5808EDA89 /* AppIconEmerald.icon */; };
+		B63FB8254E06BC94C03D619A /* DiagnosticsController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22417736892B9A6F6D43910 /* DiagnosticsController.swift */; };
+		B87C67226E34E62B77B60245 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E90F37FD03A59436C87C9 /* SoftShieldGuardian.swift */; };
+		BFBA6BE4E35B13CEE5BE415A /* AppIconCherryQuartz.icon in Resources */ = {isa = PBXBuildFile; fileRef = 9758F66E43B8E6F2E892B5E3 /* AppIconCherryQuartz.icon */; };
+		C2EF5EA7ACA7EF2A5EF1F625 /* LavaCondensedList.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3DF3DACCF08F924E18F16D6 /* LavaCondensedList.swift */; };
+		C4447F583558505C8059370B /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F58C8B8DE72A46657CD185 /* FilterReviewFlowView.swift */; };
+		C5EEDE1442744604E7FC14BD /* LavaSecWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6ED257949723A3277496D67 /* LavaSecWidget.swift */; };
+		CF82CA6A8CE155C0E200C3F4 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
+		D4EEDA552641F6ADD42848AE /* BackupKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30AAB1BE92F8F1D3EFBFFCB /* BackupKeychainStore.swift */; };
+		DA2E25FE345E0B8A01769120 /* RageShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76DE535F94487F5B86BAC2FA /* RageShakeDetector.swift */; };
+		DAE8C1A933296EBA9A20AB30 /* BackupPasskeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A559FA7CC5717E4982BC8E8 /* BackupPasskeyCoordinator.swift */; };
+		DE9A19E85E9871691DBAB29A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D0CDE044D25F392A285CBD9D /* Assets.xcassets */; };
+		E04A583EC4B603B19C177AFC /* LavaStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FBAC7417B668F766E37473 /* LavaStrings.swift */; };
+		E0C3FE8BE802449EF1FA52C1 /* SecuritySettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E9F0B4AFAD1CC6D1D6A6A4 /* SecuritySettingsUITests.swift */; };
+		E19D83E9B83CCD33AD1BD202 /* LavaSecIntentsExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA999346ED07803A7F609B26 /* LavaSecIntentsExtension.swift */; };
+		E4971600095483200CCE05D6 /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */; };
+		E86FD4DE8D4841746C71EC47 /* FocusFilterIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150D66A5AB4B36C3E1F8B767 /* FocusFilterIntent.swift */; };
+		E89003FA2B27549418951567 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A6669E00C12ACE0BA2022 /* RootView.swift */; };
+		E8C1893F76E8D625E7914D17 /* CoreFlowDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A123CA5B7F4D795C388BBB /* CoreFlowDeviceTests.swift */; };
+		E9DACA83819725B7E45779CA /* LavaScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0307F06FDA899480972F17 /* LavaScaffold.swift */; };
+		EC85EE16323936B221FB42D3 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */; };
+		EEE01CC96BF967E733F042C0 /* AppIconKiwiCreme.icon in Resources */ = {isa = PBXBuildFile; fileRef = 62D36571C91548DEAB497BAD /* AppIconKiwiCreme.icon */; };
+		EEF22C55AA2E86F6139DF4D1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C6267DC77BF4D6DE0036AA16 /* GoogleSignIn */; };
+		F4C91FF4E37E013CEBFE2A0E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87586B94D5F1BDE576E914A6 /* SettingsView.swift */; };
+		F57C89C6E60F9EBC314D19B6 /* LavaProtectionCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D974530B9A8B79A6BA6BDFB6 /* LavaProtectionCommandService.swift */; };
+		F6646C7800FC5C0576F15EC0 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD591F9BF8393489AF5B4160 /* OnboardingFlowView.swift */; };
+		F97BDA8880B84CB3EE0F1948 /* AppIconObsidian.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5A84157BEB21136149A018EC /* AppIconObsidian.icon */; };
+		FC187227032D9EAF98AF7865 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35C0532BD8DEB45FFE27E603 /* BackupRestoreView.swift */; };
+		FC725F7AC290FDC4F58E6E97 /* LavaActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */; };
+		FDC6382B8A59455A290A53FE /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC13D86F9F6D8EB12B844D9 /* PacketTunnelProvider.swift */; };
+		FF4A8EABB965F626ED0DA8A7 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 83427A3F020AA78216FC7A30 /* AppIcon.icon */; };
+		FF8AE4D951FE19F32D3F111D /* LavaLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C16FD5B0D15FAB11349CFE /* LavaLiveActivityController.swift */; };
+		FFA20501A18536CD3DA27372 /* BackupController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDB8449E737843EBEC973745 /* BackupController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		1A0000010000000000006001 /* PBXContainerItemProxy */ = {
+		2B2C85B18EBA76866519A9BE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 1A0000010000000000009001 /* Project object */;
+			containerPortal = 83262453BC8AED844A7455F3 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 1A0000010000000000008002;
-			remoteInfo = LavaSecTunnel;
-		};
-		1A0000030000000000006003 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 1A0000010000000000009001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 1A0000030000000000008003;
+			remoteGlobalIDString = 15479A35CEFA407334A8EF9A;
 			remoteInfo = LavaSecWidget;
 		};
-		1A0000020000000000006001 /* PBXContainerItemProxy */ = {
+		67540789688D91F9957A8454 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 1A0000010000000000009001 /* Project object */;
+			containerPortal = 83262453BC8AED844A7455F3 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 1A0000010000000000008001;
+			remoteGlobalIDString = BBDEBA7C6CCC5CF9273D342F;
+			remoteInfo = LavaSecTunnel;
+		};
+		70E81AE4DE5567B9A6710FBF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83262453BC8AED844A7455F3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 35CBEDDD793FEE0361B051F6;
 			remoteInfo = LavaSec;
 		};
-		1A0000080000000000006001 /* PBXContainerItemProxy */ = {
+		DC4206CA73AB3E9AD26A18F4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 1A0000010000000000009001 /* Project object */;
+			containerPortal = 83262453BC8AED844A7455F3 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 1A0000080000000000008001;
+			remoteGlobalIDString = 1994B9376017074A73232670;
 			remoteInfo = LavaSecIntents;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		1A0000010000000000004004 /* Embed App Extensions */ = {
+		D3288A740BC8154E9E9F8283 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				1A000001000000000000000A /* LavaSecTunnel.appex in Embed App Extensions */,
-				1A0000030000000000000002 /* LavaSecWidget.appex in Embed App Extensions */,
+				70FE7A2B60CA1872BDA4B7CD /* LavaSecTunnel.appex in Embed Foundation Extensions */,
+				0FD1F5BDB46AAF8D1E79EAE1 /* LavaSecWidget.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000080000000000004004 /* Embed ExtensionKit Extensions */ = {
+		F86686F75C9FC787269E59F4 /* Embed ExtensionKit Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
 			dstSubfolderSpec = 16;
 			files = (
-				1A0000080000000000003001 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */,
+				48F2BA34C61849B6B0ED67B5 /* LavaSecIntents.appex in Embed ExtensionKit Extensions */,
 			);
 			name = "Embed ExtensionKit Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -148,330 +153,313 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		1ACF160000000000000F0101 /* Lava.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Lava.xcconfig; sourceTree = "<group>"; };
-		1ACF160000000000000F0102 /* Lava.QA.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Lava.QA.xcconfig; sourceTree = "<group>"; };
-		1A0000010000000000001001 /* LavaSecApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecApp.swift; sourceTree = "<group>"; };
-		1A0000010000000000001002 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
-		1A0000010000000000001011 /* AccountAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAuthService.swift; sourceTree = "<group>"; };
-		1A0000010000000000001012 /* BackupKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupKeychainStore.swift; sourceTree = "<group>"; };
-		1A0000010000000000001013 /* BackupSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSyncService.swift; sourceTree = "<group>"; };
-		1A0000010000000000001014 /* BackupSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSetupView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001015 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
-		1A000001000000000000101B /* BackupPasskeyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasskeyCoordinator.swift; sourceTree = "<group>"; };
-		1A0000010000000000001016 /* AccountSessionKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSessionKeychainStore.swift; sourceTree = "<group>"; };
-		1A0000010000000000001017 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
-		1A000001000000000000101A /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001003 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001030 /* FilterPreparationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPreparationPresentation.swift; sourceTree = "<group>"; };
-		1A0000010000000000001029 /* LavaIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaIcon.swift; sourceTree = "<group>"; };
-		1A0000010000000000001028 /* ProtectionPlatformSeams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionPlatformSeams.swift; sourceTree = "<group>"; };
-		1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionConnectivityPresentation.swift; sourceTree = "<group>"; };
-		1A0000010000000000001025 /* GuardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001026 /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
-		1A0000010000000000001022 /* LavaTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaTokens.swift; sourceTree = "<group>"; };
-		1A0000010000000000001023 /* LavaScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaScaffold.swift; sourceTree = "<group>"; };
-		1A00000100000000000010F2 /* LavaSelectableRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaSelectableRow.swift; sourceTree = "<group>"; };
-		1A00000100000000000010F0 /* LavaConfirmationDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaConfirmationDialog.swift; sourceTree = "<group>"; };
-		1A0000010000000000001024 /* LavaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaDesignSystem/LavaComponents.swift; sourceTree = "<group>"; };
-		1A0000010000000000001010 /* LavaCondensedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaCondensedList.swift; sourceTree = "<group>"; };
-		1A0000010000000000001004 /* FiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001FFF /* FocusFilterIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusFilterIntent.swift; sourceTree = "<group>"; };
-		1A00000100000000000010D0 /* ShareableFiltersUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableFiltersUI.swift; sourceTree = "<group>"; };
-		1A000001000000000000101D /* FilterReviewFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterReviewFlowView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001020 /* SecurityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityController.swift; sourceTree = "<group>"; };
-		1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryProtectionPauseController.swift; sourceTree = "<group>"; };
-		1A0000010000000000001021 /* LavaSecurityPlusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecurityPlusStore.swift; sourceTree = "<group>"; };
-		1A0000030000000000001004 /* LavaLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityController.swift; sourceTree = "<group>"; };
-		1A00000300000000000010F1 /* DarwinNotificationObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DarwinNotificationObserver.swift; sourceTree = "<group>"; };
-		1A0000010000000000001005 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001006 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		1A0000010000000000001007 /* LavaSecApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecApp.entitlements; sourceTree = "<group>"; };
-		1A0000010000000000001008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		1A0000060000000000001001 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
-		1A0000060000000000001002 /* AppIconFireOpal.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconFireOpal.icon; sourceTree = "<group>"; };
-		1A0000060000000000001003 /* AppIconAmethyst.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconAmethyst.icon; sourceTree = "<group>"; };
-		1A0000060000000000001004 /* AppIconObsidian.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconObsidian.icon; sourceTree = "<group>"; };
-		1A0000060000000000001005 /* AppIconCherryQuartz.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconCherryQuartz.icon; sourceTree = "<group>"; };
-		1A0000060000000000001006 /* AppIconEmerald.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconEmerald.icon; sourceTree = "<group>"; };
-		1A0000060000000000001007 /* AppIconKiwiCreme.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconKiwiCreme.icon; sourceTree = "<group>"; };
-		1A0000060000000000001008 /* AppIcon-QA.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "AppIcon-QA.icon"; sourceTree = "<group>"; };
-		1A0000010000000000001018 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
-		1A0000080000000000001018 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
-		1A0000010000000000001019 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
-		1A0000010000000000001009 /* AdminQAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminQAView.swift; sourceTree = "<group>"; };
-		1A000001000000000000100A /* RageShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RageShakeDetector.swift; sourceTree = "<group>"; };
-		1A0000010000000000002001 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
-		1A0000080000000000002001 /* FocusSwitchEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSwitchEnvironment.swift; sourceTree = "<group>"; };
-		1A0000030000000000002002 /* SoftShieldGuardian.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftShieldGuardian.swift; sourceTree = "<group>"; };
-		1A0000030000000000002003 /* LavaActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaActivityAttributes.swift; sourceTree = "<group>"; };
-		1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityActionRequest.swift; sourceTree = "<group>"; };
-		1A0000030000000000002005 /* LavaLiveActivityIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityIntents.swift; sourceTree = "<group>"; };
-		1A0000040000000000002001 /* LavaProtectionCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaProtectionCommandService.swift; sourceTree = "<group>"; };
-		1A0000010000000000003001 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
-		1A0000010000000000003002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		1A0000010000000000003003 /* LavaSecTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecTunnel.entitlements; sourceTree = "<group>"; };
-			1A0000010000000000003004 /* DeviceDNSResolver.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = DeviceDNSResolver.c; sourceTree = "<group>"; };
-			1A0000010000000000005001 /* LavaSec.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LavaSec.app; sourceTree = BUILT_PRODUCTS_DIR; };
-			1A0000010000000000005002 /* LavaSecTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LavaSecTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-			1A0000030000000000005001 /* LavaSecWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LavaSecWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-			1A0000030000000000001001 /* LavaSecWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecWidget.swift; sourceTree = "<group>"; };
-			1A0000030000000000001002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-			1A0000030000000000001003 /* LavaSecWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecWidget.entitlements; sourceTree = "<group>"; };
-			1A0000020000000000001001 /* SecuritySettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsUITests.swift; sourceTree = "<group>"; };
-			1A0000020000000000001002 /* CoreFlowDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreFlowDeviceTests.swift; sourceTree = "<group>"; };
-			1A0000020000000000005001 /* LavaSecUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LavaSecUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A0000080000000000005001 /* LavaSecIntents.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = LavaSecIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A0000080000000000001001 /* LavaSecIntentsExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecIntentsExtension.swift; sourceTree = "<group>"; };
-		1A0000080000000000002002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		1A0000080000000000002003 /* LavaSecIntents.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecIntents.entitlements; sourceTree = "<group>"; };
+		0B2E6D0E367F6E6B19F50B88 /* BackupSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSyncService.swift; sourceTree = "<group>"; };
+		0DB7C47FB0203698017A6DC5 /* BackupSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSetupView.swift; sourceTree = "<group>"; };
+		11F58C8B8DE72A46657CD185 /* FilterReviewFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterReviewFlowView.swift; sourceTree = "<group>"; };
+		150D66A5AB4B36C3E1F8B767 /* FocusFilterIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusFilterIntent.swift; sourceTree = "<group>"; };
+		15E9F0B4AFAD1CC6D1D6A6A4 /* SecuritySettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsUITests.swift; sourceTree = "<group>"; };
+		1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaActivityAttributes.swift; sourceTree = "<group>"; };
+		1B1A6669E00C12ACE0BA2022 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		2698AE790B2EC125F392D467 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityIntents.swift; sourceTree = "<group>"; };
+		35C0532BD8DEB45FFE27E603 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
+		377227FF19AD51CBBA46D14F /* FilterPreparationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterPreparationPresentation.swift; sourceTree = "<group>"; };
+		37BCD696A2327F0BEA10D711 /* LavaSec.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LavaSec.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		39388C8EDBF998A359692447 /* AdminQAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminQAView.swift; sourceTree = "<group>"; };
+		3AFC146695FE7F2000BBD1D8 /* AccountSessionKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSessionKeychainStore.swift; sourceTree = "<group>"; };
+		3BD7C830CC4B06E1022AF041 /* AppIconAmethyst.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconAmethyst.icon; sourceTree = "<group>"; };
+		42A123CA5B7F4D795C388BBB /* CoreFlowDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreFlowDeviceTests.swift; sourceTree = "<group>"; };
+		44E905933618F39CD5CD5AFD /* AppIcon-QA.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "AppIcon-QA.icon"; sourceTree = "<group>"; };
+		452EDA71ED48695D8F66ECC8 /* LavaConfirmationDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaConfirmationDialog.swift; sourceTree = "<group>"; };
+		475344236B3E8AB54792E488 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4A0E5F380B28F3E11E46BE82 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		5A559FA7CC5717E4982BC8E8 /* BackupPasskeyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasskeyCoordinator.swift; sourceTree = "<group>"; };
+		5A84157BEB21136149A018EC /* AppIconObsidian.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconObsidian.icon; sourceTree = "<group>"; };
+		5DE5788769192F41A62C8FBB /* ProtectionConnectivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionConnectivityPresentation.swift; sourceTree = "<group>"; };
+		5FC4E06343769194B51B6F66 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		60FBAC7417B668F766E37473 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
+		62014BEC1308590DBDFDC281 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
+		62D36571C91548DEAB497BAD /* AppIconKiwiCreme.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconKiwiCreme.icon; sourceTree = "<group>"; };
+		631308081BEDBCB9110A86FB /* LavaLiveActivityActionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityActionRequest.swift; sourceTree = "<group>"; };
+		65DA81562188BC2A4F30EF79 /* FiltersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiltersView.swift; sourceTree = "<group>"; };
+		6ED277843A0DD9BA1871064E /* LavaSecWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecWidget.entitlements; sourceTree = "<group>"; };
+		73C16FD5B0D15FAB11349CFE /* LavaLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityController.swift; sourceTree = "<group>"; };
+		73EAEE49A1278B163A373C9E /* LavaSecTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecTunnel.entitlements; sourceTree = "<group>"; };
+		766203DF4A4069F5808EDA89 /* AppIconEmerald.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconEmerald.icon; sourceTree = "<group>"; };
+		76DE535F94487F5B86BAC2FA /* RageShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RageShakeDetector.swift; sourceTree = "<group>"; };
+		7A9A1E8579A9360795AE2BFE /* TemporaryProtectionPauseController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryProtectionPauseController.swift; sourceTree = "<group>"; };
+		7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusSwitchEnvironment.swift; sourceTree = "<group>"; };
+		7C2BF04367698AD931D1CBA3 /* DarwinNotificationObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DarwinNotificationObserver.swift; sourceTree = "<group>"; };
+		7D0307F06FDA899480972F17 /* LavaScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaScaffold.swift; sourceTree = "<group>"; };
+		7D88815E2DF25E0B2E3BDB4B /* Lava.QA.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Lava.QA.xcconfig; sourceTree = "<group>"; };
+		83427A3F020AA78216FC7A30 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		87586B94D5F1BDE576E914A6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		880F2026E7F9614F41528C94 /* kit-split */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "kit-split"; path = .; sourceTree = SOURCE_ROOT; };
+		89EE9460526FFD0F581A5C2A /* LavaSecApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecApp.entitlements; sourceTree = "<group>"; };
+		8FAF0292E1C43D849B6E83AA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		942481FBD1187F268A1B17B6 /* LavaSecTunnel.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LavaSecTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9758F66E43B8E6F2E892B5E3 /* AppIconCherryQuartz.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconCherryQuartz.icon; sourceTree = "<group>"; };
+		989ABE7F8DA88E49932EFB5C /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
+		9BB298B6CD215B94D98BEC40 /* AccountController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountController.swift; sourceTree = "<group>"; };
+		9D2E7D6B281C23F85D208C16 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
+		9EC13D86F9F6D8EB12B844D9 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		9F10CD412C2176D512556EBF /* Lava.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Lava.xcconfig; sourceTree = "<group>"; };
+		A01C449F904108483AB3F643 /* LavaSelectableRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSelectableRow.swift; sourceTree = "<group>"; };
+		A1FB3410530DA6E54514EA0C /* LavaSecurityPlusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecurityPlusStore.swift; sourceTree = "<group>"; };
+		A23F650CEEB2D9299F83D202 /* LavaComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaComponents.swift; sourceTree = "<group>"; };
+		A476E049796876A09CC94771 /* DeviceDNSResolver.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = DeviceDNSResolver.c; sourceTree = "<group>"; };
+		A4A36223276900C821F9A46C /* AppIconFireOpal.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconFireOpal.icon; sourceTree = "<group>"; };
+		A512831E5CD0AE249FDDD840 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		AA999346ED07803A7F609B26 /* LavaSecIntentsExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecIntentsExtension.swift; sourceTree = "<group>"; };
+		AABCAEA160F90F5A448A5106 /* LavaIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaIcon.swift; sourceTree = "<group>"; };
+		B20E7F70A51B40B48535E757 /* LavaSecIntents.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = LavaSecIntents.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B29C2940C84A12870A4B1167 /* SecurityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityController.swift; sourceTree = "<group>"; };
+		C1684C162C60DB73CD1C5176 /* AccountAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAuthService.swift; sourceTree = "<group>"; };
+		CE71830033F0CBDD90AD2DA8 /* LavaSecIntents.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecIntents.entitlements; sourceTree = "<group>"; };
+		D0CDE044D25F392A285CBD9D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D1DF12CD3B98331E69F8B85A /* LavaTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaTokens.swift; sourceTree = "<group>"; };
+		D22417736892B9A6F6D43910 /* DiagnosticsController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsController.swift; sourceTree = "<group>"; };
+		D974530B9A8B79A6BA6BDFB6 /* LavaProtectionCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaProtectionCommandService.swift; sourceTree = "<group>"; };
+		DAA78F82CA320CA83BB68828 /* ShareableFiltersUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableFiltersUI.swift; sourceTree = "<group>"; };
+		DC4BDFBADFBFFA9E8F01CE02 /* ProtectionPlatformSeams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionPlatformSeams.swift; sourceTree = "<group>"; };
+		E2CD5D67F59378D1DF3FD348 /* LavaSecurityPlusController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecurityPlusController.swift; sourceTree = "<group>"; };
+		E30AAB1BE92F8F1D3EFBFFCB /* BackupKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupKeychainStore.swift; sourceTree = "<group>"; };
+		E3243A36B97CE35B1E1CF083 /* CustomizationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomizationController.swift; sourceTree = "<group>"; };
+		E35E90F37FD03A59436C87C9 /* SoftShieldGuardian.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftShieldGuardian.swift; sourceTree = "<group>"; };
+		E61E81E0049BC464964CD618 /* LavaSecWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LavaSecWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E6578205ABF30A2F83DAA42B /* LavaSecUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LavaSecUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E6ED257949723A3277496D67 /* LavaSecWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecWidget.swift; sourceTree = "<group>"; };
+		EDB8449E737843EBEC973745 /* BackupController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupController.swift; sourceTree = "<group>"; };
+		F3DF3DACCF08F924E18F16D6 /* LavaCondensedList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaCondensedList.swift; sourceTree = "<group>"; };
+		F68DBF8431223971A6D6A3B8 /* GuardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuardView.swift; sourceTree = "<group>"; };
+		F74243102EA37FA0885E082F /* LavaSecApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaSecApp.swift; sourceTree = "<group>"; };
+		FD591F9BF8393489AF5B4160 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
+		FEE0C6FB11D872B41CF42592 /* AppViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		1A0000010000000000004002 /* Frameworks */ = {
+		1C143F9778F1E6663BAE23AD /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A000001000000000000001B /* GoogleSignIn in Frameworks */,
-				1A000001000000000000000B /* LavaSecCore in Frameworks */,
+				6836A51EF239AD3A95B66BC0 /* LavaSecCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000010000000000004012 /* Frameworks */ = {
+		A91F6EC012719016A580D378 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A000001000000000000000C /* LavaSecCore in Frameworks */,
+				22BE365D7FAA7E80D4699AE2 /* LavaSecCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000030000000000004022 /* Frameworks */ = {
+		BDB096EE4BDAF95E7655E962 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000030000000000000003 /* LavaSecCore in Frameworks */,
+				AA6B1293710F79C682DA3D46 /* LavaSecCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-			1A0000020000000000004002 /* Frameworks */ = {
-				isa = PBXFrameworksBuildPhase;
-				buildActionMask = 2147483647;
-				files = (
-					1A0000020000000000000003 /* LavaSecCore in Frameworks */,
-				);
-				runOnlyForDeploymentPostprocessing = 0;
-			};
-		1A0000080000000000004002 /* Frameworks */ = {
+		C70A7380572451EDDECD3B35 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000080000000000001105 /* LavaSecCore in Frameworks */,
+				9F61E25E969D4E8764F16A97 /* LavaSecCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEB3202FA3EEDC01847FCA29 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				19EBDB26B5F1BD7AE6A7B5E3 /* LavaSecCore in Frameworks */,
+				EEF22C55AA2E86F6139DF4D1 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		1ACF160000000000000F0100 /* Config */ = {
+		19B8864DB5A6CB6FC19487F8 /* LavaDesignSystem */ = {
 			isa = PBXGroup;
 			children = (
-				1ACF160000000000000F0101 /* Lava.xcconfig */,
-				1ACF160000000000000F0102 /* Lava.QA.xcconfig */,
+				A23F650CEEB2D9299F83D202 /* LavaComponents.swift */,
+				452EDA71ED48695D8F66ECC8 /* LavaConfirmationDialog.swift */,
+				AABCAEA160F90F5A448A5106 /* LavaIcon.swift */,
+				7D0307F06FDA899480972F17 /* LavaScaffold.swift */,
+				A01C449F904108483AB3F643 /* LavaSelectableRow.swift */,
+				D1DF12CD3B98331E69F8B85A /* LavaTokens.swift */,
 			);
-			path = Config;
+			name = LavaDesignSystem;
+			path = LavaSecApp/LavaDesignSystem;
 			sourceTree = "<group>";
 		};
-		1A0000010000000000009002 = {
+		262D6E5029B3C099460DAA3D /* LavaSecIntents */ = {
 			isa = PBXGroup;
 			children = (
-				1ACF160000000000000F0100 /* Config */,
-				1A0000010000000000009003 /* LavaSecApp */,
-				1A0000010000000000009004 /* LavaSecTunnel */,
-				1A0000030000000000009007 /* LavaSecWidget */,
-				1A0000080000000000009008 /* LavaSecIntents */,
-				1A0000010000000000009005 /* Shared */,
-				1A0000020000000000009001 /* LavaSecUITests */,
-				1A0000010000000000009006 /* Products */,
+				150D66A5AB4B36C3E1F8B767 /* FocusFilterIntent.swift */,
+				475344236B3E8AB54792E488 /* Info.plist */,
+				CE71830033F0CBDD90AD2DA8 /* LavaSecIntents.entitlements */,
+				AA999346ED07803A7F609B26 /* LavaSecIntentsExtension.swift */,
+				2698AE790B2EC125F392D467 /* Localizable.xcstrings */,
 			);
+			path = LavaSecIntents;
 			sourceTree = "<group>";
 		};
-		1A0000010000000000009003 /* LavaSecApp */ = {
+		396045C7850ABBFDFDA3E437 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000010000000000001001 /* LavaSecApp.swift */,
-				1A0000010000000000001002 /* AppViewModel.swift */,
-				1A0000010000000000001011 /* AccountAuthService.swift */,
-				1A0000010000000000001012 /* BackupKeychainStore.swift */,
-				1A0000010000000000001013 /* BackupSyncService.swift */,
-				1A0000010000000000001014 /* BackupSetupView.swift */,
-				1A0000010000000000001015 /* BackupRestoreView.swift */,
-				1A000001000000000000101B /* BackupPasskeyCoordinator.swift */,
-				1A0000010000000000001016 /* AccountSessionKeychainStore.swift */,
-				1A0000010000000000001017 /* LavaStrings.swift */,
-				1A000001000000000000101A /* OnboardingFlowView.swift */,
-				1A0000010000000000001003 /* RootView.swift */,
-				1A0000010000000000001030 /* FilterPreparationPresentation.swift */,
-				1A0000010000000000001029 /* LavaIcon.swift */,
-				1A0000010000000000001028 /* ProtectionPlatformSeams.swift */,
-				1A0000010000000000001027 /* ProtectionConnectivityPresentation.swift */,
-				1A0000010000000000001025 /* GuardView.swift */,
-				1A0000010000000000001026 /* DeveloperPreviewViews.swift */,
-				1A0000010000000000001022 /* LavaTokens.swift */,
-				1A0000010000000000001023 /* LavaScaffold.swift */,
-				1A00000100000000000010F2 /* LavaSelectableRow.swift */,
-				1A00000100000000000010F0 /* LavaConfirmationDialog.swift */,
-				1A0000010000000000001024 /* LavaComponents.swift */,
-				1A0000010000000000001010 /* LavaCondensedList.swift */,
-				1A0000010000000000001004 /* FiltersView.swift */,
-				1A00000100000000000010D0 /* ShareableFiltersUI.swift */,
-				1A000001000000000000101D /* FilterReviewFlowView.swift */,
-				1A0000010000000000001020 /* SecurityController.swift */,
-				1A00000100000000000010A1 /* TemporaryProtectionPauseController.swift */,
-				1A0000010000000000001021 /* LavaSecurityPlusStore.swift */,
-				1A0000030000000000001004 /* LavaLiveActivityController.swift */,
-				1A00000300000000000010F1 /* DarwinNotificationObserver.swift */,
-				1A0000010000000000001005 /* DiagnosticsView.swift */,
-				1A0000010000000000001006 /* SettingsView.swift */,
-				1A0000010000000000001009 /* AdminQAView.swift */,
-				1A000001000000000000100A /* RageShakeDetector.swift */,
-				1A0000010000000000001007 /* LavaSecApp.entitlements */,
-				1A0000010000000000001018 /* Localizable.xcstrings */,
-				1A0000010000000000001019 /* InfoPlist.xcstrings */,
-				1A0000010000000000001008 /* Assets.xcassets */,
-				1A0000060000000000001001 /* AppIcon.icon */,
-				1A0000060000000000001002 /* AppIconFireOpal.icon */,
-				1A0000060000000000001003 /* AppIconAmethyst.icon */,
-				1A0000060000000000001004 /* AppIconObsidian.icon */,
-				1A0000060000000000001005 /* AppIconCherryQuartz.icon */,
-				1A0000060000000000001006 /* AppIconEmerald.icon */,
-				1A0000060000000000001007 /* AppIconKiwiCreme.icon */,
-				1A0000060000000000001008 /* AppIcon-QA.icon */,
-			);
-			path = LavaSecApp;
-			sourceTree = "<group>";
-		};
-		1A0000010000000000009004 /* LavaSecTunnel */ = {
-			isa = PBXGroup;
-			children = (
-				1A0000010000000000003001 /* PacketTunnelProvider.swift */,
-				1A0000010000000000003004 /* DeviceDNSResolver.c */,
-				1A0000010000000000003002 /* Info.plist */,
-				1A0000010000000000003003 /* LavaSecTunnel.entitlements */,
-			);
-			path = LavaSecTunnel;
-			sourceTree = "<group>";
-		};
-		1A0000010000000000009005 /* Shared */ = {
-			isa = PBXGroup;
-			children = (
-				1A0000010000000000002001 /* AppGroup.swift */,
-				1A0000030000000000002002 /* SoftShieldGuardian.swift */,
-				1A0000030000000000002003 /* LavaActivityAttributes.swift */,
-				1A0000030000000000002004 /* LavaLiveActivityActionRequest.swift */,
-				1A0000030000000000002005 /* LavaLiveActivityIntents.swift */,
-				1A0000040000000000002001 /* LavaProtectionCommandService.swift */,
-				1A0000080000000000002001 /* FocusSwitchEnvironment.swift */,
+				9D2E7D6B281C23F85D208C16 /* AppGroup.swift */,
+				7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */,
+				1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */,
+				631308081BEDBCB9110A86FB /* LavaLiveActivityActionRequest.swift */,
+				338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */,
+				D974530B9A8B79A6BA6BDFB6 /* LavaProtectionCommandService.swift */,
+				E35E90F37FD03A59436C87C9 /* SoftShieldGuardian.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
 		};
-		1A0000030000000000009007 /* LavaSecWidget */ = {
+		47574431C287784886FEB64D /* LavaSecWidget */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000030000000000001001 /* LavaSecWidget.swift */,
-				1A0000030000000000001002 /* Info.plist */,
-				1A0000030000000000001003 /* LavaSecWidget.entitlements */,
+				8FAF0292E1C43D849B6E83AA /* Info.plist */,
+				6ED277843A0DD9BA1871064E /* LavaSecWidget.entitlements */,
+				E6ED257949723A3277496D67 /* LavaSecWidget.swift */,
 			);
 			path = LavaSecWidget;
 			sourceTree = "<group>";
 		};
-		1A0000010000000000009006 /* Products */ = {
+		5216389391CED1E31BACF991 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000010000000000005001 /* LavaSec.app */,
-				1A0000010000000000005002 /* LavaSecTunnel.appex */,
-				1A0000030000000000005001 /* LavaSecWidget.appex */,
-				1A0000020000000000005001 /* LavaSecUITests.xctest */,
+				880F2026E7F9614F41528C94 /* kit-split */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		59B72C7F2421EB1BCA806992 = {
+			isa = PBXGroup;
+			children = (
+				92090B45E20DB02EEA4C0636 /* Config */,
+				19B8864DB5A6CB6FC19487F8 /* LavaDesignSystem */,
+				B5CC4F02DA219586E7AFA20C /* LavaSecApp */,
+				262D6E5029B3C099460DAA3D /* LavaSecIntents */,
+				E28E6D53844228E0FE245DEA /* LavaSecTunnel */,
+				7A7C8559920EA9A065E741AE /* LavaSecUITests */,
+				47574431C287784886FEB64D /* LavaSecWidget */,
+				5216389391CED1E31BACF991 /* Packages */,
+				396045C7850ABBFDFDA3E437 /* Shared */,
+				990912886397EFAD4D720690 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7A7C8559920EA9A065E741AE /* LavaSecUITests */ = {
+			isa = PBXGroup;
+			children = (
+				42A123CA5B7F4D795C388BBB /* CoreFlowDeviceTests.swift */,
+				15E9F0B4AFAD1CC6D1D6A6A4 /* SecuritySettingsUITests.swift */,
+			);
+			path = LavaSecUITests;
+			sourceTree = "<group>";
+		};
+		92090B45E20DB02EEA4C0636 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				7D88815E2DF25E0B2E3BDB4B /* Lava.QA.xcconfig */,
+				9F10CD412C2176D512556EBF /* Lava.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		990912886397EFAD4D720690 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				37BCD696A2327F0BEA10D711 /* LavaSec.app */,
+				B20E7F70A51B40B48535E757 /* LavaSecIntents.appex */,
+				942481FBD1187F268A1B17B6 /* LavaSecTunnel.appex */,
+				E6578205ABF30A2F83DAA42B /* LavaSecUITests.xctest */,
+				E61E81E0049BC464964CD618 /* LavaSecWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-			1A0000020000000000009001 /* LavaSecUITests */ = {
-				isa = PBXGroup;
-				children = (
-					1A0000020000000000001001 /* SecuritySettingsUITests.swift */,
-					1A0000020000000000001002 /* CoreFlowDeviceTests.swift */,
-				);
-				path = LavaSecUITests;
-				sourceTree = "<group>";
-		};
-		1A0000080000000000009008 /* LavaSecIntents */ = {
+		B5CC4F02DA219586E7AFA20C /* LavaSecApp */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000080000000000001001 /* LavaSecIntentsExtension.swift */,
-				1A0000010000000000001FFF /* FocusFilterIntent.swift */,
-				1A0000080000000000001018 /* Localizable.xcstrings */,
-				1A0000080000000000002002 /* Info.plist */,
-				1A0000080000000000002003 /* LavaSecIntents.entitlements */,
+				C1684C162C60DB73CD1C5176 /* AccountAuthService.swift */,
+				9BB298B6CD215B94D98BEC40 /* AccountController.swift */,
+				3AFC146695FE7F2000BBD1D8 /* AccountSessionKeychainStore.swift */,
+				39388C8EDBF998A359692447 /* AdminQAView.swift */,
+				44E905933618F39CD5CD5AFD /* AppIcon-QA.icon */,
+				83427A3F020AA78216FC7A30 /* AppIcon.icon */,
+				3BD7C830CC4B06E1022AF041 /* AppIconAmethyst.icon */,
+				9758F66E43B8E6F2E892B5E3 /* AppIconCherryQuartz.icon */,
+				766203DF4A4069F5808EDA89 /* AppIconEmerald.icon */,
+				A4A36223276900C821F9A46C /* AppIconFireOpal.icon */,
+				62D36571C91548DEAB497BAD /* AppIconKiwiCreme.icon */,
+				5A84157BEB21136149A018EC /* AppIconObsidian.icon */,
+				FEE0C6FB11D872B41CF42592 /* AppViewModel.swift */,
+				D0CDE044D25F392A285CBD9D /* Assets.xcassets */,
+				EDB8449E737843EBEC973745 /* BackupController.swift */,
+				E30AAB1BE92F8F1D3EFBFFCB /* BackupKeychainStore.swift */,
+				5A559FA7CC5717E4982BC8E8 /* BackupPasskeyCoordinator.swift */,
+				35C0532BD8DEB45FFE27E603 /* BackupRestoreView.swift */,
+				0DB7C47FB0203698017A6DC5 /* BackupSetupView.swift */,
+				0B2E6D0E367F6E6B19F50B88 /* BackupSyncService.swift */,
+				E3243A36B97CE35B1E1CF083 /* CustomizationController.swift */,
+				7C2BF04367698AD931D1CBA3 /* DarwinNotificationObserver.swift */,
+				989ABE7F8DA88E49932EFB5C /* DeveloperPreviewViews.swift */,
+				D22417736892B9A6F6D43910 /* DiagnosticsController.swift */,
+				5FC4E06343769194B51B6F66 /* DiagnosticsView.swift */,
+				377227FF19AD51CBBA46D14F /* FilterPreparationPresentation.swift */,
+				11F58C8B8DE72A46657CD185 /* FilterReviewFlowView.swift */,
+				65DA81562188BC2A4F30EF79 /* FiltersView.swift */,
+				F68DBF8431223971A6D6A3B8 /* GuardView.swift */,
+				62014BEC1308590DBDFDC281 /* InfoPlist.xcstrings */,
+				F3DF3DACCF08F924E18F16D6 /* LavaCondensedList.swift */,
+				73C16FD5B0D15FAB11349CFE /* LavaLiveActivityController.swift */,
+				89EE9460526FFD0F581A5C2A /* LavaSecApp.entitlements */,
+				F74243102EA37FA0885E082F /* LavaSecApp.swift */,
+				E2CD5D67F59378D1DF3FD348 /* LavaSecurityPlusController.swift */,
+				A1FB3410530DA6E54514EA0C /* LavaSecurityPlusStore.swift */,
+				60FBAC7417B668F766E37473 /* LavaStrings.swift */,
+				4A0E5F380B28F3E11E46BE82 /* Localizable.xcstrings */,
+				FD591F9BF8393489AF5B4160 /* OnboardingFlowView.swift */,
+				5DE5788769192F41A62C8FBB /* ProtectionConnectivityPresentation.swift */,
+				DC4BDFBADFBFFA9E8F01CE02 /* ProtectionPlatformSeams.swift */,
+				76DE535F94487F5B86BAC2FA /* RageShakeDetector.swift */,
+				1B1A6669E00C12ACE0BA2022 /* RootView.swift */,
+				B29C2940C84A12870A4B1167 /* SecurityController.swift */,
+				87586B94D5F1BDE576E914A6 /* SettingsView.swift */,
+				DAA78F82CA320CA83BB68828 /* ShareableFiltersUI.swift */,
+				7A9A1E8579A9360795AE2BFE /* TemporaryProtectionPauseController.swift */,
 			);
-			path = LavaSecIntents;
+			path = LavaSecApp;
+			sourceTree = "<group>";
+		};
+		E28E6D53844228E0FE245DEA /* LavaSecTunnel */ = {
+			isa = PBXGroup;
+			children = (
+				A476E049796876A09CC94771 /* DeviceDNSResolver.c */,
+				A512831E5CD0AE249FDDD840 /* Info.plist */,
+				73EAEE49A1278B163A373C9E /* LavaSecTunnel.entitlements */,
+				9EC13D86F9F6D8EB12B844D9 /* PacketTunnelProvider.swift */,
+			);
+			path = LavaSecTunnel;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		1A0000010000000000008001 /* LavaSec */ = {
+		15479A35CEFA407334A8EF9A /* LavaSecWidget */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1A000001000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSec" */;
+			buildConfigurationList = 2BF0FAE14D17FDAFBDA83304 /* Build configuration list for PBXNativeTarget "LavaSecWidget" */;
 			buildPhases = (
-				1A0000010000000000004001 /* Sources */,
-				1A0000010000000000004002 /* Frameworks */,
-				1A0000010000000000004003 /* Resources */,
-				1A0000010000000000004004 /* Embed App Extensions */,
-				1A0000080000000000004004 /* Embed ExtensionKit Extensions */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				1A0000010000000000006002 /* PBXTargetDependency */,
-				1A0000030000000000006004 /* PBXTargetDependency */,
-				1A0000080000000000006002 /* PBXTargetDependency */,
-			);
-			name = LavaSec;
-			packageProductDependencies = (
-				1A0000010000000000007002 /* LavaSecCore */,
-				1A0000010000000000007004 /* GoogleSignIn */,
-			);
-			productName = LavaSec;
-			productReference = 1A0000010000000000005001 /* LavaSec.app */;
-			productType = "com.apple.product-type.application";
-		};
-		1A0000010000000000008002 /* LavaSecTunnel */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1A000001000000000000A002 /* Build configuration list for PBXNativeTarget "LavaSecTunnel" */;
-			buildPhases = (
-				1A0000010000000000004011 /* Sources */,
-				1A0000010000000000004012 /* Frameworks */,
-				1A0000010000000000004013 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = LavaSecTunnel;
-			packageProductDependencies = (
-				1A0000010000000000007003 /* LavaSecCore */,
-			);
-			productName = LavaSecTunnel;
-			productReference = 1A0000010000000000005002 /* LavaSecTunnel.appex */;
-			productType = "com.apple.product-type.app-extension";
-		};
-		1A0000030000000000008003 /* LavaSecWidget */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1A000003000000000000A003 /* Build configuration list for PBXNativeTarget "LavaSecWidget" */;
-			buildPhases = (
-				1A0000030000000000004021 /* Sources */,
-				1A0000030000000000004022 /* Frameworks */,
-				1A0000030000000000004023 /* Resources */,
+				3A24406C967D2D0CBAF33434 /* Sources */,
+				BDB096EE4BDAF95E7655E962 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -479,40 +467,19 @@
 			);
 			name = LavaSecWidget;
 			packageProductDependencies = (
-				1A0000030000000000007007 /* LavaSecCore */,
+				135580B4385ACEED7B9D1813 /* LavaSecCore */,
 			);
 			productName = LavaSecWidget;
-			productReference = 1A0000030000000000005001 /* LavaSecWidget.appex */;
+			productReference = E61E81E0049BC464964CD618 /* LavaSecWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		1A0000020000000000008001 /* LavaSecUITests */ = {
+		1994B9376017074A73232670 /* LavaSecIntents */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1A000002000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecUITests" */;
+			buildConfigurationList = D382B2F1D249605C623E9664 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */;
 			buildPhases = (
-				1A0000020000000000004001 /* Sources */,
-				1A0000020000000000004002 /* Frameworks */,
-				1A0000020000000000004003 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				1A0000020000000000006002 /* PBXTargetDependency */,
-			);
-			name = LavaSecUITests;
-			packageProductDependencies = (
-				1A0000020000000000007006 /* LavaSecCore */,
-			);
-			productName = LavaSecUITests;
-			productReference = 1A0000020000000000005001 /* LavaSecUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
-		1A0000080000000000008001 /* LavaSecIntents */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1A000008000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */;
-			buildPhases = (
-				1A0000080000000000004001 /* Sources */,
-				1A0000080000000000004002 /* Frameworks */,
-				1A0000080000000000004003 /* Resources */,
+				7190D75DC4BB3739121CB2A0 /* Sources */,
+				20B0BD8735A44025246D6A3D /* Resources */,
+				A91F6EC012719016A580D378 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -520,41 +487,110 @@
 			);
 			name = LavaSecIntents;
 			packageProductDependencies = (
-				1A0000080000000000007008 /* LavaSecCore */,
+				2B24A38AB6289CC278FB512C /* LavaSecCore */,
 			);
 			productName = LavaSecIntents;
-			productReference = 1A0000080000000000005001 /* LavaSecIntents.appex */;
+			productReference = B20E7F70A51B40B48535E757 /* LavaSecIntents.appex */;
 			productType = "com.apple.product-type.extensionkit-extension";
+		};
+		35CBEDDD793FEE0361B051F6 /* LavaSec */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D8367D5D71616C13E50FAC10 /* Build configuration list for PBXNativeTarget "LavaSec" */;
+			buildPhases = (
+				F8C46C4C3C57D39FD9F44679 /* Sources */,
+				ECB4B61470045A43883F63B6 /* Resources */,
+				FEB3202FA3EEDC01847FCA29 /* Frameworks */,
+				D3288A740BC8154E9E9F8283 /* Embed Foundation Extensions */,
+				F86686F75C9FC787269E59F4 /* Embed ExtensionKit Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				597CAA239D0944F0B4A4EA6F /* PBXTargetDependency */,
+				89AB9CDA1FFDAC466BA661DD /* PBXTargetDependency */,
+				3E2BB25211A3856D1D0FEC17 /* PBXTargetDependency */,
+			);
+			name = LavaSec;
+			packageProductDependencies = (
+				05F233E527344169F47CC27F /* LavaSecCore */,
+				C6267DC77BF4D6DE0036AA16 /* GoogleSignIn */,
+			);
+			productName = LavaSec;
+			productReference = 37BCD696A2327F0BEA10D711 /* LavaSec.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BBDEBA7C6CCC5CF9273D342F /* LavaSecTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6BD8F71BBA741F2DA5941EA9 /* Build configuration list for PBXNativeTarget "LavaSecTunnel" */;
+			buildPhases = (
+				05EDF7F2E9B36D9E2C3A3EA6 /* Sources */,
+				1C143F9778F1E6663BAE23AD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LavaSecTunnel;
+			packageProductDependencies = (
+				0FA3A1980DA87565BA72E48D /* LavaSecCore */,
+			);
+			productName = LavaSecTunnel;
+			productReference = 942481FBD1187F268A1B17B6 /* LavaSecTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E0370B825514E55647364BD4 /* LavaSecUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AEC580C9DCECBC8DD39E5514 /* Build configuration list for PBXNativeTarget "LavaSecUITests" */;
+			buildPhases = (
+				CE3488A0ADAC472385FE04B9 /* Sources */,
+				C70A7380572451EDDECD3B35 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EB5CFEFE0D51121A339463C2 /* PBXTargetDependency */,
+			);
+			name = LavaSecUITests;
+			packageProductDependencies = (
+				92A55F77631CEC03A1B76E38 /* LavaSecCore */,
+			);
+			productName = LavaSecUITests;
+			productReference = E6578205ABF30A2F83DAA42B /* LavaSecUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		1A0000010000000000009001 /* Project object */ = {
+		83262453BC8AED844A7455F3 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
-					1A0000010000000000008001 = {
-						CreatedOnToolsVersion = 26.3;
+					15479A35CEFA407334A8EF9A = {
+						DevelopmentTeam = "$(inherited)";
+						ProvisioningStyle = Automatic;
 					};
-					1A0000010000000000008002 = {
-						CreatedOnToolsVersion = 26.3;
+					1994B9376017074A73232670 = {
+						DevelopmentTeam = "$(inherited)";
+						ProvisioningStyle = Automatic;
 					};
-					1A0000030000000000008003 = {
-						CreatedOnToolsVersion = 26.3;
+					35CBEDDD793FEE0361B051F6 = {
+						DevelopmentTeam = "$(inherited)";
+						ProvisioningStyle = Automatic;
 					};
-					1A0000080000000000008001 = {
-						CreatedOnToolsVersion = 26.3;
+					BBDEBA7C6CCC5CF9273D342F = {
+						DevelopmentTeam = "$(inherited)";
+						ProvisioningStyle = Automatic;
 					};
-					1A0000020000000000008001 = {
-						CreatedOnToolsVersion = 26.3;
-						TestTargetID = 1A0000010000000000008001;
+					E0370B825514E55647364BD4 = {
+						DevelopmentTeam = "$(inherited)";
+						ProvisioningStyle = Automatic;
+						TestTargetID = 35CBEDDD793FEE0361B051F6;
 					};
 				};
 			};
-			buildConfigurationList = 1A000001000000000000A000 /* Build configuration list for PBXProject "LavaSec" */;
+			buildConfigurationList = 9898E08112138BCEC9E7FD20 /* Build configuration list for PBXProject "LavaSec" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -570,201 +606,544 @@
 				pt-BR,
 				it,
 			);
-			mainGroup = 1A0000010000000000009002;
+			mainGroup = 59B72C7F2421EB1BCA806992;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */,
-				1A0000010000000000007005 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				5FC3FD0D52FBFE0D6EB44F21 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				E888162D1D7C2ECD55F478E9 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 1A0000010000000000009006 /* Products */;
+			productRefGroup = 990912886397EFAD4D720690 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1A0000010000000000008001 /* LavaSec */,
-				1A0000010000000000008002 /* LavaSecTunnel */,
-				1A0000030000000000008003 /* LavaSecWidget */,
-				1A0000080000000000008001 /* LavaSecIntents */,
-				1A0000020000000000008001 /* LavaSecUITests */,
+				35CBEDDD793FEE0361B051F6 /* LavaSec */,
+				1994B9376017074A73232670 /* LavaSecIntents */,
+				BBDEBA7C6CCC5CF9273D342F /* LavaSecTunnel */,
+				E0370B825514E55647364BD4 /* LavaSecUITests */,
+				15479A35CEFA407334A8EF9A /* LavaSecWidget */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		1A0000010000000000004003 /* Resources */ = {
+		20B0BD8735A44025246D6A3D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000060000000000000001 /* AppIcon.icon in Resources */,
-				1A0000060000000000000002 /* AppIconFireOpal.icon in Resources */,
-				1A0000060000000000000003 /* AppIconAmethyst.icon in Resources */,
-				1A0000060000000000000004 /* AppIconObsidian.icon in Resources */,
-				1A0000060000000000000005 /* AppIconCherryQuartz.icon in Resources */,
-				1A0000060000000000000006 /* AppIconEmerald.icon in Resources */,
-				1A0000060000000000000007 /* AppIconKiwiCreme.icon in Resources */,
-				1A0000060000000000000008 /* AppIcon-QA.icon in Resources */,
-				1A000001000000000000000D /* Assets.xcassets in Resources */,
-				1A0000010000000000000019 /* Localizable.xcstrings in Resources */,
-				1A000001000000000000001A /* InfoPlist.xcstrings in Resources */,
+				69BF9CFD7C2FCC7B530EF075 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000010000000000004013 /* Resources */ = {
+		ECB4B61470045A43883F63B6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1A0000030000000000004023 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1A0000020000000000004003 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1A0000080000000000004003 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				1A0000080000000000000019 /* Localizable.xcstrings in Resources */,
+				AD391D05F13421503355D4F6 /* AppIcon-QA.icon in Resources */,
+				FF4A8EABB965F626ED0DA8A7 /* AppIcon.icon in Resources */,
+				8504C3B9EE9B428047C2006B /* AppIconAmethyst.icon in Resources */,
+				BFBA6BE4E35B13CEE5BE415A /* AppIconCherryQuartz.icon in Resources */,
+				B269895D027C1C596B60418A /* AppIconEmerald.icon in Resources */,
+				AF0781428B2CA5DD1846BA19 /* AppIconFireOpal.icon in Resources */,
+				EEE01CC96BF967E733F042C0 /* AppIconKiwiCreme.icon in Resources */,
+				F97BDA8880B84CB3EE0F1948 /* AppIconObsidian.icon in Resources */,
+				DE9A19E85E9871691DBAB29A /* Assets.xcassets in Resources */,
+				9578FB4C9CD4249502947686 /* InfoPlist.xcstrings in Resources */,
+				486193D35FE048DB04CF8D7E /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		1A0000010000000000004001 /* Sources */ = {
+		05EDF7F2E9B36D9E2C3A3EA6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000010000000000000001 /* LavaSecApp.swift in Sources */,
-				1A0000010000000000000002 /* AppViewModel.swift in Sources */,
-				1A0000010000000000000011 /* AccountAuthService.swift in Sources */,
-				1A0000010000000000000012 /* BackupKeychainStore.swift in Sources */,
-				1A0000010000000000000013 /* BackupSyncService.swift in Sources */,
-				1A0000010000000000000014 /* BackupSetupView.swift in Sources */,
-				1A0000010000000000000015 /* BackupRestoreView.swift in Sources */,
-				1A000001000000000000001D /* BackupPasskeyCoordinator.swift in Sources */,
-				1A0000010000000000000016 /* AccountSessionKeychainStore.swift in Sources */,
-				1A0000010000000000000018 /* LavaStrings.swift in Sources */,
-				1A0000010000000000000003 /* RootView.swift in Sources */,
-				1A0000010000000000000030 /* FilterPreparationPresentation.swift in Sources */,
-				1A0000010000000000000029 /* LavaIcon.swift in Sources */,
-				1A0000010000000000000028 /* ProtectionPlatformSeams.swift in Sources */,
-				1A0000010000000000000027 /* ProtectionConnectivityPresentation.swift in Sources */,
-				1A0000010000000000000025 /* GuardView.swift in Sources */,
-				1A0000010000000000000026 /* DeveloperPreviewViews.swift in Sources */,
-				1A0000010000000000000022 /* LavaTokens.swift in Sources */,
-				1A0000010000000000000023 /* LavaScaffold.swift in Sources */,
-				1A00000100000000000000F2 /* LavaSelectableRow.swift in Sources */,
-				1A00000100000000000000F0 /* LavaConfirmationDialog.swift in Sources */,
-				1A0000010000000000000024 /* LavaComponents.swift in Sources */,
-				1A000001000000000000001C /* OnboardingFlowView.swift in Sources */,
-				1A0000010000000000000010 /* LavaCondensedList.swift in Sources */,
-				1A0000010000000000000004 /* FiltersView.swift in Sources */,
-				1A00000100000000000000D0 /* ShareableFiltersUI.swift in Sources */,
-				1A000001000000000000001F /* FilterReviewFlowView.swift in Sources */,
-				1A0000010000000000000020 /* SecurityController.swift in Sources */,
-				1A00000100000000000000A1 /* TemporaryProtectionPauseController.swift in Sources */,
-				1A0000010000000000000021 /* LavaSecurityPlusStore.swift in Sources */,
-				1A000003000000000000000D /* LavaLiveActivityController.swift in Sources */,
-				1A00000300000000000000F1 /* DarwinNotificationObserver.swift in Sources */,
-				1A0000010000000000000005 /* DiagnosticsView.swift in Sources */,
-				1A0000010000000000000006 /* SettingsView.swift in Sources */,
-				1A000001000000000000000E /* AdminQAView.swift in Sources */,
-				1A000001000000000000000F /* RageShakeDetector.swift in Sources */,
-				1A0000010000000000000007 /* AppGroup.swift in Sources */,
-				1A0000030000000000000005 /* SoftShieldGuardian.swift in Sources */,
-				1A0000030000000000000007 /* LavaActivityAttributes.swift in Sources */,
-				1A0000030000000000000009 /* LavaLiveActivityActionRequest.swift in Sources */,
-				1A000003000000000000000B /* LavaLiveActivityIntents.swift in Sources */,
-				1A0000040000000000000001 /* LavaProtectionCommandService.swift in Sources */,
-				1A0000080000000000000001 /* FocusSwitchEnvironment.swift in Sources */,
+				60E6CF21D875196E34046D9F /* AppGroup.swift in Sources */,
+				A96F5E3A787610CA1F279DE0 /* DeviceDNSResolver.c in Sources */,
+				FC725F7AC290FDC4F58E6E97 /* LavaActivityAttributes.swift in Sources */,
+				FDC6382B8A59455A290A53FE /* PacketTunnelProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000010000000000004011 /* Sources */ = {
+		3A24406C967D2D0CBAF33434 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000010000000000000008 /* PacketTunnelProvider.swift in Sources */,
-				1A0000010000000000000009 /* AppGroup.swift in Sources */,
-				1A0000010000000000000017 /* DeviceDNSResolver.c in Sources */,
-				1A0000050000000000000001 /* LavaActivityAttributes.swift in Sources */,
+				2C270B1939D9E69B0AB32170 /* AppGroup.swift in Sources */,
+				4516E79CC0891D448A5E8FFF /* LavaActivityAttributes.swift in Sources */,
+				490DA8B239CBB16916A8C4B6 /* LavaLiveActivityActionRequest.swift in Sources */,
+				E4971600095483200CCE05D6 /* LavaLiveActivityIntents.swift in Sources */,
+				448DA58FF28701012497AABB /* LavaProtectionCommandService.swift in Sources */,
+				C5EEDE1442744604E7FC14BD /* LavaSecWidget.swift in Sources */,
+				B87C67226E34E62B77B60245 /* SoftShieldGuardian.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		1A0000030000000000004021 /* Sources */ = {
+		7190D75DC4BB3739121CB2A0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000030000000000000001 /* LavaSecWidget.swift in Sources */,
-				1A0000030000000000000004 /* AppGroup.swift in Sources */,
-				1A0000030000000000000006 /* SoftShieldGuardian.swift in Sources */,
-				1A0000030000000000000008 /* LavaActivityAttributes.swift in Sources */,
-				1A000003000000000000000A /* LavaLiveActivityActionRequest.swift in Sources */,
-				1A000003000000000000000C /* LavaLiveActivityIntents.swift in Sources */,
-				1A0000040000000000000002 /* LavaProtectionCommandService.swift in Sources */,
+				7C48199EEFE3E16A9E159D10 /* AppGroup.swift in Sources */,
+				E86FD4DE8D4841746C71EC47 /* FocusFilterIntent.swift in Sources */,
+				7E6A4E307AFA5800542D80F5 /* FocusSwitchEnvironment.swift in Sources */,
+				E19D83E9B83CCD33AD1BD202 /* LavaSecIntentsExtension.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-			1A0000020000000000004001 /* Sources */ = {
-				isa = PBXSourcesBuildPhase;
-				buildActionMask = 2147483647;
-				files = (
-					1A0000020000000000000001 /* SecuritySettingsUITests.swift in Sources */,
-					1A0000020000000000000002 /* CoreFlowDeviceTests.swift in Sources */,
-				);
-				runOnlyForDeploymentPostprocessing = 0;
-			};
-		1A0000080000000000004001 /* Sources */ = {
+		CE3488A0ADAC472385FE04B9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000080000000000001102 /* FocusFilterIntent.swift in Sources */,
-				1A0000080000000000001101 /* LavaSecIntentsExtension.swift in Sources */,
-				1A0000080000000000001103 /* AppGroup.swift in Sources */,
-				1A0000080000000000001104 /* FocusSwitchEnvironment.swift in Sources */,
+				E8C1893F76E8D625E7914D17 /* CoreFlowDeviceTests.swift in Sources */,
+				E0C3FE8BE802449EF1FA52C1 /* SecuritySettingsUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F8C46C4C3C57D39FD9F44679 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				18A7D521C5FFCA77A3957B88 /* AccountAuthService.swift in Sources */,
+				61C16EA9951BCB8DB7FEE549 /* AccountController.swift in Sources */,
+				55E5A66725DBA15F370FFF40 /* AccountSessionKeychainStore.swift in Sources */,
+				4B054E0FE98760FB5E87E0C2 /* AdminQAView.swift in Sources */,
+				CF82CA6A8CE155C0E200C3F4 /* AppGroup.swift in Sources */,
+				AE698E4EE549C3F63972590B /* AppViewModel.swift in Sources */,
+				FFA20501A18536CD3DA27372 /* BackupController.swift in Sources */,
+				D4EEDA552641F6ADD42848AE /* BackupKeychainStore.swift in Sources */,
+				DAE8C1A933296EBA9A20AB30 /* BackupPasskeyCoordinator.swift in Sources */,
+				FC187227032D9EAF98AF7865 /* BackupRestoreView.swift in Sources */,
+				90BB4006A0A359A5B2CABE85 /* BackupSetupView.swift in Sources */,
+				6BCE45D9FBE8F3288C77B4CF /* BackupSyncService.swift in Sources */,
+				1BAB439F93C845E61F6EFF18 /* CustomizationController.swift in Sources */,
+				7610F8020E3FFC929D2545BA /* DarwinNotificationObserver.swift in Sources */,
+				9A1E26FDC73B89F7FE0357DA /* DeveloperPreviewViews.swift in Sources */,
+				B63FB8254E06BC94C03D619A /* DiagnosticsController.swift in Sources */,
+				6E74B1C99D1B509A8F1461C3 /* DiagnosticsView.swift in Sources */,
+				48CCE8111E3701E3845AFD87 /* FilterPreparationPresentation.swift in Sources */,
+				C4447F583558505C8059370B /* FilterReviewFlowView.swift in Sources */,
+				1B430ED2EFA66562C6323199 /* FiltersView.swift in Sources */,
+				EC85EE16323936B221FB42D3 /* FocusSwitchEnvironment.swift in Sources */,
+				6BDADAD92704D57D416724ED /* GuardView.swift in Sources */,
+				04A591451D08C0D97A7D9A65 /* LavaActivityAttributes.swift in Sources */,
+				B0995E4A0EF007AFDABBD466 /* LavaComponents.swift in Sources */,
+				C2EF5EA7ACA7EF2A5EF1F625 /* LavaCondensedList.swift in Sources */,
+				AABDEA6D0CED5E3C1B72989A /* LavaConfirmationDialog.swift in Sources */,
+				439409D46616592FC49A3166 /* LavaIcon.swift in Sources */,
+				22E2AC46225A09D859737264 /* LavaLiveActivityActionRequest.swift in Sources */,
+				FF8AE4D951FE19F32D3F111D /* LavaLiveActivityController.swift in Sources */,
+				7D61B31D5B5CAF457D42E4CC /* LavaLiveActivityIntents.swift in Sources */,
+				F57C89C6E60F9EBC314D19B6 /* LavaProtectionCommandService.swift in Sources */,
+				E9DACA83819725B7E45779CA /* LavaScaffold.swift in Sources */,
+				775A367E44D46A2DDF7074CF /* LavaSecApp.swift in Sources */,
+				59A0193FF7EF22C0865162C8 /* LavaSecurityPlusController.swift in Sources */,
+				3848BA4B978A21ABE812D640 /* LavaSecurityPlusStore.swift in Sources */,
+				A08759F423EA9A7C7D34FEC8 /* LavaSelectableRow.swift in Sources */,
+				E04A583EC4B603B19C177AFC /* LavaStrings.swift in Sources */,
+				A763D73C86209D51A42977A3 /* LavaTokens.swift in Sources */,
+				F6646C7800FC5C0576F15EC0 /* OnboardingFlowView.swift in Sources */,
+				0BEC6C839FC5808F6CD3B150 /* ProtectionConnectivityPresentation.swift in Sources */,
+				0392569A8795B4EBDC2B77D0 /* ProtectionPlatformSeams.swift in Sources */,
+				DA2E25FE345E0B8A01769120 /* RageShakeDetector.swift in Sources */,
+				E89003FA2B27549418951567 /* RootView.swift in Sources */,
+				3E3256140A0F37C7440015B4 /* SecurityController.swift in Sources */,
+				F4C91FF4E37E013CEBFE2A0E /* SettingsView.swift in Sources */,
+				9F62E49B0BD6D783DD1E1F8F /* ShareableFiltersUI.swift in Sources */,
+				A8F8BF5B218F192293225391 /* SoftShieldGuardian.swift in Sources */,
+				2018C1F3BD903D586D86FA87 /* TemporaryProtectionPauseController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		1A0000010000000000006002 /* PBXTargetDependency */ = {
+		3E2BB25211A3856D1D0FEC17 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 1A0000010000000000008002 /* LavaSecTunnel */;
-			targetProxy = 1A0000010000000000006001 /* PBXContainerItemProxy */;
+			target = 1994B9376017074A73232670 /* LavaSecIntents */;
+			targetProxy = DC4206CA73AB3E9AD26A18F4 /* PBXContainerItemProxy */;
 		};
-		1A0000030000000000006004 /* PBXTargetDependency */ = {
+		597CAA239D0944F0B4A4EA6F /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 1A0000030000000000008003 /* LavaSecWidget */;
-			targetProxy = 1A0000030000000000006003 /* PBXContainerItemProxy */;
+			target = BBDEBA7C6CCC5CF9273D342F /* LavaSecTunnel */;
+			targetProxy = 67540789688D91F9957A8454 /* PBXContainerItemProxy */;
 		};
-		1A0000020000000000006002 /* PBXTargetDependency */ = {
+		89AB9CDA1FFDAC466BA661DD /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 1A0000010000000000008001 /* LavaSec */;
-			targetProxy = 1A0000020000000000006001 /* PBXContainerItemProxy */;
+			target = 15479A35CEFA407334A8EF9A /* LavaSecWidget */;
+			targetProxy = 2B2C85B18EBA76866519A9BE /* PBXContainerItemProxy */;
 		};
-		1A0000080000000000006002 /* PBXTargetDependency */ = {
+		EB5CFEFE0D51121A339463C2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 1A0000080000000000008001 /* LavaSecIntents */;
-			targetProxy = 1A0000080000000000006001 /* PBXContainerItemProxy */;
+			target = 35CBEDDD793FEE0361B051F6 /* LavaSec */;
+			targetProxy = 70E81AE4DE5567B9A6710FBF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		1A000001000000000000B001 /* Debug */ = {
+		0AABC3F0EC5F095DDA2B6D6B /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1ACF160000000000000F0101 /* Lava.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_INTENTS_PROFILE)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1D4C4651F036437FBCD85549 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LavaSec;
+			};
+			name = Debug;
+		};
+		1F35DA1205C0847604E12853 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
+				PRODUCT_NAME = LavaSecWidget;
+				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_WIDGET_PROFILE)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		32670CD8D11FDEEFE7461544 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LAVA_DISPLAY_NAME = "Lava Security";
+				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
+				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
+				LAVA_SUPABASE_URL = "$(inherited)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
+				PRODUCT_NAME = LavaSec;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3FD36D22B46565E6B3996405 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LAVA_DISPLAY_NAME = "Lava Security";
+				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
+				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
+				LAVA_SUPABASE_URL = "$(inherited)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
+				PRODUCT_NAME = LavaSec;
+				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_APP_PROFILE)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		42B8A58E53DF4DE3AD2C832C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LM_SKIP_METADATA_EXTRACTION = YES;
+				MARKETING_VERSION = "$(inherited)";
+				OTHER_LDFLAGS = "$(inherited) -lresolv";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
+				PRODUCT_NAME = LavaSecTunnel;
+				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_TUNNEL_PROFILE)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		47E1A53A81E70551A0A78E86 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LM_SKIP_METADATA_EXTRACTION = YES;
+				MARKETING_VERSION = "$(inherited)";
+				OTHER_LDFLAGS = "$(inherited) -lresolv";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
+				PRODUCT_NAME = LavaSecTunnel;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		4F252691CA859F1FF2BBF308 /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = QA;
+		};
+		70A5BED9CE3CD22A511A3C8D /* QA */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 7D88815E2DF25E0B2E3BDB4B /* Lava.QA.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = s;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"LAVA_QA_TOOLS=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = QA;
+		};
+		8207B179872F197E5CAD2231 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecIntents/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
+				PRODUCT_NAME = LavaSecIntents;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		91AE74C3273FD949E9907CBF /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LM_SKIP_METADATA_EXTRACTION = YES;
+				MARKETING_VERSION = "$(inherited)";
+				OTHER_LDFLAGS = "$(inherited) -lresolv";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.tunnel;
+				PRODUCT_NAME = LavaSecTunnel;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = QA;
+		};
+		9ECEC8C4073F189EB919F6B1 /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.widget;
+				PRODUCT_NAME = LavaSecWidget;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = QA;
+		};
+		B1E6DD4D7783523C91A6AD2D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9F10CD412C2176D512556EBF /* Lava.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -808,21 +1187,96 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-					GCC_WARN_UNUSED_FUNCTION = YES;
-					GCC_WARN_UNUSED_VARIABLE = YES;
-					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-					ONLY_ACTIVE_ARCH = YES;
-					SDKROOT = iphoneos;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "";
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
-		1A000001000000000000B002 /* Release */ = {
+		B682A44DB1783AB21F1E175C /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1ACF160000000000000F0101 /* Lava.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
+				PRODUCT_NAME = LavaSecWidget;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D38E88650D0CAA30DA80813D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = LavaSec;
+			};
+			name = Release;
+		};
+		DA6589E45F3C94063BB659AC /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon-QA";
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(inherited)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LavaSecApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LAVA_DISPLAY_NAME = "Lava Security";
+				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
+				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
+				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
+				LAVA_SUPABASE_URL = "$(inherited)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = "$(inherited)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa;
+				PRODUCT_NAME = LavaSec;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = QA;
+		};
+		E0AD20F37AFD69758FC066BA /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 9F10CD412C2176D512556EBF /* Lava.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -860,373 +1314,20 @@
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-					GCC_WARN_UNUSED_FUNCTION = YES;
-					GCC_WARN_UNUSED_VARIABLE = YES;
-					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MTL_ENABLE_DEBUG_INFO = NO;
-					SDKROOT = iphoneos;
-					SWIFT_COMPILATION_MODE = wholemodule;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "";
-					SWIFT_VERSION = 6.0;
-					VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		1A000001000000000000B003 /* QA */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 1ACF160000000000000F0102 /* Lava.QA.xcconfig */;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = NO;
-				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = s;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"LAVA_QA_TOOLS=1",
-					"$(inherited)",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-					GCC_WARN_UNUSED_FUNCTION = YES;
-					GCC_WARN_UNUSED_VARIABLE = YES;
-					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MTL_ENABLE_DEBUG_INFO = NO;
-					ONLY_ACTIVE_ARCH = NO;
-					SDKROOT = iphoneos;
-				ENABLE_NS_ASSERTIONS = NO;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				VALIDATE_PRODUCT = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "";
-				SWIFT_VERSION = 6.0;
-			};
-			name = QA;
-		};
-		1A000001000000000000B101 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecApp/Info.plist;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LAVA_DISPLAY_NAME = "Lava Security";
-				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
-				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
-				LAVA_SUPABASE_URL = "$(inherited)";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
-	                PRODUCT_NAME = LavaSec;
-					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-					SWIFT_VERSION = 6.0;
-					TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		1A000001000000000000B102 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_APP_PROFILE)";
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecApp/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LAVA_DISPLAY_NAME = "Lava Security";
-				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
-				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
-				LAVA_SUPABASE_URL = "$(inherited)";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-	                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app;
-	                PRODUCT_NAME = LavaSec;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-					SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-					SWIFT_VERSION = 6.0;
-					TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		1A000001000000000000B103 /* QA */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme";
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon-QA;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = LavaSecApp/LavaSecApp.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecApp/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-                LAVA_DISPLAY_NAME = "Lava Security";
-				LAVA_GOOGLE_IOS_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_REVERSED_CLIENT_ID = "$(inherited)";
-				LAVA_GOOGLE_SERVER_CLIENT_ID = "$(inherited)";
-				LAVA_SUPABASE_ANON_KEY = "$(inherited)";
-				LAVA_SUPABASE_URL = "$(inherited)";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa;
-                PRODUCT_NAME = LavaSec;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = QA;
-		};
-		1A000001000000000000B201 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
-				LM_SKIP_METADATA_EXTRACTION = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				OTHER_LDFLAGS = "$(inherited) -lresolv";
-                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
-                PRODUCT_NAME = LavaSecTunnel;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Debug;
-		};
-		1A000001000000000000B202 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_TUNNEL_PROFILE)";
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
-				LM_SKIP_METADATA_EXTRACTION = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				OTHER_LDFLAGS = "$(inherited) -lresolv";
-                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.tunnel;
-					PRODUCT_NAME = LavaSecTunnel;
-					SKIP_INSTALL = YES;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-					SWIFT_VERSION = 6.0;
-				};
-				name = Release;
-		};
-		1A000001000000000000B203 /* QA */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecTunnel/LavaSecTunnel.entitlements;
-				LM_SKIP_METADATA_EXTRACTION = YES;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				INFOPLIST_FILE = LavaSecTunnel/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				OTHER_LDFLAGS = "$(inherited) -lresolv";
-                PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.tunnel;
-                PRODUCT_NAME = LavaSecTunnel;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 6.0;
-			};
-			name = QA;
-		};
-		1A000003000000000000B301 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
-				PRODUCT_NAME = LavaSecWidget;
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		1A000003000000000000B302 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_WIDGET_PROFILE)";
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.widget;
-				PRODUCT_NAME = LavaSecWidget;
-				SKIP_INSTALL = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "";
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
-		1A000003000000000000B303 /* QA */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecWidget/LavaSecWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.widget;
-				PRODUCT_NAME = LavaSecWidget;
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = QA;
-		};
-		1A000002000000000000B101 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = LavaSec;
-			};
-			name = Debug;
-		};
-		1A000002000000000000B102 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.uitests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = LavaSec;
-			};
-			name = Release;
-		};
-		1A000002000000000000B103 /* QA */ = {
+		F65D3C31702016CD59A6BF88 /* QA */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -1244,146 +1345,65 @@
 			};
 			name = QA;
 		};
-		1A0000080000000000B001 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecIntents/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
-				PRODUCT_NAME = LavaSecIntents;
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		1A0000080000000000B002 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecIntents/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.app.intents;
-				PRODUCT_NAME = LavaSecIntents;
-				PROVISIONING_PROFILE_SPECIFIER = "$(LAVASEC_INTENTS_PROFILE)";
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = RELEASE;
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		1A0000080000000000B003 /* QA */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LavaSecIntents/LavaSecIntents.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LavaSecIntents/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
-				MARKETING_VERSION = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lavasec.dev.qa.intents;
-				PRODUCT_NAME = LavaSecIntents;
-				SKIP_INSTALL = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "RELEASE LAVA_QA_TOOLS";
-				SWIFT_EMIT_CONST_VALUE_PROTOCOLS = "AppIntent LiveActivityIntent EntityQuery AppEntity TransientEntity AppEnum AppShortcutProviding AppShortcutsProvider AnyResolverProviding AppIntentsPackage DynamicOptionsProvider _IntentValueRepresentable _AssistantIntentsProvider _GenerativeFunctionExtractable IntentValueQuery Resolver";
-				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = QA;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1A000001000000000000A000 /* Build configuration list for PBXProject "LavaSec" */ = {
+		2BF0FAE14D17FDAFBDA83304 /* Build configuration list for PBXNativeTarget "LavaSecWidget" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A000001000000000000B001 /* Debug */,
-				1A000001000000000000B002 /* Release */,
-				1A000001000000000000B003 /* QA */,
+				B682A44DB1783AB21F1E175C /* Debug */,
+				9ECEC8C4073F189EB919F6B1 /* QA */,
+				1F35DA1205C0847604E12853 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A000001000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSec" */ = {
+		6BD8F71BBA741F2DA5941EA9 /* Build configuration list for PBXNativeTarget "LavaSecTunnel" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A000001000000000000B101 /* Debug */,
-				1A000001000000000000B102 /* Release */,
-				1A000001000000000000B103 /* QA */,
+				47E1A53A81E70551A0A78E86 /* Debug */,
+				91AE74C3273FD949E9907CBF /* QA */,
+				42B8A58E53DF4DE3AD2C832C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A000001000000000000A002 /* Build configuration list for PBXNativeTarget "LavaSecTunnel" */ = {
+		9898E08112138BCEC9E7FD20 /* Build configuration list for PBXProject "LavaSec" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A000001000000000000B201 /* Debug */,
-				1A000001000000000000B202 /* Release */,
-				1A000001000000000000B203 /* QA */,
+				B1E6DD4D7783523C91A6AD2D /* Debug */,
+				70A5BED9CE3CD22A511A3C8D /* QA */,
+				E0AD20F37AFD69758FC066BA /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A000003000000000000A003 /* Build configuration list for PBXNativeTarget "LavaSecWidget" */ = {
+		AEC580C9DCECBC8DD39E5514 /* Build configuration list for PBXNativeTarget "LavaSecUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A000003000000000000B301 /* Debug */,
-				1A000003000000000000B302 /* Release */,
-				1A000003000000000000B303 /* QA */,
+				1D4C4651F036437FBCD85549 /* Debug */,
+				F65D3C31702016CD59A6BF88 /* QA */,
+				D38E88650D0CAA30DA80813D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A000002000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecUITests" */ = {
+		D382B2F1D249605C623E9664 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A000002000000000000B101 /* Debug */,
-				1A000002000000000000B102 /* Release */,
-				1A000002000000000000B103 /* QA */,
+				8207B179872F197E5CAD2231 /* Debug */,
+				4F252691CA859F1FF2BBF308 /* QA */,
+				0AABC3F0EC5F095DDA2B6D6B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1A000008000000000000A001 /* Build configuration list for PBXNativeTarget "LavaSecIntents" */ = {
+		D8367D5D71616C13E50FAC10 /* Build configuration list for PBXNativeTarget "LavaSec" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				1A0000080000000000B001 /* Debug */,
-				1A0000080000000000B002 /* Release */,
-				1A0000080000000000B003 /* QA */,
+				32670CD8D11FDEEFE7461544 /* Debug */,
+				DA6589E45F3C94063BB659AC /* QA */,
+				3FD36D22B46565E6B3996405 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -1391,14 +1411,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */ = {
+		E888162D1D7C2ECD55F478E9 /* XCLocalSwiftPackageReference "." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = .;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		1A0000010000000000007005 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+		5FC3FD0D52FBFE0D6EB44F21 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
 			requirement = {
@@ -1409,37 +1429,32 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		1A0000010000000000007002 /* LavaSecCore */ = {
+		05F233E527344169F47CC27F /* LavaSecCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
 			productName = LavaSecCore;
 		};
-			1A0000010000000000007003 /* LavaSecCore */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
-				productName = LavaSecCore;
-			};
-			1A0000020000000000007006 /* LavaSecCore */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
-				productName = LavaSecCore;
-			};
-			1A0000030000000000007007 /* LavaSecCore */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
-				productName = LavaSecCore;
-			};
-			1A0000010000000000007004 /* GoogleSignIn */ = {
+		0FA3A1980DA87565BA72E48D /* LavaSecCore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1A0000010000000000007005 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = LavaSecCore;
+		};
+		135580B4385ACEED7B9D1813 /* LavaSecCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LavaSecCore;
+		};
+		2B24A38AB6289CC278FB512C /* LavaSecCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LavaSecCore;
+		};
+		92A55F77631CEC03A1B76E38 /* LavaSecCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LavaSecCore;
+		};
+		C6267DC77BF4D6DE0036AA16 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5FC3FD0D52FBFE0D6EB44F21 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
 		};
-			1A0000080000000000007008 /* LavaSecCore */ = {
-				isa = XCSwiftPackageProductDependency;
-				package = 1A0000010000000000007001 /* XCLocalSwiftPackageReference "." */;
-				productName = LavaSecCore;
-			};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = 1A0000010000000000009001 /* Project object */;
+	rootObject = 83262453BC8AED844A7455F3 /* Project object */;
 }

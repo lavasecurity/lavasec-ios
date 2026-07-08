@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 struct BackupSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var backup: BackupController
 
     @State private var step: BackupSetupStep = .overview
     /// Whether the next step swap reads as a push or a pop, so the slide matches
@@ -56,9 +56,9 @@ struct BackupSetupView: View {
         // task is awaiting, and on .validatePasskey — that step holds a
         // registered-but-unvalidated passkey that only the Cancel/Back path
         // (cancelPasskeyValidation) cleans up, so a drag-dismiss there would
-        // leave orphaned pending passkey state in the view model. The disabled
-        // chevron only covers the button; without this the gesture reintroduces
-        // the same race.
+        // leave orphaned pending passkey state in the backup controller. The
+        // disabled chevron only covers the button; without this the gesture
+        // reintroduces the same race.
         .interactiveDismissDisabled(blocksInteractiveDismiss)
         .onAppear {
             ensureRecoveryPhrase()
@@ -364,7 +364,7 @@ struct BackupSetupView: View {
         errorMessage = nil
 
         guard mode == .withPasskey else {
-            viewModel.clearPendingBackupPasskey()
+            backup.clearPendingBackupPasskey()
             go(to: .recoveryPhrase)
             return
         }
@@ -372,7 +372,7 @@ struct BackupSetupView: View {
         isPreparingPasskey = true
         Task {
             do {
-                try await viewModel.registerBackupPasskey()
+                try await backup.registerBackupPasskey()
                 go(to: .validatePasskey)
             } catch {
                 selectedPasskeyMode = nil
@@ -388,7 +388,7 @@ struct BackupSetupView: View {
         Task {
             let failure: String?
             do {
-                try await viewModel.validateBackupPasskey()
+                try await backup.validateBackupPasskey()
                 failure = nil
             } catch {
                 failure = error.localizedDescription
@@ -408,7 +408,7 @@ struct BackupSetupView: View {
     }
 
     private func cancelPasskeyValidation() {
-        viewModel.clearPendingBackupPasskey()
+        backup.clearPendingBackupPasskey()
         selectedPasskeyMode = nil
         errorMessage = nil
         go(to: .overview)
@@ -430,7 +430,7 @@ struct BackupSetupView: View {
             isFinishingSetup = true
             Task {
                 do {
-                    try await viewModel.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
+                    try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
                     ProtectionHapticFeedback.play(.actionSucceeded)
                     // Success dismisses the sheet immediately, so there is no on-screen
                     // confirmation for VoiceOver to land on — announce that backup is on.

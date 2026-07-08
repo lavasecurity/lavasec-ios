@@ -272,6 +272,17 @@ struct LavaSecApp: App {
     private var productionRoot: some View {
         RootView()
             .environmentObject(viewModel)
+            // The backup scope peeled from the hub (Phase D1): views observe it as its own
+            // environment object; the hub creates it so the bridge is wired to live state.
+            .environmentObject(viewModel.backup)
+            // The LavaSecurity+ billing scope, peeled the same way (Phase D2).
+            .environmentObject(viewModel.plus)
+            // The account/sign-in scope, peeled the same way (Phase D3).
+            .environmentObject(viewModel.account)
+            // The diagnostics + bug-report/rage-shake scope, peeled the same way (Phase D4).
+            .environmentObject(viewModel.reports)
+            // The customization-preferences scope, peeled the same way (Phase D5).
+            .environmentObject(viewModel.customization)
             .environmentObject(security)
             .overlay(alignment: .bottom) {
                 #if DEBUG

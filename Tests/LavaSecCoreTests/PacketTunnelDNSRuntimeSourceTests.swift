@@ -336,9 +336,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
 
         // The drop must be gated behind the retry-exhaustion check (only when truly
         // exhausted, never on a routine empty read mid-retry).
+        // (Phase E2: the policy call moved inside DeviceDNSCaptureRetryCycle; the
+        // provider consults it through the cycle's shouldContinue.)
         let gateRange = try XCTUnwrap(
-            retryBlock.range(of: "DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture"),
-            "Expected the shouldRetryDeviceDNSCapture gate in runDeviceDNSCaptureRetry."
+            retryBlock.range(of: "deviceDNSCaptureRetryCycle.shouldContinue(capturedNonEmpty: false)"),
+            "Expected the cycle's retry-continuation gate in runDeviceDNSCaptureRetry."
         )
         let dropRange = try XCTUnwrap(
             retryBlock.range(of: "preserveOnEmptyCapture: !routesToEncryptedFallback"),
@@ -383,40 +385,32 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // futile reads + log appends over ~4.7 h, 108 exhaustions, zero recoveries.
         // A wake-reason restart must honour the exhaustion cooldown; the wake path's
         // one-shot re-read still samples the network every wake.
+        // Phase E2: the cooldown/stamp STATE machine moved into
+        // DeviceDNSCaptureRetryCycle (LavaSecDNS), where its transitions are
+        // EXECUTABLE (DeviceDNSCaptureRetryCycleTests replay the rc5 field timeline —
+        // something these presence-pins could never catch: they passed on rc5 while
+        // the cooldown was bypassed in the field). What remains compiler-invisible is
+        // the WIRING: the provider must route schedule requests through the cycle and
+        // keep the suppression observable in the device log.
         XCTAssertTrue(
-            scheduleBlock.contains("DeviceDNSFallbackPolicy.shouldRestartCaptureRetryCycleAfterWake("),
-            "Wake-triggered retry-cycle restarts must consult the exhaustion cooldown policy."
-        )
-        XCTAssertTrue(
-            scheduleBlock.contains("if reason == \"wake\" {"),
-            "Only the wake reason is cooldown-gated; every other reason means a real change."
-        )
-        XCTAssertTrue(
-            scheduleBlock.contains("deviceDNSCaptureRetryLastMaskedExhaustionAt = nil"),
-            "A non-wake schedule reason (network-path-changed) must clear the exhaustion stamp so a real change always retries."
+            scheduleBlock.contains("deviceDNSCaptureRetryCycle.noteScheduleRequest(isWake: reason == \"wake\")"),
+            "Wake-triggered retry-cycle restarts must consult the extracted cycle's cooldown gate."
         )
         XCTAssertTrue(
             scheduleBlock.contains("event: \"device-dns-capture-retry-suppressed\""),
             "The first suppressed wake after an exhaustion must stay observable in the device log."
         )
-
-        // The stamp is set exactly at masked exhaustion and cleared on the first
-        // non-empty capture (the mask lifted — future wakes may retry immediately).
         XCTAssertTrue(
-            retryBlock.contains("deviceDNSCaptureRetryLastMaskedExhaustionAt = Date()"),
-            "Masked exhaustion must stamp the cooldown."
-        )
-        let recaptureRange = try XCTUnwrap(
-            retryBlock.range(of: "if !captured.isEmpty {"),
-            "Expected the non-empty-capture branch in runDeviceDNSCaptureRetry."
-        )
-        let clearRange = try XCTUnwrap(
-            retryBlock.range(of: "deviceDNSCaptureRetryLastMaskedExhaustionAt = nil"),
-            "A non-empty capture must clear the exhaustion stamp."
+            retryBlock.contains("deviceDNSCaptureRetryCycle.noteExhausted()"),
+            "Masked exhaustion must stamp the cycle's cooldown."
         )
         XCTAssertTrue(
-            recaptureRange.lowerBound < clearRange.lowerBound,
-            "The stamp clear must live in the non-empty-capture branch."
+            retryBlock.contains("deviceDNSCaptureRetryCycle.noteCaptureSucceeded("),
+            "A non-empty capture must report success to the cycle."
+        )
+        XCTAssertTrue(
+            retryBlock.contains("addressesChanged: deviceDNSResolverAddresses != previousAddresses"),
+            "The cycle must learn whether the capture was a REAL recovery or an address-neutral flap (rc5 field-log fix)."
         )
     }
 
@@ -642,51 +636,45 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("resolverQueue"))
     }
 
-    func testUDPResolverSendsToEndpointPerQueryWithoutConnectingSocketAtCreation() throws {
-        let source = try readSource(.packetTunnelProvider)
+    // Phase E1 re-anchor: UDPResolverSocket moved to Sources/LavaSecDNS/SocketResolvers.swift.
+    // The behavior the old pins guarded is now EXECUTABLE — SocketResolverTests covers
+    // loopback round trips, source-address validation (anti-spoofing, both families),
+    // the mismatch cap, and bounded receive timeouts. This slim pin keeps only what no
+    // behavioral test can observe: the socket must stay UNCONNECTED (a connected UDP
+    // socket would pass every loopback round trip but re-poison socket creation on
+    // route changes) and each query must go out via sendto, never Darwin.send.
+    func testUDPResolverSocketStaysUnconnectedAndSendsPerQuery() throws {
+        let source = try readSource(.socketResolvers)
         let udpSocketBlock = try sourceBlock(
             in: source,
-            startingAt: "private final class UDPResolverSocket",
-            endingBefore: "private enum TCPResolver"
+            startingAt: "public final class UDPResolverSocket",
+            endingBefore: "public enum TCPResolver"
+        )
+        let sendHelperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func send(_ query: Data, endpoint: ResolverEndpoint"
         )
 
+        // The doc comment legitimately mentions `connect(2)`; ban the CALL spellings.
         XCTAssertFalse(
-            udpSocketBlock.contains("Self.connect(descriptor"),
-            "UDP socket creation should not fail because a resolver route cannot be connected yet."
+            udpSocketBlock.contains("Darwin.connect("),
+            "UDP socket creation must not fail because a resolver route cannot be connected yet."
         )
+        XCTAssertFalse(udpSocketBlock.contains("connect(descriptor"))
+        XCTAssertFalse(udpSocketBlock.contains("connect(fileDescriptor"))
         XCTAssertTrue(
-            udpSocketBlock.contains("send(query, endpoint: endpoint, fileDescriptor: fileDescriptor)"),
-            "Each UDP query should use sendto with its endpoint so route changes do not poison socket creation."
+            udpSocketBlock.contains("send(query, endpoint: endpoint, port: port, fileDescriptor: fileDescriptor)"),
+            "Each UDP query should use the sendto helper so route changes do not poison socket creation."
         )
-    }
-
-    func testUDPResolverValidatesReceivedPacketSourceBeforeDNSPayload() throws {
-        let source = try readSource(.packetTunnelProvider)
-        let udpSocketBlock = try sourceBlock(
-            in: source,
-            startingAt: "private final class UDPResolverSocket",
-            endingBefore: "private enum TCPResolver"
+        XCTAssertTrue(sendHelperBlock.contains("sendto("))
+        XCTAssertFalse(
+            sendHelperBlock.contains("Darwin.send("),
+            "Unconnected UDP sockets must use sendto, not send."
         )
-        let sourceMatcherBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func isExpectedSource",
-            endingBefore: "private func send("
-        )
-
-        XCTAssertTrue(
-            udpSocketBlock.contains("var sourceAddress = sockaddr_storage()"),
-            "recvfrom should capture the UDP sender address on unconnected sockets."
-        )
-        XCTAssertTrue(
-            udpSocketBlock.contains("isExpectedSource(sourceAddress, endpoint: endpoint)"),
-            "DNS payload validation should only run for packets sent by the resolver endpoint."
-        )
-        XCTAssertTrue(
-            sourceMatcherBlock.contains("sin_port == in_port_t(53).bigEndian"),
-            "UDP source validation should require the DNS server port."
-        )
-        XCTAssertTrue(sourceMatcherBlock.contains("inet_pton(AF_INET, endpoint.address"))
-        XCTAssertTrue(sourceMatcherBlock.contains("inet_pton(AF_INET6, endpoint.address"))
+        // Canary: the negative pins above key on these identifiers — if a rename removes
+        // one from the pinned source, those pins pass vacuously. Fail here instead, then
+        // re-anchor both sides to the new name.
+        XCTAssertTrue(source.contains("Darwin.connect("))
     }
 
     func testBlockedDNSResponsesUseShortTTLWithoutChangingUpstreamResponseCache() throws {
@@ -756,22 +744,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
     }
 
-    func testUDPResolverSendHelperUsesSendtoForIPv4AndIPv6() throws {
-        let source = try readSource(.packetTunnelProvider)
-        let sendBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func send(",
-            endingBefore: "private func receiveFailureOutcome()"
-        )
-
-        XCTAssertTrue(sendBlock.contains("sendto("))
-        XCTAssertTrue(sendBlock.contains("inet_pton(AF_INET, endpoint.address"))
-        XCTAssertTrue(sendBlock.contains("inet_pton(AF_INET6, endpoint.address"))
-        XCTAssertFalse(
-            sendBlock.contains("Darwin.send("),
-            "Unconnected UDP sockets must use sendto, not send."
-        )
-    }
+    // (Phase E1) testUDPResolverSendHelperUsesSendtoForIPv4AndIPv6 and
+    // testUDPResolverValidatesReceivedPacketSourceBeforeDNSPayload were text pins on the
+    // provider's copy of this logic; the moved code is executable now, so both families'
+    // send paths and the source-validation (anti-spoofing) gate are exercised for real
+    // in SocketResolverTests. The sendto-not-send spelling stays pinned in
+    // testUDPResolverSocketStaysUnconnectedAndSendsPerQuery.
 
     func testPlainDNSAttemptsTCPFallbackAfterUDPTimeoutOnly() throws {
         let source = try readSource(.packetTunnelProvider)
@@ -822,17 +800,22 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(addressOrderBlock.contains("resolverBackoffPolicy.availableAddresses(from: addresses, now: now)"))
     }
 
+    // Phase E1 re-anchor: the resolver sockets moved to Sources/LavaSecDNS/SocketResolvers.swift.
+    // That the timeouts actually BOUND blocking receives is executable now
+    // (SocketResolverTests timeout tests would hang without SO_RCVTIMEO); this pin keeps
+    // the branch no behavioral test can force — setsockopt FAILING must abort socket
+    // setup (fail closed) rather than run an unbounded socket.
     func testResolverSocketsRequireTimeoutSetup() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readSource(.socketResolvers)
         let udpSocketBlock = try sourceBlock(
             in: source,
-            startingAt: "private final class UDPResolverSocket",
-            endingBefore: "private enum TCPResolver"
+            startingAt: "public final class UDPResolverSocket",
+            endingBefore: "public enum TCPResolver"
         )
         let tcpResolverBlock = try sourceBlock(
             in: source,
-            startingAt: "private enum TCPResolver",
-            endingBefore: "private enum DNSMessageTraits"
+            startingAt: "public enum TCPResolver",
+            endingBefore: "private func isExpectedSource"
         )
 
         XCTAssertTrue(
@@ -2355,13 +2338,16 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func drainTransientBootstrapDNSWait("
         )
 
-        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitTimeout: TimeInterval = 4"))
-        XCTAssertTrue(source.contains("private static let transientBootstrapDNSWaitMaximumPendingResponses = 64"))
-        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitPendingResponses: [PendingDNSResponse] = []"))
-        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitGeneration: UInt64?"))
-        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitExpiredGeneration: UInt64?"))
-        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitTimer: DispatchSourceTimer?"))
-        XCTAssertTrue(source.contains("private var transientBootstrapDNSWaitDidLogOverflow = false"))
+        // Phase E2: the wait's STATE (64-deep/4 s bounds, active flag, generation +
+        // expired-generation markers, pending queue, timer handle, overflow-log dedup)
+        // moved into TransientBootstrapDNSWait (LavaSecDNS), where the INV-DNS-2
+        // bounds and transitions are EXECUTABLE (TransientBootstrapDNSWaitTests)
+        // instead of text-pinned constants and ivars. What stays compiler-invisible
+        // is the WIRING: the provider must route the wait through the machine on the
+        // confinement queue and feed it the CURRENT lifecycle generation per call —
+        // the machine never owns tunnelLifecycleGeneration.
+        XCTAssertTrue(source.contains("private lazy var transientBootstrapDNSWait = TransientBootstrapDNSWait<PendingDNSResponse>("))
+        XCTAssertTrue(source.contains("queue: dnsStateQueue,"))
 
         XCTAssertTrue(initialStateBlock.contains("let launchFollowsRecentSelfReconnect = Self.launchFollowsRecentSelfReconnect(now: Date())"))
         XCTAssertTrue(startTunnelBlock.contains("let shouldBeginTransientBootstrapDNSWaitAfterNetworkSettings = loadInitialSharedState()"))
@@ -2372,17 +2358,23 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(enqueueBlock.contains("filterDecision.action == .block"))
         XCTAssertTrue(enqueueBlock.contains("filterDecision.reason == .protectionUnavailable"))
         XCTAssertTrue(enqueueBlock.contains("failClosedReason == \"transient-protection-unavailable\""))
-        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitActive"))
-        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
-        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
-        XCTAssertTrue(enqueueBlock.contains("if !transientBootstrapDNSWaitDidLogOverflow {"))
-        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWaitDidLogOverflow = true"))
+        // Phase E2: the admission transitions (expired-generation latecomer, stale
+        // lifecycle, 64-cap overflow with one-shot log dedup, first-append marker)
+        // are executable in TransientBootstrapDNSWaitTests. The wiring pins below
+        // hold the provider to: consulting the machine under the CURRENT lifecycle
+        // generation, and mapping its decisions onto the unchanged SERVFAIL reasons
+        // and device-log events.
+        XCTAssertTrue(enqueueBlock.contains("transientBootstrapDNSWait.enqueue(pending, generation: tunnelLifecycleGeneration)"))
         XCTAssertTrue(enqueueBlock.containsInOrder([
-            "if transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration",
-            "serverFailure = PendingDNSResponse(",
-            "guard transientBootstrapDNSWaitActive",
-            "else {\n                return false\n            }",
-            "let pending = PendingDNSResponse("
+            "case .rejectExpiredGeneration:",
+            "serverFailureReason = \"transient-bootstrap-dns-wait-timeout\"",
+            "case .notHandled:",
+            "return false",
+            "case .rejectOverflow(let logOnce, let pendingCount):",
+            "serverFailureReason = \"transient-bootstrap-dns-wait-overflow\"",
+            "if logOnce {",
+            "case .queued(let isFirst):",
+            "if isFirst {"
         ]))
         XCTAssertTrue(
             initialStateBlock.contains("Queued DNS is not forwarded while the snapshot is unavailable"),
@@ -2436,11 +2428,6 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "private func replayTransientBootstrapDNSRequests(",
             endingBefore: "private func recordDiagnostic("
         )
-        let finishBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func finishTransientBootstrapDNSWaitOnDNSQueue()",
-            endingBefore: "private func recordDiagnostic("
-        )
         let writeServerFailureBlock = try sourceBlock(
             in: source,
             startingAt: "private func writeServerFailures(",
@@ -2457,12 +2444,22 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(invalidateLifecycleBlock.contains("cancelTransientBootstrapDNSWait(reason: \"lifecycle-invalidated-\\(reason)\")"))
         XCTAssertTrue(drainBlock.contains("let drain = { [self] () ->"))
         XCTAssertTrue(failBlock.contains("let fail = { [self] () ->"))
-        XCTAssertTrue(drainBlock.contains("transientBootstrapDNSWaitGeneration == tunnelLifecycleGeneration"))
-        XCTAssertTrue(drainBlock.contains("transientBootstrapDNSWaitExpiredGeneration == tunnelLifecycleGeneration"))
+        // Phase E2: the generation-match/stale-lifecycle split and the timeout's
+        // expired-generation stamping are executable transitions in
+        // TransientBootstrapDNSWaitTests. These pins hold the WIRING: drain/fail
+        // consult the machine under the CURRENT lifecycle generation, a stale
+        // lifecycle's queue goes to SERVFAIL (never replay), and only the TIMEOUT
+        // reason marks the generation expired.
+        XCTAssertTrue(drainBlock.contains("transientBootstrapDNSWait.drain(currentGeneration: tunnelLifecycleGeneration)"))
+        XCTAssertTrue(drainBlock.containsInOrder([
+            "case .staleLifecycle(let pendingResponses):",
+            "case .replay(let pendingResponses, let replayGeneration):"
+        ]))
         XCTAssertTrue(drainBlock.contains("transient-bootstrap-dns-wait-stale-lifecycle"))
         XCTAssertTrue(drainBlock.contains("expectedLifecycleGeneration: result.replayGeneration"))
         XCTAssertTrue(failBlock.contains("writeServerFailures(for: pendingResponses, reason: reason)"))
-        XCTAssertTrue(failBlock.contains("transientBootstrapDNSWaitExpiredGeneration = expectedGeneration ?? generation"))
+        XCTAssertTrue(failBlock.contains("let isTimeout = reason == \"transient-bootstrap-dns-wait-timeout\""))
+        XCTAssertTrue(failBlock.contains("marksGenerationExpired: isTimeout"))
         XCTAssertTrue(replayBlock.contains("expectedLifecycleGeneration: UInt64?"))
         XCTAssertTrue(replayBlock.contains("self.isCurrentTunnelLifecycle(expectedLifecycleGeneration)"))
         XCTAssertTrue(replayBlock.contains("transient-bootstrap-dns-wait-stale-lifecycle"))
@@ -2470,8 +2467,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(replayBlock.contains("expectedLifecycleGeneration: expectedLifecycleGeneration"))
         XCTAssertFalse(replayBlock.contains("for (index, pending) in pendingResponses.enumerated()"))
         XCTAssertTrue(replayBlock.contains("for pending in pendingResponses"))
-        XCTAssertTrue(finishBlock.contains("transientBootstrapDNSWaitExpiredGeneration = nil"))
-        XCTAssertTrue(finishBlock.contains("transientBootstrapDNSWaitDidLogOverflow = false"))
+        // Phase E2: the finish/reset transition (timer cancel, both generation
+        // markers cleared, overflow dedup reset, queue handed back) is executable —
+        // TransientBootstrapDNSWaitTests
+        // .testTeardownReturnsTheQueueForSERVFAILAndResetsForTheNextLifecycle —
+        // so the old finishTransientBootstrapDNSWaitOnDNSQueue text pins are gone.
+        XCTAssertTrue(source.contains("transientBootstrapDNSWait.cancelWait()"))
         XCTAssertTrue(source.contains("let cancel = { [self] () ->"))
         XCTAssertTrue(failBlock.contains("event: \"transient-bootstrap-dns-wait-timeout\""))
         XCTAssertTrue(enqueueBlock.contains("event: \"transient-bootstrap-dns-wait-overflow\""))
@@ -4347,9 +4348,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let ledgerIOHop = try XCTUnwrap(clearLedgerBlock.range(of: "Self.appGroupLogIOQueue.async")).lowerBound
         XCTAssertLessThan(ledgerDNSTurn, ledgerIOHop, "the clear must drain dnsStateQueue before hopping to the IO queue")
 
-        // The app's clear-all sends the ledger clear so the tunnel drains its queue.
-        let appSource = try readSource(.appViewModel)
-        XCTAssertTrue(appSource.contains("sendTunnelMessage(LavaSecAppGroup.clearIncidentLedgerMessage)"))
+        // The app's clear-all sends the ledger clear so the tunnel drains its queue
+        // (clearAllLocalLogs lives on DiagnosticsController since the Phase D4 peel;
+        // the message still travels the hub's provider-message channel via the bridge).
+        let diagnosticsControllerSource = try readSource(.diagnosticsController)
+        XCTAssertTrue(diagnosticsControllerSource.contains("sendTunnelMessage(LavaSecAppGroup.clearIncidentLedgerMessage)"))
     }
 
     func testIncidentLedgerWritesAtEveryIncidentSiteWithoutTouchingPolicy() throws {
@@ -4452,7 +4455,9 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // by construction (arm → 24 h corroborated confirm), hooked to the app's
         // local-log lifecycle as well (Codex round 4: tunnel starts stop happening while
         // the VPN is disabled, and expired rows must not outlive the 7-day promise).
-        let appSource = try readSource(.appViewModel)
+        // The app-side ledger read/sweep/clear lifecycle lives on DiagnosticsController
+        // since the Phase D4 peel.
+        let appSource = try readSource(.diagnosticsController)
         XCTAssertTrue(appSource.contains("""
         sweepIncidentLedgerRetention()
         let ledgerURL = containerURL.appendingPathComponent(LavaSecAppGroup.incidentLedgerFilename)
@@ -4470,7 +4475,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         let clearAllBlock = try sourceBlock(
             in: appSource,
             startingAt: "func clearAllLocalLogs()",
-            endingBefore: "func makeLocalLogExportArchive"
+            endingBefore: "func setKeepFilteringCounts"
         )
         XCTAssertTrue(clearAllBlock.contains("clearIncidentLedger()"))
         XCTAssertTrue(appSource.contains("IncidentLedgerPersistence.clear(at: ledgerURL)"))
@@ -4502,19 +4507,32 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // the last few Domain History events. The app still prunes IN MEMORY for display and
         // persists its prune once it owns the file (protection off). Config-driven clears are
         // coordinated with the tunnel (control file + IPC) and still persist regardless.
-        let appSource = try readSource(.appViewModel)
+        // refreshDiagnostics lives on DiagnosticsController since the Phase D4 peel;
+        // the file-ownership signal reaches it through the hub bridge.
+        let appSource = try readSource(.diagnosticsController)
         let block = try sourceBlock(
             in: appSource,
             startingAt: "func refreshDiagnostics() {",
-            endingBefore: "func refreshReports()"
+            endingBefore: "// MARK: - Bug reports & rage shake"
         )
 
         // Ownership must span the whole NON-stopped lifecycle, not just .connected: the permanent
-        // lost-update is the tunnel's stop-flush during .disconnecting. isProtectionStopPendingStatus
-        // is true for .connected/.connecting/.reasserting/.disconnecting, false once stopped.
+        // lost-update is the tunnel's stop-flush during .disconnecting. The controller reads the
+        // classification through the bridge; the hub conformance is what keeps it
+        // isProtectionStopPendingStatus(vpnStatus) — true for
+        // .connected/.connecting/.reasserting/.disconnecting, false once stopped. Pin BOTH sides.
         XCTAssertTrue(
-            block.contains("let tunnelOwnsDiagnosticsFile = isProtectionStopPendingStatus(vpnStatus)"),
+            block.contains("let tunnelOwnsDiagnosticsFile = hub.isProtectionStopPending"),
             "Ownership of the unlocked diagnostics file must cover the teardown (.disconnecting) window."
+        )
+        let hubSource = try readSource(.appViewModel)
+        XCTAssertTrue(
+            hubSource.contains("""
+    var isProtectionStopPending: Bool {
+        isProtectionStopPendingStatus(vpnStatus)
+    }
+"""),
+            "The bridge's ownership signal must stay the stop-pending classification of the live vpnStatus."
         )
 
         // Unchanged-file branch: in-memory == disk here, so it's safe to write. Flush a deferred
@@ -4534,7 +4552,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // fresh reload re-prune and persist the authoritative on-disk store.
         let preReadGate = try sourceBlock(
             in: appSource,
-            startingAt: "let tunnelOwnsDiagnosticsFile = isProtectionStopPendingStatus(vpnStatus)",
+            startingAt: "let tunnelOwnsDiagnosticsFile = hub.isProtectionStopPending",
             endingBefore: "guard diagnosticsReadGate.shouldRead(modifiedAt: modifiedAt, force: shouldForceLocalLogClear) else {"
         )
         XCTAssertFalse(

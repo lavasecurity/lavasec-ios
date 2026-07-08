@@ -5,7 +5,7 @@
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
-      buildArchitectures = "Automatic">
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1A0000010000000000008001"
+               BlueprintIdentifier = "35CBEDDD793FEE0361B051F6"
                BuildableName = "LavaSec.app"
                BlueprintName = "LavaSec"
                ReferencedContainer = "container:LavaSec.xcodeproj">
@@ -28,11 +28,11 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1A0000010000000000008001"
+            BlueprintIdentifier = "35CBEDDD793FEE0361B051F6"
             BuildableName = "LavaSec.app"
             BlueprintName = "LavaSec"
             ReferencedContainer = "container:LavaSec.xcodeproj">
@@ -40,16 +40,19 @@
       </MacroExpansion>
       <Testables>
          <TestableReference
-            skipped = "NO">
+            skipped = "NO"
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "1A0000020000000000008001"
+               BlueprintIdentifier = "E0370B825514E55647364BD4"
                BuildableName = "LavaSecUITests.xctest"
                BlueprintName = "LavaSecUITests"
                ReferencedContainer = "container:LavaSec.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -65,12 +68,14 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1A0000010000000000008001"
+            BlueprintIdentifier = "35CBEDDD793FEE0361B051F6"
             BuildableName = "LavaSec.app"
             BlueprintName = "LavaSec"
             ReferencedContainer = "container:LavaSec.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -82,12 +87,14 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1A0000010000000000008001"
+            BlueprintIdentifier = "35CBEDDD793FEE0361B051F6"
             BuildableName = "LavaSec.app"
             BlueprintName = "LavaSec"
             ReferencedContainer = "container:LavaSec.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

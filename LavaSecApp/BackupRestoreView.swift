@@ -3,7 +3,7 @@ import SwiftUI
 
 struct BackupRestoreView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var backup: BackupController
     @State private var recoveryPhrasePaste = ""
     @State private var recoveryWords = Array(repeating: "", count: BackupRecoveryPhrase.wordCount)
     @State private var mode: BackupRestoreMode = .deviceKey
@@ -183,7 +183,7 @@ struct BackupRestoreView: View {
         let unlockSecret = restoreSecret
         Task {
             do {
-                try await viewModel.restoreEncryptedBackup(secret: unlockSecret, mode: mode)
+                try await backup.restoreEncryptedBackup(secret: unlockSecret, mode: mode)
                 await MainActor.run {
                     restoreStatus = .success
                     isRestoring = false

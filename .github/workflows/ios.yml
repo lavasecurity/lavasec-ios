@@ -105,6 +105,25 @@ jobs:
       - name: Check UI string catalog coverage (no hardcoded user-facing strings outside the catalog)
         run: node scripts/check-string-coverage.mjs
 
+      - name: SwiftLint (warning-only)
+        # Phase C2 lint lane (lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
+        # --lenient downgrades every violation to a warning, so findings ANNOTATE the PR but
+        # never fail this required check; a broken .swiftlint.yml still fails loudly.
+        # missing_docs is scoped to the post-split SPM targets via their nested configs.
+        # Version-pinned like the other containerized scanners (security.yml).
+        # Digest-pinned (OCR P3 on lavasec-ios#50): a version tag is mutable — a
+        # compromised registry account could re-push it; the digest is the container
+        # equivalent of SHA-pinning an action. Tag kept for human readability.
+        uses: docker://ghcr.io/realm/swiftlint:0.59.1@sha256:4002261af030eebefc377b8b5e429a3b553023d6b91cd6ea0d874d4cdaa1eaf8
+        with:
+          # The leading `swiftlint` token is REQUIRED for this pinned image: 0.59.1 is
+          # CMD-style (no ENTRYPOINT), so args form the whole container command — dropping
+          # the token fails at docker exec (`"--lenient": executable file not found`,
+          # run 2026-07-08 on this repo). Upstream added an ENTRYPOINT after 0.59.1
+          # (Codex P1 on lavasec-ios#50 cited main); if this pin is ever bumped to an
+          # ENTRYPOINT image, drop the token or the binary name doubles.
+          args: swiftlint --lenient --reporter github-actions-logging
+
       - name: Merge-up contamination guard
         if: ${{ github.event_name == 'pull_request' }}
         env:

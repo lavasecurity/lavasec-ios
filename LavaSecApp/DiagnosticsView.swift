@@ -4,6 +4,8 @@ import UIKit
 
 struct ActivityView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): the store this screen summarizes lives here.
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     @Environment(\.scenePhase) private var scenePhase
     let scrollToTopTrigger: Int
@@ -106,7 +108,7 @@ struct ActivityView: View {
     }
 
     private var selectedSummary: DiagnosticsSummary {
-        viewModel.diagnostics.rangeSummary(from: selectedRange.start, to: selectedRange.end)
+        reports.diagnostics.rangeSummary(from: selectedRange.start, to: selectedRange.end)
     }
 
     private var canShowActivity: Bool {
@@ -1165,6 +1167,8 @@ private struct DomainRowActionHint: View {
 
 private struct DomainHistoryView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): store reads + the domain-history clear.
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     @State private var selectedFilter: DomainHistoryFilter = .blocked
     @State private var searchText = ""
@@ -1212,7 +1216,7 @@ private struct DomainHistoryView: View {
         }
         .localLogSubpageChrome(
             title: "Domain History",
-            canClear: viewModel.configuration.keepDomainDiagnostics && !viewModel.diagnostics.recentEvents.isEmpty,
+            canClear: viewModel.configuration.keepDomainDiagnostics && !reports.diagnostics.recentEvents.isEmpty,
             clear: { showingClearHistoryConfirmation = true }
         )
         .lavaConfirmationAlert { host in
@@ -1222,7 +1226,7 @@ private struct DomainHistoryView: View {
             ) {
                 Button("Cancel", role: .cancel) {}
                 Button("Clear Domain Logs", role: .destructive) {
-                    viewModel.clearDomainHistory()
+                    reports.clearDomainHistory()
                     visibleEventCount = LocalLogPagination.initialCount
                 }
             } message: {
@@ -1255,14 +1259,14 @@ private struct DomainHistoryView: View {
         .onChange(of: searchText) { _, _ in
             visibleEventCount = LocalLogPagination.initialCount
         }
-        .onChange(of: viewModel.diagnostics.recentEvents.count) { _, _ in
+        .onChange(of: reports.diagnostics.recentEvents.count) { _, _ in
             visibleEventCount = LocalLogPagination.initialCount
         }
     }
 
     @ViewBuilder
     private var historyRows: some View {
-        let events = viewModel.diagnostics.recentEvents(
+        let events = reports.diagnostics.recentEvents(
             action: selectedFilter.action,
             searchText: searchText,
             limit: visibleEventCount + 1
@@ -1315,7 +1319,7 @@ private struct DomainHistoryView: View {
                 .lavaSupportingText()
 
             Button("Turn On Local History") {
-                viewModel.setKeepDomainDiagnostics(true)
+                reports.setKeepDomainDiagnostics(true)
             }
             .buttonStyle(.borderedProminent)
             .tint(LavaStyle.safeControlGreen)
@@ -1404,6 +1408,8 @@ private struct DomainHistoryRow: View {
 /// the query count ("N times").
 private struct TopDomainsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): store reads + the domain-history clear.
+    @EnvironmentObject private var reports: DiagnosticsController
     @EnvironmentObject private var security: SecurityController
     let rangeStart: Date
     let rangeEnd: Date
@@ -1453,7 +1459,7 @@ private struct TopDomainsView: View {
         }
         .localLogSubpageChrome(
             title: "Top Domains",
-            canClear: viewModel.configuration.keepDomainDiagnostics && !viewModel.diagnostics.recentEvents.isEmpty,
+            canClear: viewModel.configuration.keepDomainDiagnostics && !reports.diagnostics.recentEvents.isEmpty,
             clear: { showingClearHistoryConfirmation = true }
         )
         .lavaConfirmationAlert { host in
@@ -1463,7 +1469,7 @@ private struct TopDomainsView: View {
             ) {
                 Button("Cancel", role: .cancel) {}
                 Button("Clear Domain Logs", role: .destructive) {
-                    viewModel.clearDomainHistory()
+                    reports.clearDomainHistory()
                 }
             } message: {
                 Text("This removes saved Domain Logs from this phone. Filtering counts and network activity are unchanged.")
@@ -1493,7 +1499,7 @@ private struct TopDomainsView: View {
 
     @ViewBuilder
     private var topDomainRows: some View {
-        let domains = viewModel.diagnostics.topDomains(
+        let domains = reports.diagnostics.topDomains(
             action: selectedFilter.action,
             from: rangeStart,
             to: rangeEnd,

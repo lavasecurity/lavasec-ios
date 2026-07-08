@@ -993,11 +993,11 @@ private struct OnboardingNotificationPromptCard: View {
 
 private struct OnboardingAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var account: AccountController
     @State private var isConfirmingAccountDeletion = false
 
     var body: some View {
-        let accountConnections = viewModel.accountConnections
+        let accountConnections = account.accountConnections
 
         LavaSheetScaffold(spacing: 14, scrolls: false) {
             VStack(alignment: .leading, spacing: 14) {
@@ -1007,7 +1007,7 @@ private struct OnboardingAccountSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 LavaPlainCard {
-                    if viewModel.isAccountSignedIn {
+                    if account.isAccountSignedIn {
                         VStack(spacing: 12) {
                             ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
                                 OnboardingSignedInAccountRow(connection: connection)
@@ -1020,7 +1020,7 @@ private struct OnboardingAccountSheet: View {
                             Divider()
 
                             Button {
-                                viewModel.signOutAccount()
+                                account.signOutAccount()
                                 dismiss()
                             } label: {
                                 OnboardingAccountActionRow(
@@ -1037,51 +1037,51 @@ private struct OnboardingAccountSheet: View {
                                 isConfirmingAccountDeletion = true
                             } label: {
                                 OnboardingAccountActionRow(
-                                    title: viewModel.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
+                                    title: account.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
                                     systemImage: "trash",
                                     tint: .red,
                                     titleTint: .red,
-                                    isLoading: viewModel.isAccountDeletionInProgress
+                                    isLoading: account.isAccountDeletionInProgress
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(viewModel.isAccountDeletionInProgress)
+                            .disabled(account.isAccountDeletionInProgress)
                         }
                     } else {
                         VStack(spacing: 12) {
                             Button {
-                                viewModel.beginSignInWithApple()
+                                account.beginSignInWithApple()
                             } label: {
                                 OnboardingAccountActionRow(
-                                    title: viewModel.appleSignInActionTitle,
+                                    title: account.appleSignInActionTitle,
                                     systemImage: "apple.logo",
                                     tint: LavaStyle.ink,
-                                    isLoading: viewModel.isAppleSignInInProgress
+                                    isLoading: account.isAppleSignInInProgress
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(viewModel.isAccountSignInInProgress)
+                            .disabled(account.isAccountSignInInProgress)
 
                             Divider()
 
                             Button {
-                                viewModel.beginSignInWithGoogle()
+                                account.beginSignInWithGoogle()
                             } label: {
                                 OnboardingAccountActionRow(
-                                    title: viewModel.googleSignInActionTitle,
+                                    title: account.googleSignInActionTitle,
                                     systemImage: "g.circle.fill",
                                     tint: LavaStyle.safeGreen,
-                                    isLoading: viewModel.isGoogleSignInInProgress
+                                    isLoading: account.isGoogleSignInInProgress
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(viewModel.isAccountSignInInProgress)
+                            .disabled(account.isAccountSignInInProgress)
                         }
                     }
                 }
             }
         }
-        .presentationDetents([.height(viewModel.isAccountSignedIn && accountConnections.count > 1 ? 354 : viewModel.isAccountSignedIn ? 310 : 248)])
+        .presentationDetents([.height(account.isAccountSignedIn && accountConnections.count > 1 ? 354 : account.isAccountSignedIn ? 310 : 248)])
         .presentationDragIndicator(.visible)
         .lavaConfirmationAlert { host in
             host.alert(
@@ -1091,7 +1091,7 @@ private struct OnboardingAccountSheet: View {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
                     Task {
-                        if await viewModel.deleteAccount() {
+                        if await account.deleteAccount() {
                             dismiss()
                         }
                     }

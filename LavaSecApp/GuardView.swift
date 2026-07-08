@@ -9,6 +9,8 @@ private enum ProtectionStatusMetrics {
 
 struct GuardView: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The diagnostics scope (Phase D4 peel): the refresh loop below drives its store read.
+    @EnvironmentObject private var reports: DiagnosticsController
     @Binding var navigationPath: [GuardDestination]
     let scrollToTopTrigger: Int
     let refreshesProtectionState: Bool
@@ -58,7 +60,7 @@ struct GuardView: View {
     }
 
     private func refreshGuardProtectionState() async {
-        viewModel.refreshDiagnostics()
+        reports.refreshDiagnostics()
         await viewModel.refreshProtectionStatus()
         await viewModel.sampleTunnelHealth()
     }
@@ -66,6 +68,8 @@ struct GuardView: View {
 
 struct ProtectionStatusPanel: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // The mascot look lives on the customization controller (Phase D5 peel).
+    @EnvironmentObject private var customization: CustomizationController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var guardianOverrideState: GuardianMascotState?
@@ -78,7 +82,7 @@ struct ProtectionStatusPanel: View {
                 SoftShieldGuardian(
                     size: 96,
                     state: guardianOverrideState ?? guardianState,
-                    shieldStyle: viewModel.lavaGuardLook
+                    shieldStyle: customization.lavaGuardLook
                 )
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)
@@ -309,6 +313,8 @@ private struct GuardDestinationView: View {
 /// rhythm rather than two mismatched gaps.
 private struct GuardExploreSection: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    // Observes the diagnostics controller so the caught-today stat re-renders on store changes (Phase D4 peel).
+    @EnvironmentObject private var reports: DiagnosticsController
 
     var body: some View {
         LavaSectionGroup("Learn more") {
@@ -324,7 +330,7 @@ private struct GuardExploreSection: View {
                 LavaNavigationRow(
                     icon: .activity,
                     title: "What Lava has caught",
-                    summary: viewModel.guardActivityRowStat
+                    summary: reports.guardActivityRowStat
                 ) {
                     GuardDestinationView(destination: .activity)
                 }
