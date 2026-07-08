@@ -111,7 +111,10 @@ jobs:
         # never fail this required check; a broken .swiftlint.yml still fails loudly.
         # missing_docs is scoped to the post-split SPM targets via their nested configs.
         # Version-pinned like the other containerized scanners (security.yml).
-        uses: docker://ghcr.io/realm/swiftlint:0.59.1
+        # Digest-pinned (OCR P3 on lavasec-ios#50): a version tag is mutable — a
+        # compromised registry account could re-push it; the digest is the container
+        # equivalent of SHA-pinning an action. Tag kept for human readability.
+        uses: docker://ghcr.io/realm/swiftlint:0.59.1@sha256:4002261af030eebefc377b8b5e429a3b553023d6b91cd6ea0d874d4cdaa1eaf8
         with:
           # The leading `swiftlint` token is REQUIRED for this pinned image: 0.59.1 is
           # CMD-style (no ENTRYPOINT), so args form the whole container command — dropping

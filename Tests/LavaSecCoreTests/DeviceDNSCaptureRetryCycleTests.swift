@@ -49,9 +49,15 @@ final class DeviceDNSCaptureRetryCycleTests: XCTestCase {
             advance(20)
             XCTAssertEqual(cycle.noteScheduleRequest(isWake: true), .suppress(logOnce: false),
                            "second suppressed wake must not re-log (didLogWakeSuppression dedup)")
-            advance(30) // 70 s past exhaustion — cooldown expired
+            // The exact boundary (OCR P2 on lavasec-ios#50): the policy is `age >=
+            // cooldown`, so 59.9 s suppresses and 60.0 s starts — a `>=`→`>` (or
+            // `<`→`<=`) regression fails here instead of slipping between 40 and 70.
+            advance(19.9) // 59.9 s past exhaustion — still inside
+            XCTAssertEqual(cycle.noteScheduleRequest(isWake: true), .suppress(logOnce: false),
+                           "wake at 59.9 s is still inside the cooldown")
+            advance(0.1) // exactly 60.0 s — the >= boundary
             XCTAssertEqual(cycle.noteScheduleRequest(isWake: true), .start,
-                           "cooldown expiry re-allows a wake restart")
+                           "the cooldown expires AT the boundary (age >= cooldown)")
         }
     }
 
