@@ -1,4 +1,5 @@
 import XCTest
+import LavaSecDNS
 @testable import LavaSecCore
 @testable import LavaSecKit
 
@@ -271,15 +272,15 @@ final class DNSResponseCacheTests: XCTestCase {
     func testCacheTTLRejectsMalformedWireData() {
         // Compression-pointer loop: the question name points at itself.
         var pointerLoop = Data()
-        Self.appendUInt16(0, to: &pointerLoop)
-        Self.appendUInt16(0x8180, to: &pointerLoop)
-        Self.appendUInt16(1, to: &pointerLoop)
-        Self.appendUInt16(1, to: &pointerLoop)
-        Self.appendUInt16(0, to: &pointerLoop)
-        Self.appendUInt16(0, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(0, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(0x8180, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(1, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(1, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(0, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(0, to: &pointerLoop)
         pointerLoop.append(contentsOf: [0xC0, 0x0C])
-        Self.appendUInt16(1, to: &pointerLoop)
-        Self.appendUInt16(1, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(1, to: &pointerLoop)
+        DNSWireTestSupport.appendUInt16(1, to: &pointerLoop)
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: pointerLoop))
 
         // Compression pointer beyond the end of the message.
@@ -301,12 +302,12 @@ final class DNSResponseCacheTests: XCTestCase {
 
         // Label length claims more bytes than the message holds.
         var labelOverrun = Data()
-        Self.appendUInt16(0, to: &labelOverrun)
-        Self.appendUInt16(0x8180, to: &labelOverrun)
-        Self.appendUInt16(1, to: &labelOverrun)
-        Self.appendUInt16(1, to: &labelOverrun)
-        Self.appendUInt16(0, to: &labelOverrun)
-        Self.appendUInt16(0, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(0, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(0x8180, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(1, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(1, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(0, to: &labelOverrun)
+        DNSWireTestSupport.appendUInt16(0, to: &labelOverrun)
         labelOverrun.append(contentsOf: [0x3F, 0x61, 0x62])
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: labelOverrun))
     }
@@ -464,12 +465,12 @@ final class DNSResponseCacheTests: XCTestCase {
 
     private static func dnsQuery(id: UInt16, domain: String) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)
-        appendUInt16(0x0100, to: &data)
-        appendUInt16(1, to: &data)
-        appendUInt16(0, to: &data)
-        appendUInt16(0, to: &data)
-        appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(id, to: &data)
+        DNSWireTestSupport.appendUInt16(0x0100, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
         appendQuestion(domain: domain, to: &data)
         return data
     }
@@ -488,12 +489,12 @@ final class DNSResponseCacheTests: XCTestCase {
         optAnswer: Bool = false
     ) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)
-        appendUInt16(0x8180 | rcode, to: &data)
-        appendUInt16(1, to: &data)
-        appendUInt16(UInt16(answerTTLs.count) + (optAnswer ? 1 : 0), to: &data)
-        appendUInt16(UInt16(authorityTTLs.count) + (authoritySOA == nil ? 0 : 1), to: &data)
-        appendUInt16(
+        DNSWireTestSupport.appendUInt16(id, to: &data)
+        DNSWireTestSupport.appendUInt16(0x8180 | rcode, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(UInt16(answerTTLs.count) + (optAnswer ? 1 : 0), to: &data)
+        DNSWireTestSupport.appendUInt16(UInt16(authorityTTLs.count) + (authoritySOA == nil ? 0 : 1), to: &data)
+        DNSWireTestSupport.appendUInt16(
             UInt16(additionalNonOPTTTLs.count)
                 + (additionalSOA == nil ? 0 : 1)
                 + (includesOPTAdditional ? 1 : 0),
@@ -535,10 +536,10 @@ final class DNSResponseCacheTests: XCTestCase {
 
     private static func appendARecord(ttl: UInt32, to data: inout Data) {
         data.append(contentsOf: [0xC0, 0x0C])
-        appendUInt16(1, to: &data)
-        appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
         appendUInt32(ttl, to: &data)
-        appendUInt16(4, to: &data)
+        DNSWireTestSupport.appendUInt16(4, to: &data)
         data.append(contentsOf: [1, 2, 3, 4])
     }
 
@@ -552,10 +553,10 @@ final class DNSResponseCacheTests: XCTestCase {
         to data: inout Data
     ) {
         data.append(contentsOf: [0xC0, 0x0C])
-        appendUInt16(6, to: &data)
-        appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(6, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
         appendUInt32(ttl, to: &data)
-        appendUInt16(UInt16(23 - rdataShortfall), to: &data)
+        DNSWireTestSupport.appendUInt16(UInt16(23 - rdataShortfall), to: &data)
         data.append(contentsOf: [0xC0, 0x0C])
         data.append(0x00)
         appendUInt32(1, to: &data)
@@ -570,10 +571,10 @@ final class DNSResponseCacheTests: XCTestCase {
 
     private static func appendOPTRecord(to data: inout Data) {
         data.append(0x00)
-        appendUInt16(41, to: &data)
-        appendUInt16(4096, to: &data)
+        DNSWireTestSupport.appendUInt16(41, to: &data)
+        DNSWireTestSupport.appendUInt16(4096, to: &data)
         appendUInt32(0, to: &data)
-        appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
     }
 
     private static func appendQuestion(domain: String, to data: inout Data) {
@@ -583,13 +584,8 @@ final class DNSResponseCacheTests: XCTestCase {
             data.append(contentsOf: bytes)
         }
         data.append(0)
-        appendUInt16(1, to: &data)
-        appendUInt16(1, to: &data)
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
     }
 
     private static func appendUInt32(_ value: UInt32, to data: inout Data) {

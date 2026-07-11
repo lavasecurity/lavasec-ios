@@ -1,39 +1,39 @@
 import Foundation
 import LavaSecKit
 
-public enum BackupPasswordRequirementID: String, Codable, CaseIterable, Sendable {
+package enum BackupPasswordRequirementID: String, Codable, CaseIterable, Sendable {
     case minimumLength
     case number
     case symbol
     case matchesConfirmation
 }
 
-public struct BackupPasswordRequirement: Equatable, Sendable {
-    public let id: BackupPasswordRequirementID
-    public let label: String
-    public let isSatisfied: Bool
+package struct BackupPasswordRequirement: Equatable, Sendable {
+    package let id: BackupPasswordRequirementID
+    package let label: String
+    package let isSatisfied: Bool
 
-    public init(id: BackupPasswordRequirementID, label: String, isSatisfied: Bool) {
+    package init(id: BackupPasswordRequirementID, label: String, isSatisfied: Bool) {
         self.id = id
         self.label = label
         self.isSatisfied = isSatisfied
     }
 }
 
-public struct BackupPasswordValidationResult: Equatable, Sendable {
-    public let requirements: [BackupPasswordRequirement]
+package struct BackupPasswordValidationResult: Equatable, Sendable {
+    package let requirements: [BackupPasswordRequirement]
 
-    public init(requirements: [BackupPasswordRequirement]) {
+    package init(requirements: [BackupPasswordRequirement]) {
         self.requirements = requirements
     }
 
-    public var isValid: Bool {
+    package var isValid: Bool {
         requirements.allSatisfy(\.isSatisfied)
     }
 }
 
-public enum BackupPasswordPolicy {
-    public static func validate(password: String, confirmation: String) -> BackupPasswordValidationResult {
+package enum BackupPasswordPolicy {
+    package static func validate(password: String, confirmation: String) -> BackupPasswordValidationResult {
         BackupPasswordValidationResult(requirements: [
             BackupPasswordRequirement(
                 id: .minimumLength,

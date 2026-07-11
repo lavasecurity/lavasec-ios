@@ -11,8 +11,8 @@ Fixups:
 1. knownRegions — the app localizes via .xcstrings string catalogs (no .lproj variant
    groups), so XcodeGen emits only (Base, en); the spec has no knownRegions option.
    Restore the full region list Xcode shows in the project's Localizations panel.
-   Keep in sync with the locales in LavaSecApp/Localizable.xcstrings
-   (scripts/check-localization.mjs enforces catalog completeness for these).
+   Derive it from Config/supported-locales.json, the same manifest consumed by the
+   localization checks.
 2. Icon Composer .icon bundles — XcodeGen's bundled XcodeProj predates Icon Composer
    and types them `wrapper.icon`; Xcode 26's actool needs `folder.iconcomposer.icon`
    to compile them into the asset catalog (alternate app icons included).
@@ -22,14 +22,36 @@ Idempotent: running against an already-fixed pbxproj is a no-op. Any other state
 (pattern missing entirely — e.g. an XcodeGen upgrade changed its output) fails loudly
 so drift surfaces here instead of in the pinned tests.
 """
+import json
+import os
 import re
 import sys
 from pathlib import Path
 
-PBXPROJ = Path(__file__).resolve().parent.parent / "LavaSec.xcodeproj" / "project.pbxproj"
+IOS_ROOT = Path(os.environ.get("LAVASEC_IOS_ROOT", Path(__file__).resolve().parent.parent))
+PBXPROJ = IOS_ROOT / "LavaSec.xcodeproj" / "project.pbxproj"
+LOCALE_MANIFEST = IOS_ROOT / "Config" / "supported-locales.json"
 
-# Order matches the pre-C1 hand-kept project (development language first).
-KNOWN_REGIONS = ["en", "Base", "ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"]
+
+def load_known_regions() -> list[str]:
+    try:
+        manifest = json.loads(LOCALE_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        sys.exit(f"xcodegen-fixups: cannot read {LOCALE_MANIFEST}: {error}")
+
+    locales = manifest.get("locales")
+    if not isinstance(locales, list) or not locales or locales[0] != "en":
+        sys.exit("xcodegen-fixups: supported-locales.json must list source locale en first")
+    if any(not isinstance(locale, str) or not locale for locale in locales):
+        sys.exit("xcodegen-fixups: supported-locales.json locales must be non-empty strings")
+    if len(set(locales)) != len(locales) or "Base" in locales:
+        sys.exit("xcodegen-fixups: supported-locales.json locales must be unique and exclude Base")
+
+    # Base is an Xcode region rather than a shipped localization, so it stays out of the manifest.
+    return [locales[0], "Base", *locales[1:]]
+
+
+KNOWN_REGIONS = load_known_regions()
 
 
 def fix_known_regions(text: str) -> str:

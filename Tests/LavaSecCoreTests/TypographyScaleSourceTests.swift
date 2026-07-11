@@ -44,11 +44,11 @@ final class TypographyScaleSourceTests: XCTestCase {
     /// card through `lavaCardTitleText()`, and the two blocklist-picker OUTLIERS (formerly
     /// `.headline.weight(.semibold)`, 17pt) are corrected down to the 15pt row role.
     func testFiltersViewTitlesRouteThroughTokens() throws {
-        let raw = try readSource(.filtersView)
-        let filters = try compact(raw)
+        let raw = try readFiltersSourceAggregate()
+        let filters = compact(raw)
 
         XCTAssertTrue(raw.contains(".lavaRowTitleText()"))
-        XCTAssertTrue(raw.contains(".lavaCardTitleText()"))
+        XCTAssertTrue(try readSource(.lavaComponents).contains(".lavaCardTitleText()"))
 
         // The two outlier picker-row titles now carry the row role, not a bespoke headline.
         XCTAssertTrue(
@@ -69,12 +69,12 @@ final class TypographyScaleSourceTests: XCTestCase {
             "blocklist-picker title outlier .headline.weight(.semibold) must be migrated"
         )
 
-        // The empty-state rows drop their .body (17pt) placeholder onto the 15pt row role so an empty
-        // list lines up with its populated data rows. Two of the three EmptyFilterRow call sites pass
-        // titleFont explicitly; the third relies on the same value as the parameter default.
-        XCTAssertEqual(
-            filters.components(separatedBy: "titleFont:LavaTypography.rowTitle").count - 1, 2,
-            "the two explicit EmptyFilterRow call sites must pass titleFont: LavaTypography.rowTitle (the third uses the default)"
+        // Empty-state placeholders route through the shared LavaEmptyListRow (row role + fixed
+        // insets baked in) — the per-screen EmptyFilterRow copy is gone and must not come back.
+        XCTAssertTrue(raw.contains("LavaEmptyListRow("))
+        XCTAssertFalse(
+            raw.contains("struct EmptyFilterRow"),
+            "empty-state rows are LavaEmptyListRow now; a local placeholder struct re-fragments the scale"
         )
     }
 
@@ -84,10 +84,10 @@ final class TypographyScaleSourceTests: XCTestCase {
     /// its resolver / bug-report rows through `lavaRowTitleText()`, including the Custom DNS row
     /// weight OUTLIER (`.subheadline.weight(.medium)` → the row role).
     func testSettingsViewTitlesRouteThroughTokens() throws {
-        let raw = try readSource(.settingsView)
-        let settings = try compact(raw)
+        let raw = try readSettingsSourceAggregate()
+        let settings = compact(raw)
 
-        XCTAssertTrue(raw.contains(".lavaCardTitleText()"))
+        XCTAssertTrue(try readSource(.lavaComponents).contains(".lavaCardTitleText()"))
         XCTAssertTrue(raw.contains(".lavaRowTitleText()"))
 
         // Custom DNS row: the weight outlier is now the row role.
@@ -109,8 +109,8 @@ final class TypographyScaleSourceTests: XCTestCase {
     func testSharedComponentsUseCardTitleRole() throws {
         // LavaNavigationRow + LavaDetailRow titles.
         XCTAssertTrue(try readSource(.lavaComponents).contains(".lavaCardTitleText()"))
-        // ImportOptionRow title.
-        XCTAssertTrue(try readSource(.shareableFiltersUI).contains(".lavaCardTitleText()"))
+        // ImportOptionRow delegates its title to that shared role.
+        XCTAssertTrue(try readSource(.shareableFiltersUI).contains("LavaNavigationCardLabel("))
     }
 
     /// The condensed-list item's default title font is the single row-title source, not an
@@ -124,6 +124,33 @@ final class TypographyScaleSourceTests: XCTestCase {
         XCTAssertFalse(
             list.contains("titleFont: Font = .subheadline.weight(.semibold)"),
             "the inline default literal should be replaced by the token"
+        )
+    }
+
+    /// The empty-list placeholder is ONE component with the row role and the standard insets
+    /// baked in, and every empty card list uses it — Filters shelves, the blocklist picker, and
+    /// the diagnostics log screens (whose hand-rolled supporting-text placeholders rendered
+    /// shorter and grayer than the Filters shelves' empty rows).
+    func testEmptyListRowIsSharedAndCarriesRowRole() throws {
+        let list = try compact(readSource(.lavaCondensedList))
+        XCTAssertTrue(list.contains("structLavaEmptyListRow:View"))
+        XCTAssertTrue(
+            list.contains(".font(LavaTypography.rowTitle)"),
+            "LavaEmptyListRow's title must carry the row-title token"
+        )
+        XCTAssertTrue(
+            list.contains(".padding(.horizontal,LavaRowHeight.horizontalInset).padding(.vertical,16)"),
+            "LavaEmptyListRow bakes in the standard row insets so call sites can't drift"
+        )
+
+        let diagnostics = try readDiagnosticsSourceAggregate()
+        XCTAssertTrue(
+            diagnostics.contains("LavaEmptyListRow(title: \"No network activity yet\")"),
+            "the Network Activity empty state must use the shared placeholder row"
+        )
+        XCTAssertEqual(
+            diagnostics.components(separatedBy: "LavaEmptyListRow(").count - 1, 4,
+            "all four diagnostics empty/off placeholders route through LavaEmptyListRow"
         )
     }
 

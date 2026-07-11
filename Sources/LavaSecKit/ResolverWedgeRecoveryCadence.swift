@@ -24,6 +24,7 @@ public struct ResolverWedgeRecoveryCadence: Sendable {
     /// Ceiling the doubling backs off to (the legacy flat interval).
     public let maxInterval: TimeInterval
 
+    /// Creates a doubling cadence with nonnegative intervals, clamping the first delay to the ceiling.
     public init(firstInterval: TimeInterval = 2, maxInterval: TimeInterval = 30) {
         // A non-positive or inverted configuration would defeat the cap; clamp so the cadence
         // is always a non-decreasing ramp from a positive first interval up to the ceiling.

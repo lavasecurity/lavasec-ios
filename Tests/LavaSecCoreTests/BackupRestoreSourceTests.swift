@@ -125,7 +125,7 @@ final class BackupRestoreSourceTests: XCTestCase {
 
     func testRestoreFlowIsFullSheetWithFooterAction() throws {
         let source = try readSource(.backupRestoreView)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.accountBackupSettingsView)
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // matching the backup setup flow, instead of a pushed screen.
@@ -140,7 +140,7 @@ final class BackupRestoreSourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(settings.contains("LavaScreenContent"))
+        XCTAssertTrue(try readSource(.settingsCommon).contains("LavaScreenContent"))
         XCTAssertTrue(source.contains("lavaLocalized"))
     }
 }

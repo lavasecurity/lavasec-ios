@@ -2,7 +2,7 @@ import ActivityKit
 import CoreFoundation
 import Darwin
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import NetworkExtension
 
 enum LavaProtectionCommandService {
@@ -61,7 +61,7 @@ enum LavaProtectionCommandService {
         try LavaProtectionCommandFileLock.withExclusiveLock {
             let defaults = LavaSecAppGroup.sharedDefaults
             // The cross-process file lock is already held, so the stores run with
-            // a no-op critical section. The LavaSecCore stores are the single
+            // a no-op critical section. The LavaSecKit stores are the single
             // owners of key layout, revisions, dedup, and session binding; this
             // service keeps the lock, auth denial, signaling, and Live Activity
             // outcomes.

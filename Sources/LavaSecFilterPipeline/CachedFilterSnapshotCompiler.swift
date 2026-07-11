@@ -5,10 +5,12 @@ import LavaSecKit
 // FilterSnapshot MODEL can live in LavaSecKit while this compiler wrapper stays
 // with the snapshot pipeline in LavaSecCore.
 
+/// Compiles a compact runtime snapshot from blocklist payloads already in the cache.
 public struct CachedFilterSnapshotCompiler: Sendable {
-    public let cacheDirectoryURL: URL
-    public let includesGuardrails: Bool
+    internal let cacheDirectoryURL: URL
+    internal let includesGuardrails: Bool
 
+    /// Creates a cached compiler for a cache directory and guardrail policy.
     public init(cacheDirectoryURL: URL, includesGuardrails: Bool = true) {
         self.cacheDirectoryURL = cacheDirectoryURL
         self.includesGuardrails = includesGuardrails

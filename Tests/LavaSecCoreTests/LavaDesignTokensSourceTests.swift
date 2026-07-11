@@ -23,6 +23,21 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         }
     }
 
+    func testSpacingScaleIsAdoptedInsideDesignSystemImplementations() throws {
+        let scaffold = try readSource(.lavaScaffold)
+        XCTAssertTrue(scaffold.contains(".padding(.horizontal, LavaSpacing.screenHorizontal)"))
+        XCTAssertTrue(scaffold.contains(".padding(.top, LavaSpacing.screenTop)"))
+        XCTAssertTrue(scaffold.contains(".padding(.bottom, LavaSpacing.screenBottom)"))
+
+        let components = try readSource(.lavaComponents)
+        XCTAssertTrue(components.contains("HStack(spacing: rowSpacing)"))
+        XCTAssertTrue(components.contains("rowSpacing: LavaSpacing.md"))
+        XCTAssertTrue(components.contains(".padding(LavaSpacing.lg)"))
+
+        let condensedList = try readSource(.lavaCondensedList)
+        XCTAssertTrue(condensedList.contains("HStack(spacing: LavaSpacing.sm)"))
+    }
+
     func testNamedRadiiExistAndReconcileTheButtonDisagreement() throws {
         let tokens = try Self.tokens()
         // The button-radius disagreement (panel 10 / standalone 12) resolves to one token.
@@ -34,8 +49,8 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("cornerRadius: CGFloat = LavaSurface.controlCornerRadius"))
         XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)"))
-        XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius)"))
-        XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: LavaSurface.iconBadgeCornerRadius)"))
+        XCTAssertTrue(components.contains("cornerRadius: CGFloat = LavaSurface.iconBadgeCornerRadius"))
+        XCTAssertTrue(components.contains("RoundedRectangle(cornerRadius: badge.cornerRadius)"))
     }
 
     func testDangerColorIsTokenizedAndErrorTextNoLongerUsesRawRed() throws {
@@ -65,7 +80,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     }
 
     func testLavaTierIsWiredIntoRepresentativeSurfaces() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSettingsSourceAggregate()
         // Workshop depth: Nerd Stats + DNS Resolver + the "Information Sent" diagnostics preview —
         // declared via the SettingsSubpageContent tier: argument (the scaffold applies .lavaTier(tier)
         // internally), not a route-site modifier.
@@ -109,7 +124,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     /// The hero shield call sites consume the token and no longer carry their old
     /// disagreeing literals.
     func testHeroShieldCallSitesConsumeTheToken() throws {
-        for sourceFile in [SourceFile.securityController, .diagnosticsView, .settingsView] {
+        for sourceFile in [SourceFile.securityController, .diagnosticsView, .privacySecuritySettingsView, .bugReportSettingsView] {
             let source = try readSource(sourceFile)
             XCTAssertTrue(source.contains(".font(.system(size: LavaIconSize.hero, weight: .semibold))"),
                           "\(sourceFile.rawValue) should render the hero shield via LavaIconSize.hero")

@@ -37,6 +37,7 @@ public enum LavaNotificationPreferences {
         defaults.object(forKey: category.enabledDefaultsKey) as? Bool ?? true
     }
 
+    /// Persists whether a notification category is enabled in the supplied shared defaults store.
     public static func setEnabled(_ enabled: Bool, for category: LavaNotificationCategory, in defaults: UserDefaults) {
         defaults.set(enabled, forKey: category.enabledDefaultsKey)
     }

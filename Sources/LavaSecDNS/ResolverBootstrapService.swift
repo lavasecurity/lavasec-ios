@@ -7,21 +7,27 @@ import LavaSecKit
 // tunnel) runs on the service's own utility queue, kicked by pre-warms at
 // tunnel start, resolver switches, and network changes, or by a cold miss.
 // Failed lookups are never cached so the next pre-warm retries.
+/// Thread-safe, generation-aware cache for resolving encrypted-resolver hostnames away from the packet path.
 public final class ResolverBootstrapService: @unchecked Sendable {
+    /// Caller-classified address strings grouped by intended IP family; this value does not validate them.
     public struct ResolvedAddresses: Equatable, Sendable {
+        /// Strings the injected resolver classified as IPv4 addresses.
         public let ipv4: [String]
+        /// Strings the injected resolver classified as IPv6 addresses.
         public let ipv6: [String]
 
-        public var isEmpty: Bool {
+        package var isEmpty: Bool {
             ipv4.isEmpty && ipv6.isEmpty
         }
 
+        /// Creates a family-partitioned result without performing additional lookup or validation.
         public init(ipv4: [String], ipv6: [String]) {
             self.ipv4 = ipv4
             self.ipv6 = ipv6
         }
     }
 
+    /// Synchronous hostname lookup invoked on the queue supplied when constructing the service.
     public typealias AddressResolver = @Sendable (_ hostname: String) -> ResolvedAddresses
 
     private let resolveAddresses: AddressResolver
@@ -39,6 +45,7 @@ public final class ResolverBootstrapService: @unchecked Sendable {
     // change) can't repopulate the freshly-cleared cache with stale addresses.
     private var generation: UInt64 = 0
 
+    /// Creates a cache whose potentially blocking resolver work is owned by the supplied queue.
     public init(
         resolveAddresses: @escaping AddressResolver,
         queue: DispatchQueue = DispatchQueue(label: "com.lavasec.tunnel.resolver.bootstrap", qos: .utility)

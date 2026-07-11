@@ -10,10 +10,8 @@ final class CoreFlowDeviceTests: XCTestCase {
         let query = dnsQuery(id: 0x1234, domain: "Ads.Example.COM", type: DNSRecordType.a.rawValue)
         let question = try DNSMessage.parseQuestion(from: query)
 
-        XCTAssertEqual(question.transactionID, 0x1234)
         XCTAssertEqual(question.domain, "Ads.Example.COM")
         XCTAssertEqual(question.normalizedDomain, "ads.example.com")
-        XCTAssertEqual(question.recordType, .a)
 
         let blocked = try DNSMessage.blockedResponse(for: query, question: question, ttl: 60)
         XCTAssertEqual(readUInt16(blocked, at: 0), 0x1234)
@@ -58,43 +56,17 @@ final class CoreFlowDeviceTests: XCTestCase {
         XCTAssertEqual(snapshot.decision(forNormalizedDomain: "unknown.test"), .defaultAllow)
     }
 
-    func testDoHValidationRestoresTransactionIDAndRejectsWrongQuestionOnDevice() throws {
-        let query = dnsQuery(id: 0xCAFE, domain: "allowed.example.com", type: DNSRecordType.a.rawValue)
-        let response = try DNSWireMessage.clearingTransactionID(in: DNSMessage.blockedResponse(for: query))
-        let httpResponse = try XCTUnwrap(HTTPURLResponse(
-            url: URL(string: "https://dns.example/dns-query")!,
-            statusCode: 200,
-            httpVersion: nil,
-            headerFields: ["Content-Type": "application/dns-message"]
-        ))
-
-        let validated = try DNSOverHTTPSRequest.validatedDNSResponse(
-            body: response,
-            response: httpResponse,
-            originalQuery: query
-        )
-        XCTAssertEqual(DNSWireMessage.transactionID(in: validated), 0xCAFE)
-        XCTAssertTrue(DNSWireMessage.isValidResponse(validated, matching: query))
-
-        let differentQuestion = dnsQuery(id: 0xCAFE, domain: "different.example.com", type: DNSRecordType.a.rawValue)
-        XCTAssertThrowsError(try DNSOverHTTPSRequest.validatedDNSResponse(
-            body: response,
-            response: httpResponse,
-            originalQuery: differentQuestion
-        ))
-    }
-
     func testDNSWireTransactionIDRewritingOnDevice() throws {
         let query = dnsQuery(id: 0x1111, domain: "cache.example.com", type: DNSRecordType.a.rawValue)
+        let zeroIDQuery = dnsQuery(id: 0, domain: "cache.example.com", type: DNSRecordType.a.rawValue)
         let secondQuery = dnsQuery(id: 0x2222, domain: "cache.example.com", type: DNSRecordType.a.rawValue)
         let response = try DNSMessage.blockedResponse(for: query)
 
-        let cached = DNSWireMessage.clearingTransactionID(in: response)
-        XCTAssertEqual(DNSWireMessage.transactionID(in: cached), 0)
+        let cached = DNSWireMessage.replacingTransactionID(in: response, from: zeroIDQuery)
+        XCTAssertEqual(readUInt16(cached, at: 0), 0)
 
         let rewritten = DNSWireMessage.replacingTransactionID(in: cached, from: secondQuery)
-        XCTAssertEqual(DNSWireMessage.transactionID(in: rewritten), 0x2222)
-        XCTAssertTrue(DNSWireMessage.isValidResponse(rewritten, matching: secondQuery))
+        XCTAssertEqual(readUInt16(rewritten, at: 0), 0x2222)
     }
 
     func testDeviceDNSFallbackRefreshPolicyOnDevice() {

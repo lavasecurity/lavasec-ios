@@ -9,10 +9,12 @@ import LavaSecKit
 // confines all access to its DNS state queue, and the cache preserves that
 // contract instead of paying for a lock on the packet path.
 
+/// Resolver-scoped identity for a DNS question with its client-specific transaction ID removed.
 public struct DNSCacheKey: Hashable, Sendable {
-    public let resolverIdentifier: String
-    public let canonicalQuery: Data
+    internal let resolverIdentifier: String
+    internal let canonicalQuery: Data
 
+    /// Returns `nil` when `dnsPayload` is shorter than a DNS header; otherwise canonicalizes its transaction ID.
     public init?(resolverIdentifier: String, dnsPayload: Data) {
         guard dnsPayload.count >= 12 else {
             return nil
@@ -23,13 +25,13 @@ public struct DNSCacheKey: Hashable, Sendable {
     }
 }
 
-public enum DNSResponseCachePolicy {
+package enum DNSResponseCachePolicy {
     private static let maximumTTL: TimeInterval = 300
     // RFC 2308 negative entries get a much harder clamp than positive ones so a
     // transient NXDOMAIN can never be pinned for minutes (start conservative).
     private static let maximumNegativeTTL: TimeInterval = 60
 
-    public static func cacheTTL(for response: Data) -> TimeInterval? {
+    package static func cacheTTL(for response: Data) -> TimeInterval? {
         guard response.count >= 12 else {
             return nil
         }
@@ -292,6 +294,7 @@ public enum DNSResponseCachePolicy {
     }
 }
 
+/// Queue-confined response cache that stores canonical wire replies until their DNS-derived expiration time.
 public final class DNSResponseCache {
     private struct CachedDNSResponse {
         let response: Data
@@ -303,12 +306,13 @@ public final class DNSResponseCache {
     private var entries: [DNSCacheKey: CachedDNSResponse] = [:]
     private var lastCleanupAt = Date.distantPast
 
+    /// Creates a cache with a positive entry cap and a lazy-expiry sweep interval measured in seconds.
     public init(maximumEntryCount: Int = 512, cleanupInterval: TimeInterval = 30) {
         self.maximumEntryCount = max(1, maximumEntryCount)
         self.cleanupInterval = max(0, cleanupInterval)
     }
 
-    public var count: Int {
+    package var count: Int {
         entries.count
     }
 
@@ -355,6 +359,7 @@ public final class DNSResponseCache {
         trimIfNeeded()
     }
 
+    /// Drops every resolver-scoped response immediately, such as after a runtime identity change.
     public func removeAll() {
         entries = [:]
     }

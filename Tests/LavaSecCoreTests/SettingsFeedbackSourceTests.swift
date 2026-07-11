@@ -41,7 +41,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let settingsBlock = try sourceBlock(
             in: source,
             startingAt: "struct SettingsView: View",
-            endingBefore: "private struct AccountSettingsView: View"
+            endingBefore: "private struct LavaSecurityPlusGlyph: View"
         )
 
         XCTAssertTrue(settingsBlock.contains("LavaPrimaryTabScreenContent("))
@@ -62,7 +62,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let settingsBlock = try sourceBlock(
             in: source,
             startingAt: "struct SettingsView: View",
-            endingBefore: "private struct AccountSettingsView: View"
+            endingBefore: "private struct LavaSecurityPlusGlyph: View"
         )
 
         XCTAssertTrue(settingsBlock.containsInOrder([
@@ -79,15 +79,15 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testVersionNerdStatsAppSectionUsesTableRowsWithBuildAndPlatform() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.legalVersionSettingsView)
         let versionInfoBlock = try sourceBlock(
             in: source,
             startingAt: "private enum VersionInfo",
-            endingBefore: "private struct PhoneQASettingsView: View"
+            endingBefore: "struct VersionNerdStatsView: View"
         )
         let nerdStatsBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct VersionNerdStatsView: View",
+            startingAt: "struct VersionNerdStatsView: View",
             endingBefore: "private func refreshTunnelHealthSample() async"
         )
         let appSectionBlock = try sourceBlock(
@@ -114,10 +114,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSettingsSubpagesUseSharedSubpageScaffold() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSettingsSourceAggregate()
 
-        XCTAssertTrue(source.contains("private struct SettingsSubpageContent<Content: View>: View"))
-        XCTAssertTrue(source.contains("private enum SettingsSubpageLayout"))
+        XCTAssertTrue(source.contains("struct SettingsSubpageContent<Content: View>: View"))
+        XCTAssertTrue(source.contains("enum SettingsSubpageLayout"))
         // Every Settings sub-screen routes through the shared scaffold. Each screen now passes
         // title:/tier:/intro: arguments, so all call sites use the parenthesized form.
         XCTAssertEqual(source.occurrences(of: "SettingsSubpageContent("), 10)
@@ -148,11 +148,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackFlowUsesThreeStepsAndPrivacyFirstCopy() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
 
         XCTAssertTrue(feedbackBlock.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
@@ -179,11 +178,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackDetailsStepUsesFlatRowsAndTextOnlyActions() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let contextPageBlock = try sourceBlock(
             in: feedbackBlock,
@@ -231,12 +229,11 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackInputsHaveExplicitDetailsCounterAndImplicitCaps() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let components = try readSource(.lavaComponents)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let contextPageBlock = try sourceBlock(
             in: feedbackBlock,
@@ -272,11 +269,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackReviewStepUsesSeparatePanelsAndBackAction() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let reviewPageBlock = try sourceBlock(
             in: feedbackBlock,
@@ -312,7 +308,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "Button {",
             "moveBack()",
             "Text(\"Back\".lavaLocalized)",
-            ".buttonStyle(FeedbackSecondaryActionButtonStyle())",
+            ".buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))",
             "Button {",
             "submitReport()"
         ]))
@@ -335,11 +331,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDeviceDNSPresetOffersSelectableEncryptedFallback() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.dnsResolverSettingsView)
         let resolverBlock = try sourceBlock(
             in: source,
-            startingAt: "struct DNSResolverSettingsView: View",
-            endingBefore: "struct PrivacyDataSettingsView: View"
+            startingAt: "struct DNSResolverSettingsView: View"
         )
 
         // The Device DNS preset now exposes a selectable encrypted fallback. A
@@ -371,7 +366,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testClearingCustomDoQFallbackKeepsEncryptedDefault() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.dnsResolverSettingsView)
         // The fallback picker's clear preset uses a Mullvad base (the primary section's
         // uses Google), so this start marker uniquely targets the fallback clear path.
         let clearBlock = try sourceBlock(
@@ -389,11 +384,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackSubmittingStateStaysInsideSubmitButton() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let statusBlock = try sourceBlock(
             in: feedbackBlock,
@@ -412,11 +406,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackThankYouPageUsesMascotCopyIDAndNoClose() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let thankYouBlock = try sourceBlock(
             in: feedbackBlock,
@@ -426,7 +419,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let thankYouMascotBlock = try sourceBlock(
             in: feedbackBlock,
             startingAt: "private struct FeedbackThankYouMascot: View",
-            endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
+            endingBefore: "private struct BugReportTopicOptionRow"
         )
 
         XCTAssertTrue(feedbackBlock.contains("SettingsSubpageContent(title: \"Feedback\", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou)"))
@@ -465,32 +458,37 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackStepActionsArePinnedAndUseExpectedSecondaryButtons() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
+        let components = try readSource(.lavaComponents)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
 
         XCTAssertTrue(feedbackBlock.contains(".safeAreaInset(edge: .bottom)"))
         XCTAssertTrue(feedbackBlock.contains("private var feedbackBottomActionBar: some View"))
         XCTAssertTrue(feedbackBlock.contains("private var feedbackBottomActionButtons: some View"))
-        XCTAssertTrue(feedbackBlock.contains("private struct FeedbackSecondaryActionButtonStyle: ButtonStyle"))
-        XCTAssertTrue(feedbackBlock.contains("Color(uiColor: .secondarySystemFill)"))
+        XCTAssertFalse(feedbackBlock.contains("FeedbackSecondaryActionButtonStyle"))
+        XCTAssertTrue(components.contains("struct LavaSecondaryActionButtonStyle: ButtonStyle"))
+        XCTAssertTrue(components.contains("let disabledOpacity: Double"))
         XCTAssertTrue(feedbackBlock.contains("Text(\"Back\".lavaLocalized)"))
-        XCTAssertEqual(feedbackBlock.occurrences(of: ".buttonStyle(FeedbackSecondaryActionButtonStyle())"), 2)
+        XCTAssertEqual(
+            feedbackBlock.occurrences(
+                of: ".buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))"
+            ),
+            2
+        )
         XCTAssertTrue(feedbackBlock.contains(".buttonStyle(LavaPanelActionButtonStyle())"))
     }
 
     func testFeedbackTypingReusesPreparedDiagnosticsInsteadOfRebuildingPerKeystroke() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.bugReportSettingsView)
         // The draft lifecycle (prepare/refresh-context + the prepared-inputs cache)
         // lives on DiagnosticsController since the Phase D4 peel.
         let diagnosticsControllerSource = try readSource(.diagnosticsController)
         let feedbackBlock = try sourceBlock(
             in: settingsSource,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let inputChangedBlock = try sourceBlock(
             in: feedbackBlock,
@@ -534,11 +532,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackStepProgressUsesClickableSimpleNumberText() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let stepProgressBlock = try sourceBlock(
             in: source,
@@ -570,12 +567,11 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackFlowGuardsDirtyDismissalInSettingsAndRageShakeSheet() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.bugReportSettingsView)
         let rootSource = try readSource(.rootView)
         let feedbackBlock = try sourceBlock(
             in: settingsSource,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let rageShakeSheetBlock = try sourceBlock(
             in: rootSource,
@@ -610,7 +606,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let maskBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct BugReportSheetLockMask",
-            endingBefore: "private struct FeedbackSecondaryActionButtonStyle"
+            endingBefore: "private struct BugReportTopicOptionRow"
         )
         // OPAQUE fill, never translucent material (which would leak the draft
         // through the blur), and it must swallow hits + be a modal a11y element.
@@ -625,10 +621,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testAccountPageRemovesFreeAccountInfoPanelAndUsesStandardAccountSheetChrome() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.accountBackupSettingsView)
         let accountBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct AccountSettingsView: View",
+            startingAt: "struct AccountSettingsView: View",
             endingBefore: "private struct AppleSignInStatusIcon: View"
         )
         let sheetBlock = try sourceBlock(
@@ -649,7 +645,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testSettingsModalSingleGlyphToolbarsUseNativeActions() throws {
-        let source = try readSource(.settingsView)
+        let source = try [readSource(.privacySecuritySettingsView), readSource(.bugReportSettingsView)].joined(separator: "\n")
         let passcodeBlock = try sourceBlock(
             in: source,
             startingAt: "private struct SecurityPasscodeSetupView: View",
@@ -672,10 +668,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testEncryptedBackupSectionUsesInfoPanelAndAutomaticBackupToggle() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.accountBackupSettingsView)
         let accountBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct AccountSettingsView: View",
+            startingAt: "struct AccountSettingsView: View",
             endingBefore: "private struct AppleSignInStatusIcon: View"
         )
 
@@ -777,7 +773,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testPrivacyDataShowsKeepLocalLogsSectionAndInfoPanel() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.privacySecuritySettingsView)
         let privacyBlock = try sourceBlock(
             in: source,
             startingAt: "struct PrivacyDataSettingsView: View",
@@ -816,7 +812,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testPrivacyDataShowsInlineClearOptionsBehindToggle() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.privacySecuritySettingsView)
         let privacyBlock = try sourceBlock(
             in: source,
             startingAt: "struct PrivacyDataSettingsView: View",
@@ -863,7 +859,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("SettingsNavigationRow"))
+        XCTAssertTrue(try readSource(.settingsView).contains("SettingsNavigationRow"))
     }
 
     func testPrivacyDataSettingsSummaryNamesEnabledLocalLogs() throws {
@@ -887,11 +883,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDNSResolverSettingsShowsBaseResolversAndTransportSelectorOnly() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.dnsResolverSettingsView)
         let resolverBlock = try sourceBlock(
             in: source,
-            startingAt: "struct DNSResolverSettingsView: View",
-            endingBefore: "struct PrivacyDataSettingsView: View"
+            startingAt: "struct DNSResolverSettingsView: View"
         )
 
         XCTAssertTrue(resolverBlock.contains("LavaSectionGroup(\"Device DNS\") {"))
@@ -1078,8 +1073,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
 
         let optionControlBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct ResolverOptionControl: View",
-            endingBefore: "struct PrivacyDataSettingsView: View"
+            startingAt: "private struct ResolverOptionControl: View"
         )
         XCTAssertTrue(optionControlBlock.containsInOrder([
             "ResolverToggleRow",
@@ -1176,10 +1170,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDomainHistoryAddsPullToRefreshUsingActivitySampling() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
@@ -1211,7 +1205,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testDNSResolverRowsUseTransportAddressesAndCondensedCustomRow() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.dnsResolverSettingsView)
         let resolverBlock = try sourceBlock(
             in: source,
             startingAt: "struct DNSResolverSettingsView: View",
@@ -1251,11 +1245,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackReviewStepLocalizesPlaceholderAndDiagnosticsValues() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let reviewPageBlock = try sourceBlock(
             in: feedbackBlock,
@@ -1275,11 +1268,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackSubmitButtonLocalizesSubmitAndRetryCatalogKeys() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let submitTitleBlock = try sourceBlock(
             in: feedbackBlock,
@@ -1302,11 +1294,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackTopicSelectionReusesPreparedDiagnosticsInsteadOfRebuilding() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let topicChangeBlock = try sourceBlock(
             in: feedbackBlock,
@@ -1326,11 +1317,10 @@ final class SettingsFeedbackSourceTests: XCTestCase {
     }
 
     func testFeedbackTopicOptionRowSkipsRedundantReRenderViaEquatable() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         let feedbackBlock = try sourceBlock(
             in: source,
-            startingAt: "struct BugReportSettingsView: View",
-            endingBefore: "private struct LegalNoticesView: View"
+            startingAt: "struct BugReportSettingsView: View"
         )
         let topicPageBlock = try sourceBlock(
             in: feedbackBlock,

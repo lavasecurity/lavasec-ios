@@ -7,14 +7,22 @@ import LavaSecKit
 /// can't, since fixes land after the version bump). Sourced by the app layer
 /// from the same Info.plist / device values the bug-report bundle already uses.
 public struct LocalLogExportMetadata: Equatable, Sendable {
-    public var appVersion: String?
-    public var build: String?
-    public var sourceRevision: String?
-    public var osVersion: String?
-    public var deviceFamily: String?
-    public var locale: String?
-    public var catalogVersion: String?
+    /// Marketing version recorded in the export manifest.
+    public private(set) var appVersion: String?
+    /// Build identifier recorded in the export manifest.
+    public private(set) var build: String?
+    /// Source revision recorded in the export manifest.
+    public private(set) var sourceRevision: String?
+    /// Operating-system version recorded in the export manifest.
+    public private(set) var osVersion: String?
+    /// Device-family description recorded in the export manifest.
+    public private(set) var deviceFamily: String?
+    /// Locale identifier recorded in the export manifest.
+    public private(set) var locale: String?
+    /// Blocklist catalog version recorded in the export manifest.
+    public private(set) var catalogVersion: String?
 
+    /// Creates metadata from the supplied optional provenance values.
     public init(
         appVersion: String? = nil,
         build: String? = nil,
@@ -52,10 +60,15 @@ public struct LocalLogExportMetadata: Equatable, Sendable {
     }
 }
 
+/// In-memory ZIP export containing local diagnostics files.
 public struct LocalLogExportArchive: Equatable, Sendable {
+    /// Suggested timestamped filename for the ZIP export.
     public let filename: String
+    /// Complete ZIP archive bytes.
     public let data: Data
 
+    /// Builds a stored ZIP archive from current diagnostics, activity, progress, and metadata.
+    /// Debug-log entries are archived as supplied; callers choose any required filtering first.
     public static func make(
         diagnostics: DiagnosticsStore,
         networkActivityLog: NetworkActivityLog,
@@ -122,11 +135,11 @@ public struct LocalLogExportArchive: Equatable, Sendable {
 
         // The device debug log (the granular tunnel/VPN trace — device-dns-captured,
         // self-reconnect-suppressed, resolver outcomes) previously shipped only in
-        // the Feedback report (→ Supabase). Including the same already-redacted
-        // entries here makes the local export a true superset, so the on-device
-        // VPN-recovery story can be self-diagnosed without backend access. Entries
-        // arrive pre-redacted by BugReportDebugLogEntry (allowlisted detail keys
-        // only — never a queried domain).
+        // the Feedback report (→ Supabase). Including the same entries here makes
+        // the local export a true superset, so the on-device VPN-recovery story can
+        // be self-diagnosed without backend access. The app supplies parser output
+        // whose allowlisted detail keys omit queried domains; this archive builder
+        // deliberately preserves whatever entries its caller supplies.
         if !deviceDebugLog.isEmpty {
             files.append((
                 "device-debug-log-\(timestamp.filename).jsonl",
@@ -390,7 +403,7 @@ private enum StoredZIPArchive {
     }
 }
 
-public enum LocalLogExportArchiveError: Error, Equatable {
+internal enum LocalLogExportArchiveError: Error, Equatable {
     case archiveTooLarge
 }
 

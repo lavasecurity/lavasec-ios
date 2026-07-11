@@ -1,13 +1,13 @@
 import Foundation
 
-public enum CustomBlocklistSourceError: LocalizedError, Equatable {
+internal enum CustomBlocklistSourceError: LocalizedError, Equatable {
     case invalidURL
     case unsupportedScheme
     case missingHost
     case privateNetworkHost
     case credentialsNotAllowed
 
-    public var errorDescription: String? {
+    internal var errorDescription: String? {
         switch self {
         case .invalidURL:
             LavaCoreStrings.localized("core.customBlocklist.invalidURL")
@@ -23,14 +23,23 @@ public enum CustomBlocklistSourceError: LocalizedError, Equatable {
     }
 }
 
+/// A blocklist source record and the metadata needed to parse and cache its contents.
 public struct CustomBlocklistSource: Identifiable, Hashable, Codable, Sendable {
+    /// The source identifier. The public initializer generates a `custom-` identifier when omitted.
     public let id: String
-    public var displayName: String
+    /// The user-facing name. The public initializer trims it and falls back to the source hostname.
+    public private(set) var displayName: String
+    /// The URL stored for fetching; the public initializer accepts only validated HTTPS inputs.
     public let sourceURL: URL
-    public var parseFormat: CatalogBlocklistSource.CatalogParseFormat
-    public var createdAt: Date
-    public var lastAcceptedHash: String?
+    /// The parser selection used when interpreting downloaded source data.
+    public private(set) var parseFormat: CatalogBlocklistSource.CatalogParseFormat
+    /// The date associated with creation of this source record.
+    public private(set) var createdAt: Date
+    /// The hash of the most recently accepted source contents, when available.
+    public package(set) var lastAcceptedHash: String?
 
+    /// Creates a source after trimming its name and rejecting invalid, credentialed,
+    /// localhost, or non-public IP URLs.
     public init(
         id: String? = nil,
         displayName: String,
@@ -70,6 +79,7 @@ public struct CustomBlocklistSource: Identifiable, Hashable, Codable, Sendable {
         self.lastAcceptedHash = lastAcceptedHash
     }
 
+    /// A cache key derived from the URL, parse format, and last accepted content hash.
     public var cacheIdentity: String {
         [
             sourceURL.absoluteString,

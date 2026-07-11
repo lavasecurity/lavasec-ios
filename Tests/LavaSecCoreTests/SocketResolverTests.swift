@@ -344,12 +344,12 @@ final class SocketResolverTests: XCTestCase {
     /// header (ID, flags 0x0100, QD=1) + QNAME labels + QTYPE A + QCLASS IN.
     private static func dnsQuery(id: UInt16, domain: String) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)     // transaction ID
-        appendUInt16(0x0100, to: &data) // flags: standard query, recursion desired
-        appendUInt16(1, to: &data)      // QDCOUNT
-        appendUInt16(0, to: &data)      // ANCOUNT
-        appendUInt16(0, to: &data)      // NSCOUNT
-        appendUInt16(0, to: &data)      // ARCOUNT
+        DNSWireTestSupport.appendUInt16(id, to: &data)     // transaction ID
+        DNSWireTestSupport.appendUInt16(0x0100, to: &data) // flags: standard query, recursion desired
+        DNSWireTestSupport.appendUInt16(1, to: &data)      // QDCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)      // ANCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)      // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)      // ARCOUNT
         appendQuestion(domain: domain, to: &data)
         return data
     }
@@ -361,17 +361,17 @@ final class SocketResolverTests: XCTestCase {
         var data = Data()
         data.append(query[0])           // transaction ID echoed from the query
         data.append(query[1])
-        appendUInt16(0x8180, to: &data) // flags: QR + RD + RA, NOERROR
-        appendUInt16(1, to: &data)      // QDCOUNT
-        appendUInt16(1, to: &data)      // ANCOUNT
-        appendUInt16(0, to: &data)      // NSCOUNT
-        appendUInt16(0, to: &data)      // ARCOUNT
+        DNSWireTestSupport.appendUInt16(0x8180, to: &data) // flags: QR + RD + RA, NOERROR
+        DNSWireTestSupport.appendUInt16(1, to: &data)      // QDCOUNT
+        DNSWireTestSupport.appendUInt16(1, to: &data)      // ANCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)      // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)      // ARCOUNT
         appendQuestion(domain: domain, to: &data)
         data.append(contentsOf: [0xC0, 0x0C])                 // answer NAME: pointer to offset 12
-        appendUInt16(1, to: &data)                            // TYPE A
-        appendUInt16(1, to: &data)                            // CLASS IN
+        DNSWireTestSupport.appendUInt16(1, to: &data)                            // TYPE A
+        DNSWireTestSupport.appendUInt16(1, to: &data)                            // CLASS IN
         data.append(contentsOf: [0, 0, 0, 60])                // TTL 60
-        appendUInt16(UInt16(address.count), to: &data)        // RDLENGTH
+        DNSWireTestSupport.appendUInt16(UInt16(address.count), to: &data)        // RDLENGTH
         data.append(contentsOf: address)                      // RDATA
         return data
     }
@@ -383,14 +383,10 @@ final class SocketResolverTests: XCTestCase {
             data.append(contentsOf: bytes)
         }
         data.append(0)             // root label
-        appendUInt16(1, to: &data) // QTYPE A
-        appendUInt16(1, to: &data) // QCLASS IN
+        DNSWireTestSupport.appendUInt16(1, to: &data) // QTYPE A
+        DNSWireTestSupport.appendUInt16(1, to: &data) // QCLASS IN
     }
 
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
 }
 
 // MARK: - Loopback peers

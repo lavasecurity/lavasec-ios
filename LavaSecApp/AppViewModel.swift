@@ -4,12 +4,14 @@ import SwiftUI
 import UIKit
 @preconcurrency import NetworkExtension
 @preconcurrency import UserNotifications
-import LavaSecCore
+import LavaSecKit
+import LavaSecFilterPipeline
+import LavaSecAppServices
 
 extension NETunnelProviderManager: @retroactive @unchecked Sendable {}
 
 // FilterEditDraft, DomainDraftResult, and the pure draft-mutation editor live in
-// LavaSecCore (FilterEditDraft.swift) so the mutation logic is unit-tested.
+// LavaSecKit (FilterEditDraft.swift) so the mutation logic is unit-tested.
 
 enum ProtectionPauseDuration: CaseIterable, Identifiable {
     case fiveMinutes
@@ -307,7 +309,7 @@ enum FilterPreparationState: Equatable {
 // LavaSecurityPlusController.swift with the Phase D2 billing peel — the controller
 // owns the server entitlement sync end to end.
 
-// EncryptedBackupState moved to LavaSecCore (EncryptedBackupState.swift); the whole
+// EncryptedBackupState lives in LavaSecAppServices (EncryptedBackupState.swift); the whole
 // encrypted-backup feature (EncryptedBackupError, passkey setup, upload/restore, the
 // automatic-backup debounce) now lives in BackupController.swift (Phase D1 backup peel) —
 // this hub keeps only the BackupHubBridging conformance at the bottom of this file.
@@ -397,9 +399,9 @@ private final class FilterPreparationProgressPresenter {
     }
 }
 
-// `ReusablePreparedFilterSnapshot` was promoted to LavaSecCore (LAV-100 Phase 4) so the foreground
+// `ReusablePreparedFilterSnapshot` lives in LavaSecFilterPipeline (LAV-100 Phase 4) so the foreground
 // switch and the headless Focus engine share one warm-reuse value type + validation core
-// (see WarmFilterSnapshotLoader). Referenced here unqualified via `import LavaSecCore`.
+// (see WarmFilterSnapshotLoader).
 
 private final class ProtectionStopNotificationWaiter: @unchecked Sendable {
     private let lock = NSLock()
@@ -715,17 +717,6 @@ final class AppViewModel: ObservableObject {
     // engine (synchronizeLavaGuardProgress) and the diagnostics-driven refresh write it,
     // and the controller only reads it through the bridge for availability rows.
     @Published private(set) var lavaGuardProgress = LavaGuardProgress()
-    @Published private(set) var isSyncingCatalog = false
-    private var catalogSyncTask: Task<Void, Never>?
-    /// Whether a catalog sync is queued or in progress. `catalogSyncTask` is assigned synchronously
-    /// at the start of `syncCatalog` — BEFORE the deferred `isSyncingCatalog` flips inside
-    /// `performCatalogSync` — so this also catches a sync that's been triggered but hasn't begun its
-    /// work yet, and stays true for the entire sync (it's cleared only after the recompile/republish
-    /// finishes). The warm-artifact switch path bails to a cold compile whenever this is true: a cold
-    /// compile syncs + recompiles fresh, so an instant pointer flip can never race an in-flight
-    /// refresh's recompile/republish. This makes the warm fast path mutually exclusive with catalog
-    /// syncs — the whole warm-vs-sync race class — leaving only the quiescent (common) case instant.
-    private var isCatalogSyncInFlight: Bool { catalogSyncTask != nil }
     @Published private(set) var catalogStatusMessage = "Filter will update from Lava Security's source catalog."
     @Published private(set) var catalogStatusIsError = false
     @Published private(set) var catalogVersion: String?
@@ -846,6 +837,11 @@ final class AppViewModel: ObservableObject {
             #endif
         }
     )
+    // CatalogController owns only single-flight/cancellation and sync-specific presentation.
+    // The whole publication/recovery/protection transaction remains in this hub through the
+    // one-method bridge. Lazy construction wires the weak bridge after self is initialized;
+    // headless background-refresh instances use the same ownership path.
+    private(set) lazy var catalog = CatalogController(hub: self)
     // The account/sign-in feature (the Apple/Google sign-in flows, sign-out, deletion,
     // the account presentation state, and ownership of AccountAuthService — the ONE
     // canonical Supabase identity) lives in AccountController (Phase D3, same plan).
@@ -1249,7 +1245,7 @@ final class AppViewModel: ObservableObject {
         protectionTintRole.color
     }
 
-    /// Semantic tint role for the protection surface. Portable (LavaSecCore) and
+    /// Semantic tint role for the protection surface. Portable (LavaSecKit) and
     /// resolved to a tuned, dark-mode-adaptive color via `ProtectionTintRole.color`
     /// on iOS — replaces the prior raw, non-adaptive `.green`/`.orange` returns.
     var protectionTintRole: ProtectionTintRole {
@@ -1663,6 +1659,16 @@ final class AppViewModel: ObservableObject {
         return "Uses the DNS provider from your current Wi-Fi or cellular network. On iOS 17–25 this may not always work."
     }
 
+    private var catalogPresentationState: CatalogPresentationState {
+        return CatalogPresentationState(
+            cacheAge: blocklistCatalogAge,
+            maxAge: catalogSyncFreshnessInterval,
+            statusIsError: catalogStatusIsError,
+            sync: catalog.syncState,
+            ruleCount: compiledRuleCount
+        )
+    }
+
     var filterFreshnessText: String {
         guard catalogGeneratedAt != nil else {
             return "Filter not updated yet"
@@ -1673,9 +1679,12 @@ final class AppViewModel: ObservableObject {
 
     var configuredBlockedDomainCountText: String {
         let count = compiledRuleCount
-        return count == 1
-            ? "%@ blocked domain".lavaLocalizedFormat(count.formatted())
-            : "%@ blocked domains".lavaLocalizedFormat(count.formatted())
+        switch catalogPresentationState.ruleCount {
+        case .one:
+            return "%@ blocked domain".lavaLocalizedFormat(count.formatted())
+        case .zero, .many:
+            return "%@ blocked domains".lavaLocalizedFormat(count.formatted())
+        }
     }
 
     var configuredBlockedDomainNumberText: String {
@@ -1718,8 +1727,15 @@ final class AppViewModel: ObservableObject {
     }
 
     var blocklistCatalogIsFresh: Bool {
-        BlocklistCatalogFreshnessPolicy(maxAge: catalogSyncFreshnessInterval)
-            .isFresh(age: blocklistCatalogAge, statusIsError: catalogStatusIsError)
+        switch catalogPresentationState.freshness {
+        case .missing, .fresh:
+            // Preserve the shipped initial-window behavior: no cache age and no error
+            // remains acceptable while the first fetch is pending, even though the pure
+            // state keeps `.missing` distinct from genuinely fresh catalog data.
+            return true
+        case .stale, .error:
+            return false
+        }
     }
 
     var blocklistCatalogFreshnessTitle: String {
@@ -1747,15 +1763,14 @@ final class AppViewModel: ObservableObject {
     }
 
     var catalogRefreshButtonTitle: String {
-        if isSyncingCatalog {
+        switch catalogPresentationState.sync {
+        case .syncing:
             return "Fetching from the server..."
-        }
-
-        if catalogStatusMessage == "Refreshed" {
+        case .succeeded:
             return "Refreshed"
+        case .idle, .failed:
+            return "Refresh now"
         }
-
-        return "Refresh now"
     }
 
     private var blocklistCatalogAge: TimeInterval? {
@@ -1953,8 +1968,13 @@ final class AppViewModel: ObservableObject {
     }
 
     /// True when the *known* rules for this selection already exceed the soft
-    /// ceiling. Pending (unknown) lists are not counted here — they are caught
-    /// at compile time, by design (smoother flow over selection-time precision).
+    /// ceiling. Pending (unknown) lists are not counted here, by design (smoother
+    /// flow over selection-time precision): whatever slips this estimate is caught
+    /// exactly — on the deduped union — by the cold-prepare gate on the draft-apply
+    /// path, by `toggleBlocklist`'s post-rebuild exact check on the cached in-place
+    /// enable (which runs no cold prepare), and by the INV-TIER-1 publish/reuse/
+    /// serve gates on the remaining compile-free paths (onboarding writes, refresh
+    /// republish, restore).
     func enabledIDsExceedSoftRuleBudget(_ enabledIDs: Set<String>) -> Bool {
         let known = projectedFilterRuleCount(forEnabledIDs: enabledIDs).known + stagedManualRuleCount
         return FilterRuleBudget.exceedsSoftCeiling(knownRuleCount: known, budget: filterRuleBudget)
@@ -1967,6 +1987,57 @@ final class AppViewModel: ObservableObject {
             return "Lava Plus includes up to %@ filter rules. Remove a list to add more.".lavaLocalizedFormat(budgetText)
         }
         return "Free protection includes up to %@ filter rules. Remove a list or upgrade to Plus.".lavaLocalizedFormat(budgetText)
+    }
+
+    /// INV-TIER-1 status reconcile for the two paths that change the budget or the
+    /// selection WITHOUT a compile anywhere on them — a plan change (lapse/upgrade)
+    /// and a backup restore. When the live compiled total no longer fits the (new)
+    /// budget, report the existing tier message on the existing catalog status
+    /// surface so the user learns why before a publish/serve gate bites; the gates
+    /// themselves are the enforcement, this is only the explanation. Within budget
+    /// ⇒ clear a stale tier message this hub previously surfaced (a Free→Plus
+    /// upgrade runs no refresh that would otherwise replace it, so the resolved
+    /// error would persist indefinitely); any OTHER status stays untouched.
+    private func reconcileTierBudgetStatusAfterPlanOrRestoreChange() {
+        guard !FilterRuleBudget.fitsTierBudget(
+            compiledTotal: liveCompiledTierBudgetRuleCount,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            if let surfaced = lastSurfacedTierBudgetMessage, catalogStatusMessage == surfaced {
+                catalogStatusMessage = "Filter will update from Lava Security's source catalog."
+                catalogStatusIsError = false
+            }
+            lastSurfacedTierBudgetMessage = nil
+            return
+        }
+
+        surfaceTierBudgetStatusMessage()
+
+        // DEBUG-only (not the usual internal-QA pairing): the repo-checks guard rejects any
+        // PR line that adds the internal build-flag token to tracked source, and counts-only
+        // telemetry isn't worth a guard exception — QA builds still see the status message.
+        #if DEBUG
+        logVPNDebugEvent("tier-budget-over-after-plan-or-restore", details: [
+            "compiledTotal": "\(liveCompiledTierBudgetRuleCount)",
+            "maxFilterRules": "\(configuration.limits.maxFilterRules)"
+        ])
+        #endif
+    }
+
+    /// The exact tier-budget message text this hub last put on the catalog status
+    /// surface, so the plan-change reconcile can recognize (and clear) ITS OWN stale
+    /// message after an upgrade resolves it — without pattern-matching status text,
+    /// which would break the moment the copy or locale changes.
+    private var lastSurfacedTierBudgetMessage: String?
+
+    /// Single writer for the over-budget status: every INV-TIER-1 surface (plan/restore
+    /// reconcile, post-sync check, launch-reconcile catch, in-place enable revert) funnels
+    /// through here so the clear-on-upgrade logic above always recognizes the message.
+    private func surfaceTierBudgetStatusMessage() {
+        let message = filterRuleBudgetMessage()
+        catalogStatusMessage = message
+        catalogStatusIsError = true
+        lastSurfacedTierBudgetMessage = message
     }
 
     /// Compact filter-rule count for tight UI: 500K, 1.2M, 2M.
@@ -2816,6 +2887,9 @@ final class AppViewModel: ObservableObject {
             return false
         }
         backup.scheduleAutomaticBackupAfterConfigurationChange()
+        // (The "Switch Filter" App Shortcut parameter is refreshed by refreshFilterSwitchShortcutAfterPersist,
+        // called from the shared persist funnels AFTER the library reaches disk — this path routed through
+        // persistFilterLibrary → persistConfigurationOnly above — Codex #325.)
         return true
     }
 
@@ -2998,7 +3072,7 @@ final class AppViewModel: ObservableObject {
             //   • liveness — a sync is in flight RIGHT NOW (started during prepare, about to republish);
             //   • content  — the live catalog no longer matches the one the warm snapshot was validated
             //     against, i.e. a sync STARTED AND FINISHED entirely between the entry gate and here, so
-            //     catalogSyncTask is already nil yet the catalog moved (Codex #133 — liveness alone
+            //     the controller is already idle yet the catalog moved (Codex #133 — liveness alone
             //     can't see a completed sync). The content check is by per-source identity, not the
             //     top-level catalog_version string, so a source rotation (hagezi ~4x/day, catalog hash
             //     pinned) that keeps catalog_version constant is still caught.
@@ -3012,7 +3086,7 @@ final class AppViewModel: ObservableObject {
                         against: PreparedFilterSnapshotIdentity.make(configuration: nextConfiguration, catalog: $0)
                     ).isEmpty
                 } ?? false
-                if isCatalogSyncInFlight || catalogMovedSinceValidation {
+                if catalog.isSyncInFlight || catalogMovedSinceValidation {
                     publication = .compiled(try await prepareFilterSnapshot(for: nextConfiguration))
                 }
             }
@@ -3283,7 +3357,7 @@ final class AppViewModel: ObservableObject {
         // warmReusableSnapshotForSwitch — same candidate set + validation). Skipped entirely while a
         // catalog sync is in flight: that sync is about to recompile + republish, so a warm flip would
         // race it; bailing to the cold compile keeps the warm fast path quiescent-only.
-        if !isCatalogSyncInFlight,
+        if !catalog.isSyncInFlight,
            let reusable = await warmReusableSnapshotForSwitch(target: target, configuration: configuration) {
             return .warm(reusable)
         }
@@ -3335,7 +3409,7 @@ final class AppViewModel: ObservableObject {
         token: String,
         configuration: AppConfiguration
     ) async -> ReusablePreparedFilterSnapshot? {
-        // Load-bearing warm-reuse validation lives in LavaSecCore (WarmFilterSnapshotLoader) so the
+        // Load-bearing warm-reuse validation lives in LavaSecFilterPipeline (WarmFilterSnapshotLoader) so the
         // foreground switch and the headless Focus engine share ONE validation core and can't drift on
         // reuse safety (fresh-cache + manifest/coverage/source-hash + token-match + tier-cap + full
         // guardrail). This wrapper only supplies the App Group URLs the foreground already derives.
@@ -4099,7 +4173,7 @@ final class AppViewModel: ObservableObject {
 
     private func startOnboardingBlocklistSyncIfNeeded(for sourceIDs: Set<String>) {
         let missingSourceIDs = sourceIDs.filter { cachedBlockRuleSets[$0] == nil }
-        guard !missingSourceIDs.isEmpty, !isSyncingCatalog else {
+        guard !missingSourceIDs.isEmpty, !catalog.isSyncInFlight else {
             return
         }
 
@@ -4119,7 +4193,7 @@ final class AppViewModel: ObservableObject {
         catalogStatusIsError = false
         persistFilterChanges()
 
-        guard cachedBlockRuleSets[blocklist.id] == nil, !isSyncingCatalog else {
+        guard cachedBlockRuleSets[blocklist.id] == nil, !catalog.isSyncInFlight else {
             return
         }
 
@@ -4162,7 +4236,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        guard !isSyncingCatalog else {
+        guard !catalog.isSyncInFlight else {
             catalogStatusMessage = "Finish the current filter update first."
             catalogStatusIsError = false
             ProtectionHapticFeedback.play(.selectionRejected)
@@ -4170,8 +4244,7 @@ final class AppViewModel: ObservableObject {
         }
 
         guard !enabledIDsExceedSoftRuleBudget(configuration.enabledBlocklistIDs.union([blocklist.id])) else {
-            catalogStatusMessage = filterRuleBudgetMessage()
-            catalogStatusIsError = true
+            surfaceTierBudgetStatusMessage()
             ProtectionHapticFeedback.play(.selectionRejected)
             return
         }
@@ -4189,6 +4262,24 @@ final class AppViewModel: ObservableObject {
 
         configuration.enabledBlocklistIDs.insert(blocklist.id)
         rebuildEnabledBlockRules()
+
+        // INV-TIER-1 exact-union check: the soft gate above binds the per-list SUM (with its
+        // ×1.10 estimate margin), so a low-overlap selection can pass it while the deduped
+        // union exceeds the budget — and this cached-enable path runs NO cold prepare, so
+        // without this check the over-budget selection would persist, hit the silent flip
+        // veto, and fail closed unexplained on the next NE restart. The union is already
+        // rebuilt, so reject exactly, revert, and reuse the soft gate's rejection UX.
+        guard FilterRuleBudget.fitsTierBudget(
+            compiledTotal: liveCompiledTierBudgetRuleCount,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            configuration.enabledBlocklistIDs.remove(blocklist.id)
+            rebuildEnabledBlockRules()
+            surfaceTierBudgetStatusMessage()
+            ProtectionHapticFeedback.play(.selectionRejected)
+            return
+        }
+
         catalogStatusMessage = "Enabled \(blocklist.name)."
         catalogStatusIsError = false
         persistFilterChanges()
@@ -4211,17 +4302,40 @@ final class AppViewModel: ObservableObject {
                     return filterRuleBudgetMessage()
                 }
 
+                let customBlocklistsBeforeEnable = configuration.customBlocklists
+                let wasAlreadyEnabled = configuration.enabledBlocklistIDs.contains(catalogSourceID)
                 configuration.customBlocklists.removeAll {
                     $0.sourceURL == source.sourceURL
                         || KnownBlocklistURLMatcher.catalogSourceID(for: $0.sourceURL) == catalogSourceID
                 }
                 configuration.enabledBlocklistIDs.insert(catalogSourceID)
                 rebuildEnabledBlockRules()
+
+                // INV-TIER-1 exact-union check, mirroring toggleBlocklist's: the soft gate above
+                // binds the estimate SUM (×1.10 margin), so a pasted known-catalog URL can pass
+                // it while the deduped union exceeds the budget — and this cached-enable path
+                // runs no cold prepare, so without this the over-budget selection would persist
+                // into the silent flip veto and fail closed later instead of reverting here.
+                // (An uncached source under-counts and defers to the post-sync surface + flip
+                // veto, same as toggleBlocklist's download branch.) Revert BOTH mutations and
+                // return the message through this API's own error surface.
+                guard FilterRuleBudget.fitsTierBudget(
+                    compiledTotal: liveCompiledTierBudgetRuleCount,
+                    maxFilterRules: configuration.limits.maxFilterRules
+                ) else {
+                    configuration.customBlocklists = customBlocklistsBeforeEnable
+                    if !wasAlreadyEnabled {
+                        configuration.enabledBlocklistIDs.remove(catalogSourceID)
+                    }
+                    rebuildEnabledBlockRules()
+                    return filterRuleBudgetMessage()
+                }
+
                 persistFilterChanges()
                 catalogStatusMessage = "Enabled \(blocklistName(for: catalogSourceID))."
                 catalogStatusIsError = false
 
-                guard !isSyncingCatalog else {
+                guard !catalog.isSyncInFlight else {
                     return nil
                 }
 
@@ -4256,7 +4370,7 @@ final class AppViewModel: ObservableObject {
             catalogStatusMessage = "Added custom blocklist."
             catalogStatusIsError = false
 
-            guard !isSyncingCatalog else {
+            guard !catalog.isSyncInFlight else {
                 return nil
             }
 
@@ -4618,11 +4732,10 @@ final class AppViewModel: ObservableObject {
             // A refresh already in flight (e.g. the launch sync) captured the previous
             // selection, so wait for it to finish before syncing — otherwise the newly
             // selected QA sources never download and the load persists with missing rules.
-            // Gate on catalogSyncTask (set synchronously at the start of syncCatalog), not
-            // isSyncingCatalog (set later inside performCatalogSync), to also catch the
-            // window between the two — matching the turn-on path.
-            if catalogSyncTask != nil {
-                await self.waitForCatalogSyncToFinish()
+            // The controller installs its task synchronously before the transaction starts,
+            // so this also catches a queued refresh that has not reached the hub yet.
+            if catalog.isSyncInFlight {
+                await catalog.awaitCompletion()
             }
             guard sourceIDs.contains(where: { cachedBlockRuleSets[$0] == nil }) else {
                 return
@@ -5082,59 +5195,33 @@ final class AppViewModel: ObservableObject {
     // MARK: - Blocklist catalog sync
 
     func syncCatalog(isBackgroundRefresh: Bool = false) async {
-        if let catalogSyncTask {
-            await catalogSyncTask.value
-            return
-        }
-
-        let task = Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
-
-            await self.performCatalogSync(isBackgroundRefresh: isBackgroundRefresh)
-        }
-        catalogSyncTask = task
-        // Forward cancellation from the awaiting context (e.g. an expired background
-        // refresh's BGTask) into the unstructured sync task, which in turn forwards it
-        // to the detached network/compile work in `performCatalogSync`.
-        await withTaskCancellationHandler {
-            await task.value
-        } onCancel: {
-            task.cancel()
-        }
+        await catalog.sync(isBackgroundRefresh: isBackgroundRefresh)
     }
 
-    private func waitForCatalogSyncToFinish() async {
-        guard let catalogSyncTask else {
-            return
-        }
-
-        await catalogSyncTask.value
-    }
-
-    private func finishCatalogSyncTask() {
-        isSyncingCatalog = false
-        catalogSyncTask = nil
-    }
-
-    private func performCatalogSync(operationID: LatencyOperationID = .make(), isBackgroundRefresh: Bool = false) async {
+    func performCatalogSyncTransaction(
+        isBackgroundRefresh: Bool,
+        operationID: LatencyOperationID
+    ) async -> CatalogSyncTransactionResult {
         let trace = makeLatencyTrace(operationID: operationID, operationKind: "refreshLists")
         let span = trace.beginSpan("action.refreshLists", details: [
             "catalogVersion": catalogVersion ?? "nil",
             "compiledRuleCount": "\(compiledRuleCount)"
         ])
         var actionStatus = "started"
+        var transactionResult = CatalogSyncTransactionResult.failed
         defer {
             span.end(details: ["status": actionStatus, "catalogVersion": catalogVersion ?? "nil"])
+            // Normal return-path fallback. The hub explicitly releases before the
+            // reentrant protection-restore tail below; operation-ID fencing makes this
+            // second completion a no-op, including when a newer sync has already begun.
+            catalog.complete(operationID: operationID, result: transactionResult)
         }
 
         guard let cacheURL = catalogCacheURL else {
             actionStatus = "app-group-unavailable"
             catalogStatusMessage = LavaSecAppError.appGroupUnavailable.localizedDescription
             catalogStatusIsError = true
-            finishCatalogSyncTask()
-            return
+            return transactionResult
         }
 
         // Captured BEFORE the sync for the background rollback guard: the published pointer
@@ -5152,7 +5239,6 @@ final class AppViewModel: ObservableObject {
             : nil
 
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
-        isSyncingCatalog = true
         catalogStatusMessage = "Fetching from the server..."
         catalogStatusIsError = false
         var shouldAttemptProtectionRestore = false
@@ -5198,8 +5284,8 @@ final class AppViewModel: ObservableObject {
 
             guard !Task.isCancelled else {
                 actionStatus = "cancelled"
-                finishCatalogSyncTask()
-                return
+                transactionResult = .cancelled
+                return transactionResult
             }
 
             applySyncResults(catalogResult: result.0, customResult: result.1)
@@ -5212,8 +5298,8 @@ final class AppViewModel: ObservableObject {
                 // before the pointer flip by the in-lock supersession closure below.)
                 guard !Task.isCancelled else {
                     actionStatus = "cancelled"
-                    finishCatalogSyncTask()
-                    return
+                    transactionResult = .cancelled
+                    return transactionResult
                 }
                 // Hybrid background publish: artifacts-only, never configuration.json,
                 // never protection restore. Returns before the foreground persist tail.
@@ -5232,8 +5318,14 @@ final class AppViewModel: ObservableObject {
                 if !Task.isCancelled, actionStatus == "bg-published" {
                     await warmNonActiveFiltersInBackground()
                 }
-                finishCatalogSyncTask()
-                return
+                if Task.isCancelled || actionStatus == "bg-cancelled" {
+                    transactionResult = .cancelled
+                } else if actionStatus == "bg-error" {
+                    transactionResult = .failed
+                } else {
+                    transactionResult = .succeeded
+                }
+                return transactionResult
             }
 
             // Smart refresh: only pay the snapshot re-encode + tunnel reload (and the
@@ -5245,8 +5337,23 @@ final class AppViewModel: ObservableObject {
                 await notifyTunnelSnapshotUpdated(operationID: operationID)
             }
 
-            catalogStatusMessage = "Refreshed"
-            catalogStatusIsError = false
+            // INV-TIER-1 surface: when the freshly-synced union no longer fits the tier budget
+            // (upstream growth, or the tier shrank since the lists were enabled), report the
+            // actionable tier message on this existing status surface instead of a false
+            // "Refreshed". On the changed path the persist above just vetoed the artifact
+            // flip; on the UNCHANGED path nothing persisted, but a pre-existing over-budget
+            // state (e.g. a prior lapse) is equally worth reporting over "Refreshed". The
+            // sync itself succeeded either way, so the cached catalog/payloads stay usable
+            // for a later gated compile.
+            if FilterRuleBudget.fitsTierBudget(
+                compiledTotal: liveCompiledTierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            ) {
+                catalogStatusMessage = "Refreshed"
+                catalogStatusIsError = false
+            } else {
+                surfaceTierBudgetStatusMessage()
+            }
 
             // Keep the expensive snapshot reload + reconnect gated on an actual
             // upstream change, but always attempt the protection restore: a successful
@@ -5254,13 +5361,14 @@ final class AppViewModel: ObservableObject {
             // online (e.g. on launch after iOS dropped the VPN).
             shouldAttemptProtectionRestore = true
             actionStatus = snapshotChanged ? "refreshed" : "unchanged"
+            transactionResult = .succeeded
         } catch {
             if Task.isCancelled {
                 // Cancelled refresh (e.g. an expired background BGTask): bail without
                 // restoring from cache or touching protection.
                 actionStatus = "cancelled"
-                finishCatalogSyncTask()
-                return
+                transactionResult = .cancelled
+                return transactionResult
             }
 
             // A background refresh must NEVER write shared state, on ANY path. The
@@ -5273,8 +5381,7 @@ final class AppViewModel: ObservableObject {
             // untouched and let the next foreground sync recover.
             if isBackgroundRefresh {
                 actionStatus = "bg-sync-failed"
-                finishCatalogSyncTask()
-                return
+                return transactionResult
             }
 
             let restoredFromCache = await loadCachedCatalogAfterSyncFailure(
@@ -5287,10 +5394,14 @@ final class AppViewModel: ObservableObject {
             actionStatus = restoredFromCache ? "cache-restored" : "error"
         }
 
-        finishCatalogSyncTask()
+        // Release before restore: restoreProtectionIfNeeded can re-enter
+        // enableProtection, which joins an in-flight catalog operation. Keeping this
+        // operation installed until the bridge returns would make it await itself.
+        catalog.complete(operationID: operationID, result: transactionResult)
         if shouldAttemptProtectionRestore {
             await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)
         }
+        return transactionResult
     }
 
     /// Thrown by the background publish's `commitBeforeFlip` to veto the flip when a concurrent
@@ -5381,6 +5492,20 @@ final class AppViewModel: ObservableObject {
         // this headless sync didn't fetch).
         guard prepared.summary.coversEnabledBlocklists(in: configuration) else {
             return "bg-uncovered"
+        }
+
+        // INV-TIER-1: the background refresh republishes without the gated cold prepare, so it
+        // must veto an over-budget build itself (upstream growth or a lapse since the last gated
+        // compile). Publish nothing and stay silent — background never writes user-facing state;
+        // the next foreground refresh surfaces the tier message on its existing status surface.
+        // The limit comes from the RELOADED on-disk configuration (isPaid → limits), the same
+        // config this build is stamped against.
+        // pinned: TierBudgetEnforcementSourceTests.testBackgroundPublishVetoesOverBudgetArtifacts
+        guard FilterRuleBudget.fitsTierBudget(
+            recordedTotal: prepared.summary.tierBudgetRuleCount,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            return "bg-over-tier-budget"
         }
 
         // Smart refresh (mirror the foreground gate at performCatalogSync): if nothing
@@ -5899,13 +6024,33 @@ final class AppViewModel: ObservableObject {
             // Persist the SAME tier-budget total a cold compile would record (block-merge + FULL
             // guardrail + allowed + blocked — mirrors FilterSnapshotPreparationService.prepare), so a
             // warm switch-back to this freshly persisted token passes the tier gate instead of always
-            // cold-compiling (Codex #133). threatGuardrail is the full guardrail (snapshot's
-            // nonAllowableThreatRules is only the allowlist-overlap subset). nil blocklist count ⇒ nil
-            // budget ⇒ the warm reuse correctly falls back to a cold compile.
+            // cold-compiling (Codex #133). threatGuardrail normally holds the full guardrail
+            // (snapshot's nonAllowableThreatRules is only the allowlist-overlap subset) — EXCEPT in
+            // the startup-warm-reuse window before the launch catalog sync repopulates it, where a
+            // persist records a subset-based (lower) total; the artifact is self-consistent and the
+            // drift is bounded by the guardrail-tier size (empty in production today). nil blocklist
+            // count ⇒ nil budget ⇒ the warm reuse correctly falls back to a cold compile.
             tierBudgetRuleCount: blocklistRuleCount.map {
                 $0 + threatGuardrail.count + configuration.allowedDomains.count + configuration.blockedDomains.count
             }
         )
+    }
+
+    /// The live in-memory equivalent of `preparedSummary`'s `tierBudgetRuleCount` — the same
+    /// block-merge + FULL guardrail + allowed + blocked total the cold gate evaluates — computed
+    /// from the already-rebuilt published state so INV-TIER-1 status checks (post-sync surface,
+    /// plan-change reconcile) never pay a second merge. Transient under-count, accepted:
+    /// between a startup warm reuse and the launch catalog sync, `threatGuardrail` holds only
+    /// the allowlist-overlap SUBSET (see `loadReusablePreparedSnapshotForProtectionStartup`),
+    /// so a status check in that window can miss by up to the guardrail-tier size — a delayed
+    /// message, never a false one, and only the STATUS surface: every enforcement gate binds
+    /// the recorded `tierBudgetRuleCount` instead. (The guardrail tier is empty in production
+    /// today.)
+    private var liveCompiledTierBudgetRuleCount: Int {
+        compiledBlocklistRuleCount
+            + threatGuardrail.count
+            + configuration.allowedDomains.count
+            + configuration.blockedDomains.count
     }
 
     private func preparedBlocklistRuleCount() -> Int? {
@@ -6067,18 +6212,31 @@ final class AppViewModel: ObservableObject {
         if currentCatalog != nil || configuration.enabledBlocklistIDs.isEmpty {
             let preparedSnapshot = preparedSnapshotForCurrentConfiguration()
 
-            #if DEBUG
-            logVPNDebugEvent("enable-use-current-snapshot", details: [
-                "fingerprint": preparedSnapshot.identity.fingerprint,
-                "compiledRuleCount": "\(compiledRuleCount)",
-                "catalogVersion": currentCatalog?.catalogVersion ?? "nil"
-            ])
-            #endif
+            // INV-TIER-1: this branch wraps the in-memory merge without the gated cold
+            // prepare, so it must not hand an over-budget snapshot to the turn-on
+            // publish. Over budget (or a nil recorded total — an under-covered build,
+            // which the coverage veto would skip anyway) falls through to the gated
+            // prepare below, which recomputes and throws the actionable tier error.
+            if FilterRuleBudget.fitsTierBudget(
+                recordedTotal: preparedSnapshot.summary.tierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            ) {
+                #if DEBUG
+                logVPNDebugEvent("enable-use-current-snapshot", details: [
+                    "fingerprint": preparedSnapshot.identity.fingerprint,
+                    "compiledRuleCount": "\(compiledRuleCount)",
+                    // The tier gate's actual inputs, for diagnosing budget field cases.
+                    "tierBudgetRuleCount": preparedSnapshot.summary.tierBudgetRuleCount.map(String.init) ?? "nil",
+                    "maxFilterRules": "\(configuration.limits.maxFilterRules)",
+                    "catalogVersion": currentCatalog?.catalogVersion ?? "nil"
+                ])
+                #endif
 
-            return ProtectionStartupSnapshot(
-                preparedSnapshot: preparedSnapshot,
-                reusedPersistedArtifacts: false
-            )
+                return ProtectionStartupSnapshot(
+                    preparedSnapshot: preparedSnapshot,
+                    reusedPersistedArtifacts: false
+                )
+            }
         }
 
         #if DEBUG
@@ -6149,6 +6307,18 @@ final class AppViewModel: ObservableObject {
                 cachedCatalog: cachedCatalog
             ) else {
                 return rejectReuse(cachedCatalog == nil ? "snapshot-mismatch-no-cached-catalog" : "snapshot-mismatch")
+            }
+
+            // INV-TIER-1: same tier gate as the warm-SWITCH loader (WarmFilterSnapshotLoader).
+            // The reuse identity ignores isPaid, so a downgrade never invalidates an artifact
+            // compiled under Plus — without this gate every launch after a lapse keeps serving
+            // the oversized filter. Over budget or legacy-nil ⇒ fall through to the startup
+            // pipeline, whose gated cold prepare surfaces the actionable tier error.
+            guard FilterRuleBudget.fitsTierBudget(
+                recordedTotal: preparedSnapshot.summary.tierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            ) else {
+                return rejectReuse("tier-budget")
             }
 
             return ReusablePreparedFilterSnapshot(
@@ -6341,13 +6511,13 @@ final class AppViewModel: ObservableObject {
             // Cache-first turn-on: when a confirmed-reusable prepared artifact
             // exists for the *current* configuration, the VPN can come up
             // immediately from cache while any in-flight catalog sync keeps
-            // refreshing in the background — performCatalogSync reconciles the
+            // refreshing in the background — performCatalogSyncTransaction reconciles the
             // running tunnel on completion (notifyTunnelSnapshotUpdated +
             // restoreProtectionIfNeeded, which single-flights against this
             // turn-on). We only block on the sync when there is nothing valid
             // to start from, e.g. the user just changed the enabled-list set,
             // which invalidates the cached artifact's identity.
-            if catalogSyncTask != nil {
+            if catalog.isSyncInFlight {
                 if await hasReusableArtifactForCurrentConfiguration() {
                     #if DEBUG
                     logVPNDebugEvent("enable-cache-first-skip-sync-wait")
@@ -6358,7 +6528,7 @@ final class AppViewModel: ObservableObject {
                     #endif
 
                     vpnMessage = "Finishing filter update..."
-                    await waitForCatalogSyncToFinish()
+                    await catalog.awaitCompletion()
                 }
             }
 
@@ -8073,7 +8243,7 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Focus auto-switch coordination (LAV-100 Phase 3)
 
-    // `HeadlessFocusSwitchOutcome` was relocated to LavaSecCore with the headless switch engine
+    // `HeadlessFocusSwitchOutcome` lives in LavaSecFilterPipeline with the headless switch engine
     // (LAV-100 Phase 4). The foreground reconcile + the non-active warm-keep helper below STAY here.
 
     /// Foreground-only: keep the non-active filters — including the seeded defaults (Core/Balanced/Extra) —
@@ -8375,7 +8545,7 @@ final class AppViewModel: ObservableObject {
 
     // The headless Focus warm-switch orchestration (FocusWarmSwitchCatalogMovedError,
     // nudgeForegroundReconcile, performHeadlessFocusFilterSwitch, warmSnapshotStillReusableAgainstCachedCatalog)
-    // was relocated to LavaSecCore.HeadlessFocusFilterSwitchEngine (LAV-100 Phase 4) so it can run in the
+    // lives in LavaSecFilterPipeline.HeadlessFocusFilterSwitchEngine (LAV-100 Phase 4) so it can run in the
     // App Intents extension with no AppViewModel. The foreground reconcile + persist paths below STAY here.
 
     // MARK: - Shared-state persistence funnels
@@ -8410,9 +8580,22 @@ final class AppViewModel: ObservableObject {
         // the on-disk artifacts (identical bytes) or when only configuration
         // state changed: re-encoding the prepared JSON and rebuilding the
         // compact artifact were measured as the bulk of warm turn-on cost.
+        //
+        // INV-TIER-1 flip veto: every foreground pointer flip funnels through here, including
+        // the catalog-refresh republish that never runs the gated cold prepare — without this
+        // veto a lapsed-Plus (or upstream-grown) over-budget filter keeps re-publishing fresh
+        // over-budget artifacts forever (2026-07-10 field case: free tier serving a 558,917-rule
+        // union past the 500K budget). Over budget ⇒ config still persists (user data is never
+        // mutated here) but the artifact pointer does not move; the tunnel's own INV-TIER-1
+        // serve gates and the gated cold prepare provide the actionable failure.
+        // pinned: TierBudgetEnforcementSourceTests.testPersistSharedStateVetoesOverBudgetArtifactFlip
         let snapshotToPersist = preparedSnapshot ?? preparedSnapshotForCurrentConfiguration()
         let didRewriteArtifacts = rewritesRuleArtifacts
             && snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)
+            && FilterRuleBudget.fitsTierBudget(
+                recordedTotal: snapshotToPersist.summary.tierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            )
 
         // Keep the library's active filter in lockstep with the configuration we're
         // persisting (the only two writers of app-configuration.json funnel through here
@@ -8444,6 +8627,7 @@ final class AppViewModel: ObservableObject {
         )
         configuration = written.configuration
         library = written.library
+        refreshFilterSwitchShortcutAfterPersist()
         // Suppressed for the headless warm switch: that model skips loadAutomaticBackupPreference /
         // loadEncryptedBackupState, so its isAutomaticBackupEnabled is the default false and touching the
         // backup envelope here would mishandle it (same hazard as the launch-time persists). The
@@ -8516,9 +8700,23 @@ final class AppViewModel: ObservableObject {
         )
         configuration = written.configuration
         library = written.library
+        refreshFilterSwitchShortcutAfterPersist()
         if schedulesAutomaticBackup {
             backup.scheduleAutomaticBackupAfterConfigurationChange()
         }
+    }
+
+    /// Refresh the "Switch Filter" App Shortcut's filter parameter AFTER the library has reached disk
+    /// (Codex #325). Both this-app persist funnels — `persistConfigurationOnly` and `persistSharedState`
+    /// — call `SharedFilterStatePersistence.writeConfigurationAndLibrary` (the single shared writer) and
+    /// then land here, so every list change (create/rename/delete/import, restore-to-default, backup
+    /// restore, onboarding seed) refreshes with the CURRENT on-disk list — the shortcut's entity query
+    /// reads disk, so refreshing before the write would re-fetch the previous list (r5). Called after the
+    /// write, not on `library`'s didSet, for exactly that ordering. Idempotent and cheap, so a config-only
+    /// persist harmlessly re-publishes the unchanged list rather than us threading a list-changed flag
+    /// through both funnels.
+    private func refreshFilterSwitchShortcutAfterPersist() {
+        LavaShortcuts.updateAppShortcutParameters()
     }
 
     /// Write-through the active filter's four fields from the live `configuration`.
@@ -8721,6 +8919,15 @@ final class AppViewModel: ObservableObject {
             ])
             #endif
         } catch {
+            // INV-TIER-1: a tier-limit throw here is the FIRST app-side signal for the
+            // lapsed-Plus / grown-union cohort whose tunnel just cold-started fail-closed
+            // (startup reuse and LKG both tier-rejected). Swallowing it — as every other
+            // reconcile failure is, correctly — leaves the device blocking all DNS with the
+            // status still reading like a healthy cache load; surface the actionable tier
+            // message on the existing status surface instead.
+            if case FilterSnapshotPreparationError.exceedsTierFilterRuleLimit = error {
+                surfaceTierBudgetStatusMessage()
+            }
             #if DEBUG || LAVA_QA_TOOLS
             logVPNDebugEvent("launch-snapshot-reconcile-failed", details: errorDebugDetails(error))
             #endif
@@ -9141,7 +9348,7 @@ enum LavaSecAppError: LocalizedError {
 
 // NetworkExtension-backed conformances for VPNLifecycleController. Per the
 // plan's architecture decisions, NE concrete types stay in the app target and
-// the controller in LavaSecCore sees only these seams.
+// the controller in LavaSecKit sees only these seams.
 extension NETunnelProviderManager: @retroactive VPNManagerControlling {
     public var managerDisplayName: String? {
         localizedDescription
@@ -9248,10 +9455,17 @@ struct ProtectionStatusChangeWaiter: VPNStatusChangeWaiting {
 }
 
 // The Focus-driven warm filter switch is driven by the App Intents EXTENSION (LavaSecIntents), whose
-// `perform()` calls `FocusSwitchEnvironment.performSwitch` → the shared LavaSecCore
+// `perform()` calls `FocusSwitchEnvironment.performSwitch` → the shared LavaSecFilterPipeline
 // `HeadlessFocusFilterSwitchEngine`. perform() runs in the extension even while Lava is closed (WWDC22
 // §10121), so there is no app-target switch entry; the app keeps only the foreground reconcile
 // (`reconcilePendingFilterSwitch`), the manual `switchToFilter`, and the non-active warm-keep helper.
+
+// MARK: - Catalog sync bridge
+
+// CatalogController owns only single-flight/cancellation and sync presentation. The one bridge
+// method above remains the complete AppViewModel transaction boundary for shared catalog metadata,
+// artifact publication, persistence, cache recovery, tunnel notification, warming, and protection.
+extension AppViewModel: CatalogSyncTransactionBridging {}
 
 // MARK: - Backup hub bridge
 
@@ -9361,6 +9575,18 @@ extension AppViewModel: BackupHubBridging {
         // saved envelope reflects the restored state and the upload marker is correctly cleared —
         // no post-persist save can clobber it.
         try await persistSharedState(prioritizesConfigurationDurability: true)
+        // INV-TIER-1: a restore replaces the selection wholesale with no compile on the path, so
+        // a backup written under Plus (or from a device whose lists have since grown) can land an
+        // over-budget selection on this tier. The user's restored data is kept as-is — the
+        // publish/reuse/serve gates keep it from ever being served — but surface the tier message
+        // now so the refusal is explained rather than discovered. Recompute the compiled count for
+        // the RESTORED enabled set first: without this the check reads the PRE-restore state and
+        // can show a false tier error to a user who just restored a smaller, fitting selection.
+        // Sources the restore enabled but this device hasn't cached yet contribute nothing — an
+        // under-count, so the residual failure mode is only a delayed message (the follow-up sync
+        // re-runs the same check on its own status path), never a false one.
+        refreshCompiledBlocklistRuleCount()
+        reconcileTierBudgetStatusAfterPlanOrRestoreChange()
     }
 }
 
@@ -9382,16 +9608,26 @@ extension AppViewModel: LavaSecurityPlusHubBridging {
         configuration.hasLavaSecurityPlus
     }
 
-    /// Applies the entitlement outcome to the persisted plan. The paid flag only
-    /// drives app-side tier limits and UI; the tunnel never reads isPaid. Persist it
-    /// so the status survives launches, but do NOT signal a configuration reload —
-    /// that reapplies tunnel network settings (a visible reconnect) and would fire
-    /// spuriously on every entitlement change. (Moved with the code from the pre-peel
-    /// applyLavaSecurityPlusEntitlement; the controller keeps the do/catch + paywall
-    /// message semantics around this call.)
+    /// Applies the entitlement outcome to the persisted plan. The paid flag drives
+    /// app-side tier limits and UI; the tunnel never reads isPaid for FEATURE gating,
+    /// but it does enforce the derived `limits.maxFilterRules` as the INV-TIER-1
+    /// serve cap. Persist the flag so the status survives launches, but do NOT signal
+    /// a configuration reload — that reapplies tunnel network settings (a visible
+    /// reconnect) and would fire spuriously on every entitlement change. (Moved with
+    /// the code from the pre-peel applyLavaSecurityPlusEntitlement; the controller
+    /// keeps the do/catch + paywall message semantics around this call.)
     func persistPaidPlanFlag(_ isPaid: Bool) throws {
         configuration.isPaid = isPaid
         try persistConfigurationOnly()
+        // INV-TIER-1 downgrade reconciliation: a lapse shrinks the budget under the
+        // ACTIVE filter with no compile anywhere on the path (this call is the entire
+        // downgrade), so surface the over-budget state on the existing status surface
+        // now — deliberately deferred-in-effect, still no reload/reconnect: the
+        // publish/reuse/serve gates make the cap bite at the next natural compile
+        // point, this line just tells the user why before that happens. An
+        // already-resident tunnel snapshot keeps serving until that point (the
+        // INV-TIER-1 resident carve-out) — extra filtering, never fail-open.
+        reconcileTierBudgetStatusAfterPlanOrRestoreChange()
     }
 }
 

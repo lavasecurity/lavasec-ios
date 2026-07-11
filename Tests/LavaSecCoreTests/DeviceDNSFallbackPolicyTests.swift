@@ -285,4 +285,123 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
         // Both dotted-quad and hextet spellings of the embedded v4 are accepted.
         XCTAssertTrue(DeviceDNSFallbackPolicy.isUsableResolverAddress("64:ff9b::808:808"))
     }
+
+    // MARK: - Brief-wake resolver preservation (UR-48 Phase 2a)
+
+    func testPreserveResolverRuntimeRequiresAnObservedSleepStart() {
+        // No paired sleep() observed (fresh process, or an OS wake with no sleep callback) —
+        // the suspension length is unknown, so the conservative teardown must run.
+        XCTAssertFalse(DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+            sleepBeganAt: nil,
+            now: Date(timeIntervalSinceReferenceDate: 1_000)
+        ))
+    }
+
+    func testPreserveResolverRuntimeAcrossBriefSleepOnly() {
+        let sleepBeganAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        let threshold = DeviceDNSFallbackPolicy.briefWakeResolverPreserveThreshold
+
+        // Micro-sleep (the UR-48 thrash shape): keep the live sessions.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+            sleepBeganAt: sleepBeganAt,
+            now: sleepBeganAt.addingTimeInterval(5)
+        ))
+        // Exactly at the threshold still preserves (inclusive bound).
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+            sleepBeganAt: sleepBeganAt,
+            now: sleepBeganAt.addingTimeInterval(threshold)
+        ))
+        // Past the threshold the stale-socket/DHCP-rebind risk wins: tear down.
+        XCTAssertFalse(DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+            sleepBeganAt: sleepBeganAt,
+            now: sleepBeganAt.addingTimeInterval(threshold + 1)
+        ))
+    }
+
+    func testPreserveResolverRuntimeRejectsClockJumpBackwards() {
+        // A sleep stamp in the future (clock set backwards while suspended) is bogus —
+        // fail toward the conservative teardown, never toward trusting stale sessions.
+        let sleepBeganAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        XCTAssertFalse(DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+            sleepBeganAt: sleepBeganAt,
+            now: sleepBeganAt.addingTimeInterval(-1)
+        ))
+    }
+
+    // MARK: - Chronic-failure smoke-probe backoff (UR-48 Phase 2a)
+
+    func testRoutineProbeIntervalKeepsBaseCadenceBelowActivation() {
+        // Transient blips (streaks under the activation count) keep today's cadence exactly.
+        let base = DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+        for failures in 0..<DeviceDNSFallbackPolicy.smokeProbeBackoffActivationFailureCount {
+            XCTAssertEqual(
+                DeviceDNSFallbackPolicy.routineSmokeProbeInterval(afterConsecutiveFailures: failures),
+                base,
+                "streak of \(failures) must not back off"
+            )
+        }
+    }
+
+    func testRoutineProbeIntervalDoublesFromActivationAndHitsTheCeiling() {
+        let activation = DeviceDNSFallbackPolicy.smokeProbeBackoffActivationFailureCount
+        let base = DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+        let ceiling = DeviceDNSFallbackPolicy.maxRoutineSmokeProbeInterval
+
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.routineSmokeProbeInterval(afterConsecutiveFailures: activation),
+            min(base * 2, ceiling)
+        )
+        // Chronic streak (the rc9 log's 500+): pinned to the ceiling, never beyond.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.routineSmokeProbeInterval(afterConsecutiveFailures: 500),
+            ceiling
+        )
+        // Ceiling stays modest so a silent recovery is noticed within minutes, not hours.
+        XCTAssertLessThanOrEqual(ceiling, 1_800)
+    }
+
+    func testConsecutiveSmokeFailureStreakSaturates() {
+        XCTAssertEqual(DeviceDNSFallbackPolicy.nextConsecutiveSmokeProbeFailureCount(current: 0), 1)
+        let cap = DeviceDNSFallbackPolicy.maxTrackedConsecutiveSmokeProbeFailures
+        XCTAssertEqual(DeviceDNSFallbackPolicy.nextConsecutiveSmokeProbeFailureCount(current: cap - 1), cap)
+        // Saturates instead of growing without bound (rc9 log: 500+ with no consumer).
+        XCTAssertEqual(DeviceDNSFallbackPolicy.nextConsecutiveSmokeProbeFailureCount(current: cap), cap)
+        // Every behavioral threshold sits far below the saturation point.
+        XCTAssertLessThan(DeviceDNSFallbackPolicy.smokeProbeBackoffActivationFailureCount, cap)
+        XCTAssertLessThan(DeviceDNSFallbackPolicy.queryFallbackActivationThreshold, cap)
+    }
+
+    func testDeviceDNSCaptureLoggingCollapsesMaskedEpisodes() {
+        // First read of a masked episode logs; SAME-reason repeats within it do not.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 0, reason: "wake", lastLoggedCount: nil, lastLoggedReason: nil))
+        XCTAssertFalse(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 0, reason: "wake", lastLoggedCount: 0, lastLoggedReason: "wake"))
+        // Any non-empty capture always logs (it can change the adopted resolvers)...
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 2, reason: "wake", lastLoggedCount: 2, lastLoggedReason: "wake"))
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 1, reason: "wake", lastLoggedCount: 0, lastLoggedReason: "wake"))
+        // ...and the next masked read after a recovery logs the new episode's start.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 0, reason: "wake", lastLoggedCount: 2, lastLoggedReason: "wake"))
+        // A masked→masked handoff under a NEW reason logs — it's a distinct recapture the
+        // diagnostic log exists to surface, not a same-reason repeat within one episode.
+        XCTAssertTrue(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 0, reason: "network-path-changed", lastLoggedCount: 0, lastLoggedReason: "wake"))
+        // But once that new context has logged, its own same-reason repeats collapse again.
+        XCTAssertFalse(DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: 0, reason: "network-path-changed", lastLoggedCount: 0, lastLoggedReason: "network-path-changed"))
+    }
+
+    func testRoutineProbeIntervalIsMonotonicInFailureStreak() {
+        // More failures may never SHORTEN the cadence — the streak resets (on success,
+        // recovery, or a path change) are what restore the base interval.
+        var previous: TimeInterval = 0
+        for failures in 0...600 {
+            let interval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval(afterConsecutiveFailures: failures)
+            XCTAssertGreaterThanOrEqual(interval, previous, "interval shrank at streak \(failures)")
+            previous = interval
+        }
+    }
 }

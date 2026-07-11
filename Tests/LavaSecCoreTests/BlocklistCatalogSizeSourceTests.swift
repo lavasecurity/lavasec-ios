@@ -10,11 +10,11 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
     }
 
     func testCatalogRowsUsePlainDomainCountWithLeadingSizeBucketPill() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let catalogListBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "BlocklistPickerList(",
-            endingBefore: ".blocklistJumpAnchor(id: section.id)"
+            endingBefore: ".blocklistJumpAnchor(id: section.id, pinnedHeaderHeight: pinnedHeaderHeight)"
         )
         let pickerTextStackBlock = try sourceBlock(
             in: filtersViewSource,
@@ -35,7 +35,7 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
         let listSource = try readSource(.lavaCondensedList)
         let metadataRowBlock = try sourceBlock(
             in: listSource,
-            startingAt: "HStack(spacing: 8)",
+            startingAt: "HStack(spacing: LavaSpacing.sm)",
             endingBefore: ".fixedSize(horizontal: false, vertical: true)"
         )
 

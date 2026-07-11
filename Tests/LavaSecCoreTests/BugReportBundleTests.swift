@@ -19,8 +19,16 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertEqual(BugReportIssueType.websiteAccess.kind, .bug)
         XCTAssertEqual(BugReportIssueType.vpnOrFilterIssue.kind, .bug)
         XCTAssertEqual(BugReportIssueType.featureIssue.kind, .bug)
+        XCTAssertEqual(BugReportIssueType.translationIssue.kind, .bug)
         XCTAssertEqual(BugReportIssueType.suggestion.kind, .suggestion)
         XCTAssertEqual(BugReportIssueType.other.kind, .other)
+    }
+
+    func testIssueKindRawValuesMatchTriageWireVocabulary() {
+        XCTAssertEqual(
+            [BugReportIssueKind.bug, .suggestion, .other].map(\.rawValue),
+            ["bug", "suggestion", "other"]
+        )
     }
 
     func testRequestBodyIncludesTriageKind() throws {

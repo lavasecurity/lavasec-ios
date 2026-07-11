@@ -1,14 +1,17 @@
 import CryptoKit
-import LavaSecDNS
 import LavaSecKit
+import LavaSecNetworking
 import Foundation
 
+/// Base endpoints used to reach Lava Security services.
 public enum LavaSecAPI {
+    /// Primary production API base URL.
     public static let productionBaseURL = URL(string: "https://api.lavasecurity.app")!
+    /// Fallback API base URL used when the primary service is unavailable.
     public static let fallbackBaseURL = URL(string: "https://lavasec-api.lavasec.workers.dev")!
-    public static let catalogURL = catalogURL(baseURL: productionBaseURL)
-    public static let fallbackCatalogURL = catalogURL(baseURL: fallbackBaseURL)
-    public static let catalogURLs = [catalogURL, fallbackCatalogURL]
+    internal static let catalogURL = catalogURL(baseURL: productionBaseURL)
+    internal static let fallbackCatalogURL = catalogURL(baseURL: fallbackBaseURL)
+    internal static let catalogURLs = [catalogURL, fallbackCatalogURL]
 
     private static func catalogURL(baseURL: URL) -> URL {
         baseURL
@@ -17,16 +20,20 @@ public enum LavaSecAPI {
     }
 }
 
+/// Versioned metadata describing available blocklist and guardrail sources.
 public struct BlocklistCatalog: Equatable, Codable, Sendable {
-    public static let builtInSourceURLCatalogVersion = "built-in-source-url-catalog-v1"
+    internal static let builtInSourceURLCatalogVersion = "built-in-source-url-catalog-v1"
 
-    public let schemaVersion: Int
+    package let schemaVersion: Int
+    /// Identifier for the catalog revision.
     public let catalogVersion: String
+    /// Time recorded by the catalog producer for this revision.
     public let generatedAt: Date
+    /// Selectable blocklist sources in this catalog.
     public let sources: [CatalogBlocklistSource]
-    public let guardrails: [CatalogBlocklistSource]
+    package let guardrails: [CatalogBlocklistSource]
 
-    public init(
+    package init(
         schemaVersion: Int,
         catalogVersion: String,
         generatedAt: Date,
@@ -48,6 +55,7 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
         case guardrails
     }
 
+    /// Decodes the supported catalog schema and marks decoded guardrail entries.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
@@ -70,7 +78,7 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
             .map { $0.markedAsGuardrail() }
     }
 
-    public static func builtInSourceURLCatalog() -> BlocklistCatalog {
+    internal static func builtInSourceURLCatalog() -> BlocklistCatalog {
         BlocklistCatalog(
             schemaVersion: 2,
             catalogVersion: builtInSourceURLCatalogVersion,
@@ -85,15 +93,19 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
     }
 }
 
+/// Evaluates whether cached catalog metadata is fresh enough to use.
 public struct BlocklistCatalogFreshnessPolicy: Sendable {
+    /// Default evaluation window of one week.
     public static let oneWeekEvaluationWindow: TimeInterval = 7 * 24 * 60 * 60
 
-    public let maxAge: TimeInterval
+    internal let maxAge: TimeInterval
 
+    /// Creates a freshness policy with the maximum accepted cache age.
     public init(maxAge: TimeInterval = Self.oneWeekEvaluationWindow) {
         self.maxAge = maxAge
     }
 
+    /// Returns whether a non-error status and optional cache age are considered fresh.
     public func isFresh(age: TimeInterval?, statusIsError: Bool) -> Bool {
         guard !statusIsError else {
             return false
@@ -113,14 +125,20 @@ private struct LoadedBlocklistPayload: Sendable {
     let checksumSHA256: String
 }
 
+/// Catalog synchronization output used to prepare a filter snapshot.
 public struct BlocklistCatalogSyncResult: Sendable {
+    /// Resolved catalog, including accepted source rotations.
     public let catalog: BlocklistCatalog
+    /// Parsed rule sets keyed by selected source identifier.
     public let sourceRuleSets: [String: DomainRuleSet]
+    /// Combined rules supplied by catalog guardrail sources.
     public let guardrailRuleSet: DomainRuleSet
+    /// Snapshot metadata keyed by selected source identifier.
     public let metadataBySourceID: [String: SourceSnapshotMetadata]
+    /// Source identifiers whose payloads were loaded from cache.
     public let usedCachedSourceIDs: Set<String>
 
-    public init(
+    package init(
         catalog: BlocklistCatalog,
         sourceRuleSets: [String: DomainRuleSet],
         guardrailRuleSet: DomainRuleSet,
@@ -135,12 +153,16 @@ public struct BlocklistCatalogSyncResult: Sendable {
     }
 }
 
+/// Synchronization output for user-provided blocklist sources.
 public struct CustomBlocklistSyncResult: Sendable {
+    /// Parsed rule sets keyed by custom source identifier.
     public let sourceRuleSets: [String: DomainRuleSet]
+    /// Accepted payload hashes keyed by custom source identifier.
     public let sourceHashes: [String: String]
+    /// Custom source identifiers whose payloads were loaded from cache.
     public let usedCachedSourceIDs: Set<String>
 
-    public init(
+    package init(
         sourceRuleSets: [String: DomainRuleSet],
         sourceHashes: [String: String],
         usedCachedSourceIDs: Set<String>
@@ -151,19 +173,32 @@ public struct CustomBlocklistSyncResult: Sendable {
     }
 }
 
+/// Errors produced while fetching, validating, or compiling blocklist sources.
 public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
+    /// A catalog or source request returned a non-success HTTP status.
     case invalidHTTPStatus(Int)
+    /// Catalog metadata could not be validated or decoded.
     case invalidCatalog
+    /// A source payload could not be interpreted as supported text.
     case invalidBlocklistEncoding(String)
+    /// A source payload exceeded the configured byte budget.
     case blocklistTooLarge(sourceID: String, byteSize: Int)
+    /// A source produced more accepted rules than its configured limit.
     case blocklistExceedsRuleLimit(sourceID: String, ruleLimit: Int)
+    /// A source payload did not match an accepted checksum.
     case checksumMismatch(sourceID: String)
+    /// A catalog source supplied no checksum that could authorize its payload.
     case noAcceptedSourceHashes(sourceID: String)
+    /// An enabled source identifier was absent from the resolved inputs.
     case missingEnabledBlocklistSource(sourceID: String)
+    /// No saved catalog metadata was available for a cache-only operation.
     case noCachedCatalog
+    /// Synchronization completed without any usable rules.
     case noRulesAvailable
+    /// A custom source could not be fetched or loaded from cache.
     case customBlocklistUnavailable(displayName: String, reason: String)
 
+    /// Localized description suitable for presenting the synchronization failure.
     public var errorDescription: String? {
         switch self {
         case .invalidHTTPStatus(let statusCode):
@@ -192,13 +227,14 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
     }
 }
 
+/// Asynchronous byte fetcher used by catalog synchronizers.
 public typealias BlocklistCatalogDataFetcher = @Sendable (URL) async throws -> Data
 
-// `BlocklistDownloadSizeLimitExceeded` (previously here) moved to LavaSecDNS beside its
+// `BlocklistDownloadSizeLimitExceeded` (previously here) lives in LavaSecNetworking beside its
 // throw sites — the streaming body decoders in PinnedPublicHTTPSFetcher.swift.
 
 extension PinnedPublicHTTPSFetcher {
-    /// Catalog-facing fetch: the LavaSecDNS pinned transport plus the catalog sync's
+    /// Catalog-facing fetch: the LavaSecNetworking pinned transport plus the catalog sync's
     /// HTTP-success policy. Lives engine-side because `BlocklistCatalogSyncError` is the
     /// sync engine's error vocabulary — the transport target must not depend on it, the
     /// same boundary rule as the `CatalogParseFormat.blocklistFormat` bridge (#302).
@@ -222,13 +258,13 @@ extension PinnedPublicHTTPSFetcher {
 /// full snapshot.
 public struct BlocklistParseResourceBudget: Sendable {
     /// Hard ceiling on a single source's raw bytes (enforced before parsing).
-    public let maximumBlocklistBytes: Int
+    package let maximumBlocklistBytes: Int
     /// Hard ceiling on rules accepted from a single source (truncates above it).
-    public let maxRulesPerSource: Int
+    package let maxRulesPerSource: Int
     /// Max sources parsed concurrently (bounds the multiplied parse transient).
-    public let maxConcurrentSources: Int
+    package let maxConcurrentSources: Int
 
-    public init(maximumBlocklistBytes: Int, maxRulesPerSource: Int, maxConcurrentSources: Int) {
+    package init(maximumBlocklistBytes: Int, maxRulesPerSource: Int, maxConcurrentSources: Int) {
         self.maximumBlocklistBytes = maximumBlocklistBytes
         self.maxRulesPerSource = maxRulesPerSource
         self.maxConcurrentSources = maxConcurrentSources
@@ -255,26 +291,28 @@ public struct BlocklistParseResourceBudget: Sendable {
     /// construction, so `maxConcurrentSources` is unused too). `maxRulesPerSource` is set to
     /// the aggregate ceiling as a defensive value for any non-streaming caller of this
     /// budget.
-    public static let inExtension = BlocklistParseResourceBudget(
+    internal static let inExtension = BlocklistParseResourceBudget(
         maximumBlocklistBytes: 25 * 1024 * 1024,
         maxRulesPerSource: FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount,
         maxConcurrentSources: 1
     )
 }
 
+/// Fetches catalog metadata and compiles selected blocklist payloads into rule sets.
 public struct BlocklistCatalogSynchronizer: Sendable {
     /// The app/default raw-bytes ceiling. Also used by the static network fetcher and
     /// surfaced to tests; per-instance enforcement uses `parseBudget.maximumBlocklistBytes`
     /// (smaller inside the extension). See `BlocklistParseResourceBudget`.
-    public static let maximumBlocklistBytes = BlocklistParseResourceBudget.default.maximumBlocklistBytes
+    package static let maximumBlocklistBytes = BlocklistParseResourceBudget.default.maximumBlocklistBytes
 
-    public let catalogURLs: [URL]
-    public let cacheDirectoryURL: URL
-    public let parseBudget: BlocklistParseResourceBudget
+    internal let catalogURLs: [URL]
+    internal let cacheDirectoryURL: URL
+    internal let parseBudget: BlocklistParseResourceBudget
     private let dataFetcher: BlocklistCatalogDataFetcher
     private let ruleSetCache: RuleSetCache
     private let catalogRepository: BlocklistCatalogRepository
 
+    /// Creates a synchronizer for the production catalog endpoints and a cache directory.
     public init(
         cacheDirectoryURL: URL,
         dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
@@ -292,7 +330,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
-    public init(
+    package init(
         catalogURL: URL,
         cacheDirectoryURL: URL,
         dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
@@ -310,7 +348,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
-    public init(
+    package init(
         catalogURLs: [URL],
         cacheDirectoryURL: URL,
         dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher,
@@ -362,6 +400,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return result
     }
 
+    /// Compiles selected sources from cached catalog and payload data without network access.
     public func loadCached(
         enabledSourceIDs: Set<String>,
         includesGuardrails: Bool = true
@@ -375,14 +414,17 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
+    /// Loads cached catalog metadata without compiling source payloads.
     public func loadCachedCatalogMetadata() throws -> BlocklistCatalog {
         try loadLatestCatalog()
     }
 
+    /// Fetches and compiles the supplied custom blocklist sources.
     public func syncCustomBlocklists(_ sources: [CustomBlocklistSource]) async throws -> CustomBlocklistSyncResult {
         try await compileCustomBlocklists(sources, allowsNetwork: true)
     }
 
+    /// Compiles the supplied custom blocklist sources using cached payloads only.
     public func loadCachedCustomBlocklists(_ sources: [CustomBlocklistSource]) async throws -> CustomBlocklistSyncResult {
         try await compileCustomBlocklists(sources, allowsNetwork: false)
     }
@@ -392,10 +434,10 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     /// per-source rule counts + delivered IDs (for the summary and the missing-source
     /// check). The rule sets themselves are NOT returned — they were handed to the
     /// callbacks one at a time and released.
-    public struct StreamingInExtensionCompileLoad: Sendable {
-        public let resolvedCatalog: BlocklistCatalog
-        public let deliveredBlockSourceIDs: Set<String>
-        public let perSourceRuleCounts: [String: Int]
+    internal struct StreamingInExtensionCompileLoad: Sendable {
+        internal let resolvedCatalog: BlocklistCatalog
+        internal let deliveredBlockSourceIDs: Set<String>
+        internal let perSourceRuleCounts: [String: Int]
     }
 
     /// Serial, callback-per-RULE load for the packet-tunnel streaming compile
@@ -416,7 +458,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     /// caller intersects them with the small allowlist); the caller passes
     /// `includesGuardrails: false` when there are no allowed domains, since the effective
     /// threat set is then empty regardless.
-    public func streamCachedForInExtensionCompile(
+    internal func streamCachedForInExtensionCompile(
         enabledSourceIDs: Set<String>,
         customSources: [CustomBlocklistSource],
         includesGuardrails: Bool,
@@ -547,16 +589,18 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return count
     }
 
-    public static func sha256Hex(of data: Data) -> String {
+    package static func sha256Hex(of data: Data) -> String {
         SHA256.hash(data: data).map { byte in
             String(format: "%02x", byte)
         }.joined()
     }
 
+    /// Returns the standard cached-catalog file within a cache directory.
     public static func latestCatalogURL(in cacheDirectoryURL: URL) -> URL {
         BlocklistCatalogRepository.latestCatalogURL(in: cacheDirectoryURL)
     }
 
+    /// Returns the cached catalog's age from its file modification date, when available.
     public static func cachedCatalogAge(
         in cacheDirectoryURL: URL,
         now: Date = Date()
@@ -564,6 +608,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         BlocklistCatalogRepository.cachedCatalogAge(in: cacheDirectoryURL, now: now)
     }
 
+    /// Returns whether cached catalog metadata exists and is younger than the supplied age.
     public static func hasFreshCachedCatalog(
         in cacheDirectoryURL: URL,
         maxAge: TimeInterval,
@@ -579,8 +624,9 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     // Temporary launch holds for GPL catalog sources that must be purged from
     // existing caches. AdGuard is intentionally active under the source-url-only,
     // off-by-default posture, so this set is empty for the catalog launch.
-    public static let inactiveGPLLaunchSourceIDs: Set<String> = []
+    internal static let inactiveGPLLaunchSourceIDs: Set<String> = []
 
+    /// Returns whether cached launch metadata needs a low-risk catalog refresh.
     public static func cachedCatalogRequiresLowRiskLaunchRefresh(
         in cacheDirectoryURL: URL,
         requiredSourceIDs: Set<String>
@@ -602,6 +648,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return hasInactiveGPLSource || hasLegacyGuardrails || missesLaunchSources
     }
 
+    /// Removes inactive launch payloads and stale catalog metadata when needed.
     @discardableResult
     public static func migrateLowRiskLaunchCacheIfNeeded(
         in cacheDirectoryURL: URL,
@@ -634,6 +681,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return changed
     }
 
+    /// Creates the decoder used for catalog timestamps and metadata.
     public static func makeJSONDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -660,6 +708,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return decoder
     }
 
+    /// Creates the encoder used for persisted catalog metadata.
     public static func makeJSONEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -667,6 +716,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return encoder
     }
 
+    /// Fetches a public HTTPS resource with connection pinning and the default byte ceiling.
     public static func defaultDataFetcher(url: URL) async throws -> Data {
         // SEC-1 connect-time peer-IP validation. This is the app/foreground network path for
         // BOTH the first-party catalog manifest and every (built-in or custom) blocklist
@@ -1016,8 +1066,11 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         // tier ceiling, not the higher device memory budget (~3.26M), on purpose, since the
         // parsed intermediate is a dirty `Set<String>` (~tens of bytes/rule). The
         // subscription-tier aggregate (Free 500K / Plus 2M) and the device budget are enforced
-        // on the deduped union in FilterSnapshotPreparationService, the authoritative per-user
-        // gate. (The in-extension streaming compile parses with no Set at all.)
+        // on the deduped union: FilterSnapshotPreparationService is the cold-compile gate
+        // (throws the actionable error), and INV-TIER-1 gates every other publish/reuse/serve
+        // point — the refresh republish, warm/startup reuse, and the tunnel's load/compile/LKG
+        // reads — since those paths never run the cold prepare. (The in-extension streaming
+        // compile parses with no Set at all.)
         //
         // The cap is enforced on UNIQUE rules by counting the deduped set as it is built off
         // the streaming emit, and a source that would EXCEED it surfaces an over-limit error

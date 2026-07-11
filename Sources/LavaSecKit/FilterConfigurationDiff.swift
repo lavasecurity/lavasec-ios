@@ -1,10 +1,15 @@
 import Foundation
 
+/// The three filter-selection fields compared when presenting configuration changes.
 public struct FilterConfigurationSelection: Equatable, Sendable {
-    public var enabledBlocklistIDs: Set<String>
-    public var blockedDomains: Set<String>
-    public var allowedDomains: Set<String>
+    /// Curated blocklist identifiers enabled by the selection.
+    public private(set) var enabledBlocklistIDs: Set<String>
+    /// User-authored domain rules blocked by the selection.
+    public private(set) var blockedDomains: Set<String>
+    /// User-authored domain rules allowed by the selection.
+    public private(set) var allowedDomains: Set<String>
 
+    /// Creates a selection snapshot from its blocklist and domain-rule sets.
     public init(
         enabledBlocklistIDs: Set<String>,
         blockedDomains: Set<String>,
@@ -16,14 +21,22 @@ public struct FilterConfigurationSelection: Equatable, Sendable {
     }
 }
 
+/// Sorted additions and removals between two filter configuration selections.
 public struct FilterConfigurationDiff: Equatable, Sendable {
+    /// Blocklist identifiers present only in the new selection.
     public let addedBlocklistIDs: [String]
+    /// Blocklist identifiers present only in the old selection.
     public let removedBlocklistIDs: [String]
+    /// Block-domain rules present only in the new selection.
     public let addedBlockedDomains: [String]
+    /// Block-domain rules present only in the old selection.
     public let removedBlockedDomains: [String]
+    /// Allow-domain rules present only in the new selection.
     public let addedAllowedDomains: [String]
+    /// Allow-domain rules present only in the old selection.
     public let removedAllowedDomains: [String]
 
+    /// Computes changes from `old` to `new`, sorted with `localizedStandardCompare`.
     public init(from old: FilterConfigurationSelection, to new: FilterConfigurationSelection) {
         addedBlocklistIDs = Self.sorted(new.enabledBlocklistIDs.subtracting(old.enabledBlocklistIDs))
         removedBlocklistIDs = Self.sorted(old.enabledBlocklistIDs.subtracting(new.enabledBlocklistIDs))
@@ -33,6 +46,7 @@ public struct FilterConfigurationDiff: Equatable, Sendable {
         removedAllowedDomains = Self.sorted(old.allowedDomains.subtracting(new.allowedDomains))
     }
 
+    /// Whether every addition and removal collection is empty.
     public var isEmpty: Bool {
         addedBlocklistIDs.isEmpty
             && removedBlocklistIDs.isEmpty
@@ -42,6 +56,7 @@ public struct FilterConfigurationDiff: Equatable, Sendable {
             && removedAllowedDomains.isEmpty
     }
 
+    /// The total number of added and removed entries across all three selection fields.
     public var changeCount: Int {
         addedBlocklistIDs.count
             + removedBlocklistIDs.count
@@ -56,7 +71,9 @@ public struct FilterConfigurationDiff: Equatable, Sendable {
     }
 }
 
+/// Projects an app configuration into the fields used by ``FilterConfigurationDiff``.
 public extension AppConfiguration {
+    /// A snapshot of this configuration's enabled blocklists and user domain rules.
     var filterSelection: FilterConfigurationSelection {
         FilterConfigurationSelection(
             enabledBlocklistIDs: enabledBlocklistIDs,

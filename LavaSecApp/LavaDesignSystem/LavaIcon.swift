@@ -1,5 +1,3 @@
-import SwiftUI
-
 /// Semantic icon roles — the portable icon layer. Views and components name a role;
 /// each platform resolves it (iOS → SF Symbol below; Android → a Material icon from
 /// the same role table). Keeps Apple-proprietary glyph strings out of the UI so the
@@ -42,10 +40,4 @@ extension LavaIconRole {
         default:           sfSymbolName
         }
     }
-}
-
-/// Renders a `LavaIconRole` as its platform glyph (iOS: the SF Symbol).
-struct LavaIcon: View {
-    let role: LavaIconRole
-    var body: some View { Image(systemName: role.sfSymbolName) }
 }

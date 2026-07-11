@@ -20,13 +20,13 @@ final class LavaSecurityPlusOffersLoadSourceTests: XCTestCase {
     }
 
     func testPaywallLoadsProductsWhileOffersAreEmpty() throws {
-        let compact = try readSource(.settingsView).filter { !$0.isWhitespace }
+        let compact = try readSource(.upgradeSettingsView).filter { !$0.isWhitespace }
         XCTAssertTrue(compact.contains("plus.lavaSecurityPlusOffers.isEmpty{awaitplus.loadLavaSecurityPlusProducts()}"),
                       "The paywall must load live StoreKit products while the offers array is empty.")
     }
 
     func testDisplayedOffersFallBackWhileEmpty() throws {
-        let compact = try readSource(.settingsView).filter { !$0.isWhitespace }
+        let compact = try readSource(.upgradeSettingsView).filter { !$0.isWhitespace }
         XCTAssertTrue(compact.contains("if!plus.lavaSecurityPlusOffers.isEmpty{returnplus.lavaSecurityPlusOffers}"),
                       "displayedOffers must return the loaded offers when present.")
         XCTAssertTrue(compact.contains("returnLavaSecurityPlusPolicy.fallbackOfferOrder.map"),

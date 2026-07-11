@@ -300,4 +300,4 @@ public struct CatalogBlocklistSource: Identifiable, Equatable, Codable, Sendable
     }
 }
 
-public typealias CatalogParseFormat = CatalogBlocklistSource.CatalogParseFormat
+package typealias CatalogParseFormat = CatalogBlocklistSource.CatalogParseFormat

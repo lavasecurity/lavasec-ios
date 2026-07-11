@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import LavaSecDNS
 @testable import LavaSecCore
 @testable import LavaSecKit
 
@@ -90,18 +91,18 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         let query = DNSResolverSmokeProbe.query(transactionID: txid)
         let question = query.dropFirst(12)
         var malformed = Data()
-        Self.appendUInt16(txid, to: &malformed)     // transaction id (matches the query)
-        Self.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
-        Self.appendUInt16(1, to: &malformed)        // QDCOUNT
-        Self.appendUInt16(1, to: &malformed)        // ANCOUNT = 1
-        Self.appendUInt16(0, to: &malformed)        // NSCOUNT
-        Self.appendUInt16(0, to: &malformed)        // ARCOUNT
+        DNSWireTestSupport.appendUInt16(txid, to: &malformed)     // transaction id (matches the query)
+        DNSWireTestSupport.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // QDCOUNT
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // ANCOUNT = 1
+        DNSWireTestSupport.appendUInt16(0, to: &malformed)        // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &malformed)        // ARCOUNT
         malformed.append(question)                   // same question → passes the match guard
         malformed.append(contentsOf: [0xC0, 0x0C])  // compressed name pointer
-        Self.appendUInt16(1, to: &malformed)        // type A
-        Self.appendUInt16(1, to: &malformed)        // class IN
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // type A
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // class IN
         Self.appendUInt32(60, to: &malformed)       // ttl
-        Self.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
+        DNSWireTestSupport.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
         malformed.append(93)                         // … but only 1 of 4 rdata bytes present
 
         XCTAssertFalse(
@@ -204,29 +205,29 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
 
         // Malformed POSITIVE: NOERROR + ANCOUNT=1 with truncated rdata.
         var malformedAnswer = Data()
-        Self.appendUInt16(0x4C56, to: &malformedAnswer)
-        Self.appendUInt16(0x8180, to: &malformedAnswer)               // NOERROR
-        Self.appendUInt16(1, to: &malformedAnswer); Self.appendUInt16(1, to: &malformedAnswer)   // QD=1 AN=1
-        Self.appendUInt16(0, to: &malformedAnswer); Self.appendUInt16(0, to: &malformedAnswer)
+        DNSWireTestSupport.appendUInt16(0x4C56, to: &malformedAnswer)
+        DNSWireTestSupport.appendUInt16(0x8180, to: &malformedAnswer)               // NOERROR
+        DNSWireTestSupport.appendUInt16(1, to: &malformedAnswer); DNSWireTestSupport.appendUInt16(1, to: &malformedAnswer)   // QD=1 AN=1
+        DNSWireTestSupport.appendUInt16(0, to: &malformedAnswer); DNSWireTestSupport.appendUInt16(0, to: &malformedAnswer)
         malformedAnswer.append(question)
         malformedAnswer.append(contentsOf: [0xC0, 0x0C])
-        Self.appendUInt16(1, to: &malformedAnswer); Self.appendUInt16(1, to: &malformedAnswer)   // A, IN
+        DNSWireTestSupport.appendUInt16(1, to: &malformedAnswer); DNSWireTestSupport.appendUInt16(1, to: &malformedAnswer)   // A, IN
         Self.appendUInt32(60, to: &malformedAnswer)
-        Self.appendUInt16(4, to: &malformedAnswer)                    // RDLENGTH=4 …
+        DNSWireTestSupport.appendUInt16(4, to: &malformedAnswer)                    // RDLENGTH=4 …
         malformedAnswer.append(93)                                     // … only 1 of 4 rdata bytes
 
         // Malformed NEGATIVE: NXDOMAIN + NSCOUNT=1 with a truncated authority RR. ANCOUNT=0, so a
         // NOERROR-answer-only malformed check would MISS it, but completeForward still SERVFAILs it.
         var malformedNegative = Data()
-        Self.appendUInt16(0x4C56, to: &malformedNegative)
-        Self.appendUInt16(0x8183, to: &malformedNegative)             // NXDOMAIN
-        Self.appendUInt16(1, to: &malformedNegative); Self.appendUInt16(0, to: &malformedNegative) // QD=1 AN=0
-        Self.appendUInt16(1, to: &malformedNegative); Self.appendUInt16(0, to: &malformedNegative) // NS=1 AR=0
+        DNSWireTestSupport.appendUInt16(0x4C56, to: &malformedNegative)
+        DNSWireTestSupport.appendUInt16(0x8183, to: &malformedNegative)             // NXDOMAIN
+        DNSWireTestSupport.appendUInt16(1, to: &malformedNegative); DNSWireTestSupport.appendUInt16(0, to: &malformedNegative) // QD=1 AN=0
+        DNSWireTestSupport.appendUInt16(1, to: &malformedNegative); DNSWireTestSupport.appendUInt16(0, to: &malformedNegative) // NS=1 AR=0
         malformedNegative.append(question)
         malformedNegative.append(contentsOf: [0xC0, 0x0C])            // authority name pointer
-        Self.appendUInt16(6, to: &malformedNegative); Self.appendUInt16(1, to: &malformedNegative) // SOA, IN
+        DNSWireTestSupport.appendUInt16(6, to: &malformedNegative); DNSWireTestSupport.appendUInt16(1, to: &malformedNegative) // SOA, IN
         Self.appendUInt32(60, to: &malformedNegative)
-        Self.appendUInt16(20, to: &malformedNegative)                 // RDLENGTH=20 …
+        DNSWireTestSupport.appendUInt16(20, to: &malformedNegative)                 // RDLENGTH=20 …
         malformedNegative.append(0x00)                                 // … only 1 rdata byte
 
         XCTAssertTrue(DNSResolverSmokeProbe.indicatesServedAnswer(wellFormedAnswer))
@@ -250,18 +251,18 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
         let query = DNSResolverSmokeProbe.query(transactionID: 0x4C56)
         let question = query.dropFirst(12)
         var malformed = Data()
-        Self.appendUInt16(0x4C56, to: &malformed)   // transaction id
-        Self.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
-        Self.appendUInt16(1, to: &malformed)        // QDCOUNT
-        Self.appendUInt16(1, to: &malformed)        // ANCOUNT = 1 (claims an answer)
-        Self.appendUInt16(0, to: &malformed)        // NSCOUNT
-        Self.appendUInt16(0, to: &malformed)        // ARCOUNT
+        DNSWireTestSupport.appendUInt16(0x4C56, to: &malformed)   // transaction id
+        DNSWireTestSupport.appendUInt16(0x8180, to: &malformed)   // QR=1, rcode=0 (NOERROR)
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // QDCOUNT
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // ANCOUNT = 1 (claims an answer)
+        DNSWireTestSupport.appendUInt16(0, to: &malformed)        // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &malformed)        // ARCOUNT
         malformed.append(question)
         malformed.append(contentsOf: [0xC0, 0x0C])  // compressed name pointer to the question
-        Self.appendUInt16(1, to: &malformed)        // type A
-        Self.appendUInt16(1, to: &malformed)        // class IN
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // type A
+        DNSWireTestSupport.appendUInt16(1, to: &malformed)        // class IN
         Self.appendUInt32(60, to: &malformed)       // ttl
-        Self.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
+        DNSWireTestSupport.appendUInt16(4, to: &malformed)        // RDLENGTH = 4 …
         malformed.append(93)                         // … but only 1 of 4 rdata bytes present
 
         XCTAssertFalse(
@@ -287,29 +288,24 @@ final class DNSResolverSmokeProbeTests: XCTestCase {
     ) -> Data {
         let question = query.dropFirst(12)
         var data = Data()
-        appendUInt16(transactionID, to: &data)
-        appendUInt16(flags, to: &data)
-        appendUInt16(1, to: &data)
-        appendUInt16(answerCount, to: &data)
-        appendUInt16(0, to: &data)
-        appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(transactionID, to: &data)
+        DNSWireTestSupport.appendUInt16(flags, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(answerCount, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
         data.append(question)
 
         if answerCount > 0 {
             data.append(contentsOf: [0xC0, 0x0C])
-            appendUInt16(1, to: &data)
-            appendUInt16(1, to: &data)
+            DNSWireTestSupport.appendUInt16(1, to: &data)
+            DNSWireTestSupport.appendUInt16(1, to: &data)
             appendUInt32(60, to: &data)
-            appendUInt16(4, to: &data)
+            DNSWireTestSupport.appendUInt16(4, to: &data)
             data.append(contentsOf: [93, 184, 216, 34])
         }
 
         return data
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
     }
 
     private static func appendUInt32(_ value: UInt32, to data: inout Data) {

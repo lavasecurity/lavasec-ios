@@ -1,16 +1,42 @@
 import Foundation
 
 /// Pure, testable math for the user-facing filter-rules budget (the selection
-/// meter and tier gate). The authoritative over-budget enforcement lives in
-/// `FilterSnapshotPreparationService` at compile time on the deduped union;
-/// these helpers drive the advisory selection-time UI, which sums per-list
-/// counts (a conservative over-estimate) and is allowed a small margin.
+/// meter and tier gate). Two regimes, deliberately different (INV-TIER-1):
+/// the advisory selection-time UI sums per-list counts (a conservative
+/// over-estimate of the deduped union) and is allowed the soft-ceiling margin;
+/// a COMPILED (deduped) total gets no margin — `fitsTierBudget` gates every
+/// artifact publish/reuse/serve point, with `FilterSnapshotPreparationService`
+/// remaining the cold-compile gate that throws the actionable error.
 public enum FilterRuleBudget: Sendable {
     /// Selection-time tolerance over the tier budget. The per-list sum
-    /// over-counts the deduped union by ~7–10% (cross-list overlap), so the UI
-    /// only blocks adding a list once the known total passes budget × this.
+    /// over-counts the deduped union by ~7–10% typically (aggregate lists such
+    /// as HaGeZi Multi PRO have been observed near 18%), so the UI only blocks
+    /// adding a list once the known total passes budget × this. Applies ONLY
+    /// to the pre-dedupe estimate — never to a compiled total (INV-TIER-1).
     public static let softCeilingMargin = 1.10
 
+    /// INV-TIER-1 serve/publish gate: a COMPILED, deduped rule total fits the
+    /// tier budget exactly or not at all — no soft margin. The margin above
+    /// exists to tolerate over-counting in the selection-time per-list-sum
+    /// estimate; a deduped total has nothing to tolerate, so an excess is a
+    /// real violation and the artifact must not be published or served.
+    /// pinned: FilterRuleBudgetTests.testCompiledTotalGetsNoSoftMargin
+    public static func fitsTierBudget(compiledTotal: Int, maxFilterRules: Int) -> Bool {
+        compiledTotal <= maxFilterRules
+    }
+
+    /// INV-TIER-1 gate on a RECORDED compiled total (a
+    /// `PreparedFilterSnapshotSummary.tierBudgetRuleCount`). `nil` — a legacy
+    /// or under-covered artifact that never recorded its total — fails closed:
+    /// reuse/publish callers fall back to their gated cold path, which
+    /// recomputes the real total and surfaces the actionable tier error.
+    /// pinned: FilterRuleBudgetTests.testNilRecordedTotalFailsClosed
+    public static func fitsTierBudget(recordedTotal: Int?, maxFilterRules: Int) -> Bool {
+        guard let recordedTotal else { return false }
+        return fitsTierBudget(compiledTotal: recordedTotal, maxFilterRules: maxFilterRules)
+    }
+
+    /// Returns the rounded advisory ceiling after applying ``softCeilingMargin`` to `budget`.
     public static func softCeiling(forBudget budget: Int) -> Int {
         Int((Double(budget) * softCeilingMargin).rounded())
     }
@@ -21,6 +47,7 @@ public enum FilterRuleBudget: Sendable {
         return min(1.0, Double(knownRuleCount) / Double(budget))
     }
 
+    /// Returns whether the known rule count is above the advisory selection ceiling.
     public static func exceedsSoftCeiling(knownRuleCount: Int, budget: Int) -> Bool {
         knownRuleCount > softCeiling(forBudget: budget)
     }

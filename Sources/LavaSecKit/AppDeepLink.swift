@@ -12,7 +12,7 @@ import Foundation
 /// applying an imported config — is therefore *unrepresentable* as a deeplink
 /// outcome: a link can carry you to the door, never through it. Adding a third
 /// case here is a deliberate, test-guarded act (see `AppDeepLinkEffectTests`).
-public enum DeepLinkEffect: CaseIterable, Sendable {
+package enum DeepLinkEffect: CaseIterable, Sendable {
     case navigate
     case stage
 }
@@ -85,7 +85,7 @@ public enum LavaAppDeepLink: Equatable, Sendable {
     /// The effect this intent is permitted to have. Every case is `.navigate` or
     /// `.stage`; none can apply a change. This is the type-level guarantee that a
     /// deeplink cannot compromise the hot path.
-    public var effect: DeepLinkEffect {
+    package var effect: DeepLinkEffect {
         switch self {
         case .guardPanel, .filters, .activity, .settings:
             return .navigate

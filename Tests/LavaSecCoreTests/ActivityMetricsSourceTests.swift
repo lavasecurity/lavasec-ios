@@ -47,12 +47,12 @@ final class ActivityMetricsSourceTests: XCTestCase {
     }
 
     func testTopDomainsDetailRanksDomainsByQueryCount() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsTopDomains)
         // Top Domains is now its own screen reached from a Local Logs row, reusing
         // the Allowed/Blocked toggle and ranking domains by query count.
         let topBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct TopDomainsView: View",
+            startingAt: "struct TopDomainsView: View",
             endingBefore: "private struct TopDomainRow"
         )
 
@@ -62,7 +62,7 @@ final class ActivityMetricsSourceTests: XCTestCase {
         XCTAssertTrue(topBlock.contains("action: selectedFilter.action"))
         XCTAssertTrue(topBlock.contains("from: rangeStart"))
         XCTAssertTrue(topBlock.contains("to: rangeEnd"))
-        XCTAssertTrue(topBlock.contains("Text(\"Turn on Domain History to see your most frequent domains.\")"))
+        XCTAssertTrue(topBlock.contains("LavaEmptyListRow(title: \"Turn on Domain History to see your most frequent domains.\")"))
 
         // Each row carries the query count as its "N times" subtitle.
         XCTAssertTrue(source.contains("\"%@ times\".lavaLocalizedFormat(count.formatted())"))
@@ -89,12 +89,12 @@ final class ActivityMetricsSourceTests: XCTestCase {
         // re-anchor both sides to the new name. (The icon case anchors in the LavaIcon
         // source, NOT SettingsView's same-named route case - and a bare "networkActivity"
         // match in this file would be satisfied by networkActivityLog.)
-        XCTAssertTrue(source.contains("struct NetworkActivityLogView"))
+        XCTAssertTrue(try readSource(.diagnosticsNetworkActivity).contains("struct NetworkActivityLogView"))
         XCTAssertTrue(try readSource(.lavaIcon).contains("case .networkActivity:"))
     }
 
     func testNetworkActivityCarriesPrivacyInfoPanelWithReviewLink() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsNetworkActivity)
         let panelBlock = try sourceBlock(
             in: source,
             startingAt: "private struct NetworkActivityPrivacyInfoPanel: View",
@@ -126,7 +126,7 @@ final class ActivityMetricsSourceTests: XCTestCase {
         let routeBlock = try sourceBlock(
             in: source,
             startingAt: "enum SettingsRoute: Hashable",
-            endingBefore: "private enum LavaWebLinks"
+            endingBefore: "struct SettingsRouteDestinationView: View"
         )
         XCTAssertTrue(routeBlock.contains(".networkActivity"))
 

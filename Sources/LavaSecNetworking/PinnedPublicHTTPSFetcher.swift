@@ -171,7 +171,9 @@ enum SystemHostResolver {
     }
 }
 
-public enum PinnedPublicHTTPSFetcher {
+/// Fetches HTTPS resources through a resolve-once transport that rejects non-public peers and
+/// pins each connection to an address validated against LavaSec's network-boundary policy.
+package enum PinnedPublicHTTPSFetcher {
     struct Configuration: Sendable {
         var maximumRedirects: Int = 5
         /// Connect deadline: bounds how long a blackholed address (one that never reaches
@@ -195,7 +197,7 @@ public enum PinnedPublicHTTPSFetcher {
     /// Cross-module entry point for `fetchResponse` with the transport defaults. The
     /// full-signature variant below stays internal so `Configuration` and the resolver
     /// injection surface (test seams) don't join the public API.
-    public static func fetchResponse(
+    package static func fetchResponse(
         url: URL,
         maximumByteCount: Int
     ) async throws -> (status: Int, body: Data) {
@@ -211,7 +213,7 @@ public enum PinnedPublicHTTPSFetcher {
     /// Returns the final (non-interim, post-redirect) status and body verbatim: HTTP-status
     /// *policy* is the caller's domain — the catalog sync's 2xx gate lives engine-side with
     /// its `BlocklistCatalogSyncError` vocabulary (`fetch(url:maximumByteCount:)` in
-    /// LavaSecCore), which this transport layer must not depend on.
+    /// LavaSecFilterPipeline), which this transport layer must not depend on.
     static func fetchResponse(
         url: URL,
         maximumByteCount: Int,
@@ -589,7 +591,10 @@ final class PinnedHTTPSExchange: @unchecked Sendable {
         connection = networkConnection
         phase = .connecting
         networkConnection.stateUpdateHandler = { [weak self] state in
-            self?.queue.async { self?.handleConnectionState(state) }
+            guard let self else {
+                return
+            }
+            self.queue.async { [self] in self.handleConnectionState(state) }
         }
         scheduleTimeout(seconds: configuration.connectTimeoutSeconds)
         networkConnection.start(queue: queue)
@@ -624,8 +629,11 @@ final class PinnedHTTPSExchange: @unchecked Sendable {
         // Connection is up: switch from the short connect deadline to the transfer idle timeout.
         scheduleTimeout(seconds: configuration.idleTimeoutSeconds)
         connection.send(content: requestData, completion: .contentProcessed { [weak self] error in
-            self?.queue.async {
-                guard let self, !self.isFinished else {
+            guard let self else {
+                return
+            }
+            self.queue.async { [self] in
+                guard !self.isFinished else {
                     return
                 }
                 if error != nil {
@@ -643,8 +651,11 @@ final class PinnedHTTPSExchange: @unchecked Sendable {
         }
         scheduleTimeout(seconds: configuration.idleTimeoutSeconds)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-            self?.queue.async {
-                guard let self, !self.isFinished else {
+            guard let self else {
+                return
+            }
+            self.queue.async { [self] in
+                guard !self.isFinished else {
                     return
                 }
                 if error != nil {
@@ -884,7 +895,7 @@ protocol HTTPResponseBodyDecoder {
 /// one exists), the custom-source path wraps it as `customBlocklistUnavailable` (named),
 /// and the catalog loader treats it as just another failed remote attempt. Lives beside
 /// its throw sites (the body decoders below); nothing engine-side names the type, so it
-/// stays internal across the LavaSecDNS boundary.
+/// stays internal across the LavaSecNetworking boundary.
 struct BlocklistDownloadSizeLimitExceeded: LocalizedError {
     let byteSize: Int
     let maximumByteCount: Int

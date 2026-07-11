@@ -1,0 +1,20 @@
+# Dedicated blocking ratchet for undocumented public package API. Keep this scope exact:
+# the baseline is path-sensitive, and app/extension/test sources remain warning-only.
+included:
+  - Sources/LavaSecKit
+  - Sources/LavaSecNetworking
+  - Sources/LavaSecDNS
+  - Sources/LavaSecFilterPipeline
+  - Sources/LavaSecPresentation
+  - Sources/LavaSecAppServices
+excluded:
+  - Sources/LavaSecKit/Generated/DefaultCatalog+Generated.swift
+
+opt_in_rules:
+  - missing_docs
+missing_docs:
+  warning: [open, public]
+  excludes_extensions: true
+  excludes_inherited_types: true
+  excludes_trivial_init: false
+  evaluate_effective_access_control_level: false

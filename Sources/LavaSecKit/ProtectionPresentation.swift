@@ -17,6 +17,7 @@ public enum ProtectionTintRole: Equatable, Sendable {
     case inactive
 }
 
+/// Maps connectivity health into platform-independent protection tint roles.
 public extension ProtectionTintRole {
     /// The tint role while protection is connected, from the connectivity severity.
     /// Exhaustive over every `ProtectionConnectivitySeverity`.

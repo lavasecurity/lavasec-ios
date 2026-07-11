@@ -2,20 +2,20 @@ import CryptoKit
 import LavaSecKit
 import Foundation
 
-public enum FilterArtifactKind: String, Codable, Equatable, Hashable, Sendable {
+package enum FilterArtifactKind: String, Codable, Equatable, Hashable, Sendable {
     case prepared
     case compact
 }
 
-public struct FilterArtifactCatalogIdentity: Codable, Equatable, Sendable {
-    public let catalogVersion: String
-    public let selectedSourceVersionIDs: [String: String]
-    public let selectedSourceHashes: [String: String]
-    public let guardrailVersionIDs: [String: String]
-    public let guardrailHashes: [String: String]
-    public let fingerprint: String
+package struct FilterArtifactCatalogIdentity: Codable, Equatable, Sendable {
+    package let catalogVersion: String
+    package let selectedSourceVersionIDs: [String: String]
+    package let selectedSourceHashes: [String: String]
+    package let guardrailVersionIDs: [String: String]
+    package let guardrailHashes: [String: String]
+    package let fingerprint: String
 
-    public init(
+    package init(
         catalogVersion: String,
         selectedSourceVersionIDs: [String: String],
         selectedSourceHashes: [String: String],
@@ -36,7 +36,7 @@ public struct FilterArtifactCatalogIdentity: Codable, Equatable, Sendable {
         )
     }
 
-    public init?(snapshotIdentity: PreparedFilterSnapshotIdentity) {
+    package init?(snapshotIdentity: PreparedFilterSnapshotIdentity) {
         guard let catalogVersion = snapshotIdentity.catalogVersion else {
             return nil
         }
@@ -80,20 +80,24 @@ public struct FilterArtifactCatalogIdentity: Codable, Equatable, Sendable {
     }
 }
 
+/// Persisted metadata used to validate and select a filter artifact set.
 public struct FilterArtifactManifest: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    package static let currentSchemaVersion = 1
 
-    public let schemaVersion: Int
+    package let schemaVersion: Int
+    /// Snapshot identity recorded for every artifact in the set.
     public let snapshotIdentity: PreparedFilterSnapshotIdentity
-    public let snapshotIdentityFingerprint: String
-    public let catalogIdentity: FilterArtifactCatalogIdentity?
-    public let compactSchemaVersion: UInt32?
+    package let snapshotIdentityFingerprint: String
+    package let catalogIdentity: FilterArtifactCatalogIdentity?
+    package let compactSchemaVersion: UInt32?
+    /// Rule-count and coverage summary for the artifact set.
     public let summary: PreparedFilterSnapshotSummary
+    /// Time the represented snapshot was generated.
     public let generatedAt: Date
-    public let writtenAt: Date
-    public let availableArtifacts: [FilterArtifactKind]
+    package let writtenAt: Date
+    package let availableArtifacts: [FilterArtifactKind]
 
-    public init(
+    package init(
         preparedSnapshot: PreparedFilterSnapshot,
         compactSchemaVersion: UInt32?,
         writtenAt: Date,
@@ -109,7 +113,7 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
         )
     }
 
-    public init(
+    package init(
         compactSnapshot: CompactFilterSnapshot,
         compactSchemaVersion: UInt32 = CompactFilterSnapshot.fileVersion,
         writtenAt: Date,
@@ -125,7 +129,7 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
         )
     }
 
-    public init(
+    package init(
         snapshotIdentity: PreparedFilterSnapshotIdentity,
         compactSchemaVersion: UInt32?,
         summary: PreparedFilterSnapshotSummary,
@@ -144,7 +148,7 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
         self.availableArtifacts = availableArtifacts
     }
 
-    public func canReuseForProtectionStartup(
+    package func canReuseForProtectionStartup(
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
     ) -> Bool {
@@ -182,19 +186,22 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
     }
 }
 
-public struct FilterArtifactSelection: Equatable, Sendable {
-    public let kind: FilterArtifactKind
-    public let url: URL
-    public let manifest: FilterArtifactManifest
-    public let summary: PreparedFilterSnapshotSummary
+package struct FilterArtifactSelection: Equatable, Sendable {
+    package let kind: FilterArtifactKind
+    package let url: URL
+    package let manifest: FilterArtifactManifest
+    package let summary: PreparedFilterSnapshotSummary
 }
 
+/// File-backed store for prepared, compact, and manifest filter artifacts.
 public struct FilterArtifactStore: Sendable {
+    /// Root directory containing this store's artifacts.
     public let directoryURL: URL
-    public let manifestFilename: String
-    public let preparedSnapshotFilename: String
-    public let compactSnapshotFilename: String
+    package let manifestFilename: String
+    package let preparedSnapshotFilename: String
+    package let compactSnapshotFilename: String
 
+    /// Creates a store rooted at a directory with configurable artifact filenames.
     public init(
         directoryURL: URL,
         manifestFilename: String = "filter-artifact-manifest.json",
@@ -207,19 +214,22 @@ public struct FilterArtifactStore: Sendable {
         self.compactSnapshotFilename = compactSnapshotFilename
     }
 
+    /// URL of the artifact manifest.
     public var manifestURL: URL {
         directoryURL.appendingPathComponent(manifestFilename)
     }
 
+    /// URL of the prepared JSON snapshot.
     public var preparedSnapshotURL: URL {
         directoryURL.appendingPathComponent(preparedSnapshotFilename)
     }
 
+    /// URL of the compact binary snapshot.
     public var compactSnapshotURL: URL {
         directoryURL.appendingPathComponent(compactSnapshotFilename)
     }
 
-    public func writeManifest(_ manifest: FilterArtifactManifest) throws {
+    package func writeManifest(_ manifest: FilterArtifactManifest) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -227,14 +237,14 @@ public struct FilterArtifactStore: Sendable {
         try data.write(to: manifestURL, options: [.atomic])
     }
 
-    public func writePreparedSnapshot(_ preparedSnapshot: PreparedFilterSnapshot) throws {
+    package func writePreparedSnapshot(_ preparedSnapshot: PreparedFilterSnapshot) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(preparedSnapshot).write(to: preparedSnapshotURL, options: [.atomic])
     }
 
-    public func writeCompactSnapshot(_ compactSnapshot: CompactFilterSnapshot) throws {
+    package func writeCompactSnapshot(_ compactSnapshot: CompactFilterSnapshot) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         try compactSnapshot.encodedData().write(to: compactSnapshotURL, options: [.atomic])
     }
@@ -243,7 +253,7 @@ public struct FilterArtifactStore: Sendable {
     /// order. The manifest is the cheap startup decision point and must never
     /// describe artifacts that failed to land, so it is written LAST. This is the
     /// single owner of artifact persistence.
-    public func persist(preparedSnapshot: PreparedFilterSnapshot, writtenAt: Date = Date()) throws {
+    package func persist(preparedSnapshot: PreparedFilterSnapshot, writtenAt: Date = Date()) throws {
         try writePreparedSnapshot(preparedSnapshot)
         try writeCompactSnapshot(CompactFilterSnapshot(preparedSnapshot: preparedSnapshot))
         try writeManifest(FilterArtifactManifest(
@@ -254,6 +264,7 @@ public struct FilterArtifactStore: Sendable {
         ))
     }
 
+    /// Loads the persisted manifest, returning `nil` when the file is absent.
     public func loadManifest() throws -> FilterArtifactManifest? {
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
             return nil
@@ -263,7 +274,7 @@ public struct FilterArtifactStore: Sendable {
         return try JSONDecoder().decode(FilterArtifactManifest.self, from: data)
     }
 
-    public func loadPreparedSnapshot() throws -> PreparedFilterSnapshot? {
+    package func loadPreparedSnapshot() throws -> PreparedFilterSnapshot? {
         guard FileManager.default.fileExists(atPath: preparedSnapshotURL.path) else {
             return nil
         }
@@ -272,7 +283,7 @@ public struct FilterArtifactStore: Sendable {
         return try JSONDecoder().decode(PreparedFilterSnapshot.self, from: data)
     }
 
-    public func reusableArtifact(
+    package func reusableArtifact(
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
     ) throws -> FilterArtifactSelection? {
@@ -313,9 +324,10 @@ public struct FilterArtifactStore: Sendable {
             blockedDomainRuleCount: compactSummary.blockedDomainRuleCount,
             allowRuleCount: compactSummary.allowRuleCount,
             guardrailRuleCount: compactSummary.guardrailRuleCount,
-            // The tier budget total is a manifest-level record (the compact snapshot doesn't carry
-            // it), so inherit it from the manifest — otherwise this equality check would always fail
-            // once the manifest records a budget.
+            // Inherit the tier total from the manifest for the equality check below. The compact
+            // summary NOW carries its own recorded copy (PR #335 Codex P1 — the tunnel serve
+            // gates bind it), but artifacts written before that carry nil there, and this
+            // selection must keep accepting them — the manifest stays the selection-level record.
             tierBudgetRuleCount: manifest.summary.tierBudgetRuleCount
         )
 

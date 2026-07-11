@@ -1,7 +1,9 @@
 import CryptoKit
 import DeviceCheck
 import Foundation
-import LavaSecCore
+import LavaSecKit
+import LavaSecFilterPipeline
+import LavaSecAppServices
 import SwiftUI
 
 // The diagnostics + bug-report/rage-shake feature, peeled out of AppViewModel (Phase D4,
@@ -301,6 +303,7 @@ final class DiagnosticsController: ObservableObject {
         // the tunnel's force-apply gate reads `requestedAt > marker` = false (PST-1).
         let clearedAt = Date()
         diagnostics.clearDomainHistory(clearedAt: clearedAt)
+        clearDNSEventLogHistory(at: clearedAt)
 
         do {
             try writeDiagnosticsClearControl(clearDomainHistory: true, at: clearedAt)
@@ -357,6 +360,10 @@ final class DiagnosticsController: ObservableObject {
         let clearedAt = Date()
         diagnostics.clearFilteringCounts(startedAt: clearedAt)
         diagnostics.clearDomainHistory(clearedAt: clearedAt)
+        // The "All" clear must erase the SQLite depth store too, exactly like the
+        // domain-history-only clear — otherwise Domain History repopulates from
+        // dns-events.sqlite as soon as the list reloads (PR #327 review).
+        clearDNSEventLogHistory(at: clearedAt)
         hub.clearNetworkActivityLog(notifyTunnel: false)
         hub.clearLavaGuardProgress()
         clearIncidentLedger()
@@ -387,6 +394,30 @@ final class DiagnosticsController: ObservableObject {
             ProtectionHapticFeedback.play(.actionFailed)
             return false
         }
+    }
+
+    /// Erase Domain History from the SQLite depth store for a user clear. Two steps, because
+    /// the read floor alone isn't enough (PR #327 review):
+    /// 1. Advance the shared "cleared at" floor so the read path (`domainHistoryEvents`) hides
+    ///    pre-clear rows immediately — no cross-process write for the common case.
+    /// 2. Physically prune those rows NOW via a transient read-write handle, so they leave the
+    ///    phone even when the tunnel is stopped and its periodic prune won't run (the offline
+    ///    clear path). Appends stay tunnel-only; this is the one app-side write, on an explicit
+    ///    user clear. WAL + busy_timeout serialize it against the tunnel's writer when running;
+    ///    the file is only opened when it already exists, so we never create an empty DB here.
+    /// Every clear path that erases Domain History must call this, or cleared rows resurface
+    /// from dns-events.sqlite on reload.
+    private func clearDNSEventLogHistory(at clearedAt: Date) {
+        LavaSecAppGroup.sharedDefaults.set(
+            Int(clearedAt.timeIntervalSince1970 * 1000),
+            forKey: LavaSecAppGroup.dnsEventLogClearedAtKey
+        )
+        guard let dnsEventLogURL,
+              FileManager.default.fileExists(atPath: dnsEventLogURL.path),
+              let writer = try? DNSEventLog(url: dnsEventLogURL) else {
+            return
+        }
+        try? writer.prune(before: clearedAt)
     }
 
     func setKeepFilteringCounts(_ keepFilteringCounts: Bool, clearCounts: Bool = true) {
@@ -957,6 +988,69 @@ final class DiagnosticsController: ObservableObject {
 
     private var diagnosticsControlURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.diagnosticsControlFilename)
+    }
+
+    private var dnsEventLogURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.dnsEventLogFilename)
+    }
+
+    /// Read-only handle on the tunnel-written Domain History depth store. Opened lazily and
+    /// retried until the file exists (a fresh install before the tunnel's first run).
+    private var dnsEventLogReader: DNSEventLog?
+
+    private func domainHistoryLog() -> DNSEventLog? {
+        if let dnsEventLogReader {
+            return dnsEventLogReader
+        }
+        guard let dnsEventLogURL,
+              FileManager.default.fileExists(atPath: dnsEventLogURL.path) else {
+            return nil
+        }
+        dnsEventLogReader = try? DNSEventLog(url: dnsEventLogURL, readOnly: true)
+        return dnsEventLogReader
+    }
+
+    /// Domain History rows for the list, drawn from the SQLite depth store (the full 7-day
+    /// window) instead of the 250-entry JSON buffer. Honors a local "Clear Domain History" via
+    /// the shared-defaults floor. Returns `[]` when the store isn't available yet (the list
+    /// then simply shows its empty state until the tunnel has written the first events).
+    func domainHistoryEvents(action: FilterAction, searchText: String, limit: Int) -> [DNSQueryEvent] {
+        guard let log = domainHistoryLog() else {
+            // Before the tunnel has run once on this build, dns-events.sqlite doesn't exist yet
+            // (or failed to open), but diagnostics.json can still hold the pre-existing last-250
+            // events this view used to show. Fall back to them so an upgraded install isn't
+            // blank until protection starts and seeds the DB (PR #327 review). The JSON buffer
+            // is cleared by clearDomainHistory, so this path honors clears too.
+            return diagnostics.recentEvents(action: action, searchText: searchText, limit: limit)
+        }
+        // Floor the read at BOTH the user-clear timestamp AND the 7-day fine-grained retention
+        // cutoff. The retention floor matters when the tunnel has been stopped >7 days: its
+        // physical prune hasn't run, so stale rows are still on disk — filtering here keeps
+        // Domain History honoring the "kept on this iPhone for 7 days" promise regardless of
+        // tunnel state (the tunnel + app-clear paths handle the physical delete). PR #327 review.
+        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
+        let retentionFloorMs = Int((Date().timeIntervalSince1970 - LocalLogRetention.fineGrainedWindow) * 1000)
+        let floorMs = max(clearFloorMs, retentionFloorMs)
+        let since: Int64? = floorMs > 0 ? Int64(floorMs) : nil
+        return log.page(action: action, searchText: searchText, since: since, limit: limit)
+            .map { entry in
+                DNSQueryEvent(
+                    id: Self.stableEventID(forRowID: entry.id),
+                    timestamp: entry.timestamp,
+                    domain: entry.domain,
+                    decision: entry.decision
+                )
+            }
+    }
+
+    /// Deterministic UUID from the sqlite rowid so SwiftUI list identity is stable across
+    /// reloads — a fresh `UUID()` per read would thrash the diff (reset scroll and animations).
+    private static func stableEventID(forRowID rowID: Int64) -> UUID {
+        let bytes = withUnsafeBytes(of: UInt64(bitPattern: rowID).bigEndian) { Array($0) }
+        return UUID(uuid: (
+            0, 0, 0, 0, 0, 0, 0, 0,
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]
+        ))
     }
 
     // Same helper the hub keeps for ITS read gates (tunnel health, network activity) —

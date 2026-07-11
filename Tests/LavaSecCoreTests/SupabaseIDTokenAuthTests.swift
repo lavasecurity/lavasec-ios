@@ -1,9 +1,45 @@
 import Foundation
 @testable import LavaSecCore
+@testable import LavaSecAppServices
 @testable import LavaSecKit
 import XCTest
 
 final class SupabaseIDTokenAuthTests: XCTestCase {
+    func testPersistedSessionRoundTripKeepsSnakeCaseKeysAndNormalizedProviders() throws {
+        let session = SupabaseIDTokenAuthSession(
+            accessToken: "persisted-access-token",
+            refreshToken: "persisted-refresh-token",
+            expiresIn: 3_600,
+            expiresAt: 1_779_100_000,
+            user: SupabaseIDTokenAuthUser(
+                id: "user-123",
+                email: "user@example.com",
+                provider: "Apple",
+                providers: [" APPLE ", "GOOGLE", "apple"]
+            )
+        )
+
+        let data = try JSONEncoder().encode(session)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(
+            Set(object.keys),
+            ["access_token", "refresh_token", "expires_in", "expires_at", "user"]
+        )
+        XCTAssertEqual(object["access_token"] as? String, "persisted-access-token")
+        XCTAssertEqual(object["refresh_token"] as? String, "persisted-refresh-token")
+        XCTAssertEqual(object["expires_in"] as? Int, 3_600)
+        XCTAssertEqual(object["expires_at"] as? Int, 1_779_100_000)
+
+        let user = try XCTUnwrap(object["user"] as? [String: Any])
+        let appMetadata = try XCTUnwrap(user["app_metadata"] as? [String: Any])
+        XCTAssertEqual(appMetadata["provider"] as? String, "Apple")
+        XCTAssertEqual(appMetadata["providers"] as? [String], ["apple", "google"])
+
+        let restored = try JSONDecoder().decode(SupabaseIDTokenAuthSession.self, from: data)
+        XCTAssertEqual(restored, session)
+        XCTAssertEqual(restored.user.providers, ["apple", "google"])
+    }
+
     func testTokenRequestUsesSupabaseAuthEndpointAndIDTokenPayload() throws {
         let configuration = SupabaseIDTokenAuthConfiguration(
             projectURL: try XCTUnwrap(URL(string: "https://example.supabase.co")),

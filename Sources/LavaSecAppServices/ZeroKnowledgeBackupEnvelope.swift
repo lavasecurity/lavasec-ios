@@ -4,7 +4,7 @@ import CryptoKit
 import Foundation
 import Security
 
-public enum ZeroKnowledgeBackupEnvelopeError: Error, Equatable, Sendable {
+package enum ZeroKnowledgeBackupEnvelopeError: Error, Equatable, Sendable {
     case invalidBase64
     case invalidCiphertext
     case keyDerivationFailed(Int32)
@@ -15,19 +15,28 @@ public enum ZeroKnowledgeBackupEnvelopeError: Error, Equatable, Sendable {
     case unsupportedEnvelopeVersion(Int)
 }
 
+/// Persisted discriminator for a secret that can unwrap the envelope's payload key.
 public enum ZeroKnowledgeBackupKeySlotKind: String, Codable, Equatable, Sendable {
+    /// Slot derived from a recovery phrase combined with a server-held share.
     case assistedRecovery
+    /// Slot derived from the user's backup password.
     case password
+    /// Legacy slot derived directly from a recovery phrase.
     case recoveryPhrase
+    /// Slot derived from a device-local keychain secret.
     case keychain
+    /// Slot derived from passkey secret material or an authenticator PRF output.
     case passkey
 }
 
+/// Derives the versioned secret used by assisted-recovery key slots.
 public enum BackupAssistedRecoverySecret {
+    /// Generates a new URL-safe random server share.
     public static func makeServerShare() throws -> String {
         try BackupDeviceSecret.generate()
     }
 
+    /// Normalizes the phrase and hashes it with the server share into URL-safe key material.
     public static func combinedSecret(recoveryPhrase: String, serverRecoveryShare: String) -> String {
         let normalizedPhrase = BackupRecoveryPhrase.phrase(
             from: BackupRecoveryPhrase.words(from: recoveryPhrase)
@@ -42,14 +51,22 @@ public enum BackupAssistedRecoverySecret {
     }
 }
 
+/// Serialized metadata and ciphertext for one payload-key unlock path.
 public struct ZeroKnowledgeBackupKeySlot: Codable, Equatable, Sendable {
+    /// Unlock-path discriminator persisted with the slot.
     public let kind: ZeroKnowledgeBackupKeySlotKind
+    /// Key-derivation identifier persisted with the slot.
     public let kdf: String
+    /// Base64-encoded salt or PRF input used by the slot.
     public let salt: String
+    /// PBKDF iteration count; PRF-produced slots store zero.
     public let iterations: Int
+    /// Base64-encoded AES-GCM box containing the wrapped payload key.
     public let wrappedKey: String
+    /// Passkey credential identifier associated with the slot, when present.
     public let credentialID: String?
 
+    /// Stores the supplied serialized slot fields without validating their coherence.
     public init(
         kind: ZeroKnowledgeBackupKeySlotKind,
         kdf: String,
@@ -67,24 +84,37 @@ public struct ZeroKnowledgeBackupKeySlot: Codable, Equatable, Sendable {
     }
 }
 
+/// Serialized encrypted backup payload and the independent key slots that can unlock it.
 public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
+    /// Schema version emitted by current envelope factories.
     public static let currentSchemaVersion = 1
+    /// Cryptographic envelope version accepted and emitted by current operations.
     public static let currentEnvelopeVersion = 1
+    /// PBKDF2 iteration count used by production factories unless a caller overrides it.
     public static let defaultPasswordIterations = 210_000
-    public static let testingPasswordIterations = 8
+    package static let testingPasswordIterations = 8
     private static let supportedKeyDerivationFunction = "PBKDF2-HMAC-SHA256"
     private static let prfKeyDerivationFunction = "HKDF-SHA256"
     private static let prfHKDFInfo = Data("LavaSec passkey backup PRF v1".utf8)
 
+    /// Persisted payload-schema version; direct initialization preserves the supplied value.
     public let schemaVersion: Int
+    /// Persisted cryptographic envelope version; direct initialization preserves the supplied value.
     public let envelopeVersion: Int
+    /// Persisted cipher identifier; current factories emit `AES-256-GCM`.
     public let cipher: String
+    /// Base64-encoded AES-GCM box containing the configuration payload.
     public let payloadCiphertext: String
+    /// Serialized unlock paths for the shared payload key.
     public let keySlots: [ZeroKnowledgeBackupKeySlot]
+    /// Server-held assisted-recovery share, when that recovery mode is configured.
     public let serverRecoveryShare: String?
+    /// Recorded payload-ciphertext byte count.
     public let ciphertextByteSize: Int
+    /// Timestamp assigned when the envelope was produced or directly initialized.
     public let createdAt: Date
 
+    /// Stores serialized envelope fields without validating versions, cipher, or key-slot coherence.
     public init(
         schemaVersion: Int = currentSchemaVersion,
         envelopeVersion: Int = currentEnvelopeVersion,
@@ -105,6 +135,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 
+    /// Estimates encoded storage as payload JSON plus fixed and per-slot overhead.
     public static func estimatedByteSize(
         for payload: BackupConfigurationPayload,
         keySlotCount: Int
@@ -114,6 +145,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         return payloadSize + 1_024 + max(0, keySlotCount) * 512
     }
 
+    /// Seals a payload with password and recovery-phrase PBKDF2 key slots.
     public static func make(
         payload: BackupConfigurationPayload,
         password: String,
@@ -129,7 +161,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
-    public static func makeForTesting(
+    package static func makeForTesting(
         payload: BackupConfigurationPayload,
         password: String,
         recoveryPhrase: String
@@ -143,6 +175,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
+    /// Seals a payload with device and assisted-recovery slots plus an optional passkey slot.
     public static func makePasswordless(
         payload: BackupConfigurationPayload,
         deviceSecret: String,
@@ -174,7 +207,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
-    public static func makePasswordlessForTesting(
+    package static func makePasswordlessForTesting(
         payload: BackupConfigurationPayload,
         deviceSecret: String,
         serverRecoveryShare: String? = nil,
@@ -265,7 +298,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
-    public static func makeWithPRFForTesting(
+    package static func makeWithPRFForTesting(
         payload: BackupConfigurationPayload,
         deviceSecret: String,
         serverRecoveryShare: String? = nil,
@@ -287,18 +320,22 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         )
     }
 
+    /// Unwraps the password slot and decrypts the configuration payload.
     public func decryptWithPassword(_ password: String) throws -> BackupConfigurationPayload {
         try decrypt(using: password, slotKind: .password)
     }
 
+    /// Unwraps the device-keychain slot and decrypts the configuration payload.
     public func decryptWithKeychainSecret(_ secret: String) throws -> BackupConfigurationPayload {
         try decrypt(using: secret, slotKind: .keychain)
     }
 
+    /// Unwraps a legacy direct recovery-phrase slot and decrypts the configuration payload.
     public func decryptWithRecoveryPhrase(_ phrase: String) throws -> BackupConfigurationPayload {
         try decrypt(using: phrase, slotKind: .recoveryPhrase)
     }
 
+    /// Combines the phrase with the stored server share to decrypt through assisted recovery.
     public func decryptWithAssistedRecoveryPhrase(_ phrase: String) throws -> BackupConfigurationPayload {
         guard let serverRecoveryShare, !serverRecoveryShare.isEmpty else {
             throw ZeroKnowledgeBackupEnvelopeError.missingServerRecoveryShare
@@ -311,6 +348,7 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
         return try decrypt(using: assistedRecoverySecret, slotKind: .assistedRecovery)
     }
 
+    /// Unwraps a PBKDF2 passkey-secret slot and decrypts the configuration payload.
     public func decryptWithPasskeySecret(_ secret: String) throws -> BackupConfigurationPayload {
         try decrypt(using: secret, slotKind: .passkey)
     }

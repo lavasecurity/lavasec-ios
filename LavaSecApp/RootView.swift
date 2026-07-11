@@ -1,5 +1,5 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
 import UIKit
 
 enum LavaRootTab: Hashable {
@@ -558,6 +558,8 @@ private struct BugReportSheetView: View {
 }
 
 #Preview {
+    let viewModel = AppViewModel(loadVPNState: false)
     RootView()
-        .environmentObject(AppViewModel(loadVPNState: false))
+        .environmentObject(viewModel)
+        .environmentObject(viewModel.catalog)
 }

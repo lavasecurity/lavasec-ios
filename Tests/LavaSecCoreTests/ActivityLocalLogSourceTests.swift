@@ -2,7 +2,8 @@ import XCTest
 
 final class ActivityLocalLogSourceTests: XCTestCase {
     func testNetworkActivityUsesLargeNavigationTitleLikeDomainHistory() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsNetworkActivity)
+        let localLogSupport = try readSource(.diagnosticsLocalLogSupport)
         let networkBlock = try sourceBlock(
             in: source,
             startingAt: "struct NetworkActivityLogView: View",
@@ -10,7 +11,7 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         )
 
         XCTAssertFalse(networkBlock.contains("LavaScreenContent(\n            title: \"Network Activity\""))
-        XCTAssertTrue(source.contains("private struct LocalLogSubpageChrome"))
+        XCTAssertTrue(localLogSupport.contains("private struct LocalLogSubpageChrome"))
         XCTAssertTrue(networkBlock.contains(".localLogSubpageChrome("))
         XCTAssertTrue(networkBlock.contains("title: \"Network Activity\""))
         // Canary: the negative pins above key on these identifiers - if a rename removes
@@ -20,20 +21,22 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryAndNetworkActivityExposeTopRightClearActions() throws {
-        let source = try readSource(.diagnosticsView)
+        let localLogSupport = try readSource(.diagnosticsLocalLogSupport)
+        let networkSource = try readSource(.diagnosticsNetworkActivity)
+        let domainSource = try readSource(.diagnosticsDomainHistory)
         let chromeBlock = try sourceBlock(
-            in: source,
+            in: localLogSupport,
             startingAt: "private struct LocalLogSubpageChrome",
-            endingBefore: "struct NetworkActivityLogView: View"
+            endingBefore: "extension View"
         )
         let networkBlock = try sourceBlock(
-            in: source,
+            in: networkSource,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
         let domainBlock = try sourceBlock(
-            in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            in: domainSource,
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
@@ -50,10 +53,10 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryDoesNotKeepBottomManageClearSection() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
@@ -66,23 +69,23 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistorySearchLivesInContentInsteadOfNavigationDrawer() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
-        XCTAssertTrue(source.contains("private struct LocalLogSearchField"))
+        XCTAssertTrue(try readSource(.diagnosticsLocalLogSupport).contains("struct LocalLogSearchField"))
         XCTAssertTrue(domainBlock.contains("LocalLogSearchField(text: $searchText)"))
         XCTAssertFalse(domainBlock.contains(".searchable("))
     }
 
     func testDomainHistoryDoesNotShowLongPressHintFinePrint() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
@@ -97,15 +100,16 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryEmptyRowsAvoidTerminalPeriods() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
+        let localLogSupport = try readSource(.diagnosticsLocalLogSupport)
         let domainFilterBlock = try sourceBlock(
-            in: source,
-            startingAt: "private enum DomainHistoryFilter",
-            endingBefore: "private struct DomainHistoryDomainActionAlert"
+            in: localLogSupport,
+            startingAt: "enum DomainHistoryFilter",
+            endingBefore: "struct DomainHistoryDomainActionAlert"
         )
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
@@ -118,19 +122,21 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryAndNetworkActivityUsePagedVisibleRows() throws {
-        let source = try readSource(.diagnosticsView)
+        let localLogSupport = try readSource(.diagnosticsLocalLogSupport)
+        let networkSource = try readSource(.diagnosticsNetworkActivity)
+        let domainSource = try readSource(.diagnosticsDomainHistory)
         let networkBlock = try sourceBlock(
-            in: source,
+            in: networkSource,
             startingAt: "struct NetworkActivityLogView: View",
             endingBefore: "private struct NetworkActivityLogRow: View"
         )
         let domainBlock = try sourceBlock(
-            in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            in: domainSource,
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
-        XCTAssertTrue(source.contains("private enum LocalLogPagination"))
+        XCTAssertTrue(localLogSupport.contains("enum LocalLogPagination"))
         XCTAssertTrue(networkBlock.contains("@State private var visibleEntryCount"))
         XCTAssertTrue(networkBlock.contains(".prefix(visibleEntryCount)"))
         XCTAssertTrue(networkBlock.contains("LocalLogLoadMoreSentinel"))
@@ -142,12 +148,12 @@ final class ActivityLocalLogSourceTests: XCTestCase {
         XCTAssertTrue(domainBlock.contains("LocalLogLoadMoreSentinel"))
         XCTAssertTrue(domainBlock.contains(".onChange(of: selectedFilter)"))
         XCTAssertTrue(domainBlock.contains(".onChange(of: searchText)"))
-        XCTAssertTrue(source.contains("loadMoreIfNeeded(sentinelMinY:"))
-        XCTAssertTrue(source.contains("UIScreen.main.bounds.height + 80"))
+        XCTAssertTrue(localLogSupport.contains("loadMoreIfNeeded(sentinelMinY:"))
+        XCTAssertTrue(localLogSupport.contains("UIScreen.main.bounds.height + 80"))
     }
 
     func testDomainHistoryRowsUseSharedTimestampLine() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let rowBlock = try sourceBlock(
             in: source,
             startingAt: "private struct DomainHistoryRow: View"
@@ -164,11 +170,11 @@ final class ActivityLocalLogSourceTests: XCTestCase {
             startingAt: "struct LavaScreenContent<Content: View>: View",
             endingBefore: "struct LavaSheetScaffold"
         )
-        let diagnosticsSource = try readSource(.diagnosticsView)
+        let diagnosticsSource = try readSource(.diagnosticsNetworkActivity)
         let networkBlock = try sourceBlock(
             in: diagnosticsSource,
             startingAt: "struct NetworkActivityLogView: View",
-            endingBefore: "private struct ActivityDateScopeButton"
+            endingBefore: "private struct NetworkActivityLogRow: View"
         )
 
         XCTAssertTrue(screenContentBlock.contains(".scrollBounceBehavior(.always, axes: .vertical)"))
@@ -196,10 +202,10 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryRowsExposeContextMenuDomainActions() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsDomainHistory)
         let domainBlock = try sourceBlock(
             in: source,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
         let rowBlock = try sourceBlock(
@@ -224,19 +230,20 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testDomainHistoryUsesSharedFilterReviewAndPreparationScreens() throws {
-        let diagnosticsSource = try readSource(.diagnosticsView)
-        let filtersSource = try readSource(.filtersView)
+        let diagnosticsSource = try readSource(.diagnosticsDomainHistory)
+        let filtersSource = try readSource(.filterMyListView)
+        let filtersShellSource = try readSource(.filtersView)
         let sharedReviewSource = try readSource(.filterReviewFlowView)
         let domainBlock = try sourceBlock(
             in: diagnosticsSource,
-            startingAt: "private struct DomainHistoryView: View",
+            startingAt: "struct DomainHistoryView: View",
             endingBefore: "private struct DomainHistoryRow: View"
         )
 
         XCTAssertTrue(domainBlock.contains("FilterConfirmationSheet(origin: .domainHistory"))
         XCTAssertTrue(domainBlock.contains("FilterPreparationScreen(origin: .domainHistory"))
         XCTAssertTrue(filtersSource.contains("FilterConfirmationSheet(origin: .filters"))
-        XCTAssertTrue(filtersSource.contains("FilterPreparationScreen(origin: .filters"))
+        XCTAssertTrue(filtersShellSource.contains("FilterPreparationScreen(origin: .filters"))
         XCTAssertTrue(sharedReviewSource.contains("enum FilterReviewOrigin"))
         XCTAssertTrue(sharedReviewSource.contains("case domainHistory"))
         XCTAssertTrue(sharedReviewSource.contains("Back to Review"))
@@ -261,11 +268,10 @@ final class ActivityLocalLogSourceTests: XCTestCase {
     }
 
     func testNetworkActivityThemeHandlesConnectedLifecycleEvent() throws {
-        let source = try readSource(.diagnosticsView)
+        let source = try readSource(.diagnosticsNetworkActivity)
         let themeBlock = try sourceBlock(
             in: source,
-            startingAt: "private extension NetworkActivityEvent",
-            endingBefore: "private struct ActivityDateRange"
+            startingAt: "private extension NetworkActivityEvent"
         )
 
         XCTAssertTrue(themeBlock.contains("case .protectionConnected:"))

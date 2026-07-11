@@ -1,8 +1,62 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecAppServices
 @testable import LavaSecKit
 
 final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
+    func testPersistedEnvelopeVocabularyMatchesCurrentCryptoFormat() throws {
+        XCTAssertEqual(
+            [
+                ZeroKnowledgeBackupKeySlotKind.assistedRecovery,
+                .password,
+                .recoveryPhrase,
+                .keychain,
+                .passkey,
+            ].map(\.rawValue),
+            ["assistedRecovery", "password", "recoveryPhrase", "keychain", "passkey"]
+        )
+        XCTAssertEqual(ZeroKnowledgeBackupEnvelope.currentSchemaVersion, 1)
+        XCTAssertEqual(ZeroKnowledgeBackupEnvelope.currentEnvelopeVersion, 1)
+
+        let envelope = try ZeroKnowledgeBackupEnvelope.makeForTesting(
+            payload: BackupConfigurationPayload(configuration: AppConfiguration()),
+            password: "lava2026!",
+            recoveryPhrase: "ember vault canyon ribbon orbit cedar window quiet"
+        )
+
+        XCTAssertEqual(envelope.schemaVersion, 1)
+        XCTAssertEqual(envelope.envelopeVersion, 1)
+        XCTAssertEqual(envelope.cipher, "AES-256-GCM")
+        XCTAssertEqual(Set(envelope.keySlots.map(\.kdf)), ["PBKDF2-HMAC-SHA256"])
+    }
+
+    func testLegacySerializedEnvelopeDecodesMissingOptionalRecoveryFieldsAsNil() throws {
+        let legacyJSON = #"""
+        {
+          "schemaVersion": 1,
+          "envelopeVersion": 1,
+          "cipher": "AES-256-GCM",
+          "payloadCiphertext": "AA==",
+          "keySlots": [
+            {
+              "kind": "password",
+              "kdf": "PBKDF2-HMAC-SHA256",
+              "salt": "AA==",
+              "iterations": 8,
+              "wrappedKey": "AA=="
+            }
+          ],
+          "ciphertextByteSize": 1,
+          "createdAt": 0
+        }
+        """#.data(using: .utf8)!
+
+        let envelope = try JSONDecoder().decode(ZeroKnowledgeBackupEnvelope.self, from: legacyJSON)
+
+        XCTAssertNil(envelope.serverRecoveryShare)
+        XCTAssertNil(try XCTUnwrap(envelope.keySlots.first).credentialID)
+    }
+
     func testEstimateUsesPayloadAndKeySlotOverhead() throws {
         let payload = BackupConfigurationPayload(configuration: AppConfiguration())
         let estimate = try ZeroKnowledgeBackupEnvelope.estimatedByteSize(for: payload, keySlotCount: 3)

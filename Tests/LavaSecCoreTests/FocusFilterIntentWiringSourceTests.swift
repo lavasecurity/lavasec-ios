@@ -43,10 +43,12 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         XCTAssertTrue(nilBranch.contains("return .result()"),
                       "The nil (Focus-off) branch must return without side effects.")
 
-        // The switch goes through the shared LavaSecCore engine via the FocusSwitchEnvironment entry — the
-        // SAME path any in-app caller would use (single gated boundary, no app-target dependency).
-        XCTAssertTrue(perform.contains("await FocusSwitchEnvironment.performSwitch(toFilterID: filter.id)"),
-                      "perform() must drive the switch through FocusSwitchEnvironment.performSwitch (the shared engine).")
+        // The switch goes through the shared FilterPipeline engine via the FocusSwitchEnvironment entry — the
+        // SAME path any in-app caller would use (single gated boundary, no app-target dependency). The
+        // Focus path passes `.closedAppBanner`: it has no dialog of its own, so the engine's closed-app
+        // banner is its only user feedback (unlike the Shortcuts intent, which is `.systemOwnedDialog`).
+        XCTAssertTrue(perform.contains("await FocusSwitchEnvironment.performSwitch(toFilterID: filter.id, feedback: .closedAppBanner)"),
+                      "The Focus intent must drive the shared engine with .closedAppBanner feedback (its only channel).")
 
         // The unsafe focus-off cancel must be gone from the shared environment factory too.
         let envFactory = try readSource(.focusSwitchEnvironment)
@@ -82,10 +84,20 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
                       "The extension must use the conventional bundle ids (app.intents / dev.qa.intents).")
     }
 
-    // MARK: - The AppEntity + query
+    // MARK: - The AppEntity + query (shared by the Focus intent AND the Switch intent)
 
     func testEntityQueryReadsLibraryHeadlesslyAndUsesConstStatics() throws {
-        let source = try readSource(.focusFilterIntent)
+        // The AppEntity + query live in Shared/LavaFilterEntity.swift, compiled into BOTH the app target
+        // (the discoverable Switch intent) and the extension (the Focus intent), so there is ONE AppEntity
+        // record. They must NOT be redefined in either intent file.
+        let source = try readSource(.lavaFilterEntity)
+        for intentFile in [SourceFile.focusFilterIntent, .switchFilterShortcut] {
+            let intentSource = try readSource(intentFile)
+            XCTAssertFalse(intentSource.contains("struct LavaFilterEntity: AppEntity"),
+                           "\(intentFile) must REUSE the shared LavaFilterEntity, not redefine it.")
+            XCTAssertFalse(intentSource.contains("struct LavaFilterEntityQuery: EntityQuery"),
+                           "\(intentFile) must REUSE the shared LavaFilterEntityQuery, not redefine it.")
+        }
 
         // `static let` (not `var`): the AppIntents metadata processor records the AppEntity — and from it
         // the parameter→query link — only from CONST bindings (a `var` produces "no record of the query
@@ -110,7 +122,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - The filters-list signpost (moon glyph) + how-to
 
     func testMoonGlyphShowsHowToForAllTiersBesideTheEditPencil() throws {
-        let source = try readSource(.filtersView)
+        let source = try readSource(.filterLibraryView)
 
         // The glyph sits in the non-editing primaryAction group with the edit pencil, so it's hidden in
         // edit mode; declared first so it renders to the LEFT of the pencil.
@@ -129,7 +141,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             startingAt: "systemName: \"moon\"",
             endingBefore: "NativeToolbarIconButton(systemName: \"square.and.pencil\""
         )
-        XCTAssertTrue(moonButton.contains("isShowingFocusInfo = true"),
+        XCTAssertTrue(moonButton.contains("isShowingAutoSwitchInfo = true"),
                       "Tapping the moon glyph shows the how-to sheet to all tiers.")
         XCTAssertFalse(moonButton.contains("isShowingPaywall"),
                        "The moon glyph must NOT paywall — Focus auto-switch is free for all tiers.")
@@ -142,24 +154,46 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("hasLavaSecurityPlus"))
     }
 
-    func testHowToSheetGuidesFocusSetupViaStepsNotAMisroutingSettingsButton() throws {
-        let source = try readSource(.filtersView)
-        XCTAssertTrue(source.contains(".sheet(isPresented: $isShowingFocusInfo) {"),
+    func testHowToSheetCoversAutomationAndFocusWithDeepLinks() throws {
+        let source = try readSource(.filterLibraryView)
+        XCTAssertTrue(source.contains(".sheet(isPresented: $isShowingAutoSwitchInfo) {"),
                       "The how-to sheet must be presented from the moon glyph's state.")
         let sheet = try sourceBlock(
             in: source,
-            startingAt: "private struct FocusFilterHowToSheet: View {",
-            endingBefore: "private struct FiltersOverviewPanel: View {"
+            startingAt: "private struct AutoSwitchHowToSheet: View {"
         )
-        // Codex #29: NO jump-to-app-Settings button. The app-settings deep link opens Lava's OWN pane, but
-        // Focus setup lives at the Settings ROOT -> Focus (no iOS deep link), so a button only misroutes the
-        // user DEEPER into the wrong place. The numbered steps must guide the manual path instead.
-        XCTAssertFalse(sheet.contains("openSettingsURLString"),
-                       "The how-to must NOT route to the app-settings pane — it misroutes away from Focus setup (Codex #29).")
-        XCTAssertFalse(sheet.contains("UIApplication.shared.open"),
-                       "The how-to must not open any URL — Focus setup is a manual Settings navigation.")
+
+        // Generic framing: the moon header + a schedule/Focus title, NOT a Focus-only header (focus-mode-
+        // sheet revamp). The panel title reuses the existing "Switch filters automatically" catalog key.
+        XCTAssertTrue(sheet.contains("systemImage: \"moon\""),
+                      "The how-to keeps the moon glyph in its header panel.")
+        XCTAssertTrue(sheet.contains("title: \"Switch filters automatically\""),
+                      "The header must frame auto-switch generically, not Focus-only.")
+
+        // Two sections, Automation BEFORE Focus mode (task order).
+        let automationIdx = try XCTUnwrap(sheet.range(of: "title: \"Automation\"")?.lowerBound,
+                                          "The how-to must have an Automation section.")
+        let focusIdx = try XCTUnwrap(sheet.range(of: "title: \"Focus mode\"")?.lowerBound,
+                                     "The how-to must have a Focus mode section.")
+        XCTAssertLessThan(automationIdx, focusIdx, "Automation must come before Focus mode.")
+
+        // Deep links (supersedes Codex #29's no-Settings-button stance): Shortcuts app for the Automation
+        // section, the Settings app for the Focus section, both opened via the openURL environment action.
+        XCTAssertTrue(sheet.contains("@Environment(\\.openURL) private var openURL"),
+                      "The how-to must read the openURL action to drive its deep links.")
+        XCTAssertTrue(sheet.contains("URL(string: \"shortcuts://\")"),
+                      "The Automation section must deep-link into the Shortcuts app (shortcuts://).")
+        XCTAssertTrue(sheet.contains("URL(string: UIApplication.openSettingsURLString)"),
+                      "The Focus section must deep-link into the Settings app (openSettingsURLString).")
+        XCTAssertTrue(sheet.contains("openURL(url)"),
+                      "The section link button must open its URL via the openURL action.")
+
+        // The numbered steps still guide the manual paths: the Focus section keeps the Settings › Focus
+        // walkthrough, and the Automation section names the discoverable Switch Filter action.
         XCTAssertTrue(sheet.contains("Open the Settings app, then tap Focus."),
-                      "The how-to must guide the manual path to Settings -> Focus via the numbered steps.")
+                      "The Focus section must keep the manual Settings -> Focus walkthrough.")
+        XCTAssertTrue(sheet.contains("Add the Lava Switch Filter action, then pick a filter."),
+                      "The Automation section must name the discoverable Switch Filter action.")
     }
 
     // MARK: - Build wiring (root cause of the original metadata-export failure)
@@ -179,5 +213,165 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         }
     }
 
+    // MARK: - The Switch Filter shortcut (Shortcuts / Automations / Siri)
+
+    /// The Shortcuts/Automations/Siri twin of the Focus intent. Unlike the Focus intent it is
+    /// DISCOVERABLE and takes a NON-optional filter (Shortcuts/automations always supply the value), and it
+    /// REUSES `LavaFilterEntity` from Shared/LavaFilterEntity.swift rather than duplicating the entity/query.
+    func testSwitchIntentIsDiscoverableWithNonOptionalReusedEntity() throws {
+        let source = try readSource(.switchFilterShortcut)
+
+        XCTAssertTrue(source.contains("struct SwitchFilterIntent: AppIntent {"),
+                      "The Switch action must be a plain AppIntent (not a SetFocusFilterIntent).")
+
+        // DISCOVERABLE — the opposite of the Focus intent's isDiscoverable = false — so Shortcuts,
+        // Automations, and Siri surface it. And it runs headless like the Focus path (no foregrounding).
+        XCTAssertTrue(source.contains("static var isDiscoverable = true"),
+                      "The Switch intent must be discoverable so it appears in Shortcuts/Automations/Siri.")
+        XCTAssertTrue(source.contains("static var openAppWhenRun = false"),
+                      "The Switch intent runs headless — it must not foreground the app to switch.")
+
+        // NON-optional parameter (only the Focus deactivation edge needed optional), REUSING the shared
+        // AppEntity from Shared/LavaFilterEntity.swift (no duplicate entity/query — asserted in
+        // testEntityQueryReadsLibraryHeadlesslyAndUsesConstStatics).
+        XCTAssertTrue(source.contains("var filter: LavaFilterEntity\n"),
+                      "The @Parameter must be a NON-optional LavaFilterEntity (always supplied by Shortcuts).")
+        XCTAssertFalse(source.contains("var filter: LavaFilterEntity?"),
+                       "The Switch intent's parameter must NOT be optional — that edge is Focus-only.")
+        XCTAssertFalse(source.contains("struct LavaFilterEntity"),
+                       "The Switch shortcut must REUSE the shared LavaFilterEntity, not redefine it.")
+        XCTAssertFalse(source.contains("struct LavaFilterEntityQuery"),
+                       "The Switch shortcut must REUSE the shared LavaFilterEntityQuery, not redefine it.")
+    }
+
+    /// perform() must drive the SHARED engine (no duplicated switch logic), return a dialog
+    /// (`ProvidesDialog`), and post NO notification of its own — this caller suppresses the engine banner
+    /// (`.systemOwnedDialog`) because the system delivers its dialog/thrown error in every context, and a
+    /// banner on top would double-notify a backgrounded Siri/Shortcuts run (Codex #325).
+    func testSwitchPerformDrivesSharedEngineAndReturnsDialogWithoutASecondNotification() throws {
+        let source = try readSource(.switchFilterShortcut)
+        let perform = try sourceBlock(
+            in: source,
+            startingAt: "func perform() async throws -> some IntentResult & ProvidesDialog {",
+            endingBefore: "\n    }\n}"
+        )
+
+        // Same shared FilterPipeline engine any in-app or Focus caller uses — the single gated boundary.
+        // `.systemOwnedDialog`: the system delivers this caller's dialog/error in every context, so the
+        // engine's closed-app banner is suppressed — keeping it would double-notify a backgrounded
+        // Siri/Shortcuts run (Codex #325).
+        XCTAssertTrue(perform.contains("feedback: .systemOwnedDialog"),
+                      "The Shortcuts intent must suppress the engine banner (.systemOwnedDialog) — the system owns its feedback.")
+        XCTAssertTrue(perform.contains("await FocusSwitchEnvironment.performSwitch("),
+                      "perform() must drive the shared engine via FocusSwitchEnvironment.performSwitch.")
+        // Returns a dialog (ProvidesDialog), mapping each engine outcome; `.disallowed` — the switch did
+        // NOT happen — is a THROWN localized error, so Shortcuts halts downstream actions and reports the
+        // failure itself (incl. its silent-automation failure notification), replacing the banner there.
+        XCTAssertTrue(perform.contains("return .result(dialog:"),
+                      "perform() must return a dialog via .result(dialog:).")
+        for outcome in ["case .committed:", "case .alreadyActive:", "case .deferred:", "case .disallowed:"] {
+            XCTAssertTrue(perform.contains(outcome),
+                          "perform() must handle the \(outcome) engine outcome.")
+        }
+        XCTAssertTrue(perform.contains("throw SwitchFilterDisallowedError(filterName: filter.name)"),
+                      "perform() must THROW on .disallowed — an un-happened switch is an error, and the throw is what reaches silent automations.")
+        XCTAssertTrue(source.contains("struct SwitchFilterDisallowedError: Error, CustomLocalizedStringResourceConvertible"),
+                      "The disallowed error must be localized (CustomLocalizedStringResourceConvertible) for Siri/Shortcuts display.")
+        // No re-implemented switch logic: the CAS/flock/marker/diagnostics all live in the engine, so the
+        // intent must not touch the container writers/locks directly.
+        for leak in ["SharedFilterStatePersistence", "focusSwitchLockURL", "persistArtifacts", "configurationWriteLockURL"] {
+            XCTAssertFalse(perform.contains(leak),
+                           "perform() must not re-implement switch internals (\(leak)) — that is the engine's job.")
+        }
+        // NO notification from this intent: with the engine banner suppressed (.systemOwnedDialog), the
+        // system-delivered dialog/error is the ONLY feedback — hand-rolling a notification here would
+        // reintroduce the double-notify this caller's feedback mode exists to prevent (Codex #325).
+        for notifyAPI in ["LavaEventNotificationPoster", "notifySwitchOutcome", "UNUserNotificationCenter"] {
+            XCTAssertFalse(perform.contains(notifyAPI),
+                           "perform() must NOT post a notification (\(notifyAPI)) — the system-delivered dialog/error is the feedback.")
+        }
+    }
+
+    /// An AppShortcutsProvider must exist so Siri/the Shortcuts gallery surface the action, and EVERY
+    /// phrase must contain `\(.applicationName)` (an Apple requirement — a phrase without it is dropped).
+    func testAppShortcutsProviderExistsAndEveryPhraseCarriesApplicationName() throws {
+        let source = try readSource(.switchFilterShortcut)
+
+        XCTAssertTrue(source.contains("struct LavaShortcuts: AppShortcutsProvider {"),
+                      "An AppShortcutsProvider must exist so the action reaches Siri and the Shortcuts gallery.")
+        XCTAssertTrue(source.contains("static var appShortcuts: [AppShortcut]"),
+                      "The provider must vend appShortcuts: [AppShortcut].")
+        XCTAssertTrue(source.contains("intent: SwitchFilterIntent()"),
+                      "The one AppShortcut must wire the SwitchFilterIntent.")
+
+        // Extract the phrases array and assert EVERY quoted phrase carries \(.applicationName).
+        let phrasesBlock = try sourceBlock(in: source, startingAt: "phrases: [", endingBefore: "]")
+        var phraseCount = 0
+        for line in phrasesBlock.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Only the quoted phrase lines (skip the `phrases: [` opener and comment lines).
+            guard trimmed.hasPrefix("\"") else { continue }
+            phraseCount += 1
+            XCTAssertTrue(trimmed.contains("\\(.applicationName)"),
+                          "Every App Shortcut phrase must contain \\(.applicationName): \(trimmed)")
+        }
+        XCTAssertGreaterThanOrEqual(phraseCount, 1, "The AppShortcut must declare at least one phrase.")
+    }
+
+    /// CRUX OF THE CODEX P2 FIX: the intent + `AppShortcutsProvider` must be in the APP target, not the
+    /// LavaSecIntents extension — App Shortcuts register from the app bundle, so a provider compiled only
+    /// into the extension would not reliably surface the Siri/Shortcuts-gallery action. Pin that
+    /// SwitchFilterShortcut.swift is in the APP target's Sources phase and NOT the extension's.
+    func testSwitchShortcutFileIsInTheAppTargetNotTheExtension() throws {
+        let pbxproj = try readSource(.xcodeProject)
+        XCTAssertTrue(pbxproj.contains("SwitchFilterShortcut.swift in Sources"),
+                      "SwitchFilterShortcut.swift must be in a Sources compile phase.")
+
+        // The generated pbxproj lists a PBXSourcesBuildPhase per target; entries aren't labelled by target,
+        // so anchor each phase on a file EXCLUSIVE to that target. AppViewModel.swift compiles only into the
+        // app; LavaSecIntentsExtension.swift only into the extension. The drift check guarantees these blocks
+        // reflect project.yml, where SwitchFilterShortcut.swift is listed ONLY under the LavaSec app target.
+        let appSourcesPhase = try sourceBlock(
+            in: pbxproj,
+            startingAt: "AppViewModel.swift in Sources */,",
+            endingBefore: "runOnlyForDeploymentPostprocessing"
+        )
+        XCTAssertTrue(appSourcesPhase.contains("SwitchFilterShortcut.swift in Sources"),
+                      "SwitchFilterShortcut.swift must be in the APP target's Sources phase (App Shortcuts register from the app bundle).")
+
+        let extensionSourcesPhase = try sourceBlock(
+            in: pbxproj,
+            startingAt: "LavaSecIntentsExtension.swift in Sources */,",
+            endingBefore: "runOnlyForDeploymentPostprocessing"
+        )
+        XCTAssertFalse(extensionSourcesPhase.contains("SwitchFilterShortcut.swift in Sources"),
+                       "SwitchFilterShortcut.swift must NOT be in the extension's Sources phase — the provider belongs in the app target.")
+    }
+
     // MARK: - Source introspection helpers
+    func testAppShortcutIsRegisteredAtLaunchAndRefreshedOnLibraryChange() throws {
+        // The AppShortcutsProvider only publishes reliably when the app calls
+        // updateAppShortcutParameters at launch, and its filter parameter goes stale unless it is
+        // refreshed when the library list changes (Codex #325). Pin BOTH wiring points.
+        let app = try readSource(.lavaSecApp)
+        XCTAssertTrue(
+            app.contains("LavaShortcuts.updateAppShortcutParameters()"),
+            "LavaSecApp must register/refresh the Switch Filter shortcut at launch."
+        )
+        let model = try readSource(.appViewModel)
+        // The refresh runs AFTER the library reaches disk, in the shared-writer helper both persist
+        // funnels call, so it re-reads the CURRENT on-disk list (the entity query reads disk) and covers
+        // every mutation incl. wholesale restores (Codex #325 r4/r5). Assert the helper refreshes and both
+        // funnels invoke it after the write.
+        XCTAssertTrue(
+            model.contains("private func refreshFilterSwitchShortcutAfterPersist()")
+                && model.contains("func refreshFilterSwitchShortcutAfterPersist() {\n        LavaShortcuts.updateAppShortcutParameters()"),
+            "refreshFilterSwitchShortcutAfterPersist must call updateAppShortcutParameters."
+        )
+        XCTAssertEqual(
+            model.components(separatedBy: "\n        refreshFilterSwitchShortcutAfterPersist()").count - 1, 2,
+            "Both persist funnels (persistConfigurationOnly + persistSharedState) must refresh after writing the library."
+        )
+    }
+
 }

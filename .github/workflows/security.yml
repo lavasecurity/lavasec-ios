@@ -29,3 +29,7 @@ jobs:
     with:
       gitleaks: true
       mobsfscan: true
+      # Runner is chosen inside the reusable workflow from repo visibility + fork status
+      # (private + non-fork → Ubicloud; public lavasec-ios lane and any fork PR → ubuntu-latest),
+      # so this byte-identical file needs no runs_on and no repo-name gate here. Override
+      # per-repo with the LINUX_CI_RUNNER var. Plan: lavasec-infra/plans/2026-07-08-linux-ci-runner-cost-plan.md.

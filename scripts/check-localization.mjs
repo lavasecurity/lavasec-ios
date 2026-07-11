@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkSupportedLocaleLayout, loadSupportedLocales } from "./supported-locales.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const iosRoot = path.resolve(__dirname, "..");
@@ -11,7 +12,13 @@ const catalogs = [
 // NOTE: LavaSecIntents/Localizable.xcstrings (the Focus App Intents extension catalog) is
 // intentionally NOT in this list — this gate also enforces app-only requiredReleaseKeys.
 // Its completeness (all locales) is guaranteed by construction + the string-coverage gate.
-const requiredLocales = ["en", "ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"];
+let requiredLocales;
+try {
+  requiredLocales = loadSupportedLocales(iosRoot);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 const allowedUntranslatedValues = new Set([
   "Account",
   "Password",
@@ -166,6 +173,10 @@ const fail = (message) => {
   console.error(message);
   failed = true;
 };
+
+for (const error of checkSupportedLocaleLayout(iosRoot)) {
+  fail(error);
+}
 
 for (const catalogPath of catalogs) {
   if (!fs.existsSync(catalogPath)) {

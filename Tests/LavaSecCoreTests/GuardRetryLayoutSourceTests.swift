@@ -281,12 +281,12 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let activityBlock = try sourceBlock(
             in: activitySource,
             startingAt: "struct ActivityView: View",
-            endingBefore: "private struct ActivityDateScopeButton"
+            endingBefore: "private struct ActivityAuthenticationGateView"
         )
         let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
-            endingBefore: "private struct AccountSettingsView"
+            endingBefore: "private struct LavaSecurityPlusGlyph: View"
         )
 
         XCTAssertTrue(primaryTabBlock.contains(".navigationTitle(title.lavaLocalized)"))
@@ -386,7 +386,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let activityBlock = try sourceBlock(
             in: activitySource,
             startingAt: "struct ActivityView: View",
-            endingBefore: "private struct ActivityDateScopeButton"
+            endingBefore: "private struct ActivityAuthenticationGateView"
         )
         let overviewInvocation = try sourceBlock(
             in: activityBlock,
@@ -408,11 +408,11 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityLocalLogSubpagesStartWithLargeNavigationTitles() throws {
-        let activitySource = try readSource(.diagnosticsView)
+        let activitySource = try readSource(.diagnosticsLocalLogSupport)
         let chromeBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct LocalLogSubpageChrome",
-            endingBefore: "private extension View"
+            endingBefore: "extension View"
         )
 
         XCTAssertTrue(chromeBlock.contains(".navigationTitle(title.lavaLocalized)"))
@@ -422,20 +422,19 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
 
     func testActivityDateControlsUseNeutralPillAndSingleCellSelectionShape() throws {
         let activitySource = try readSource(.diagnosticsView)
+        let dateControlsSource = try readSource(.diagnosticsDateControls)
         let scopePillBlock = try sourceBlock(
             in: activitySource,
-            startingAt: "private struct ActivityDateScopePill",
-            endingBefore: "private struct ActivityDateScopeButtonStyle"
+            startingAt: "private struct ActivityDateScopePill"
         )
         let todayButtonBlock = try sourceBlock(
-            in: activitySource,
+            in: dateControlsSource,
             startingAt: "private struct ActivityDateTodayButton",
             endingBefore: "private struct ActivityDateRangeCalendarMonth"
         )
         let calendarDayBlock = try sourceBlock(
-            in: activitySource,
-            startingAt: "private struct ActivityDateRangeCalendarDay",
-            endingBefore: "private enum DomainHistoryFilter"
+            in: dateControlsSource,
+            startingAt: "private struct ActivityDateRangeCalendarDay"
         )
 
         XCTAssertTrue(scopePillBlock.contains(".foregroundStyle(LavaStyle.ink)"))
@@ -460,7 +459,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDateEndpointButtonsUseRectangularPressShape() throws {
-        let activitySource = try readSource(.diagnosticsView)
+        let activitySource = try readSource(.diagnosticsDateControls)
         let endpointButtonBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private struct ActivityDateEndpointButton",
@@ -472,17 +471,14 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         XCTAssertTrue(endpointButtonBlock.contains("RoundedRectangle(cornerRadius: 12, style: .continuous)"))
         XCTAssertFalse(endpointButtonBlock.contains(".buttonStyle(ActivityDateScopeButtonStyle())"))
         XCTAssertFalse(endpointButtonBlock.contains("Capsule(style: .continuous)"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(activitySource.contains("ActivityDateScopeButtonStyle"))
+        XCTAssertFalse(try readSource(.diagnosticsView).contains("ActivityDateScopeButtonStyle"))
     }
 
     func testActivityDatePickerUsesCloseGlyphInsteadOfCancelText() throws {
-        let activitySource = try readSource(.diagnosticsView)
+        let activitySource = try readSource(.diagnosticsDateControls)
         let pickerBlock = try sourceBlock(
             in: activitySource,
-            startingAt: "private struct ActivityDateRangePickerSheet",
+            startingAt: "struct ActivityDateRangePickerSheet",
             endingBefore: "private struct ActivityDateEndpointButton"
         )
 
@@ -492,7 +488,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
     }
 
     func testActivityDatePickerCompletesRangeFromPickedStartInEitherDirection() throws {
-        let activitySource = try readSource(.diagnosticsView)
+        let activitySource = try readSource(.diagnosticsDateControls)
         let selectDateBlock = try sourceBlock(
             in: activitySource,
             startingAt: "private func selectDate(_ date: Date)",
@@ -513,7 +509,7 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
         let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
-            endingBefore: "private struct AccountSettingsView"
+            endingBefore: "private struct LavaSecurityPlusGlyph: View"
         )
 
         XCTAssertTrue(rootViewSource.contains(".navigationTitle(title.lavaLocalized)"))

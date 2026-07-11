@@ -103,10 +103,10 @@ final class DNSBootstrapWireTests: XCTestCase {
         // Second answer claims 4 RDATA bytes but the buffer ends after 2:
         // extraction keeps what was already validated and stops.
         response.append(contentsOf: [0xC0, 0x0C]) // NAME pointer
-        Self.appendUInt16(1, to: &response)       // TYPE A
-        Self.appendUInt16(1, to: &response)       // CLASS IN
+        DNSWireTestSupport.appendUInt16(1, to: &response)       // TYPE A
+        DNSWireTestSupport.appendUInt16(1, to: &response)       // CLASS IN
         response.append(contentsOf: [0, 0, 0, 60]) // TTL
-        Self.appendUInt16(4, to: &response)       // RDLENGTH 4...
+        DNSWireTestSupport.appendUInt16(4, to: &response)       // RDLENGTH 4...
         response.append(contentsOf: [10, 0])      // ...but only 2 bytes present
 
         XCTAssertEqual(
@@ -124,10 +124,10 @@ final class DNSBootstrapWireTests: XCTestCase {
         let answerNameOffset = response.count
         XCTAssertLessThanOrEqual(answerNameOffset, 0x3F, "fixture assumes a 1-byte pointer offset")
         response.append(contentsOf: [0xC0, UInt8(answerNameOffset)])
-        Self.appendUInt16(1, to: &response)        // TYPE A
-        Self.appendUInt16(1, to: &response)        // CLASS IN
+        DNSWireTestSupport.appendUInt16(1, to: &response)        // TYPE A
+        DNSWireTestSupport.appendUInt16(1, to: &response)        // CLASS IN
         response.append(contentsOf: [0, 0, 0, 60]) // TTL
-        Self.appendUInt16(4, to: &response)        // RDLENGTH
+        DNSWireTestSupport.appendUInt16(4, to: &response)        // RDLENGTH
         response.append(contentsOf: [94, 140, 14, 14])
 
         XCTAssertEqual(
@@ -141,10 +141,10 @@ final class DNSBootstrapWireTests: XCTestCase {
         var response = Self.responseHeader(matching: query, answerCount: 1)
         // Pointer target 0x3FFF is far beyond the buffer.
         response.append(contentsOf: [0xFF, 0xFF])
-        Self.appendUInt16(1, to: &response)
-        Self.appendUInt16(1, to: &response)
+        DNSWireTestSupport.appendUInt16(1, to: &response)
+        DNSWireTestSupport.appendUInt16(1, to: &response)
         response.append(contentsOf: [0, 0, 0, 60])
-        Self.appendUInt16(4, to: &response)
+        DNSWireTestSupport.appendUInt16(4, to: &response)
         response.append(contentsOf: [94, 140, 14, 14])
 
         XCTAssertEqual(
@@ -185,10 +185,10 @@ final class DNSBootstrapWireTests: XCTestCase {
             DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint)
         )
 
-        XCTAssertEqual(readUInt16(response, at: 0), 0x4444, "transaction ID echoed")
-        XCTAssertEqual(readUInt16(response, at: 2), 0x8180, "QR + RD echoed + RA, NOERROR")
-        XCTAssertEqual(readUInt16(response, at: 4), 1, "QDCOUNT")
-        XCTAssertEqual(readUInt16(response, at: 6), 2, "one answer per pinned IPv4 server")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 0), 0x4444, "transaction ID echoed")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 2), 0x8180, "QR + RD echoed + RA, NOERROR")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 4), 1, "QDCOUNT")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 6), 2, "one answer per pinned IPv4 server")
         XCTAssertTrue(DNSWireMessage.isValidResponse(response, matching: query))
         // Round trip through the extractor: the synthesized answers must carry
         // exactly the pinned bootstrap addresses.
@@ -211,7 +211,7 @@ final class DNSBootstrapWireTests: XCTestCase {
             DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint, ttl: 300)
         )
 
-        XCTAssertEqual(readUInt16(response, at: 6), 2, "one answer per pinned IPv6 server")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 6), 2, "one answer per pinned IPv6 server")
         XCTAssertEqual(
             DNSBootstrapAddressExtractor.addresses(from: response, matching: query, recordType: .aaaa),
             ["2001:db8::1", "2001:db8::2"]
@@ -235,7 +235,7 @@ final class DNSBootstrapWireTests: XCTestCase {
             DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint)
         )
 
-        XCTAssertEqual(readUInt16(response, at: 6), 1, "the unparseable pinned address is dropped")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 6), 1, "the unparseable pinned address is dropped")
         XCTAssertEqual(
             DNSBootstrapAddressExtractor.addresses(from: response, matching: query, recordType: .a),
             ["9.9.9.9"]
@@ -257,7 +257,7 @@ final class DNSBootstrapWireTests: XCTestCase {
             DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint)
         )
 
-        XCTAssertEqual(readUInt16(response, at: 6), 0, "ANCOUNT")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 6), 0, "ANCOUNT")
         XCTAssertTrue(DNSWireMessage.isValidResponse(response, matching: query))
     }
 
@@ -275,7 +275,7 @@ final class DNSBootstrapWireTests: XCTestCase {
             DNSBootstrapResponseFactory.response(for: query, question: question, endpoint: endpoint)
         )
 
-        XCTAssertEqual(readUInt16(response, at: 2), 0x8080, "QR + RA only; RD not invented")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 2), 0x8080, "QR + RA only; RD not invented")
     }
 
     // MARK: - Fixtures
@@ -283,20 +283,20 @@ final class DNSBootstrapWireTests: XCTestCase {
     /// Standard query: header (ID, flags, QD=1) + QNAME labels + QTYPE + QCLASS IN.
     private static func dnsQuery(id: UInt16, domain: String, type: UInt16, recursionDesired: Bool = true) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)                                 // transaction ID
-        appendUInt16(recursionDesired ? 0x0100 : 0x0000, to: &data) // flags
-        appendUInt16(1, to: &data)                                  // QDCOUNT
-        appendUInt16(0, to: &data)                                  // ANCOUNT
-        appendUInt16(0, to: &data)                                  // NSCOUNT
-        appendUInt16(0, to: &data)                                  // ARCOUNT
+        DNSWireTestSupport.appendUInt16(id, to: &data)                                 // transaction ID
+        DNSWireTestSupport.appendUInt16(recursionDesired ? 0x0100 : 0x0000, to: &data) // flags
+        DNSWireTestSupport.appendUInt16(1, to: &data)                                  // QDCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)                                  // ANCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)                                  // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)                                  // ARCOUNT
         for label in domain.split(separator: ".") {                 // QNAME labels
             let bytes = Array(label.utf8)
             data.append(UInt8(bytes.count))
             data.append(contentsOf: bytes)
         }
         data.append(0)                                              // root label
-        appendUInt16(type, to: &data)                               // QTYPE
-        appendUInt16(1, to: &data)                                  // QCLASS IN
+        DNSWireTestSupport.appendUInt16(type, to: &data)                               // QTYPE
+        DNSWireTestSupport.appendUInt16(1, to: &data)                                  // QCLASS IN
         return data
     }
 
@@ -306,11 +306,11 @@ final class DNSBootstrapWireTests: XCTestCase {
         var data = Data()
         data.append(query[0])                    // transaction ID echoed
         data.append(query[1])
-        appendUInt16(0x8180, to: &data)          // flags: QR + RD + RA, NOERROR
-        appendUInt16(1, to: &data)               // QDCOUNT
-        appendUInt16(answerCount, to: &data)     // ANCOUNT
-        appendUInt16(authorityCount, to: &data)  // NSCOUNT
-        appendUInt16(0, to: &data)               // ARCOUNT
+        DNSWireTestSupport.appendUInt16(0x8180, to: &data)          // flags: QR + RD + RA, NOERROR
+        DNSWireTestSupport.appendUInt16(1, to: &data)               // QDCOUNT
+        DNSWireTestSupport.appendUInt16(answerCount, to: &data)     // ANCOUNT
+        DNSWireTestSupport.appendUInt16(authorityCount, to: &data)  // NSCOUNT
+        DNSWireTestSupport.appendUInt16(0, to: &data)               // ARCOUNT
         data.append(query[12...])                // question echoed byte-identically
         return data
     }
@@ -319,23 +319,14 @@ final class DNSBootstrapWireTests: XCTestCase {
     /// echoed question name), then TYPE/CLASS/TTL 60/RDLENGTH/RDATA.
     private static func appendRecord(type: UInt16, klass: UInt16, rdata: [UInt8], to data: inout Data) {
         data.append(contentsOf: [0xC0, 0x0C])      // NAME → pointer to offset 12
-        appendUInt16(type, to: &data)              // TYPE
-        appendUInt16(klass, to: &data)             // CLASS
+        DNSWireTestSupport.appendUInt16(type, to: &data)              // TYPE
+        DNSWireTestSupport.appendUInt16(klass, to: &data)             // CLASS
         data.append(contentsOf: [0, 0, 0, 60])     // TTL 60
-        appendUInt16(UInt16(rdata.count), to: &data) // RDLENGTH
+        DNSWireTestSupport.appendUInt16(UInt16(rdata.count), to: &data) // RDLENGTH
         data.append(contentsOf: rdata)             // RDATA
     }
 
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-
-    private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
-
     private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
-        (UInt32(readUInt16(data, at: offset)) << 16) | UInt32(readUInt16(data, at: offset + 2))
+        (UInt32(DNSWireTestSupport.readUInt16(data, at: offset)) << 16) | UInt32(DNSWireTestSupport.readUInt16(data, at: offset + 2))
     }
 }

@@ -48,7 +48,7 @@ final class AccessibilityDynamicAnnouncementsSourceTests: XCTestCase {
     // MARK: S6 — Privacy & Data clear completion
 
     func testPrivacyDataClearAnnouncesPerTargetCompletion() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.privacySecuritySettingsView)
         XCTAssertTrue(
             source.contains("var clearedConfirmation: String"),
             "The clear target must expose a localized past-tense confirmation string."

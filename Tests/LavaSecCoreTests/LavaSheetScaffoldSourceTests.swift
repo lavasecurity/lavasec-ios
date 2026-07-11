@@ -82,11 +82,11 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
         let appSources = [
             try readSource(.backupRestoreView),
             try readSource(.backupSetupView),
-            try readSource(.diagnosticsView),
+            try readDiagnosticsSourceAggregate(),
             try readSource(.filterReviewFlowView),
-            try readSource(.filtersView),
+            try readFiltersSourceAggregate(),
             try readSource(.onboardingFlowView),
-            try readSource(.settingsView),
+            try readSettingsSourceAggregate(),
             try readSource(.shareableFiltersUI)
         ].joined(separator: "\n")
 

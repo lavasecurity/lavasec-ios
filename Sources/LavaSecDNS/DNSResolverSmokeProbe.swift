@@ -1,7 +1,9 @@
 import Foundation
 import LavaSecKit
 
+/// Builds deterministic DNS canaries and classifies whether replies prove a resolver is serving usable answers.
 public enum DNSResolverSmokeProbe {
+    /// Stable fallback canary used when no rotating probe domain is available and as the public query default.
     public static let defaultDomain = "example.com"
 
     /// Diverse, globally-resolvable canary domains rotated across successive health
@@ -11,7 +13,7 @@ public enum DNSResolverSmokeProbe {
     /// count. A genuinely broken / off-network resolver fails them all and still
     /// escalates. Chosen to be unlikely to be blocked together and to reliably
     /// return NOERROR + answers on a functioning resolver.
-    public static let rotatingProbeDomains = ["example.com", "apple.com", "cloudflare.com"]
+    package static let rotatingProbeDomains = ["example.com", "apple.com", "cloudflare.com"]
 
     /// The canary domain for a given probe sequence number (e.g. the smoke-probe
     /// generation), rotating deterministically so consecutive probes use different
@@ -25,6 +27,7 @@ public enum DNSResolverSmokeProbe {
         return rotatingProbeDomains[((sequence % count) + count) % count]
     }
 
+    /// Encodes a one-question recursive IN-class probe with the supplied transaction ID and UInt16 record TYPE.
     public static func query(
         transactionID: UInt16 = 0x4C56,
         domain: String = defaultDomain,
@@ -114,6 +117,7 @@ public enum DNSResolverSmokeProbe {
         return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
+    /// Accepts only a well-formed NOERROR answer whose transaction ID and question bytes match the probe query.
     public static func acceptsResolutionResponse(_ response: Data?, matching query: Data) -> Bool {
         guard let response = response.map({ zeroBased($0) }) else {
             return false
@@ -165,7 +169,7 @@ public enum DNSResolverSmokeProbe {
     /// Only server-side failure rcodes count: NOERROR (incl. NODATA) and NXDOMAIN
     /// are authoritative answers that MUST pass through untouched — we must not
     /// reroute every "does not exist" reply to the fallback resolver.
-    public static func indicatesResolverFailure(_ response: Data?) -> Bool {
+    package static func indicatesResolverFailure(_ response: Data?) -> Bool {
         guard let response = response.map({ zeroBased($0) }) else {
             return false
         }

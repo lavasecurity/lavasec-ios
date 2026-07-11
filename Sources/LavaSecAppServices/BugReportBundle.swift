@@ -5,26 +5,35 @@ import LavaSecKit
 /// Coarse classification used by triage to separate defects from product ideas.
 /// Sent to the backend alongside the report so the promoter can label the Linear
 /// issue (`[bug]` / `[suggestion]` / `[other]`) and the triage agent can route it.
-public enum BugReportIssueKind: String, Codable, Sendable {
+package enum BugReportIssueKind: String, Codable, Sendable {
     case bug
     case suggestion
     case other
 }
 
+/// User-selectable feedback topic used to label and describe a report.
 public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sendable {
     // Bug topics first, then the suggestion topic, then a true catch-all "other".
     // Order here is the order shown in the feedback topic picker (allCases).
+    /// A website or domain cannot be reached.
     case websiteAccess
+    /// VPN connectivity or filtering behaves incorrectly.
     case vpnOrFilterIssue
+    /// An app feature behaves incorrectly.
     case featureIssue
+    /// User-facing translation needs correction.
     case translationIssue
+    /// Product suggestion rather than a defect report.
     case suggestion
+    /// Feedback that does not match a more specific topic.
     case other
 
+    /// Stable identifier derived from the persisted raw value.
     public var id: String {
         rawValue
     }
 
+    /// User-facing picker title for the topic.
     public var title: String {
         switch self {
         case .websiteAccess:
@@ -42,7 +51,7 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
         }
     }
 
-    public var kind: BugReportIssueKind {
+    package var kind: BugReportIssueKind {
         switch self {
         case .websiteAccess, .vpnOrFilterIssue, .featureIssue, .translationIssue:
             .bug
@@ -58,18 +67,28 @@ public enum BugReportIssueType: String, CaseIterable, Codable, Identifiable, Sen
 /// + input truncation) and the bundle normalization read these so the limit shown
 /// to the user is exactly the limit enforced on submission (UR-29).
 public enum BugReportInputLimits {
+    /// Maximum character count for the affected-site field.
     public static let affectedSite = 300
+    /// Maximum character count for the details field.
     public static let details = 5_000
+    /// Maximum character count for the contact-email field.
     public static let contactEmail = 320
 }
 
+/// Raw feedback fields plus the user's optional-diagnostics choice.
 public struct BugReportContext: Equatable, Codable, Sendable {
-    public var issueType: BugReportIssueType
-    public var affectedSite: String
-    public var details: String
-    public var contactEmail: String?
-    public var includeDiagnostics: Bool
+    /// Selected feedback topic.
+    public private(set) var issueType: BugReportIssueType
+    /// Raw affected-site input supplied by the user.
+    public private(set) var affectedSite: String
+    /// Raw free-form details supplied by the user.
+    public private(set) var details: String
+    /// Raw optional contact email supplied by the user.
+    public private(set) var contactEmail: String?
+    /// Whether optional device and protection diagnostics should be attached.
+    public private(set) var includeDiagnostics: Bool
 
+    /// Creates a context by storing raw inputs; normalized projections are computed on read.
     public init(
         issueType: BugReportIssueType = .other,
         affectedSite: String = "",
@@ -84,16 +103,19 @@ public struct BugReportContext: Equatable, Codable, Sendable {
         self.includeDiagnostics = includeDiagnostics
     }
 
+    /// Sanitized, single-line, length-limited affected-site value.
     public var normalizedAffectedSite: String {
         // Single-line field: collapse any embedded line breaks so a pasted value can't inject a
         // fake "Details:"/"Issue:" line into the composed userDescription (UR-29).
         Self.trim(affectedSite, maxLength: BugReportInputLimits.affectedSite, allowsLineBreaks: false)
     }
 
+    /// Sanitized, length-limited details value with normalized line breaks.
     public var normalizedDetails: String {
         Self.trim(details, maxLength: BugReportInputLimits.details, allowsLineBreaks: true)
     }
 
+    /// Sanitized single-line email, returning `nil` when absent or empty after normalization.
     public var normalizedContactEmail: String? {
         guard let contactEmail else {
             return nil
@@ -104,6 +126,7 @@ public struct BugReportContext: Equatable, Codable, Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Structured issue, affected-site, and details text with empty optional lines omitted.
     public var userDescription: String {
         var lines = ["Issue: \(issueType.title)"]
 
@@ -192,21 +215,30 @@ public struct BugReportContext: Equatable, Codable, Sendable {
     }
 }
 
+/// App version information attached to optional bug-report diagnostics.
 public struct BugReportAppSnapshot: Equatable, Codable, Sendable {
+    /// Marketing version string.
     public let version: String
+    /// Build identifier string.
     public let build: String
 
+    /// Creates an app snapshot from version and build strings.
     public init(version: String, build: String) {
         self.version = version
         self.build = build
     }
 }
 
+/// Device environment information attached to optional bug-report diagnostics.
 public struct BugReportDeviceSnapshot: Equatable, Codable, Sendable {
+    /// Operating-system version string.
     public let iosVersion: String
+    /// Device-family description.
     public let deviceFamily: String
+    /// Locale identifier active when the snapshot was made.
     public let locale: String
 
+    /// Creates a device snapshot from the supplied environment strings.
     public init(iosVersion: String, deviceFamily: String, locale: String) {
         self.iosVersion = iosVersion
         self.deviceFamily = deviceFamily
@@ -214,11 +246,16 @@ public struct BugReportDeviceSnapshot: Equatable, Codable, Sendable {
     }
 }
 
+/// Protection status, selected resolver, and tunnel health captured for a report.
 public struct BugReportVPNSnapshot: Equatable, Codable, Sendable {
+    /// Display status of the VPN connection.
     public let status: String
+    /// Display identifier or name for the selected resolver preset.
     public let resolverPreset: String
+    /// Detailed tunnel-health counters and timestamps.
     public let health: TunnelHealthSnapshot
 
+    /// Creates a VPN snapshot from status, resolver, and health values.
     public init(status: String, resolverPreset: String, health: TunnelHealthSnapshot) {
         self.status = status
         self.resolverPreset = resolverPreset
@@ -226,17 +263,23 @@ public struct BugReportVPNSnapshot: Equatable, Codable, Sendable {
     }
 }
 
+/// Filter decision evaluated specifically for the user's affected-site input.
 public struct BugReportAffectedSiteFilterDecision: Equatable, Codable, Sendable {
+    /// Domain associated with the filter decision.
     public let domain: String
+    /// Filter action selected for the domain.
     public let action: FilterAction
+    /// Rule source or fallback reason behind the action.
     public let reason: FilterDecisionReason
 
+    /// Creates a decision record from the supplied domain, action, and reason.
     public init(domain: String, action: FilterAction, reason: FilterDecisionReason) {
         self.domain = domain
         self.action = action
         self.reason = reason
     }
 
+    /// Normalizes a URL or domain and evaluates it, returning `nil` for invalid or empty input.
     public static func make(rawAffectedSite: String, snapshot: any FilterRuntimeSnapshot) -> Self? {
         guard let domain = normalizedDomain(from: rawAffectedSite) else {
             return nil
@@ -269,16 +312,26 @@ public struct BugReportAffectedSiteFilterDecision: Equatable, Codable, Sendable 
     }
 }
 
+/// Filter configuration and compiled-snapshot counts attached to a report.
 public struct BugReportFilterSummary: Equatable, Codable, Sendable {
+    /// Catalog version used for the snapshot, when known.
     public let catalogVersion: String?
+    /// Enabled curated-list identifiers.
     public let enabledListIDs: [String]
+    /// Compiled filter-snapshot version, when known.
     public let snapshotVersion: String?
+    /// Total compiled rule count.
     public let compiledRuleCount: Int
+    /// Compiled blocklist-rule count.
     public let blocklistRuleCount: Int
+    /// Number of configured custom blocklists.
     public let customBlocklistCount: Int
+    /// Number of enabled custom blocklists.
     public let enabledCustomBlocklistCount: Int
+    /// Decision associated with the user-supplied affected site, when present.
     public let affectedSiteDecision: BugReportAffectedSiteFilterDecision?
 
+    /// Creates a summary by storing the supplied catalog, snapshot, and rule-count values.
     public init(
         catalogVersion: String?,
         enabledListIDs: [String],
@@ -300,11 +353,16 @@ public struct BugReportFilterSummary: Equatable, Codable, Sendable {
     }
 }
 
+/// One labeled value shown in the pre-submission diagnostics preview.
 public struct BugReportPreviewItem: Identifiable, Equatable, Sendable {
+    /// Stable identifier within its preview section.
     public let id: String
+    /// User-facing label describing the value.
     public let label: String
+    /// User-facing rendered value.
     public let value: String
 
+    /// Creates a preview item from an identifier, label, and rendered value.
     public init(id: String, label: String, value: String) {
         self.id = id
         self.label = label
@@ -312,12 +370,18 @@ public struct BugReportPreviewItem: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Group of related values disclosed in the pre-submission diagnostics preview.
 public struct BugReportPreviewSection: Identifiable, Equatable, Sendable {
+    /// Stable section identifier.
     public let id: String
+    /// User-facing section title.
     public let title: String
+    /// Explanation of why the section is included.
     public let purpose: String
+    /// Labeled values disclosed by the section.
     public let items: [BugReportPreviewItem]
 
+    /// Creates a preview section from its identity, explanatory copy, and items.
     public init(id: String, title: String, purpose: String, items: [BugReportPreviewItem]) {
         self.id = id
         self.title = title
@@ -326,12 +390,18 @@ public struct BugReportPreviewSection: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Serializable projection of one device debug-log line.
 public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
+    /// Subsystem or process label stored for the entry.
     public let component: String
+    /// Event label stored for the entry.
     public let event: String
+    /// Timestamp string carried by the source log.
     public let timestamp: String
+    /// Detail values stored for the entry.
     public let details: [String: String]
 
+    /// Creates an entry while truncating labels, detail keys, and detail values to report limits.
     public init(component: String, event: String, timestamp: String, details: [String: String]) {
         self.component = Self.trim(component, maxLength: 40)
         self.event = Self.trim(event, maxLength: 80)
@@ -360,6 +430,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         return parseJSONLines(combined, limit: limit)
     }
 
+    /// Parses valid JSON lines, allowlists scalar details, drops report-window churn, and keeps the newest entries.
     public static func parseJSONLines(_ data: Data, limit: Int = 40) -> [BugReportDebugLogEntry] {
         let text = String(decoding: data, as: UTF8.self)
         let entries = text
@@ -425,6 +496,7 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         return false
     }
 
+    /// JSON-compatible dictionary representation used in the request body.
     public var dictionary: [String: Any] {
         [
             "component": component,
@@ -610,10 +682,14 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
 /// relaunched the tunnel yet). `cumulativeCount` counts committed teardowns for the install's
 /// lifetime — frequency evidence the rate-limiter's crediting deliberately erases.
 public struct SelfReconnectGapRecord: Equatable, Sendable {
+    /// Wall-clock time at which the tunnel teardown gap began.
     public let startedAt: Date
+    /// Wall-clock time at which a replacement tunnel launched, or `nil` while open.
     public let endedAt: Date?
+    /// Install-lifetime count of committed self-reconnect teardowns.
     public let cumulativeCount: Int
 
+    /// Creates a gap record from its start, optional end, and cumulative count.
     public init(startedAt: Date, endedAt: Date?, cumulativeCount: Int) {
         self.startedAt = startedAt
         self.endedAt = endedAt
@@ -626,59 +702,59 @@ public struct SelfReconnectGapRecord: Equatable, Sendable {
     }
 }
 
-public struct BugReportIncidentSummary: Equatable, Sendable {
+package struct BugReportIncidentSummary: Equatable, Sendable {
     /// Bound on the surfaced timeline so a long-running session can't bloat the payload.
-    public static let maxSelfReconnectTimes = 20
+    package static let maxSelfReconnectTimes = 20
 
-    public let selfReconnectTimes: [Date]
-    public let lastFailureReason: String?
-    public let consecutiveUpstreamFailureCount: Int
-    public let consecutiveDNSSmokeProbeFailureCount: Int
-    public let consecutiveRejectedSmokeResponseCount: Int
-    public let lastUpstreamFailureAt: Date?
-    public let lastUpstreamSuccessAt: Date?
-    public let lastPrimaryUpstreamSuccessAt: Date?
-    public let lastEncryptedFallbackSuccessAt: Date?
-    public let lastDNSSmokeProbeAt: Date?
-    public let lastDNSSmokeProbeSucceeded: Bool?
-    public let lastNetworkChangeAt: Date?
-    public let networkChangeCount: Int
-    public let lastResolverRuntimeResetAt: Date?
-    public let lastResolverRuntimeResetReason: String?
-    public let resolverRuntimeResetCount: Int
-    public let lastResolverIdentityChangeAt: Date?
+    package let selfReconnectTimes: [Date]
+    package let lastFailureReason: String?
+    package let consecutiveUpstreamFailureCount: Int
+    package let consecutiveDNSSmokeProbeFailureCount: Int
+    package let consecutiveRejectedSmokeResponseCount: Int
+    package let lastUpstreamFailureAt: Date?
+    package let lastUpstreamSuccessAt: Date?
+    package let lastPrimaryUpstreamSuccessAt: Date?
+    package let lastEncryptedFallbackSuccessAt: Date?
+    package let lastDNSSmokeProbeAt: Date?
+    package let lastDNSSmokeProbeSucceeded: Bool?
+    package let lastNetworkChangeAt: Date?
+    package let networkChangeCount: Int
+    package let lastResolverRuntimeResetAt: Date?
+    package let lastResolverRuntimeResetReason: String?
+    package let resolverRuntimeResetCount: Int
+    package let lastResolverIdentityChangeAt: Date?
     /// Fail-closed serve trace (session-scoped, from TunnelHealthSnapshot). Kept out of
     /// user-facing counts (#164); surfaced here so a fail-closed window is distinguishable
     /// from "no incident" in a field report.
-    public let failClosedServedQueryCount: Int
-    public let lastFailClosedAt: Date?
-    public let lastFailClosedReason: String?
+    package let failClosedServedQueryCount: Int
+    package let lastFailClosedAt: Date?
+    package let lastFailClosedReason: String?
     /// The most recent Focus-driven switch attempt (LAV-100 Phase 4). Diagnostic-only, privacy-safe; lets a
     /// closed-app Focus failure be localized on internal TestFlight without a device or the QA device log.
-    public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
+    package let lastFocusSwitch: FocusSwitchDiagnosticRecord?
     /// Durable gap evidence (LAV-92/93) — survives the productive credit and the 600 s prune.
-    public let selfReconnectGap: SelfReconnectGapRecord?
+    package let selfReconnectGap: SelfReconnectGapRecord?
     /// Whether the recorded gap is ONGOING (still open — protection has been down the whole
     /// time, however long) or ENDED within the last 24 h (a 3-day outage that ended an hour
     /// ago is fresh evidence). `hasContent` keys on this, not on the record's existence: the
     /// record never expires (that is its job), and a long-closed install-lifetime record
     /// flipping `has_incident_summary` true forever would be the same misleading-true failure
     /// the always-persisted Focus record has.
-    public let hasRecentSelfReconnectGap: Bool
+    package let hasRecentSelfReconnectGap: Bool
     /// OBS R2: the append-only incident ledger timeline (oldest-first, already bounded
     /// to 50 records / 7 days by the store). Decoupled from the policy stores, so a
     /// report filed 30 minutes after a thrash finally carries the timestamped incident.
-    public let recentIncidents: [IncidentLedgerRecord]
+    package let recentIncidents: [IncidentLedgerRecord]
     /// Like the gap: `hasContent` keys on RECENCY (any ledger record < 24 h old), not
     /// on the file's existence — week-old records are context, not a live incident.
-    public let hasRecentLedgerIncident: Bool
+    package let hasRecentLedgerIncident: Bool
     /// The Focus record never expires (that is its job as a diagnostic of the LAST
     /// switch), so its bare existence must not flip `has_incident_summary` forever —
     /// the misleading-true failure the 2026-07 review flagged (OBS-1). Recency-gated
     /// like the gap and the ledger.
-    public let hasRecentFocusSwitch: Bool
+    package let hasRecentFocusSwitch: Bool
 
-    public init(
+    package init(
         health: TunnelHealthSnapshot,
         selfReconnectTimes: [Date],
         lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
@@ -734,17 +810,17 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
         } ?? false
     }
 
-    public var selfReconnectCount: Int {
+    package var selfReconnectCount: Int {
         selfReconnectTimes.count
     }
 
-    public var lastSelfReconnectAt: Date? {
+    package var lastSelfReconnectAt: Date? {
         selfReconnectTimes.last
     }
 
     /// True when there is any recovery evidence worth reading — drives the honest
     /// `has_incident_summary` flag that replaces the always-false `has_recent_dns_events`.
-    public var hasContent: Bool {
+    package var hasContent: Bool {
         !selfReconnectTimes.isEmpty
             || lastFailureReason != nil
             || consecutiveUpstreamFailureCount > 0
@@ -771,7 +847,7 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
             || hasRecentLedgerIncident
     }
 
-    public var dictionary: [String: Any] {
+    package var dictionary: [String: Any] {
         var body: [String: Any] = [
             "self_reconnect_count": selfReconnectCount,
             "consecutive_upstream_failure_count": consecutiveUpstreamFailureCount,
@@ -868,15 +944,25 @@ public struct BugReportIncidentSummary: Equatable, Sendable {
     }
 }
 
+/// Complete feedback payload and optional diagnostic snapshots prepared for review or submission.
 public struct BugReportBundle: Sendable {
+    /// Unique report identifier sent to backend triage.
     public let reportID: UUID
+    /// User-entered feedback context and diagnostics choice.
     public let context: BugReportContext
+    /// App version snapshot.
     public let app: BugReportAppSnapshot
+    /// Device environment snapshot.
     public let device: BugReportDeviceSnapshot
+    /// VPN status and tunnel-health snapshot.
     public let vpn: BugReportVPNSnapshot
+    /// Filter configuration and compiled-rule summary.
     public let filters: BugReportFilterSummary
+    /// Aggregate local filtering diagnostics.
     public let diagnostics: DiagnosticsStore
+    /// Whether local domain history was enabled when the bundle was prepared.
     public let localHistoryEnabled: Bool
+    /// Device debug-log entries selected for the report window.
     public let debugLogEntries: [BugReportDebugLogEntry]
     /// Recent self-reconnect attempt timestamps the tunnel persisted to the shared app group
     /// (read app-side — never touches the tunnel's frozen recovery path). Folded into `incident`.
@@ -891,6 +977,7 @@ public struct BugReportBundle: Sendable {
     /// Diagnostic-only; folded into `incident`.
     public let recentIncidents: [IncidentLedgerRecord]
 
+    /// Creates a bundle by storing user context and the supplied diagnostic snapshots.
     public init(
         reportID: UUID = UUID(),
         context: BugReportContext,
@@ -922,7 +1009,7 @@ public struct BugReportBundle: Sendable {
     }
 
     /// The redacted recovery/escalation envelope surfaced in the report (LAV-94 B).
-    public var incident: BugReportIncidentSummary {
+    package var incident: BugReportIncidentSummary {
         BugReportIncidentSummary(
             health: vpn.health,
             selfReconnectTimes: selfReconnectTimes,
@@ -932,6 +1019,7 @@ public struct BugReportBundle: Sendable {
         )
     }
 
+    /// Ordered disclosure sections shown before the user submits optional diagnostics.
     public var previewSections: [BugReportPreviewSection] {
         [
             whatHappenedSection,
@@ -945,6 +1033,7 @@ public struct BugReportBundle: Sendable {
         ]
     }
 
+    /// Builds the backend request body, attaching diagnostic sections only when the user opted in.
     public func makeRequestBody() -> [String: Any] {
         let incident = incident
         var body: [String: Any] = [
@@ -1234,7 +1323,9 @@ public struct BugReportBundle: Sendable {
     }
 }
 
+/// Chooses whether a prepared draft still matches the context being submitted.
 public enum BugReportSubmissionBundlePolicy {
+    /// Reuses a matching draft; otherwise invokes the factory and returns a fresh bundle.
     public static func bundleToSubmit(
         draft: BugReportBundle?,
         currentContext: BugReportContext,

@@ -2,15 +2,18 @@ import XCTest
 
 final class AccountSignInSourceTests: XCTestCase {
     func testSettingsAccountEntryAndPageUseBackupTitle() throws {
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try [
+            readSource(.settingsView),
+            readSource(.accountBackupSettingsView),
+        ].joined(separator: "\n")
         let settingsRootBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "struct SettingsView: View",
-            endingBefore: "private struct AccountSettingsView: View"
+            endingBefore: "struct AccountSettingsView: View"
         )
         let accountPageBlock = try sourceBlock(
             in: settingsViewSource,
-            startingAt: "private struct AccountSettingsView: View",
+            startingAt: "struct AccountSettingsView: View",
             endingBefore: "private struct BackupOptionControl: View"
         )
 
@@ -26,7 +29,7 @@ final class AccountSignInSourceTests: XCTestCase {
     func testSignInRowsUseProviderSpecificProgressState() throws {
         // The account cluster lives in AccountController since the Phase D3 peel; the
         // view rows observe the `account` environment object.
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try readSource(.accountBackupSettingsView)
         let controllerSource = try readSource(.accountController)
 
         XCTAssertTrue(controllerSource.contains("var isAppleSignInInProgress: Bool"))
@@ -62,7 +65,7 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testConnectedTitlesAreProviderSpecific() throws {
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try readSource(.accountBackupSettingsView)
         // The connection flags + action titles live on AccountController since the
         // Phase D3 peel; the view reads them off the `account` environment object.
         let controllerSource = try readSource(.accountController)
@@ -110,7 +113,7 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountSheetsShowProviderEmailRows() throws {
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try readSource(.accountBackupSettingsView)
         let onboardingSource = try readSource(.onboardingFlowView)
         // The published connections live on AccountController (Phase D3 peel); both
         // sheets read them off the `account` environment object.
@@ -142,7 +145,7 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountSheetProviderRowsMatchActionTypographyTruncateLongEmailsAndSignOutIsNeutral() throws {
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try readSource(.accountBackupSettingsView)
         let onboardingSource = try readSource(.onboardingFlowView)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
@@ -152,7 +155,7 @@ final class AccountSignInSourceTests: XCTestCase {
         let settingsConnectionRowBlock = try sourceBlock(
             in: settingsViewSource,
             startingAt: "private struct AccountConnectionRow: View",
-            endingBefore: "private struct SettingsActionRow"
+            endingBefore: "private struct GoogleSignInIcon: View"
         )
         let onboardingSheetBlock = try sourceBlock(
             in: onboardingSource,
@@ -300,7 +303,7 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountDeletionIsExposedFromAccountSheets() throws {
-        let settingsViewSource = try readSource(.settingsView)
+        let settingsViewSource = try readSource(.accountBackupSettingsView)
         let onboardingSource = try readSource(.onboardingFlowView)
         let appViewModelSource = try readSource(.appViewModel)
         // The deleteAccount flow lives on AccountController since the Phase D3 peel.

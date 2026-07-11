@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecAppServices
 
 struct BackupAccountSession: Equatable, Sendable {
     let userID: String

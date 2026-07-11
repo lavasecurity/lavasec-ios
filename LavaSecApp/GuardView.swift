@@ -1,5 +1,6 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
+import LavaSecPresentation
 import UIKit
 
 private enum ProtectionStatusMetrics {

@@ -23,10 +23,10 @@ public struct ShareableFilterConfiguration: Equatable, Sendable {
     /// tolerant of missing keys.
     public static let currentSchemaVersion = 1
 
-    public var schemaVersion: Int
-    public var enabledBlocklistIDs: Set<String>
-    public var blockedDomains: Set<String>
-    public var customBlocklists: [CustomBlocklistSource]
+    public private(set) var schemaVersion: Int
+    public private(set) var enabledBlocklistIDs: Set<String>
+    public private(set) var blockedDomains: Set<String>
+    public private(set) var customBlocklists: [CustomBlocklistSource]
 
     public init(
         schemaVersion: Int = ShareableFilterConfiguration.currentSchemaVersion,

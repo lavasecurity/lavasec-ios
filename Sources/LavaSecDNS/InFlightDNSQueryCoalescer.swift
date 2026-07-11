@@ -9,7 +9,9 @@ import LavaSecKit
 // synchronized — access is confined to the caller's DNS state queue, matching
 // the dictionary this replaces.
 
+/// Queue-confined registry that lets duplicate cache keys share one upstream resolution without losing waiters.
 public final class InFlightDNSQueryCoalescer<Waiter> {
+    /// Tells the caller whether enqueueing transfers responsibility for starting the upstream request.
     public enum EnqueueOutcome: Equatable {
         /// First waiter for this key — the caller must start the resolution.
         case startedResolution
@@ -19,12 +21,14 @@ public final class InFlightDNSQueryCoalescer<Waiter> {
 
     private var waitersByKey: [DNSCacheKey: [Waiter]] = [:]
 
+    /// Creates an empty registry with no synchronization; callers own queue confinement.
     public init() {}
 
-    public var inFlightKeyCount: Int {
+    package var inFlightKeyCount: Int {
         waitersByKey.count
     }
 
+    /// Retains a waiter in arrival order and identifies whether this key needs a new upstream resolution.
     public func enqueue(_ waiter: Waiter, for key: DNSCacheKey) -> EnqueueOutcome {
         if waitersByKey[key] != nil {
             waitersByKey[key]?.append(waiter)

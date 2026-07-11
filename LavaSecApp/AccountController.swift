@@ -1,5 +1,4 @@
 import Foundation
-import LavaSecCore
 import SwiftUI
 
 // The account/sign-in feature, peeled out of AppViewModel (Phase D3, lavasec-infra

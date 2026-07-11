@@ -32,7 +32,7 @@ public final class UDPResolverSocket {
     private static let maxMismatchedResponses = 8
 
     /// The upstream resolver this socket exchanges datagrams with.
-    public let endpoint: ResolverEndpoint
+    internal let endpoint: ResolverEndpoint
     private let fileDescriptor: Int32
     // Destination port for queries and the required source port for responses.
     // Production traffic is always DNS port 53 (public initializer); the

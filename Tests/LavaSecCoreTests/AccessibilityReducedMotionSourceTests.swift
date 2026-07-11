@@ -68,7 +68,7 @@ final class AccessibilityReducedMotionSourceTests: XCTestCase {
     }
 
     func testFiltersCategoryScrollIsGated() throws {
-        let source = try readSource(.filtersView)
+        let source = try readSource(.blocklistPickerView)
         XCTAssertTrue(
             source.contains("withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.25), reduceMotion: reduceMotion))"),
             "The category jump-pill scroll must be gated on Reduce Motion."

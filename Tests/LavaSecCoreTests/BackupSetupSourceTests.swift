@@ -229,11 +229,7 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(controllerSource.contains("storeRecoverySecret"))
         XCTAssertFalse(controllerSource.contains("backupPasskeyRecoveryService"))
 
-        let serviceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("LavaSecApp/BackupPasskeyRecoveryService.swift")
+        let serviceURL = expectedAbsentSourceFileURL(.backupPasskeyRecoveryService)
         XCTAssertFalse(FileManager.default.fileExists(atPath: serviceURL.path))
     }
 
@@ -287,7 +283,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testSetupFlowIsFullSheetWithFooterActions() throws {
         let source = try readSource(.backupSetupView)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.accountBackupSettingsView)
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // not pushed onto the settings navigation stack.
@@ -308,7 +304,7 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.accountBackupSettingsView)
         let controllerSource = try readSource(.backupController)
 
         XCTAssertTrue(settingsSource.contains("backup.isEncryptedBackupConfigured"))

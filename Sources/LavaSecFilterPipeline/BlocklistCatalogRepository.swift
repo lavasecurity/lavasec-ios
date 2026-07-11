@@ -7,10 +7,10 @@ struct LoadedCatalogPayloadValue: Sendable {
     let shouldCache: Bool
 }
 
-// Owns catalog METADATA only: fetching, caching, freshness, and reads of
-// catalog/latest.json. Raw blocklist payload caching and rule compilation stay
-// with BlocklistCatalogSynchronizer; cheap metadata reads (the warm-start reuse
-// gate, freshness checks) no longer drag the payload/compile machinery along.
+/// Locates the persisted blocklist catalog metadata.
+///
+/// Raw blocklist payload caching and rule compilation are owned by
+/// ``BlocklistCatalogSynchronizer``.
 public struct BlocklistCatalogRepository: Sendable {
     // The catalog is METADATA only (source list + hashes), so a few hundred KB in
     // practice. Cap it before decoding so a compromised/MITM catalog host (incl. the
@@ -18,13 +18,13 @@ public struct BlocklistCatalogRepository: Sendable {
     // out-of-memory JSON decode in the tight extension/app budget. This is the
     // decode-side guard; a streaming byte ceiling during the download itself is a
     // separate, larger hardening (the body is still materialized by the fetcher).
-    public static let maximumCatalogBytes = 8 * 1024 * 1024
+    internal static let maximumCatalogBytes = 8 * 1024 * 1024
 
-    public let cacheDirectoryURL: URL
+    internal let cacheDirectoryURL: URL
     private let catalogURLs: [URL]
     private let dataFetcher: BlocklistCatalogDataFetcher
 
-    public init(
+    internal init(
         cacheDirectoryURL: URL,
         catalogURLs: [URL] = LavaSecAPI.catalogURLs,
         dataFetcher: @escaping BlocklistCatalogDataFetcher = BlocklistCatalogSynchronizer.defaultDataFetcher
@@ -34,17 +34,18 @@ public struct BlocklistCatalogRepository: Sendable {
         self.dataFetcher = dataFetcher
     }
 
-    public var latestCatalogURL: URL {
+    internal var latestCatalogURL: URL {
         Self.latestCatalogURL(in: cacheDirectoryURL)
     }
 
+    /// Returns the standard cached-catalog file within a cache directory.
     public static func latestCatalogURL(in cacheDirectoryURL: URL) -> URL {
         cacheDirectoryURL
             .appendingPathComponent("catalog", isDirectory: true)
             .appendingPathComponent("latest.json")
     }
 
-    public func cachedCatalog() throws -> BlocklistCatalog {
+    internal func cachedCatalog() throws -> BlocklistCatalog {
         let url = latestCatalogURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw BlocklistCatalogSyncError.noCachedCatalog
@@ -57,11 +58,11 @@ public struct BlocklistCatalogRepository: Sendable {
         return try BlocklistCatalogSynchronizer.makeJSONDecoder().decode(BlocklistCatalog.self, from: data)
     }
 
-    public func cachedCatalogAge(now: Date = Date()) -> TimeInterval? {
+    internal func cachedCatalogAge(now: Date = Date()) -> TimeInterval? {
         Self.cachedCatalogAge(in: cacheDirectoryURL, now: now)
     }
 
-    public func hasFreshCachedCatalog(maxAge: TimeInterval, now: Date = Date()) -> Bool {
+    internal func hasFreshCachedCatalog(maxAge: TimeInterval, now: Date = Date()) -> Bool {
         guard let age = cachedCatalogAge(now: now) else {
             return false
         }
@@ -69,7 +70,7 @@ public struct BlocklistCatalogRepository: Sendable {
         return age <= maxAge
     }
 
-    public static func cachedCatalogAge(in cacheDirectoryURL: URL, now: Date = Date()) -> TimeInterval? {
+    internal static func cachedCatalogAge(in cacheDirectoryURL: URL, now: Date = Date()) -> TimeInterval? {
         let url = latestCatalogURL(in: cacheDirectoryURL)
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let modifiedAt = attributes[.modificationDate] as? Date
@@ -111,7 +112,7 @@ public struct BlocklistCatalogRepository: Sendable {
         return LoadedCatalogPayloadValue(catalog: catalog, data: data, shouldCache: false)
     }
 
-    public func saveLatestCatalog(_ data: Data) throws {
+    internal func saveLatestCatalog(_ data: Data) throws {
         try FileManager.default.createDirectory(
             at: latestCatalogURL.deletingLastPathComponent(),
             withIntermediateDirectories: true

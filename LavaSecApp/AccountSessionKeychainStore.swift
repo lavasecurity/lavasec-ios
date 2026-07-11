@@ -1,5 +1,6 @@
 import Foundation
-import LavaSecCore
+import LavaSecKit
+import LavaSecAppServices
 import Security
 
 enum AccountSessionKeychainStoreError: Error, LocalizedError, Sendable {

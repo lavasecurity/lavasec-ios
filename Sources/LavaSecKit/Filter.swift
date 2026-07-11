@@ -31,7 +31,7 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     public var blockedDomains: Set<String>
     public var allowedDomains: Set<String>
 
-    public var createdAt: Date
+    public private(set) var createdAt: Date
     /// The versioned-artifact token this filter last compiled to, if any. Used both
     /// for GC retention (keep this filter's compiled dir warm) and the instant-switch
     /// cache (a still-present token dir ⇒ a switch is a pointer flip, not a compile).
@@ -39,7 +39,7 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     public var lastCompiledToken: String?
     /// Per-filter freshness timestamp (Phase 3). `nil` ⇒ fall back to the global
     /// catalog freshness signal.
-    public var lastSyncedAt: Date?
+    public private(set) var lastSyncedAt: Date?
 
     public init(
         id: String = defaultFilterID,

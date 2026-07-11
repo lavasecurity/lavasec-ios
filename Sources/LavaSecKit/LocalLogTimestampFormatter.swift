@@ -1,11 +1,11 @@
 import Foundation
 
-public enum LocalLogTimestampFormatter {
-    public static func string(from timestamp: Date) -> String {
+package enum LocalLogTimestampFormatter {
+    package static func string(from timestamp: Date) -> String {
         string(from: timestamp, uses24HourClock: systemUses24HourClock())
     }
 
-    public static func string(from timestamp: Date, uses24HourClock: Bool) -> String {
+    package static func string(from timestamp: Date, uses24HourClock: Bool) -> String {
         "\(dateString(from: timestamp)), \(timeString(from: timestamp, uses24HourClock: uses24HourClock))"
     }
 

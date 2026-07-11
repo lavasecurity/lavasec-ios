@@ -4,9 +4,13 @@ import LavaSecKit
 /// Outcome of a headless Focus-driven filter switch. Relocated from `AppViewModel` (LAV-100 Phase 4)
 /// so the App Intents extension can report it without the app target.
 public enum HeadlessFocusSwitchOutcome: String, Equatable, Sendable {
+    /// The requested filter was committed and published.
     case committed
+    /// The request was recorded for later foreground reconciliation.
     case deferred
+    /// The requested filter was already active.
     case alreadyActive
+    /// The request was refused by a fail-closed guard.
     case disallowed
 }
 
@@ -34,36 +38,37 @@ public enum HeadlessFocusFilterSwitchEngine {
     /// identifier + NetworkExtension stay out of LavaSecCore. Not `Sendable`: it is used entirely on the
     /// calling task; only individual `Sendable` values cross into detached tasks / the publish actor.
     public struct Environment {
-        public let containerURL: URL
-        public let configurationURL: URL
-        public let filterLibraryURL: URL
-        public let catalogCacheURL: URL
-        public let backgroundWarmIndexURL: URL
-        public let publishLockURL: URL
-        public let focusSwitchLockURL: URL
+        internal let containerURL: URL
+        internal let configurationURL: URL
+        internal let filterLibraryURL: URL
+        internal let catalogCacheURL: URL
+        internal let backgroundWarmIndexURL: URL
+        internal let publishLockURL: URL
+        internal let focusSwitchLockURL: URL
         /// Cross-process CAS lock for the shared (config, library) pair write (LAV-100 Phase 4 P4c).
-        public let configurationWriteLockURL: URL
+        internal let configurationWriteLockURL: URL
         /// Cross-process lock for the pending-switch MARKER record/clear (LAV-100 Phase 4).
-        public let pendingMarkerLockURL: URL
-        public let snapshotFilename: String
-        public let compactSnapshotFilename: String
-        public let defaults: UserDefaults
-        public let catalogSyncFreshnessInterval: TimeInterval
+        internal let pendingMarkerLockURL: URL
+        internal let snapshotFilename: String
+        internal let compactSnapshotFilename: String
+        internal let defaults: UserDefaults
+        internal let catalogSyncFreshnessInterval: TimeInterval
         /// Clock, injectable for tests.
-        public let now: @Sendable () -> Date
+        internal let now: @Sendable () -> Date
         /// Post a Darwin notification by name. Production: `DarwinProtectionSignalNotifier().postNotification`.
         /// Used for both the tunnel-reload signal (after a commit) and the foreground reconcile nudge.
-        public let postSignal: @Sendable (String) -> Void
+        internal let postSignal: @Sendable (String) -> Void
         /// Privacy-safe device-debug logging (no-op in Release).
-        public let log: @Sendable (_ event: String, _ details: [String: String]) -> Void
+        internal let log: @Sendable (_ event: String, _ details: [String: String]) -> Void
         /// Post a user-facing notification for a switch OUTCOME — `committed == true` ⇒ "Switched to
         /// <name>"; `committed == false` ⇒ "Couldn't switch to <name>" (a refused switch, e.g. auth-to-edit).
         /// The closure (provided by `FocusSwitchEnvironment`) gates on the category toggle + closed/
         /// backgrounded-only + permission, then posts. Default no-op (tests / the in-app caller, which has
         /// nothing to notify — the user sees the switch in-UI). Takes the resolved filter NAME (the engine
         /// has the library) so the closure needs no library access.
-        public let notifySwitchOutcome: @Sendable (_ committed: Bool, _ filterName: String) async -> Void
+        internal let notifySwitchOutcome: @Sendable (_ committed: Bool, _ filterName: String) async -> Void
 
+        /// Creates an environment from the shared files, locks, defaults, and callback seams.
         public init(
             containerURL: URL,
             configurationURL: URL,

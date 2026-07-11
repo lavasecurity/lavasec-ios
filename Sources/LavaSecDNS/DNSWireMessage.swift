@@ -1,8 +1,9 @@
 import Foundation
 import LavaSecKit
 
+/// Stateless byte-level DNS helpers used where the tunnel must preserve or validate an existing wire message.
 public enum DNSWireMessage {
-    public static func transactionID(in data: Data) -> UInt16? {
+    package static func transactionID(in data: Data) -> UInt16? {
         let data = zeroBased(data)
         guard data.count >= 2 else {
             return nil
@@ -11,7 +12,7 @@ public enum DNSWireMessage {
         return (UInt16(data[0]) << 8) | UInt16(data[1])
     }
 
-    public static func clearingTransactionID(in data: Data) -> Data {
+    package static func clearingTransactionID(in data: Data) -> Data {
         var copy = zeroBased(data)
         guard copy.count >= 2 else {
             return copy
@@ -22,6 +23,7 @@ public enum DNSWireMessage {
         return copy
     }
 
+    /// Copies the query's transaction ID into a response, returning the response unchanged when either header is short.
     public static func replacingTransactionID(in response: Data, from query: Data) -> Data {
         var copy = zeroBased(response)
         let query = zeroBased(query)
@@ -34,7 +36,7 @@ public enum DNSWireMessage {
         return copy
     }
 
-    public static func matchesTransactionID(in response: Data, query: Data) -> Bool {
+    package static func matchesTransactionID(in response: Data, query: Data) -> Bool {
         guard let responseTransactionID = transactionID(in: response),
               let queryTransactionID = transactionID(in: query)
         else {
@@ -44,11 +46,11 @@ public enum DNSWireMessage {
         return responseTransactionID == queryTransactionID
     }
 
-    public static func firstResponseMatchingTransactionID(in responses: [Data], query: Data) -> Data? {
+    package static func firstResponseMatchingTransactionID(in responses: [Data], query: Data) -> Data? {
         responses.first { matchesTransactionID(in: $0, query: query) }
     }
 
-    public static func isValidResponse(
+    package static func isValidResponse(
         _ response: Data,
         matching query: Data,
         requiresMatchingTransactionID: Bool = true
@@ -72,10 +74,11 @@ public enum DNSWireMessage {
             && queryMessage.questionBytes == responseMessage.questionBytes
     }
 
-    public static func cappingAnswerTTLs(in response: Data, to maximumTTL: UInt32) -> Data {
+    package static func cappingAnswerTTLs(in response: Data, to maximumTTL: UInt32) -> Data {
         cappingCacheableTTLs(in: response, to: maximumTTL) ?? response
     }
 
+    /// Traverses header-declared resource records, caps non-OPT TTLs in seconds, and returns `nil` if traversal is incomplete.
     public static func cappingCacheableTTLs(in response: Data, to maximumTTL: UInt32) -> Data? {
         let response = zeroBased(response)
         guard response.count >= 12 else {
@@ -127,6 +130,7 @@ public enum DNSWireMessage {
         return didCapTTL ? capped : response
     }
 
+    /// Returns true only when all declared question and resource-record bytes parse and consume the entire message.
     public static func hasWellFormedResourceRecords(_ response: Data) -> Bool {
         let response = zeroBased(response)
         guard response.count >= 12 else {

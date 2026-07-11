@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import SwiftUI
 
 // The customization-preferences feature, peeled out of AppViewModel (Phase D5,

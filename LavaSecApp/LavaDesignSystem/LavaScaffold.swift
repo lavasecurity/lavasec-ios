@@ -1,5 +1,4 @@
 import SwiftUI
-import LavaSecCore
 import UIKit
 
 extension View {
@@ -170,9 +169,9 @@ struct LavaScreenContent<Content: View>: View {
 
             content
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-        .padding(.bottom, 96)
+        .padding(.horizontal, LavaSpacing.screenHorizontal)
+        .padding(.top, LavaSpacing.screenTop)
+        .padding(.bottom, LavaSpacing.screenBottom)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(alignment: .topLeading) {
             Color.clear
@@ -197,6 +196,14 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
     let spacing: CGFloat
     let scrolls: Bool
     let viewAlignedScrolling: Bool
+    /// When set, the scaffold hosts its OWN `ScrollViewReader` around the scroll surface and
+    /// publishes the proxy through `\.lavaSheetScrollProxy`, so a pinned-header control (e.g.
+    /// the blocklist category jump-pills) can drive the list WITHOUT a caller wrapping the
+    /// whole scaffold in a reader. Wrapping externally puts this view's fill-frame *inside*
+    /// the reader, which stops the scroll surface from filling the sheet — the `.safeAreaInset`
+    /// footer then floats mid-content and the pinned header lands wrong (lavasec-ios#326
+    /// follow-up). Keeping the reader inside, below the fill-frame, preserves the bar geometry.
+    let hostsScrollProxy: Bool
     let header: Header
     let content: Content
     let footer: Footer
@@ -205,6 +212,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
         spacing: CGFloat = 18,
         scrolls: Bool = true,
         viewAlignedScrolling: Bool = false,
+        hostsScrollProxy: Bool = false,
         @ViewBuilder header: () -> Header,
         @ViewBuilder content: () -> Content,
         @ViewBuilder footer: () -> Footer
@@ -212,17 +220,32 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
         self.spacing = spacing
         self.scrolls = scrolls
         self.viewAlignedScrolling = viewAlignedScrolling
+        self.hostsScrollProxy = hostsScrollProxy
         self.header = header()
         self.content = content()
         self.footer = footer()
     }
 
     var body: some View {
-        contentSurface
+        // The fill-frame stays OUTSIDE `scrollProxyHost` so, when a reader is hosted, it is the
+        // reader (not a collapsed content-sized box) that fills the sheet — see `hostsScrollProxy`.
+        scrollProxyHost
             .background(sheetBackgroundStyle)
             .presentationBackground(sheetBackgroundStyle)
             .modifier(LavaSheetNavigationToolbarBackground(hasHeader: hasHeader))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var scrollProxyHost: some View {
+        if hostsScrollProxy {
+            ScrollViewReader { proxy in
+                contentSurface
+                    .environment(\.lavaSheetScrollProxy, proxy)
+            }
+        } else {
+            contentSurface
+        }
     }
 
     @ViewBuilder
@@ -299,8 +322,8 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
             scrollSurface
         } else {
             contentStack
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
+                .padding(.horizontal, LavaSpacing.screenHorizontal)
+                .padding(.top, LavaSpacing.screenTop)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -325,7 +348,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
 
     private var scrollContent: some View {
         contentStack
-            .padding(.horizontal, 18)
+            .padding(.horizontal, LavaSpacing.screenHorizontal)
             .padding(.top, LavaSheetScaffoldMetrics.scrollTopPadding)
             .padding(.bottom, LavaSheetScaffoldMetrics.scrollBottomPadding)
     }
@@ -339,7 +362,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
 
     private var headerBar: some View {
         header
-            .padding(.horizontal, 18)
+            .padding(.horizontal, LavaSpacing.screenHorizontal)
             .padding(.top, 12)
             .padding(.bottom, 10)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -352,7 +375,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
 
     private var footerBar: some View {
         footer
-            .padding(.horizontal, 18)
+            .padding(.horizontal, LavaSpacing.screenHorizontal)
             .padding(.top, 12)
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -382,6 +405,22 @@ private struct LavaSheetNavigationToolbarBackground: ViewModifier {
         } else {
             content.toolbarBackground(.regularMaterial, for: .navigationBar)
         }
+    }
+}
+
+/// The `ScrollViewProxy` a `LavaSheetScaffold(hostsScrollProxy: true)` publishes for its subtree,
+/// so a pinned-header control can `scrollTo` the scaffold's own scroll surface. `nil` when no
+/// hosting scaffold sits above the reader — callers must treat it as optional.
+private struct LavaSheetScrollProxyKey: EnvironmentKey {
+    // Computed (not a stored `static let`) so Swift 6 strict concurrency doesn't flag the
+    // non-Sendable `ScrollViewProxy?` as shared mutable global state — there is no storage.
+    static var defaultValue: ScrollViewProxy? { nil }
+}
+
+extension EnvironmentValues {
+    var lavaSheetScrollProxy: ScrollViewProxy? {
+        get { self[LavaSheetScrollProxyKey.self] }
+        set { self[LavaSheetScrollProxyKey.self] = newValue }
     }
 }
 
@@ -441,40 +480,6 @@ extension LavaSheetScaffold where Footer == EmptyView {
     }
 }
 
-struct LavaTabScreenContent<Content: View>: View {
-    let title: String
-    let titleAccessory: AnyView?
-    let scrolls: Bool
-    let refreshAction: (() async -> Void)?
-    let content: Content
-
-    init(
-        title: String,
-        titleAccessory: AnyView? = nil,
-        scrolls: Bool = true,
-        refreshAction: (() async -> Void)? = nil,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.titleAccessory = titleAccessory
-        self.scrolls = scrolls
-        self.refreshAction = refreshAction
-        self.content = content()
-    }
-
-    var body: some View {
-        LavaScreenContent(
-            title: title,
-            titleAccessory: titleAccessory,
-            spacing: 18,
-            scrolls: scrolls,
-            refreshAction: refreshAction
-        ) {
-            content
-        }
-    }
-}
-
 struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content: View>: View {
     let title: String
     let scrolls: Bool
@@ -515,7 +520,7 @@ struct LavaPrimaryTabScreenContent<TitleAccessory: View, Overview: View, Content
             scrollToTopTrigger: scrollToTopTrigger,
             refreshAction: refreshAction
         ) {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: LavaSpacing.xl) {
                 overview
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 

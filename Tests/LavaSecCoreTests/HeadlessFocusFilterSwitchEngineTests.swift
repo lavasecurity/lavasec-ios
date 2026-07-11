@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
 @testable import LavaSecKit
 
 /// Unit coverage for the headless Focus-switch DECISION logic — the gate, reseed/target guards, the
@@ -11,6 +12,13 @@ import XCTest
 /// validated by the source-introspection wiring tests + the internal-TestFlight behavioral test; here we
 /// assert every branch that ends in disallowed / alreadyActive / deferred and the marker + signal effects.
 final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
+    func testOutcomeRawValuesRemainStableForPersistedDiagnostics() {
+        XCTAssertEqual(HeadlessFocusSwitchOutcome.committed.rawValue, "committed")
+        XCTAssertEqual(HeadlessFocusSwitchOutcome.deferred.rawValue, "deferred")
+        XCTAssertEqual(HeadlessFocusSwitchOutcome.alreadyActive.rawValue, "alreadyActive")
+        XCTAssertEqual(HeadlessFocusSwitchOutcome.disallowed.rawValue, "disallowed")
+    }
+
     private final class SignalSpy: @unchecked Sendable {
         private let lock = NSLock()
         private var names: [String] = []

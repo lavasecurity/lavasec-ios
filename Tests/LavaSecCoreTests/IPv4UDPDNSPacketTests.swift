@@ -103,17 +103,17 @@ final class IPv4UDPDNSPacketTests: XCTestCase {
 
         XCTAssertEqual(response.count, 20 + 8 + answerPayload.count)
         XCTAssertEqual(response[0], 0x45, "version 4, IHL 5 (no options)")
-        XCTAssertEqual(readUInt16(response, at: 2), UInt16(response.count), "IPv4 total length")
-        XCTAssertEqual(readUInt16(response, at: 4), 0xABCD, "request identifier echoed")
-        XCTAssertEqual(readUInt16(response, at: 6), 0, "unfragmented response")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 2), UInt16(response.count), "IPv4 total length")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 4), 0xABCD, "request identifier echoed")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 6), 0, "unfragmented response")
         XCTAssertEqual(response[8], 64, "TTL")
         XCTAssertEqual(response[9], 17, "protocol UDP")
         XCTAssertEqual(Data(response[12..<16]), Data([10, 0, 0, 53]), "source = original destination")
         XCTAssertEqual(Data(response[16..<20]), Data([192, 168, 1, 10]), "destination = original source")
-        XCTAssertEqual(readUInt16(response, at: 20), 53, "UDP source port = original destination port")
-        XCTAssertEqual(readUInt16(response, at: 22), 51000, "UDP destination port = original source port")
-        XCTAssertEqual(readUInt16(response, at: 24), UInt16(8 + answerPayload.count), "UDP length")
-        XCTAssertEqual(readUInt16(response, at: 26), 0, "UDP checksum omitted (legal over IPv4)")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 20), 53, "UDP source port = original destination port")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 22), 51000, "UDP destination port = original source port")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 24), UInt16(8 + answerPayload.count), "UDP length")
+        XCTAssertEqual(DNSWireTestSupport.readUInt16(response, at: 26), 0, "UDP checksum omitted (legal over IPv4)")
         XCTAssertEqual(Data(response[28...]), Data(answerPayload))
     }
 
@@ -126,13 +126,13 @@ final class IPv4UDPDNSPacketTests: XCTestCase {
         // INCLUDING the checksum field, must fold to 0xFFFF.
         var sum: UInt32 = 0
         for offset in stride(from: 0, to: 20, by: 2) {
-            sum += UInt32(readUInt16(response, at: offset))
+            sum += UInt32(DNSWireTestSupport.readUInt16(response, at: offset))
         }
         while sum >> 16 != 0 {
             sum = (sum & 0xFFFF) + (sum >> 16)
         }
         XCTAssertEqual(sum, 0xFFFF, "IPv4 header checksum must validate")
-        XCTAssertNotEqual(readUInt16(response, at: 10), 0, "checksum field must actually be filled in")
+        XCTAssertNotEqual(DNSWireTestSupport.readUInt16(response, at: 10), 0, "checksum field must actually be filled in")
     }
 
     func testResponseRejectsPayloadOverflowingTotalLengthField() throws {
@@ -173,29 +173,21 @@ final class IPv4UDPDNSPacketTests: XCTestCase {
         var data = Data()
         data.append((version << 4) | ihlWords)          // version + IHL (32-bit words)
         data.append(0)                                  // DSCP/ECN
-        appendUInt16(totalLength, to: &data)            // total length
-        appendUInt16(identifier, to: &data)             // identification
-        appendUInt16(flagsAndFragmentOffset, to: &data) // flags + fragment offset
+        DNSWireTestSupport.appendUInt16(totalLength, to: &data)            // total length
+        DNSWireTestSupport.appendUInt16(identifier, to: &data)             // identification
+        DNSWireTestSupport.appendUInt16(flagsAndFragmentOffset, to: &data) // flags + fragment offset
         data.append(64)                                 // TTL
         data.append(protocolNumber)                     // protocol
-        appendUInt16(0, to: &data)                      // header checksum (unchecked on parse)
+        DNSWireTestSupport.appendUInt16(0, to: &data)                      // header checksum (unchecked on parse)
         data.append(contentsOf: sourceAddress)          // source address
         data.append(contentsOf: destinationAddress)     // destination address
         data.append(contentsOf: options)                // IP options (when IHL > 5)
-        appendUInt16(sourcePort, to: &data)             // UDP source port
-        appendUInt16(destinationPort, to: &data)        // UDP destination port
-        appendUInt16(udpLength, to: &data)              // UDP length (header + payload)
-        appendUInt16(0, to: &data)                      // UDP checksum (omitted)
+        DNSWireTestSupport.appendUInt16(sourcePort, to: &data)             // UDP source port
+        DNSWireTestSupport.appendUInt16(destinationPort, to: &data)        // UDP destination port
+        DNSWireTestSupport.appendUInt16(udpLength, to: &data)              // UDP length (header + payload)
+        DNSWireTestSupport.appendUInt16(0, to: &data)                      // UDP checksum (omitted)
         data.append(contentsOf: payload)                // DNS payload
         return data
     }
 
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
-
-    private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-    }
 }

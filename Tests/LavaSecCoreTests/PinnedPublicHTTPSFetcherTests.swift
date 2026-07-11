@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import LavaSecCore
 @testable import LavaSecKit
-@testable import LavaSecDNS
+@testable import LavaSecNetworking
 
 /// SEC-1 connect-time peer-IP validation. The blocklist source fetcher resolves each host
 /// ONCE, refuses unless every resolved address is public, and pins the connection to a
@@ -10,6 +10,27 @@ import XCTest
 /// rebinding) that the IP-literal-only URL gate could not see, for BOTH the initial URL and
 /// every redirect hop. These exercise the gate and the HTTP framing directly (no network).
 final class PinnedPublicHTTPSFetcherTests: XCTestCase {
+
+    func testFetcherAndCrossTargetEntryPointStayPackageScoped() throws {
+        let source = try readSource(.pinnedPublicHTTPSFetcher)
+
+        XCTAssertFalse(
+            source.contains("public enum PinnedPublicHTTPSFetcher {"),
+            "The fetcher implementation seam must not be exported as public API."
+        )
+        XCTAssertFalse(
+            source.contains("public static func fetchResponse("),
+            "The cross-target fetch entry point must not be exported as public API."
+        )
+        XCTAssertTrue(
+            source.contains("package enum PinnedPublicHTTPSFetcher {"),
+            "The fetcher must remain available to same-package production consumers."
+        )
+        XCTAssertTrue(
+            source.contains("package static func fetchResponse("),
+            "The fetch entry point must remain available across package targets."
+        )
+    }
 
     // A resolver that returns a fixed answer for any host, and records that it was consulted.
     // `@unchecked Sendable`: the injected resolver runs synchronously on the test thread, so the

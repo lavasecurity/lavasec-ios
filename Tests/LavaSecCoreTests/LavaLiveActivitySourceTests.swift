@@ -117,7 +117,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let routeBlock = try sourceBlock(
             in: settings,
             startingAt: "enum SettingsRoute: Hashable",
-            endingBefore: "private enum LavaWebLinks"
+            endingBefore: "struct SettingsRouteDestinationView: View"
         )
         let rootBlock = try sourceBlock(
             in: settings,
@@ -139,11 +139,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testCustomizationPageUsesApprovedCopyAndControls() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct CustomizationSettingsView: View",
-            endingBefore: "struct DNSResolverSettingsView: View"
+            startingAt: "struct CustomizationSettingsView: View"
         )
 
         XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Appearance\")"))
@@ -300,11 +299,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testCustomizationPageOffersLavaHapticsToggleBetweenLiveActivitiesAndLanguage() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct CustomizationSettingsView: View",
-            endingBefore: "struct DNSResolverSettingsView: View"
+            startingAt: "struct CustomizationSettingsView: View"
         )
 
         // The standalone Haptics section, not the removed "Appearance & Haptics" /
@@ -330,7 +328,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testLiveActivityPauseLengthStepperIsGatedToLiveActivitiesSection() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let appViewModel = try readSource(.appViewModel)
         // The pause-length preference lives on CustomizationController (Phase D5 peel);
         // the hub's reconcile still threads it into the published content state.
@@ -339,8 +337,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let controller = try readSource(.lavaLiveActivityController)
         let customizationBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct CustomizationSettingsView: View",
-            endingBefore: "struct DNSResolverSettingsView: View"
+            startingAt: "struct CustomizationSettingsView: View"
         )
         let liveActivitiesSection = try sourceBlock(
             in: customizationBlock,
@@ -377,7 +374,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testMaskedLavaGuardIconUsesOriginalShieldContour() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let sharedMascot = try readSource(.softShieldGuardian)
         let maskedIconBlock = try sourceBlock(
             in: settings,
@@ -399,16 +396,15 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testCustomizationLanguageRowRedirectsToIOSSettingsAfterLiveActivities() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let customizationBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct CustomizationSettingsView: View",
-            endingBefore: "struct DNSResolverSettingsView: View"
+            startingAt: "struct CustomizationSettingsView: View"
         )
         let systemSettingsRowBlock = try sourceBlock(
             in: settings,
             startingAt: "private struct SettingsSystemSettingsRow: View",
-            endingBefore: "private struct AccountSettingsView"
+            endingBefore: "struct CustomizationSettingsView: View"
         )
 
         let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
@@ -442,7 +438,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(settings.contains("SettingsNavigationRow"))
+        XCTAssertTrue(try readSource(.settingsView).contains("SettingsNavigationRow"))
         XCTAssertTrue(settings.contains("LavaPlainCard"))
     }
 
@@ -453,7 +449,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // controller reaches it through the bridge.
         let customizationController = try readSource(.customizationController)
         let controller = try readSource(.lavaLiveActivityController)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
 
         XCTAssertTrue(controller.contains("import UIKit"))
         XCTAssertTrue(controller.contains("var canOfferLiveActivities: Bool"))
@@ -534,7 +530,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let attributes = try readSource(.lavaActivityAttributes)
         let rootView = try readSource(.rootView)
         let guardView = try readSource(.guardView)
-        let settings = try readSource(.settingsView)
+        let settings = try [
+            readSource(.customizationSettingsView),
+            readSource(.upgradeSettingsView),
+            readSource(.bugReportSettingsView),
+        ].joined(separator: "\n")
 
         XCTAssertTrue(attributes.contains("enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable, Sendable"))
         XCTAssertTrue(attributes.contains("case original"))
@@ -631,7 +631,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     func testKiwiCremeGuardLookAddsOnlyColorSchemeAndLine() throws {
         let sharedMascot = try readSource(.softShieldGuardian)
         let attributes = try readSource(.lavaActivityAttributes)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.customizationSettingsView)
         let faceBlock = try sourceBlock(
             in: sharedMascot,
             startingAt: "private func face(_ frame: GuardianMascotFrame) -> some View",
@@ -717,7 +717,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(commandService.contains("LavaSecAppGroup.sharedDefaults"))
         XCTAssertTrue(
             commandService.contains("ProtectionPauseStore(") && commandService.contains("ProtectionSessionStore("),
-            "Pause/resume command state must flow through the LavaSecCore stores, not inline key access."
+            "Pause/resume command state must flow through the LavaSecKit stores, not inline key access."
         )
         XCTAssertTrue(commandService.contains("pauseStore.pause(for: duration, requestedSessionID: sessionID, commandID: commandID)"))
         XCTAssertTrue(commandService.contains("pauseStore.resume(requestedSessionID: sessionID, commandID: commandID)"))

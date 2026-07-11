@@ -1,13 +1,13 @@
 import Foundation
 
-public enum DomainValidationError: Error, Equatable, LocalizedError, Sendable {
+internal enum DomainValidationError: Error, Equatable, LocalizedError, Sendable {
     case empty
     case tooLong
     case needsAtLeastTwoLabels
     case invalidLabel(String)
     case ipAddressNotAllowed
 
-    public var errorDescription: String? {
+    internal var errorDescription: String? {
         switch self {
         case .empty:
             LavaCoreStrings.localized("core.domain.empty")
@@ -23,15 +23,21 @@ public enum DomainValidationError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+/// A codable DNS-hostname value whose public initializer validates and normalizes its input.
 public struct DomainName: Hashable, Codable, Sendable, CustomStringConvertible {
+    /// The stored hostname; the public initializer lowercases it, removes trailing dots,
+    /// and applies IDNA conversion when available.
     public let value: String
 
+    /// Validates and normalizes a hostname, rejecting IP addresses and malformed DNS labels.
     public init(_ rawValue: String) throws {
         value = try Self.normalize(rawValue)
     }
 
+    /// The stored hostname value.
     public var description: String { value }
 
+    /// Returns a normalized DNS hostname or throws when its length, labels, or address form is invalid.
     public static func normalize(_ rawValue: String) throws -> String {
         var candidate = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
 

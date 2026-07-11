@@ -1,21 +1,6 @@
 import XCTest
 
 final class LocalizationCatalogSourceTests: XCTestCase {
-    /// Must stay in sync with the project's supported locales
-    /// (see Sources/LavaSecCore/Resources/*.lproj).
-    private static let expectedAppLocales: Set<String> = [
-        "de",
-        "en",
-        "es",
-        "fr",
-        "it",
-        "ja",
-        "ko",
-        "pt-BR",
-        "zh-Hans",
-        "zh-Hant"
-    ]
-
     func testLocalizableCatalogDoesNotMarkManualKeysStale() throws {
         let catalog = try Self.catalog(.localizableStringsCatalog)
         let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
@@ -33,6 +18,7 @@ final class LocalizationCatalogSourceTests: XCTestCase {
     func testPlusBillingOptionCatalogIncludesDynamicPaywallKeys() throws {
         let catalog = try Self.catalog(.localizableStringsCatalog)
         let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        let expectedAppLocales = try Self.expectedAppLocales()
 
         for key in [
             "Yearly, paid monthly",
@@ -49,7 +35,7 @@ final class LocalizationCatalogSourceTests: XCTestCase {
             )
             XCTAssertEqual(
                 Set(localizations.keys),
-                Self.expectedAppLocales,
+                expectedAppLocales,
                 "Localization key \(key) must include every app locale because the generic string coverage script cannot see dynamic lavaLocalized paywall keys."
             )
         }
@@ -58,6 +44,7 @@ final class LocalizationCatalogSourceTests: XCTestCase {
     func testFeedbackReviewAndSubmitCatalogKeysCoverAllLocales() throws {
         let catalog = try Self.catalog(.localizableStringsCatalog)
         let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        let expectedAppLocales = try Self.expectedAppLocales()
 
         // The bug-report review echo and submit button feed dynamic Strings through
         // .lavaLocalized, so the generic string-coverage script can't see them — pin these
@@ -78,7 +65,7 @@ final class LocalizationCatalogSourceTests: XCTestCase {
             )
             XCTAssertEqual(
                 Set(localizations.keys),
-                Self.expectedAppLocales,
+                expectedAppLocales,
                 "Localization key \(key) must include every app locale."
             )
         }
@@ -90,5 +77,10 @@ final class LocalizationCatalogSourceTests: XCTestCase {
         return try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]
         )
+    }
+
+    private static func expectedAppLocales() throws -> Set<String> {
+        let manifest = try catalog(.supportedLocalesManifest)
+        return Set(try XCTUnwrap(manifest["locales"] as? [String]))
     }
 }

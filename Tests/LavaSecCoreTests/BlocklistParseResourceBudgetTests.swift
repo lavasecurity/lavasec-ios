@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
 @testable import LavaSecKit
 
 final class BlocklistParseResourceBudgetTests: XCTestCase {

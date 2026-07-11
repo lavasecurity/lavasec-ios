@@ -9,11 +9,16 @@ import LavaSecKit
 /// mirrors the result onto an `@Published` property. Kept in LavaSecCore so the
 /// signed-in/signed-out copy branching is unit-tested rather than source-pinned.
 public enum EncryptedBackupState: Equatable, Sendable {
+    /// No encrypted backup envelope exists on this device.
     case off
+    /// A local envelope exists but has no recorded upload timestamp.
     case waitingForSignIn(estimatedByteSize: Int)
+    /// The local envelope has a recorded upload timestamp.
     case synced(estimatedByteSize: Int, uploadedAt: Date)
+    /// Backup setup remains configured but its latest operation failed with this message.
     case failed(message: String)
 
+    /// Whether the state represents an existing backup configuration.
     public var isConfigured: Bool {
         switch self {
         case .off:
@@ -25,14 +30,17 @@ public enum EncryptedBackupState: Equatable, Sendable {
         }
     }
 
+    /// Short state summary using the signed-out copy variant.
     public var summaryText: String {
         displayText(isAccountSignedIn: false).summary
     }
 
+    /// Detailed state copy using the signed-out copy variant.
     public var detailText: String {
         displayText(isAccountSignedIn: false).detail
     }
 
+    /// Returns summary and detail copy adapted to the caller's account state.
     public func displayText(isAccountSignedIn: Bool) -> (summary: String, detail: String) {
         switch self {
         case .off:

@@ -1,7 +1,9 @@
 import Foundation
 import LavaSecKit
 
+/// Matches supported upstream blocklist URLs to curated catalog source identifiers.
 public enum KnownBlocklistURLMatcher {
+    /// Returns the curated catalog source identifier matching a canonical HTTPS URL.
     public static func catalogSourceID(for url: URL) -> String? {
         guard let key = canonicalURLKey(for: url) else {
             return nil
@@ -10,7 +12,7 @@ public enum KnownBlocklistURLMatcher {
         return catalogSourceIDsByURLKey[key]
     }
 
-    public static func catalogSourceID(for rawURL: String) -> String? {
+    internal static func catalogSourceID(for rawURL: String) -> String? {
         guard let url = URL(string: rawURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             return nil
         }
@@ -94,6 +96,7 @@ extension KnownBlocklistURLMatcher {
 }
 
 public extension AppConfiguration {
+    /// Replaces recognized custom blocklists with their curated catalog source identifiers.
     func migratingKnownCustomBlocklistsToCatalogSources() -> AppConfiguration {
         let migrated = KnownBlocklistURLMatcher.migratingKnownCustomBlocklists(
             enabledBlocklistIDs: enabledBlocklistIDs,
@@ -109,7 +112,7 @@ public extension AppConfiguration {
 public extension Filter {
     /// Migrate THIS filter's known custom blocklists to catalog sources (see
     /// ``AppConfiguration/migratingKnownCustomBlocklistsToCatalogSources()``).
-    func migratingKnownCustomBlocklistsToCatalogSources() -> Filter {
+    internal func migratingKnownCustomBlocklistsToCatalogSources() -> Filter {
         let migrated = KnownBlocklistURLMatcher.migratingKnownCustomBlocklists(
             enabledBlocklistIDs: enabledBlocklistIDs,
             customBlocklists: customBlocklists

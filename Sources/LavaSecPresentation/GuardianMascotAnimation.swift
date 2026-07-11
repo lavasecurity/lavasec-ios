@@ -1,50 +1,33 @@
 import Foundation
 import LavaSecKit
 
-public enum GuardianMascotState: Equatable, Sendable {
-    case sleeping
-    case waking
-    case awake
-    case paused
-    case retrying
-    case concerned
-    case grateful
-
-    public var allowedNextStates: [GuardianMascotState] {
-        switch self {
-        case .sleeping:
-            [.waking]
-        case .waking:
-            [.awake, .retrying, .concerned, .sleeping]
-        case .awake:
-            [.sleeping, .paused, .retrying, .concerned, .grateful]
-        case .paused:
-            [.awake, .sleeping]
-        case .retrying:
-            [.awake, .concerned, .sleeping]
-        case .concerned:
-            [.awake, .retrying, .sleeping]
-        case .grateful:
-            [.awake]
-        }
-    }
-}
-
+/// Render parameters produced by a mascot animation plan at one point in time.
 public struct GuardianMascotFrame: Equatable, Sendable {
+    /// Amount used to blend between the sleeping and awake shield appearances.
     public let shieldWakeAmount: Double
+    /// Scale applied to the shield geometry.
     public let shieldScale: Double
+    /// Amount applied to the shield's glow intensity.
     public let glowAmount: Double
+    /// Amount of the sleepy-eye curve used by the renderer.
     public let sleepyEyeAmount: Double
+    /// Open amount used to render the left eye.
     public let leftEyeOpenAmount: Double
+    /// Open amount used to render the right eye.
     public let rightEyeOpenAmount: Double
+    /// Amount of wink curvature applied to the right eye.
     public let winkAmount: Double
+    /// Amount of happy-eye lengthening and curvature.
     public let happyEyeAmount: Double
+    /// Amount of concerned-eye spacing, shape, and tilt.
     public let concernAmount: Double
-    public let pauseAmount: Double
+    package let pauseAmount: Double
+    /// Amount used to widen the mouth for the grateful expression.
     public let gratitudeAmount: Double
+    /// Curve value used to render the mouth.
     public let mouthCurve: Double
 
-    public init(
+    internal init(
         shieldWakeAmount: Double,
         shieldScale: Double = 1,
         glowAmount: Double,
@@ -96,20 +79,25 @@ public struct GuardianMascotFrame: Equatable, Sendable {
     }
 }
 
+/// A mascot state animation and its rendered frames over time.
 public struct GuardianMascotAnimationPlan: Equatable, Sendable {
-    public static let sleepWakeDuration = 0.82
-    public static let blinkDelayDuration = 0.5
-    public static let blinkDuration = 0.46
+    package static let sleepWakeDuration = 0.82
+    internal static let blinkDelayDuration = 0.5
+    package static let blinkDuration = 0.46
+    /// Default total duration of the wake transition, hold, and blink sequence.
     public static let wakeDuration = sleepWakeDuration + blinkDelayDuration + blinkDuration
-    public static let sleepDuration = sleepWakeDuration
+    internal static let sleepDuration = sleepWakeDuration
+    /// Default duration for transitions that do not use sleep/wake or waking-settle timing.
     public static let stateChangeDuration = 0.44
-    public static let settleDuration = 0.22
+    internal static let settleDuration = 0.22
     private static let awakeShieldWakeAmount = 1.0
     private static let awakeGlowAmount = 0.74
     private static let awakeMouthCurve = 1.0
 
-    public let startState: GuardianMascotState
+    package let startState: GuardianMascotState
+    /// State represented when the plan completes.
     public let endState: GuardianMascotState
+    /// Elapsed-time span of the plan, in seconds.
     public let duration: Double
 
     private let style: Style
@@ -133,7 +121,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         self.style = style
     }
 
-    public static func transition(
+    package static func transition(
         from startState: GuardianMascotState,
         to endState: GuardianMascotState,
         duration overrideDuration: Double? = nil
@@ -158,6 +146,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         )
     }
 
+    /// Creates a paired-eye blink plan for a mascot state.
     public static func blink(
         on state: GuardianMascotState,
         duration overrideDuration: Double? = nil
@@ -170,7 +159,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         )
     }
 
-    public static func hold(
+    package static func hold(
         on state: GuardianMascotState,
         duration overrideDuration: Double? = nil
     ) -> GuardianMascotAnimationPlan {
@@ -182,7 +171,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         )
     }
 
-    public static func sequence(
+    package static func sequence(
         from startState: GuardianMascotState,
         to endState: GuardianMascotState
     ) -> [GuardianMascotAnimationPlan] {
@@ -195,6 +184,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         return [transitionPlan, hold(on: .awake), blink(on: .awake)]
     }
 
+    /// Creates the rendered state animation, including the wake hold and blink when applicable.
     public static func animation(
         from startState: GuardianMascotState,
         to endState: GuardianMascotState,
@@ -217,7 +207,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         )
     }
 
-    public static func stableFrame(for state: GuardianMascotState) -> GuardianMascotFrame {
+    package static func stableFrame(for state: GuardianMascotState) -> GuardianMascotFrame {
         switch state {
         case .sleeping:
             GuardianMascotFrame(
@@ -283,6 +273,7 @@ public struct GuardianMascotAnimationPlan: Equatable, Sendable {
         }
     }
 
+    /// Returns the rendered frame sampled at the supplied elapsed time.
     public func frame(at elapsed: Double) -> GuardianMascotFrame {
         switch style {
         case .interpolate:

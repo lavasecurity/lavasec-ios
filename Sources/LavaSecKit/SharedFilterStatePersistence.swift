@@ -52,8 +52,16 @@ public enum SharedFilterStatePersistence {
     /// Thrown by `writeConfigurationAndLibrary(rejectsAdvancedBeyond:)` when the on-disk generation advanced
     /// past the fenced value — a concurrent writer won, so the caller must abort rather than clobber it
     /// (LAV-100 Phase 4).
-    public struct StaleBaseGenerationError: Error { public init() {} }
+    public struct StaleBaseGenerationError: Error {
+        /// Creates the marker error used when a generation fence loses a concurrent-write race.
+        public init() {}
+    }
 
+    /// Persists a generation-matched configuration/library pair under the optional cross-process lock.
+    ///
+    /// - Throws: ``StaleBaseGenerationError`` when the fenced on-disk generation has already advanced,
+    ///   or a serialization or file-write error.
+    /// - Returns: The configuration and library values exactly as written, including their new generation.
     @discardableResult
     public static func writeConfigurationAndLibrary(
         configuration: AppConfiguration,

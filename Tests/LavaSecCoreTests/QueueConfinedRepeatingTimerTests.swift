@@ -1,82 +1,82 @@
+import Dispatch
 import XCTest
 @testable import LavaSecCore
 @testable import LavaSecKit
 @testable import LavaSecDNS
 
 /// Executable coverage for the timer mechanism behind the provider's Focus config
-/// poll (Phase E2) — cadence, re-arm safety, stop semantics. The poll's POLICY
+/// poll (Phase E2; migrated to a dispatch-backed actor in actors slice 1) —
+/// cadence, re-arm safety, stop semantics, and the synchronous `assumeIsolated`
+/// path the provider's dnsStateQueue-confined call sites use. The poll's POLICY
 /// (60 s interval, watermark rules) stays provider-side under its existing pins
 /// (FocusFilterSwitchWiringSourceTests).
 final class QueueConfinedRepeatingTimerTests: XCTestCase {
-    private let queue = DispatchQueue(label: "timer-tests")
+    private let queue = DispatchSerialQueue(label: "timer-tests")
 
-    private func onQueue<T>(_ body: @escaping () -> T) -> T {
-        queue.sync(execute: body)
-    }
-
-    func testTicksRepeatOnTheConfinedQueue() {
+    func testTicksRepeatOnTheConfinedQueue() async {
         let timer = QueueConfinedRepeatingTimer(queue: queue)
         let twoTicks = expectation(description: "two ticks")
         twoTicks.expectedFulfillmentCount = 2
-        onQueue {
-            timer.start(interval: 0.05, leeway: .milliseconds(5)) {
-                dispatchPrecondition(condition: .onQueue(self.queue))
-                twoTicks.fulfill()
-            }
+        let confinedQueue = queue // hoisted: the @Sendable tick must not capture XCTestCase self
+        await timer.start(interval: 0.05, leeway: .milliseconds(5)) {
+            dispatchPrecondition(condition: .onQueue(confinedQueue))
+            twoTicks.fulfill()
         }
-        wait(for: [twoTicks], timeout: 2)
-        onQueue { timer.stop() }
+        await fulfillment(of: [twoTicks], timeout: 2)
+        await timer.stop()
     }
 
-    func testRestartReplacesThePriorTimerInsteadOfStacking() {
+    func testRestartReplacesThePriorTimerInsteadOfStacking() async {
         let timer = QueueConfinedRepeatingTimer(queue: queue)
         let firstHandlerTicks = ManagedAtomic(0)
         let secondTick = expectation(description: "second handler ticks")
         secondTick.assertForOverFulfill = false
-        onQueue {
-            timer.start(interval: 0.05, leeway: .milliseconds(5)) {
-                firstHandlerTicks.increment()
-            }
-            // Re-arm immediately: the first handler must never fire.
-            timer.start(interval: 0.05, leeway: .milliseconds(5)) {
-                secondTick.fulfill()
-            }
+        await timer.start(interval: 0.05, leeway: .milliseconds(5)) {
+            firstHandlerTicks.increment()
         }
-        wait(for: [secondTick], timeout: 2)
+        // Re-arm immediately: the first handler must never fire.
+        await timer.start(interval: 0.05, leeway: .milliseconds(5)) {
+            secondTick.fulfill()
+        }
+        await fulfillment(of: [secondTick], timeout: 2)
         XCTAssertEqual(firstHandlerTicks.value, 0, "a replaced timer's handler must never fire")
-        onQueue { timer.stop() }
+        await timer.stop()
     }
 
-    func testStopSilencesTicksAndIsIdempotent() {
+    func testStopSilencesTicksAndIsIdempotent() async {
         let timer = QueueConfinedRepeatingTimer(queue: queue)
         let ticks = ManagedAtomic(0)
-        onQueue {
-            timer.start(interval: 0.05, leeway: .milliseconds(5)) { ticks.increment() }
-            timer.stop()
-            timer.stop() // second stop is a safe no-op
-            XCTAssertFalse(timer.isRunning)
-        }
+        await timer.start(interval: 0.05, leeway: .milliseconds(5)) { ticks.increment() }
+        await timer.stop()
+        await timer.stop() // second stop is a safe no-op
+        let running = await timer.isRunning
+        XCTAssertFalse(running)
         // Long enough for several would-be ticks.
         let quiet = expectation(description: "stays quiet")
         queue.asyncAfter(deadline: .now() + 0.25) { quiet.fulfill() }
-        wait(for: [quiet], timeout: 2)
+        await fulfillment(of: [quiet], timeout: 2)
         XCTAssertEqual(ticks.value, 0, "ticks after stop() would mean the cancel leaked")
     }
 
-    func testIsRunningTracksLifecycle() {
+    func testAssumeIsolatedGivesSynchronousOnQueueAccess() {
+        // The provider's call shape (INV-QUEUE-1): code already confined to the
+        // actor's queue accesses it synchronously — no awaits, no hops — and the
+        // runtime checks the executor where a comment used to ask politely.
         let timer = QueueConfinedRepeatingTimer(queue: queue)
-        onQueue {
-            XCTAssertFalse(timer.isRunning)
-            timer.start(interval: 60, leeway: .seconds(1)) {}
-            XCTAssertTrue(timer.isRunning)
-            timer.stop()
-            XCTAssertFalse(timer.isRunning)
+        queue.sync {
+            timer.assumeIsolated { isolated in
+                XCTAssertFalse(isolated.isRunning)
+                isolated.start(interval: 60, leeway: .seconds(1)) {}
+                XCTAssertTrue(isolated.isRunning)
+                isolated.stop()
+                XCTAssertFalse(isolated.isRunning)
+            }
         }
     }
 }
 
 /// Minimal queue-safe counter for assertions (tests only).
-private final class ManagedAtomic {
+private final class ManagedAtomic: @unchecked Sendable {
     private let lock = NSLock()
     private var raw: Int
     init(_ value: Int) { raw = value }

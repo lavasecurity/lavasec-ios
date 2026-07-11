@@ -1,5 +1,5 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
 
 enum FilterReviewOrigin: String, Identifiable {
     case filters

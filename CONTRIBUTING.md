@@ -38,6 +38,18 @@ because the test suite pins target/embed wiring as pbxproj text.
 `scripts/check-xcodegen-drift.sh` verifies the committed project still matches
 `project.yml`; run it if you touched either side.
 
+The boundary guard intentionally supports a strict subset of XcodeGen syntax. Top-level
+keys and generator options are pinned; source entries use only `path` and optional
+`buildPhase`; package dependencies use `package`/`product`, and target dependencies use
+`target` with optional `embed` and `codeSign`. Other valid XcodeGen keys fail closed
+until the parser, policy, and fixtures are deliberately extended together.
+
+### Architecture guides
+
+Before adding a package dependency or a feature that crosses app/package boundaries,
+read the [module-boundary contract](docs/architecture/module-boundaries.md) and follow
+the [feature-slice checklist](docs/architecture/feature-slice-checklist.md).
+
 ### Lint & format
 
 - **SwiftLint** runs warning-only in CI (`Repo Checks`): findings annotate the PR, never

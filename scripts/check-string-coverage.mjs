@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Catalog-coverage gate. Three checks, scoped to the bundle each string can actually
+// Catalog-coverage gate. Four checks, scoped to the bundle each string can actually
 // be resolved from at runtime:
 //
 // (1) User-facing strings at localizing call sites must exist in a bundle the running
@@ -7,12 +7,14 @@
 //       - LavaSecApp sources  -> app catalog (Localizable/InfoPlist.xcstrings) OR LavaSecCore .strings
 //       - LavaSecWidget + Shared sources -> LavaSecKit .strings ONLY (the widget extension's
 //         Resources phase is empty; it reads LavaSecKit via Bundle.module, NOT the app catalog)
-//       - AppIntents metadata (LocalizedStringResource / IntentDescription), wherever it lives,
-//         -> app catalog (the OS resolves AppIntents metadata from the registering app target)
+//       - AppIntents metadata -> the registering target's catalog (app or LavaSecIntents)
 // (2) Every `LavaCoreStrings.localized("key")` / `.localizedFormat("key")` reference must
 //     resolve to a key in LavaSecKit's en Localizable.strings.
 // (3) Interpolated `.lavaLocalized` literals fail (they form uncatalogued runtime keys); use
 //     a format key (e.g. "Word %lld".lavaLocalizedFormat(n)).
+// (4) Standalone, ordinary-quoted literal assignments to explicitly registered render-bound
+//     message properties must localize at the producer. Raw Swift string assignments are rejected
+//     conservatively. This is deliberately a narrow registry, not Swift dataflow analysis.
 //
 // Conservative: only literal arguments at high-confidence localizing sites are checked;
 // interpolated literals (except .lavaLocalized), identifiers, URLs, and QA-only UI are skipped.
@@ -39,14 +41,17 @@ const ALLOWED = new Set([
   "VPN", "LavaSec", "OK", "iOS", "Face ID", "Touch ID",
 ]);
 
+const unesc = (s) =>
+  s.replace(/\\(["nt\\])/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
+
 const catalogKeys = new Set();
 for (const f of ["Localizable.xcstrings", "InfoPlist.xcstrings"]) {
   const j = JSON.parse(fs.readFileSync(path.join(iosRoot, "LavaSecApp", f), "utf8"));
   for (const k of Object.keys(j.strings ?? {})) catalogKeys.add(k);
 }
 const coreKeys = new Set();
-for (const m of fs.readFileSync(coreStringsFile, "utf8").matchAll(/^\s*"([^"]+)"\s*=/gm)) {
-  coreKeys.add(m[1]);
+for (const m of fs.readFileSync(coreStringsFile, "utf8").matchAll(/^\s*"((?:[^"\\]|\\.)*)"\s*=/gm)) {
+  coreKeys.add(unesc(m[1]));
 }
 // LavaSecIntents has its OWN String Catalog — its AppIntents metadata resolves from the
 // extension's bundle at the default lookup, not the app catalog.
@@ -59,9 +64,6 @@ const appKnown = new Set([...catalogKeys, ...ALLOWED]);                 // AppIn
 const coreKnown = new Set([...coreKeys, ...ALLOWED]);                   // widget/extension (Bundle.module)
 const appOrCore = new Set([...catalogKeys, ...coreKeys, ...ALLOWED]);   // app UI (app bundle or LavaSecCore)
 // LavaSecIntents validates strictly against its own catalog (intentsKeys) — see the loop.
-
-const unesc = (s) =>
-  s.replace(/\\(["nt\\])/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
 
 const L = `"((?:[^"\\\\]|\\\\.)*)"`;
 const labels =
@@ -80,17 +82,26 @@ const appIntentsPatterns = [
   `\\bLocalizedStringResource\\(\\s*${L}`, `\\bLocalizedStringResource\\s*=\\s*${L}`,
   `\\bIntentDescription\\(\\s*${L}`, `\\bDisplayRepresentation\\(\\s*title:\\s*${L}`,
 ].map((p) => new RegExp(p, "g"));
-// `Summary("…")` (AppIntents ParameterSummary) is bundle-scoped to LavaSecIntents and carries a
+// `Summary("…")` (AppIntents ParameterSummary) is scoped to its registering target and carries a
 // parameter KeyPath interpolation `\(\.$name)`, which appintentsmetadataprocessor lowers to the
 // catalog token `${name}` — NOT a printf `%@` (verified against the build's
 // ExtractedAppShortcutsMetadata.stringsdata / extract.actionsdata). clean() would drop it on the
-// `\(` test, so this path handles the transform explicitly and checks the extension catalog.
+// `\(` test, so this path handles the transform explicitly and checks the app or Intents catalog.
 const summaryPattern = new RegExp(`\\bSummary\\(\\s*${L}`, "g");
 const summaryToKey = (raw) =>
   unesc(raw).replace(/\\\(\s*\\\.\$(\w+)\s*\)/g, (_, name) => `\${${name}}`);
 const presReturn = new RegExp(`\\breturn\\s+${L}`, "g");
 const coreRef = new RegExp(`LavaCoreStrings\\.(?:localized|localizedFormat)\\(\\s*${L}`, "g");
 const lavaCall = /\.lavaLocalized(?:Format)?/g;
+const renderBoundMessageProperties = new Set(["lavaSecurityPlusMessage"]);
+const renderBoundAssignment = new RegExp(
+  `(?:^|[;{}])[\\t ]*(?:self\\.)?(${[...renderBoundMessageProperties].join("|")})\\s*=(?!=)\\s*${L}\\s*(\\.lavaLocalized(?:Format)?\\b)?`,
+  "gm"
+);
+const rawRenderBoundAssignment = new RegExp(
+  `(?:^|[;{}])[\\t ]*(?:self\\.)?(${[...renderBoundMessageProperties].join("|")})\\s*=(?!=)\\s*#+"`,
+  "gm"
+);
 const LITRE = /"((?:[^"\\]|\\.)*)"/g;
 // Harvest string literals from a label arg that is NOT a bare literal (a ternary/computed
 // `title: cond ? "A" : "B"`). The named-label site only matches a literal immediately after the
@@ -134,6 +145,82 @@ function stripDebugOnly(src) {
     if (!stack.some((s) => s.debugOnly && !s.inElse)) out.push(line);
   }
   return out.join("\n");
+}
+
+// Marks source positions that are Swift code rather than comments or string contents. The
+// render-bound assignment regex remains intentionally small, then consults this mask so examples
+// in line/block comments and multiline/raw strings cannot masquerade as executable assignments.
+function swiftCodeMask(src) {
+  const mask = new Uint8Array(src.length);
+  let mode = "code";
+  let blockDepth = 0;
+  let stringHashes = 0;
+  let tripleQuoted = false;
+
+  for (let index = 0; index < src.length;) {
+    if (mode === "lineComment") {
+      if (src[index] === "\n") mode = "code";
+      index += 1;
+      continue;
+    }
+
+    if (mode === "blockComment") {
+      if (src.startsWith("/*", index)) {
+        blockDepth += 1;
+        index += 2;
+      } else if (src.startsWith("*/", index)) {
+        blockDepth -= 1;
+        index += 2;
+        if (blockDepth === 0) mode = "code";
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (mode === "string") {
+      const quote = tripleQuoted ? '\"\"\"' : '\"';
+      const closing = `${quote}${"#".repeat(stringHashes)}`;
+      if (src.startsWith(closing, index)) {
+        index += closing.length;
+        mode = "code";
+        continue;
+      }
+      if (stringHashes === 0 && !tripleQuoted && src[index] === "\\") {
+        index += Math.min(2, src.length - index);
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (src.startsWith("//", index)) {
+      mode = "lineComment";
+      index += 2;
+      continue;
+    }
+    if (src.startsWith("/*", index)) {
+      mode = "blockComment";
+      blockDepth = 1;
+      index += 2;
+      continue;
+    }
+    if (src[index] === '\"') {
+      stringHashes = 0;
+      for (let cursor = index - 1; cursor >= 0 && src[cursor] === "#"; cursor -= 1) {
+        stringHashes += 1;
+      }
+      tripleQuoted = src.startsWith('\"\"\"', index);
+      index += tripleQuoted ? 3 : 1;
+      mode = "string";
+      continue;
+    }
+
+    mask[index] = 1;
+    index += 1;
+  }
+
+  return mask;
 }
 
 // Structural filter only — membership is checked per-context by the caller.
@@ -187,6 +274,7 @@ function walk(dir) {
 const missing = new Map(); // string -> Set("file [needs: bundle]")
 const badCoreRefs = new Map();
 const badInterp = new Map();
+const unlocalizedRenderAssignments = new Map();
 const flag = (map, key, note) => {
   if (!map.has(key)) map.set(key, new Set());
   map.get(key).add(note);
@@ -233,18 +321,45 @@ for (const file of scanDirs.flatMap(walk)) {
       if (s && !aiKnown.has(s)) flag(missing, s, `${rel} [needs: ${isIntents ? "LavaSecIntents catalog" : "app catalog"}]`);
     }
   }
-  // ParameterSummary — LavaSecIntents only; interpolation-aware (yields the `${name}` token form
-  // the metadata processor extracts), so it bypasses clean()'s `\(`-drop and validates against the
-  // extension catalog. The /[A-Za-z]/ guard skips a hypothetical token-only summary.
-  if (isIntents) {
+  // ParameterSummary in the app and Intents targets is interpolation-aware (yielding the `${name}`
+  // token form extracted by the metadata processor), so it bypasses clean()'s `\(`-drop. Shared
+  // code is excluded because it can be compiled into targets with different catalog ownership.
+  if (isIntents || rel.startsWith("LavaSecApp")) {
     summaryPattern.lastIndex = 0;
     let sm;
     while ((sm = summaryPattern.exec(txt)) !== null) {
       const key = summaryToKey(sm[1]);
-      if (/[A-Za-z]/.test(key) && !intentsKeys.has(key)) {
-        flag(missing, key, `${rel} [needs: LavaSecIntents catalog]`);
+      const summaryKnown = isIntents ? intentsKeys : appKnown;
+      const summaryLabel = isIntents ? "LavaSecIntents catalog" : "app catalog";
+      if (/[A-Za-z]/.test(key) && !summaryKnown.has(key)) {
+        flag(missing, key, `${rel} [needs: ${summaryLabel}]`);
       }
     }
+  }
+  // Only properties in renderBoundMessageProperties are checked here. The assignment must begin
+  // a Swift statement (a line, brace body, or semicolon-delimited statement) with an ordinary quoted
+  // literal and localize that literal directly; aliases, computed expressions, and arbitrary state
+  // intentionally remain outside this gate's claim. Raw string assignments fail rather than silently
+  // bypassing the ordinary-literal grammar.
+  const codeMask = swiftCodeMask(txt);
+  renderBoundAssignment.lastIndex = 0;
+  let rm;
+  while ((rm = renderBoundAssignment.exec(txt)) !== null) {
+    const propertyIndex = rm.index + rm[0].indexOf(rm[1]);
+    if (!codeMask[propertyIndex]) continue;
+    if (!rm[3]) {
+      flag(
+        unlocalizedRenderAssignments,
+        `${rm[1]} = ${JSON.stringify(unesc(rm[2]))}`,
+        rel
+      );
+    }
+  }
+  rawRenderBoundAssignment.lastIndex = 0;
+  while ((rm = rawRenderBoundAssignment.exec(txt)) !== null) {
+    const propertyIndex = rm.index + rm[0].indexOf(rm[1]);
+    if (!codeMask[propertyIndex]) continue;
+    flag(unlocalizedRenderAssignments, `${rm[1]} = <raw Swift string literal>`, rel);
   }
   lavaCall.lastIndex = 0;
   let lm;
@@ -280,6 +395,13 @@ if (badInterp.size > 0) {
   failed = true;
   console.error(`\nInterpolated .lavaLocalized check FAILED: ${badInterp.size} literal(s) interpolate into the key (uncatalogued runtime keys). Use a format key (e.g. "Word %lld".lavaLocalizedFormat(n)):\n`);
   for (const [k, files] of [...badInterp].sort()) console.error(`  ${JSON.stringify(k)}  — ${[...files].join(", ")}`);
+}
+if (unlocalizedRenderAssignments.size > 0) {
+  failed = true;
+  console.error(`\nRender-bound message localization check FAILED: ${unlocalizedRenderAssignments.size} direct literal assignment(s) do not localize at the producer:\n`);
+  for (const [assignment, files] of [...unlocalizedRenderAssignments].sort()) {
+    console.error(`  ${assignment}  — ${[...files].join(", ")}`);
+  }
 }
 if (failed) process.exit(1);
 console.log(

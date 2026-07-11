@@ -4,7 +4,9 @@
 
 import Foundation
 
+/// Bundled blocklist sources generated from the canonical catalog.
 public extension DefaultCatalog {
+    /// Curated metadata for catalog source blocklistproject-basic.
     static let blockListProjectBasic = BlocklistSource(
         id: "blocklistproject-basic",
         name: "Block List Basic",
@@ -15,6 +17,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source blocklistproject-malware.
     static let blockListProjectMalware = BlocklistSource(
         id: "blocklistproject-malware",
         name: "Block List Malware",
@@ -25,6 +28,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-phishing.
     static let blockListProjectPhishing = BlocklistSource(
         id: "blocklistproject-phishing",
         name: "Block List Phishing",
@@ -35,6 +39,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-ransomware.
     static let blockListProjectRansomware = BlocklistSource(
         id: "blocklistproject-ransomware",
         name: "Block List Ransomware",
@@ -45,6 +50,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-scam.
     static let blockListProjectScam = BlocklistSource(
         id: "blocklistproject-scam",
         name: "Block List Scam",
@@ -55,6 +61,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-tif-mini.
     static let hageziThreatIntelligenceFeedMini = BlocklistSource(
         id: "hagezi-tif-mini",
         name: "HaGeZi Threat Intelligence Feed Mini",
@@ -65,6 +72,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source phishing-database-active.
     static let phishingDatabaseActive = BlocklistSource(
         id: "phishing-database-active",
         name: "Phishing.Database Active Domains",
@@ -75,6 +83,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source 1hosts-lite.
     static let oneHostsLite = BlocklistSource(
         id: "1hosts-lite",
         name: "1Hosts Lite",
@@ -85,6 +94,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source adguard-dns-filter.
     static let adGuardDNSFilter = BlocklistSource(
         id: "adguard-dns-filter",
         name: "AdGuard DNS Filter",
@@ -95,6 +105,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source hagezi-multi-light.
     static let hageziMultiLight = BlocklistSource(
         id: "hagezi-multi-light",
         name: "HaGeZi Multi Light",
@@ -105,6 +116,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source hagezi-multi-normal.
     static let hageziMultiNormal = BlocklistSource(
         id: "hagezi-multi-normal",
         name: "HaGeZi Multi Normal",
@@ -115,6 +127,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source hagezi-multi-pro.
     static let hageziMultiPro = BlocklistSource(
         id: "hagezi-multi-pro",
         name: "HaGeZi Multi PRO",
@@ -125,6 +138,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-multi-pro-mini.
     static let hageziMultiProMini = BlocklistSource(
         id: "hagezi-multi-pro-mini",
         name: "HaGeZi Multi PRO mini",
@@ -135,6 +149,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source hagezi-multi-pro-plus-mini.
     static let hageziMultiProPlusMini = BlocklistSource(
         id: "hagezi-multi-pro-plus-mini",
         name: "HaGeZi Multi PRO++ mini",
@@ -145,6 +160,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-multi-ultimate-mini.
     static let hageziMultiUltimateMini = BlocklistSource(
         id: "hagezi-multi-ultimate-mini",
         name: "HaGeZi Multi Ultimate mini",
@@ -155,6 +171,7 @@ public extension DefaultCatalog {
         warningLevel: .aggressive
     )
 
+    /// Curated metadata for catalog source oisd-big.
     static let oisdBig = BlocklistSource(
         id: "oisd-big",
         name: "OISD Big",
@@ -165,6 +182,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source oisd-small.
     static let oisdSmall = BlocklistSource(
         id: "oisd-small",
         name: "OISD Small",
@@ -175,6 +193,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source stevenblack-unified.
     static let stevenBlackUnifiedHosts = BlocklistSource(
         id: "stevenblack-unified",
         name: "StevenBlack Unified Hosts",
@@ -185,6 +204,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source blocklistproject-ads.
     static let blockListProjectAds = BlocklistSource(
         id: "blocklistproject-ads",
         name: "Block List Ads",
@@ -195,6 +215,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source blocklistproject-tracking.
     static let blockListProjectTracking = BlocklistSource(
         id: "blocklistproject-tracking",
         name: "Block List Tracking",
@@ -205,6 +226,7 @@ public extension DefaultCatalog {
         warningLevel: .normal
     )
 
+    /// Curated metadata for catalog source blocklistproject-facebook.
     static let blockListProjectFacebook = BlocklistSource(
         id: "blocklistproject-facebook",
         name: "Block List Facebook",
@@ -215,6 +237,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-tiktok.
     static let blockListProjectTikTok = BlocklistSource(
         id: "blocklistproject-tiktok",
         name: "Block List TikTok",
@@ -225,6 +248,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source stevenblack-social.
     static let stevenBlackSocial = BlocklistSource(
         id: "stevenblack-social",
         name: "StevenBlack Social",
@@ -235,6 +259,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-nsfw.
     static let hageziNSFW = BlocklistSource(
         id: "hagezi-nsfw",
         name: "HaGeZi NSFW",
@@ -245,6 +270,7 @@ public extension DefaultCatalog {
         warningLevel: .aggressive
     )
 
+    /// Curated metadata for catalog source oisd-nsfw.
     static let oisdNSFW = BlocklistSource(
         id: "oisd-nsfw",
         name: "OISD NSFW",
@@ -255,6 +281,7 @@ public extension DefaultCatalog {
         warningLevel: .aggressive
     )
 
+    /// Curated metadata for catalog source oisd-nsfw-small.
     static let oisdNSFWSmall = BlocklistSource(
         id: "oisd-nsfw-small",
         name: "OISD NSFW Small",
@@ -265,6 +292,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source stevenblack-porn.
     static let stevenBlackAdult = BlocklistSource(
         id: "stevenblack-porn",
         name: "StevenBlack Adult",
@@ -275,6 +303,7 @@ public extension DefaultCatalog {
         warningLevel: .aggressive
     )
 
+    /// Curated metadata for catalog source blocklistproject-gambling.
     static let blockListProjectGambling = BlocklistSource(
         id: "blocklistproject-gambling",
         name: "Block List Gambling",
@@ -285,6 +314,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-gambling.
     static let hageziGambling = BlocklistSource(
         id: "hagezi-gambling",
         name: "HaGeZi Gambling",
@@ -295,6 +325,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source stevenblack-gambling.
     static let stevenBlackGambling = BlocklistSource(
         id: "stevenblack-gambling",
         name: "StevenBlack Gambling",
@@ -305,6 +336,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-piracy.
     static let blockListProjectPiracy = BlocklistSource(
         id: "blocklistproject-piracy",
         name: "Block List Piracy",
@@ -315,6 +347,7 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source blocklistproject-torrent.
     static let blockListProjectTorrent = BlocklistSource(
         id: "blocklistproject-torrent",
         name: "Block List Torrent",

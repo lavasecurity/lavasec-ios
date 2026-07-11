@@ -123,6 +123,19 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertTrue(calendar.isDate(store.summary.startedAt, inSameDayAs: clearedAt))
     }
 
+    func testClearingFilteringCountsKeepsTopDomains() {
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertEqual(store.topDomains(action: .block).first, DomainFrequency(domain: "ads.example.com", count: 1))
+
+        store.clearFilteringCounts()
+
+        // Filtering counts are numeric aggregates; Top Domains is identity-level domain history,
+        // governed by clearDomainHistory — so it must survive a counts clear.
+        XCTAssertEqual(store.summary.blockedCount, 0)
+        XCTAssertEqual(store.topDomains(action: .block).first, DomainFrequency(domain: "ads.example.com", count: 1))
+    }
+
     func testTopDomainsUsesLocalHistoryOnly() {
         var store = DiagnosticsStore()
         store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
@@ -130,6 +143,116 @@ final class DiagnosticsStoreTests: XCTestCase {
         store.record(domain: "apple.com", decision: .defaultAllow, keepDomainHistory: true)
 
         XCTAssertEqual(store.topDomains(action: .block).first, DomainFrequency(domain: "ads.example.com", count: 2))
+    }
+
+    func testTopDomainsReflectFullVolumeNotJustTheCappedEventsBuffer() {
+        var store = DiagnosticsStore()
+
+        // Far more blocked queries for one domain than the 250-entry events buffer can hold —
+        // the shape of the reported discrepancy (24k queries / 10k blocks, but Top Domains
+        // summed to ~1% because it ranked only the surviving ~250 events).
+        let blockedHits = 400
+        for _ in 0..<blockedHits {
+            store.record(
+                domain: "ads.example.com",
+                decision: FilterDecision(action: .block, reason: .blocklist),
+                keepDomainHistory: true
+            )
+        }
+
+        // Domain History stays a bounded recent sample (the events buffer is still capped)...
+        XCTAssertEqual(store.recentEvents.count, 250)
+        // ...but Top Domains now reports the FULL block volume, decoupled from that cap.
+        XCTAssertEqual(
+            store.topDomains(action: .block).first,
+            DomainFrequency(domain: "ads.example.com", count: blockedHits)
+        )
+    }
+
+    func testTopDomainsNormalizeDomainCasingIntoOneKey() {
+        var store = DiagnosticsStore()
+        // recordDiagnostic forwards the raw DNS question, which can be 0x20-/mixed-case for the
+        // same host. Top Domains must collapse them to one normalized key.
+        store.record(domain: "ADS.Example.COM", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+
+        let top = store.topDomains(action: .block)
+        XCTAssertEqual(top.count, 1)
+        XCTAssertEqual(top.first, DomainFrequency(domain: "ads.example.com", count: 2))
+    }
+
+    func testTopDomainsRespectTheDomainHistoryPrivacyGate() {
+        var store = DiagnosticsStore()
+
+        // Counts on, domain history off: the aggregate block count climbs, but no specific
+        // domain is retained, so Top Domains stays empty — it honors the domain-history
+        // toggle, not the filtering-counts toggle.
+        store.record(
+            domain: "ads.example.com",
+            decision: FilterDecision(action: .block, reason: .blocklist),
+            keepFilteringCounts: true,
+            keepDomainHistory: false
+        )
+
+        XCTAssertEqual(store.summary.blockedCount, 1)
+        XCTAssertTrue(store.topDomains(action: .block).isEmpty)
+        XCTAssertTrue(store.recentEvents.isEmpty)
+    }
+
+    func testClearingDomainHistoryAlsoClearsTopDomainsButKeepsCounts() {
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertFalse(store.topDomains(action: .block).isEmpty)
+
+        store.clearDomainHistory()
+
+        XCTAssertTrue(store.topDomains(action: .block).isEmpty, "Top Domains is identity-level history and clears with it")
+        XCTAssertEqual(store.summary.blockedCount, 1, "numeric trends survive a domain-history clear")
+    }
+
+    func testTopDomainDetailExpiresWithFineGrainedWindowButNumericCountsPersist() {
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        XCTAssertEqual(store.topDomains(action: .block).first, DomainFrequency(domain: "ads.example.com", count: 1))
+
+        let pastWindow = Date().addingTimeInterval(TimeInterval(LocalLogRetention.fineGrainedDays + 1) * 86_400)
+        XCTAssertTrue(store.pruneExpiredFineGrainedData(now: pastWindow))
+
+        // Identity-level Top Domains detail expires with the fine-grained window...
+        XCTAssertTrue(store.topDomains(action: .block).isEmpty)
+        // ...but the numeric block trend survives — "details expire, trends don't".
+        XCTAssertEqual(store.summary.blockedCount, 1)
+    }
+
+    func testTopDomainDetailSurvivesUntilTheWholeDayExitsTheWindow() throws {
+        // A day bucket is day-granular, so it must keep its Top Domains detail until the WHOLE
+        // day has aged out — clearing at "day start older than the 7-day cutoff" would strip a
+        // still-in-window afternoon and make Top Domains go empty while Domain History still
+        // lists those rows by exact timestamp (PR #327 review).
+        //
+        // Anchored to TODAY, not a fixed calendar date: record() runs an internal prune with
+        // the REAL clock, so a hardcoded past day silently ages out of the 7-day window as the
+        // calendar advances and the recorded detail is cleared at record time — the original
+        // fixed-date version of this test broke exactly 7 days after it was written.
+        let calendar = Calendar(identifier: .gregorian)
+        let recordDay = try XCTUnwrap(calendar.date(byAdding: .hour, value: 12, to: calendar.startOfDay(for: Date())))
+        var store = DiagnosticsStore(startedAt: recordDay)
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+
+        // 7 days + 6 hours after the recorded noon: the day START is past the cutoff, but the
+        // day's afternoon is still inside the window — detail must be kept.
+        let partiallyExpired = recordDay.addingTimeInterval(TimeInterval(LocalLogRetention.fineGrainedDays) * 86_400 + 6 * 3_600)
+        store.pruneExpiredFineGrainedData(now: partiallyExpired)
+        XCTAssertEqual(
+            store.topDomains(action: .block).first,
+            DomainFrequency(domain: "ads.example.com", count: 1),
+            "an in-window day's Top Domains must not be cleared early"
+        )
+
+        // One more day on: the whole recorded day has now aged out, so the detail clears.
+        let fullyExpired = recordDay.addingTimeInterval(TimeInterval(LocalLogRetention.fineGrainedDays + 1) * 86_400 + 6 * 3_600)
+        store.pruneExpiredFineGrainedData(now: fullyExpired)
+        XCTAssertTrue(store.topDomains(action: .block).isEmpty)
     }
 
     func testRecentEventsCanBeFilteredByActionAndSearchText() {
@@ -164,6 +287,61 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertEqual(decoded.summary.blockedCount, 1)
         XCTAssertEqual(decoded.summary.allowedCount, 1)
         XCTAssertEqual(decoded.recentEvents.count, 2)
+    }
+
+    func testLegacyDayBucketsWithoutDomainCountersKeepCountsAndAccumulateNewDomains() throws {
+        var store = DiagnosticsStore()
+        store.record(
+            domain: "legacy-block.example.com",
+            decision: FilterDecision(action: .block, reason: .blocklist),
+            keepDomainHistory: true
+        )
+        store.record(
+            domain: "legacy-allow.example.com",
+            decision: .defaultAllow,
+            keepDomainHistory: true
+        )
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: DiagnosticsPersistence.makeJSONEncoder().encode(store)
+            ) as? [String: Any]
+        )
+        var dayCounts = try XCTUnwrap(object["dayCounts"] as? [String: Any])
+        for (day, value) in dayCounts {
+            var bucket = try XCTUnwrap(value as? [String: Any])
+            bucket.removeValue(forKey: "allowedDomains")
+            bucket.removeValue(forKey: "blockedDomains")
+            dayCounts[day] = bucket
+        }
+        object["dayCounts"] = dayCounts
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        var upgraded = try DiagnosticsPersistence.makeJSONDecoder().decode(
+            DiagnosticsStore.self,
+            from: legacyData
+        )
+
+        XCTAssertEqual(upgraded.summary.allowedCount, 1)
+        XCTAssertEqual(upgraded.summary.blockedCount, 1)
+        XCTAssertTrue(upgraded.topDomains(action: .allow).isEmpty)
+        XCTAssertTrue(upgraded.topDomains(action: .block).isEmpty)
+
+        upgraded.record(
+            domain: "new-allow.example.com",
+            decision: .defaultAllow,
+            keepDomainHistory: true
+        )
+        upgraded.record(
+            domain: "new-block.example.com",
+            decision: FilterDecision(action: .block, reason: .blocklist),
+            keepDomainHistory: true
+        )
+
+        XCTAssertEqual(upgraded.summary.allowedCount, 2)
+        XCTAssertEqual(upgraded.summary.blockedCount, 2)
+        XCTAssertEqual(upgraded.topDomains(action: .allow).first?.domain, "new-allow.example.com")
+        XCTAssertEqual(upgraded.topDomains(action: .block).first?.domain, "new-block.example.com")
     }
 
     func testClearingDomainHistoryDoesNotResetAggregateCounts() {

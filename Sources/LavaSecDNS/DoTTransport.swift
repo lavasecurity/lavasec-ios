@@ -9,6 +9,7 @@ import Network
 // state change on the pooled NWConnection, so reused connections are refreshed
 // after an idle window and a timeout on a reused connection earns exactly one
 // fresh-connection retry.
+/// Thread-safe DNS-over-TLS client with bounded per-endpoint connection pools and stale-connection recovery.
 public final class DoTTransport: @unchecked Sendable {
     private static let maxConnectionsPerEndpoint = 4
     private let timeoutSeconds: Int
@@ -19,11 +20,13 @@ public final class DoTTransport: @unchecked Sendable {
     private var activeQueryCount = 0
     private var shouldResetWhenIdle = false
 
+    /// Creates connection pools whose per-query timeout budget is measured in whole seconds.
     public init(timeoutSeconds: Int, debugLogger: DNSTransportDebugLogger? = nil) {
         self.timeoutSeconds = timeoutSeconds
         self.debugLogger = debugLogger
     }
 
+    /// Atomically removes and cancels every pooled TLS connection, including lanes serving active queries.
     public func resetConnections() {
         let connectionsToCancel: [DoTConnection]
         connectionLock.lock()
@@ -35,6 +38,7 @@ public final class DoTTransport: @unchecked Sendable {
         connectionsToCancel.forEach { $0.cancel() }
     }
 
+    /// Defers pool cancellation until active queries finish, while resetting immediately when no query is active.
     public func resetConnectionsWhenIdle() {
         let connectionsToCancel: [DoTConnection]?
         connectionLock.lock()
@@ -51,10 +55,12 @@ public final class DoTTransport: @unchecked Sendable {
         connectionsToCancel?.forEach { $0.cancel() }
     }
 
+    /// Cancels all pooled work during tunnel shutdown using the immediate reset semantics.
     public func cancel() {
         resetConnections()
     }
 
+    /// Resolves through a pooled endpoint lane and asynchronously returns one classified transport response.
     public func resolve(
         _ query: Data,
         endpoint: DNSOverTLSEndpoint,
@@ -68,6 +74,7 @@ public final class DoTTransport: @unchecked Sendable {
         }
     }
 
+    /// Resolves on a fresh one-shot connection that is cancelled after completion and never enters the shared pool.
     public func resolveIsolated(
         _ query: Data,
         endpoint: DNSOverTLSEndpoint,

@@ -1,6 +1,7 @@
 import XCTest
 @testable import LavaSecCore
 @testable import LavaSecKit
+@testable import LavaSecPresentation
 
 final class GuardianMascotAnimationTests: XCTestCase {
     func testGuardianMascotStateGraphKeepsWakeupAsTheOnlySleepingExit() {

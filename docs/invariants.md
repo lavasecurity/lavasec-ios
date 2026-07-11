@@ -21,12 +21,17 @@ Stable IDs for the load-bearing invariants that in-code comments cite. The rules
 ### INV-DNS-1 — Never fail open
 No failure path serves unfiltered DNS while filtering is configured. Degradation order is:
 real snapshot → config-exact last-known-good (INV-DNS-3) → fail-closed (block-all)
-`FailClosedRuntimeSnapshot`. The synchronous cold-start bootstrap deliberately serves NO
-last-known-good (under-blocking risk); only the async path may.
+`FailClosedRuntimeSnapshot`. BOTH the async path and the synchronous cold-start bootstrap
+may serve config-exact LKG (founder decision 2026-07-09, UR-48 Phase 2a plan): the async
+path already served LKG for hours on compile failure, so refusing it in the bootstrap for
+the ~seconds compile window traded a block-all outage for no coherent security gain. LKG
+is never fail-open — INV-DNS-3's exact-configuration gates apply everywhere it is served,
+and with no LKG candidate the bootstrap still installs fail-closed.
 - Home: `LavaSecTunnel/PacketTunnelProvider.swift` — `loadInitialSharedState` /
-  `serveLastKnownGoodOrFailClosed` comments.
+  `bootstrapResidentSnapshotFromDisk` / `serveLastKnownGoodOrFailClosed` comments.
 - Enforced: `PacketTunnelDNSRuntimeSourceTests.testLoadInitialSharedStateWarmResumesFromDiskBeforeFailingClosed`
-  (asserts fail-closed install + absence of LKG in the sync bootstrap).
+  (asserts fail-closed install remains when neither strict nor LKG serves, and pins the
+  strict-before-LKG bootstrap sequence).
 
 ### INV-DNS-2 — Transient bootstrap DNS wait is bounded and never bypasses the filter
 After a recent self-reconnect launch that strict-misses fast-resume, DNS requests may be
@@ -38,7 +43,8 @@ Queued requests are only ever replayed *through the filter* after a real snapsho
   SERVFAIL/replay/logging wiring.
 - Enforced: `TransientBootstrapDNSWaitTests` (executable bounds + transitions: 65th
   enqueue overflows, timeout drains everything SERVFAIL-bound, stale-lifecycle and
-  expired-generation rejection, commit-only replay, teardown reset) +
+  expired-generation rejection, commit-only replay, teardown reset, plus the
+  provider-shape `assumeIsolated` call-shape test) +
   `PacketTunnelDNSRuntimeSourceTests` transient-bootstrap-wait wiring pins.
 
 ### INV-DNS-3 — Last-known-good is config-exact
@@ -47,7 +53,47 @@ block/allow rules, custom-list fingerprints, and parser rules version must match
 so LKG can serve stale rules but can never serve a *different configuration's* rules.
 - Home: `PacketTunnelProvider.swift` — `lastKnownGoodCompactSnapshot` comment;
   `CompactFilterSnapshot.canServeAsLastKnownGood`.
-- Enforced: `PacketTunnelDNSRuntimeSourceTests.testTunnelKeepsLastKnownGoodOnFailedReloadAndDoesNotFlicker`.
+- Enforced: `CompactFilterSnapshotTests.testCanServeAsLastKnownGoodToleratesRotatedCatalogHashButNotConfigChange`
+  directly exercises the config-exact predicate, and
+  `PacketTunnelDNSRuntimeSourceTests.testTunnelServesLastKnownGoodOnColdStartBuildFailure`
+  pins the tunnel reader to that predicate.
+
+### INV-DNS-4 — Resolver-health evidence keeps distinct owners and lifetimes
+`ResolverHealthCoordinator` is the single owner of resolver identity, current-network
+episode, tunnel-session, reconnect-episode, effect-delivery, and smoke-probe ownership
+state. Identity-scoped rejected-response evidence survives network handoffs and clears
+on a real configured-primary identity change, accepted-primary recovery, or tunnel-
+lifecycle reset. Network-episode failure/fallback evidence resets at the documented
+context boundaries. Session state retains tunnel-lifetime cumulative counters and
+per-resolver metrics across identity and episode changes while allowing runtime-scoped
+observations such as negotiated DoH protocol to clear on a full runtime reset. Probe
+invalidation retires the latest opaque owner without resetting evidence; stale or
+repeated completions cannot transition state.
+
+`deviceDNSFallbackModeActive` is a latched network-episode state, not a derivation of
+`deviceDNSFallbackEvidenceCount`. An organic total failure clears candidate evidence but
+does not exit a mode already driving resolver scheduling. Until a non-Device-DNS organic
+response, an accepted-primary smoke probe, a failed smoke probe, or a network,
+configuration, or lifecycle context reset, the coordinator projects the same active bit
+to both its scheduling view and `TunnelHealthSnapshot`. This intentionally removes the
+former split-brain where runtime remained in Device DNS fallback while projected health
+fell false after candidate evidence dropped below the activation threshold.
+
+The provider owns the persisted snapshot envelope, per-query counters outside connectivity
+policy, NetworkExtension work, and all IO effects. On `dnsStateQueue`, it applies each
+coordinator projection before executing the emitted effects in order. Lifecycle
+invalidation closes probe admission synchronously and generation-fences deferred path
+callbacks, so stopped providers cannot create or accept new smoke evidence.
+- Home: `Sources/LavaSecDNS/ResolverHealthEvidence.swift` for the lifetime model and reset
+  matrix; `Sources/LavaSecDNS/ResolverHealthCoordinator.swift` for state/token ownership.
+- Enforced: `ResolverHealthEvidenceTests` (reset matrix and field-wise projections),
+  `ResolverHealthCoordinatorTests` (single-owner accumulation, latest-token completion,
+  invalidation without evidence reset),
+  `ResolverHealthOrganicEvidenceTests.testTotalFailuresPreserveActiveModeAndClearEncryptedCoverageOnlyAtThree`,
+  `ResolverHealthSmokeEvidenceTests.testActiveFallbackModeRemainsStickyAfterOrganicFailureClearsCandidateCount`,
+  and
+  `PacketTunnelDNSRuntimeSourceTests.testResolverHealthContextWritersRouteDistinctEventsWithExactFencing` /
+  `PacketTunnelDNSRuntimeSourceTests.testResolverHealthReducerOwnedWritersHaveNoProviderBypasses`.
 
 ## Memory (NE jetsam ceiling ~50 MB)
 
@@ -64,8 +110,48 @@ Every artifact read checks identity + rule budget on the SAME `.mappedIfSafe` by
 would decode, so a concurrent atomic republish can never slip a different or over-budget
 generation past the header check (TOCTOU-safe). Applies to app stores and the
 tunnel-compiled retained artifact alike.
-- Home: `PacketTunnelProvider.swift` — `reusableCompactSnapshot` / `reusablePreparedSnapshot`.
-- Enforced: `PacketTunnelDNSRuntimeSourceTests` bootstrap/store contract tests.
+- Home: `PacketTunnelProvider.swift` — `reusableCompactSnapshot`,
+  `lastKnownGoodCompactSnapshot`, and `reusablePreparedSnapshot`.
+- Enforced: `PacketTunnelDNSRuntimeSourceTests.testTunnelArtifactReadsResolveThroughThePointer`,
+  `PacketTunnelDNSRuntimeSourceTests.testTunnelServesLastKnownGoodOnColdStartBuildFailure`,
+  and `PacketTunnelDNSRuntimeSourceTests.testReusablePreparedSnapshotRebindsToManifestAndRebudgetsAfterDecode`.
+
+## Tier budget
+
+### INV-TIER-1 — A compiled rule total never exceeds the tier budget, at any publish or serve point
+The tier cap (`FeatureLimits.maxFilterRules`: free 500K / Plus 2M) binds the COMPILED,
+deduped total — block-rule union + full guardrail + allowed + manual blocked — with NO
+margin, everywhere an artifact is published, reused, or served: the cold prepare (the one
+gate that THROWS the actionable error), the foreground persist's artifact-flip veto, the
+background-refresh publish, warm-switch and protection-startup reuse, and the tunnel's
+compact/prepared/LKG/in-extension-compile reads. Every gate binds the RECORDED
+`tierBudgetRuleCount` (manifest / compact-header metadata / prepared summary) — never a
+resident table sum, which under-counts the recorded formula by the full-guardrail term
+(the resident guardrail is only the allowlist-overlap subset); the in-extension compiler
+stamps its conservative equivalent so retained artifacts stay loadable. The ×1.10
+`softCeilingMargin` applies ONLY to the selection-time per-list-sum ESTIMATE (which
+over-counts cross-list overlap); it never applies to a compiled total. A recorded
+`tierBudgetRuleCount` of nil fails closed for REUSE everywhere, but is kept distinct
+from recorded-over ("tier-budget-unrecorded" vs "over-tier-budget"): only recorded-over
+marks the in-extension recompile doomed — the unrecorded case's recompile is the repair
+path that stamps the missing total for a legacy artifact. Over-budget state may persist in CONFIG (downgrade and
+restore keep user data intact, with the existing tier message surfaced) but is never
+published, reused from disk, or freshly loaded/compiled; tunnel-side violations degrade
+in INV-DNS-1's order (LKG only if itself within the tier budget → fail-closed).
+Deliberate carve-out: an ALREADY-RESIDENT tunnel snapshot (a mid-run lapse) keeps
+serving until its next adopting reload or NE process restart — the direct consequence
+of the no-reload-on-entitlement-change rule (`persistPaidPlanFlag`); serving extra
+filtering is not an INV-DNS-1 fail-open. Field origin: 2026-07-10 report of a free-tier
+device serving a 558,917-rule union — a lapsed-Plus selection kept fresh forever by the
+then-ungated refresh republish.
+- Home: `Sources/LavaSecKit/FilterRuleBudget.swift` — `fitsTierBudget`;
+  `FilterSnapshotPreparationService.prepare` cap comment.
+- Enforced: `FilterRuleBudgetTests` (`testCompiledTotalGetsNoSoftMargin`,
+  `testNilRecordedTotalFailsClosed`) + `FilterSnapshotPreparationServiceTests` (cold-gate
+  throw semantics) + `CompactFilterSnapshotTests` /
+  `StreamingCompactSnapshotCompilerTests` (recorded-total round-trip and stamping) +
+  `MultiFilterFoundationSourceTests` (warm-switch gate) +
+  `TierBudgetEnforcementSourceTests` wiring pins on every gate site.
 
 ## Concurrency
 
@@ -74,6 +160,19 @@ Mutable tunnel DNS state is `dnsStateQueue`-confined. Entry points that may alre
 on-queue use the `DispatchQueue` specific-key re-entrancy pattern (`getSpecific` → run
 inline, else `sync`/`async` hop). Any helper extracted from the provider must preserve
 this dual-entry contract or move the state onto its own isolation domain.
+Actors migration (complete for the extracted machines; provider-level actors remain
+future work): extracted state machines are dispatch-backed actors whose executor IS
+`dnsStateQueue` (now a `DispatchSerialQueue`), so confinement is compiler-enforced —
+on-queue callers use synchronous `assumeIsolated` (traps on the wrong executor), new
+code must hop. Migrated: `QueueConfinedRepeatingTimer` (slice 1),
+`DeviceDNSCaptureRetryCycle` (slice 2), `TransientBootstrapDNSWait` (slice 3),
+`SnapshotReloadCoordinator` (slice 4), `ResolverHealthCoordinator` (slice 5).
+- Enforced (migrated types): the actor's isolation +
+  `QueueConfinedRepeatingTimerTests.testAssumeIsolatedGivesSynchronousOnQueueAccess` +
+  `DeviceDNSCaptureRetryCycleTests.testAssumeIsolatedGivesSynchronousOnQueueAccess` +
+  `TransientBootstrapDNSWaitTests.testAssumeIsolatedGivesSynchronousOnQueueAccess` +
+  `SnapshotReloadCoordinatorTests.testAssumeIsolatedProvidesSynchronousOnQueueAccess` +
+  `ResolverHealthCoordinatorTests.testAssumeIsolatedProvidesSynchronousDNSQueueAccess`.
 - Home: `PacketTunnelProvider.swift` — `dnsStateQueueSpecificKey` and its ~40 call sites.
 
 ## Observability

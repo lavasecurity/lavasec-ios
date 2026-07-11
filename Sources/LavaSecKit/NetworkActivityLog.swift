@@ -1,12 +1,18 @@
 import Foundation
 import Darwin
 
+/// A timestamped network event with the Lava state captured alongside it.
 public struct NetworkActivityLogEntry: Codable, Equatable, Identifiable, Sendable {
+    /// The stable identifier of the log entry.
     public let id: UUID
+    /// The time at which the event was recorded.
     public let timestamp: Date
+    /// The network or user event that occurred.
     public let event: NetworkActivityEvent
+    /// The protection and resolver state observed with the event.
     public let lavaState: LavaStateSnapshot
 
+    /// Creates a network activity entry from an event and captured state.
     public init(
         id: UUID = UUID(),
         timestamp: Date,
@@ -19,14 +25,17 @@ public struct NetworkActivityLogEntry: Codable, Equatable, Identifiable, Sendabl
         self.lavaState = lavaState
     }
 
+    /// The entry timestamp formatted for local-log display.
     public var timestampLine: String {
         LocalLogTimestampFormatter.string(from: timestamp)
     }
 
+    /// A privacy-safe display line describing the event.
     public var eventLine: String {
         event.displayLine
     }
 
+    /// A privacy-safe display line summarizing captured Lava state.
     public var lavaStateLine: String {
         let connectivity = lavaState.connectivityStatus.privacySafeLogText(fallback: lavaState.protectionStatus)
         let resolver = lavaState.resolverDisplayName.privacySafeLogText(fallback: lavaState.resolverTransport.displayName)
@@ -34,16 +43,27 @@ public struct NetworkActivityLogEntry: Codable, Equatable, Identifiable, Sendabl
     }
 }
 
+/// Network, protection, and recovery events retained in the local activity log.
 public enum NetworkActivityEvent: Codable, Equatable, Sendable {
+    /// The network path changed kind or availability.
     case networkChanged(from: TunnelNetworkKind?, to: TunnelNetworkKind, isSatisfied: Bool)
+    /// Protection reached the connected state.
     case protectionConnected
+    /// A user initiated a protection-related action.
     case userAction(NetworkActivityUserAction)
+    /// A DNS smoke probe succeeded through the recorded resolver and transport.
     case dnsSmokeProbeSucceeded(resolver: String, transport: DNSResolverTransport, dohHTTPVersion: String?)
+    /// A DNS smoke probe failed with a diagnostic reason label.
     case dnsSmokeProbeFailed(reason: String)
+    /// Device-DNS fallback activated with a diagnostic reason label.
     case deviceDNSFallbackActivated(reason: String)
+    /// DNS connectivity recovered after Device DNS fallback activity.
     case deviceDNSFallbackRecovered
+    /// Current connectivity requires protection to reconnect.
     case reconnectNeeded(reason: String)
+    /// Connectivity recovered after a degraded state.
     case connectivityRecovered(reason: String)
+    /// Reapplying tunnel network settings failed.
     case networkSettingsReapplyFailed(reason: String)
 
     fileprivate var displayLine: String {
@@ -84,13 +104,21 @@ public enum NetworkActivityEvent: Codable, Equatable, Sendable {
     }
 }
 
+/// User actions represented in network activity history.
 public enum NetworkActivityUserAction: String, Codable, Equatable, Sendable {
+    /// The user turned protection on.
     case turnProtectionOn
+    /// The user turned protection off.
     case turnProtectionOff
+    /// The user requested a protection reconnect.
     case reconnectProtection
+    /// The user changed the configured DNS resolver.
     case changeResolver
+    /// The user changed the Device DNS fallback setting.
     case toggleDeviceDNSFallback
+    /// The user changed the active filtering configuration.
     case changeFilters
+    /// The user cleared locally retained activity.
     case clearActivity
 
     fileprivate var displayLine: String {
@@ -113,14 +141,23 @@ public enum NetworkActivityUserAction: String, Codable, Equatable, Sendable {
     }
 }
 
+/// Protection, connectivity, network, and resolver state captured for a log entry.
 public struct LavaStateSnapshot: Codable, Equatable, Sendable {
+    /// The captured protection-status label.
     public let protectionStatus: String
+    /// The captured connectivity-status label.
     public let connectivityStatus: String
+    /// The captured kind of network path.
     public let networkKind: TunnelNetworkKind
+    /// Whether the captured network path was satisfied.
     public let networkPathIsSatisfied: Bool
+    /// The captured display name of the configured resolver.
     public let resolverDisplayName: String
+    /// The captured resolver transport.
     public let resolverTransport: DNSResolverTransport
+    /// Whether Device DNS fallback was enabled.
     public let fallbackToDeviceDNS: Bool
+    /// Whether Device DNS fallback was actively carrying queries.
     public let deviceDNSFallbackActive: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -134,6 +171,7 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         case deviceDNSFallbackActive
     }
 
+    /// Creates a snapshot from captured protection and resolver state.
     public init(
         protectionStatus: String,
         connectivityStatus: String,
@@ -154,6 +192,7 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         self.deviceDNSFallbackActive = deviceDNSFallbackActive
     }
 
+    /// Decodes a snapshot, defaulting legacy fallback flags to `false`.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         protectionStatus = try container.decode(String.self, forKey: .protectionStatus)
@@ -175,12 +214,18 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// A count-bounded network activity history that coalesces duplicate appends.
 public struct NetworkActivityLog: Codable, Equatable, Sendable {
+    /// The default maximum number of entries retained by a log.
     public static let defaultMaximumEntryCount = 300
+    /// The default duplicate-coalescing window in seconds.
     public static let defaultDuplicateCoalescingWindow: TimeInterval = 30
 
+    /// Retained entries ordered from newest to oldest.
     public private(set) var entries: [NetworkActivityLogEntry]
+    /// The positive maximum number of entries retained by this log.
     public let maximumEntryCount: Int
+    /// The nonnegative interval, in seconds, used to suppress duplicate entries.
     public let duplicateCoalescingWindow: TimeInterval
 
     // Only the entries are persisted. The caps are NOT encoded (PST-4): they are
@@ -193,6 +238,7 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         case entries
     }
 
+    /// Creates a log, sorting entries newest-first and enforcing the entry-count limit.
     public init(
         entries: [NetworkActivityLogEntry] = [],
         maximumEntryCount: Int = Self.defaultMaximumEntryCount,
@@ -204,6 +250,7 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         trimToMaximumEntryCount()
     }
 
+    /// Decodes entries using the current capacity and coalescing defaults.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedEntries = try container.decodeIfPresent([NetworkActivityLogEntry].self, forKey: .entries) ?? []
@@ -212,6 +259,7 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         self.init(entries: decodedEntries)
     }
 
+    /// Encodes retained entries without persisting policy bounds.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(entries, forKey: .entries)
@@ -224,6 +272,7 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         TimeInterval(LocalLogRetention.fineGrainedDays) * 86_400
     }
 
+    /// Adds an entry unless a matching recent event is coalesced, then enforces both limits.
     public mutating func append(_ entry: NetworkActivityLogEntry) {
         guard !isDuplicateWithinCoalescingWindow(entry) else {
             return
@@ -235,6 +284,7 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         trimToMaximumEntryCount()
     }
 
+    /// Removes every retained entry.
     public mutating func clear() {
         entries.removeAll()
     }
@@ -276,7 +326,9 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
     }
 }
 
+/// Loads, saves, and coordinates locked mutations of persisted network activity.
 public enum NetworkActivityLogPersistence {
+    /// Loads a log, returning an empty log when no valid file is available.
     public static func load(from url: URL) -> NetworkActivityLog {
         guard let data = try? Data(contentsOf: url),
               let log = try? makeJSONDecoder().decode(NetworkActivityLog.self, from: data)
@@ -287,6 +339,7 @@ public enum NetworkActivityLogPersistence {
         return log
     }
 
+    /// Saves the log atomically at `url`.
     public static func save(_ log: NetworkActivityLog, to url: URL) throws {
         let directoryURL = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
@@ -328,6 +381,7 @@ public enum NetworkActivityLogPersistence {
         }
     }
 
+    /// Removes the persisted log while holding its exclusive file lock.
     public static func clear(at url: URL) {
         withExclusiveFileLock(for: url) {
             try? FileManager.default.removeItem(at: url)
@@ -363,10 +417,12 @@ public enum NetworkActivityLogPersistence {
         }
     }
 
+    /// Creates the decoder used for persisted network activity.
     public static func makeJSONDecoder() -> JSONDecoder {
         JSONDecoder()
     }
 
+    /// Creates the sorted, human-readable encoder used for persisted activity.
     public static func makeJSONEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

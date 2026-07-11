@@ -281,20 +281,20 @@ private final class LatencySpanState: @unchecked Sendable {
     }
 }
 
-public struct LatencyDurationPercentiles: Equatable, Sendable {
-    public let count: Int
-    public let p50Milliseconds: TimeInterval
-    public let p95Milliseconds: TimeInterval
+package struct LatencyDurationPercentiles: Equatable, Sendable {
+    package let count: Int
+    package let p50Milliseconds: TimeInterval
+    package let p95Milliseconds: TimeInterval
 
-    public init(count: Int, p50Milliseconds: TimeInterval, p95Milliseconds: TimeInterval) {
+    internal init(count: Int, p50Milliseconds: TimeInterval, p95Milliseconds: TimeInterval) {
         self.count = count
         self.p50Milliseconds = p50Milliseconds
         self.p95Milliseconds = p95Milliseconds
     }
 }
 
-public enum LatencyEventAggregation {
-    public static func completedDurationPercentiles(
+package enum LatencyEventAggregation {
+    package static func completedDurationPercentiles(
         from events: [LatencyEvent],
         name: String? = nil
     ) -> LatencyDurationPercentiles? {
@@ -328,10 +328,10 @@ public enum LatencyEventAggregation {
     }
 }
 
-public enum LatencyDetailRedactor {
-    public static let redactedValue = "[redacted]"
+internal enum LatencyDetailRedactor {
+    internal static let redactedValue = "[redacted]"
 
-    public static func redactedDetails(_ details: [String: String]) -> [String: String] {
+    internal static func redactedDetails(_ details: [String: String]) -> [String: String] {
         var redactedKeyCount = 0
         return details.keys.sorted().reduce(into: [:]) { redactedDetails, key in
             guard let value = details[key] else {

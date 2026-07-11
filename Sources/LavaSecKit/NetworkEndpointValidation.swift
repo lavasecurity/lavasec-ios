@@ -3,14 +3,14 @@ import Foundation
 import Darwin
 #endif
 
-public enum NetworkEndpointValidationError: LocalizedError, Equatable, Sendable {
+package enum NetworkEndpointValidationError: LocalizedError, Equatable, Sendable {
     case credentialsNotAllowed
     case localhostNotAllowed
     case privateNetworkNotAllowed
     case unusableResolverAddress
     case invalidResolverHost
 
-    public var errorDescription: String? {
+    package var errorDescription: String? {
         switch self {
         case .credentialsNotAllowed:
             return LavaCoreStrings.localized("core.endpoint.credentialsNotAllowed")
@@ -26,8 +26,8 @@ public enum NetworkEndpointValidationError: LocalizedError, Equatable, Sendable 
     }
 }
 
-public enum NetworkEndpointValidator {
-    public static func validatePublicSourceURL(_ url: URL) throws {
+package enum NetworkEndpointValidator {
+    package static func validatePublicSourceURL(_ url: URL) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return
         }
@@ -88,7 +88,7 @@ public enum NetworkEndpointValidator {
         }
     }
 
-    public static func dnsResolverAddresses(from value: String) -> (ipv4: [String], ipv6: [String])? {
+    package static func dnsResolverAddresses(from value: String) -> (ipv4: [String], ipv6: [String])? {
         guard let scope = ipAddressScope(value), scope.isUsableResolverAddress else {
             return nil
         }
@@ -104,14 +104,14 @@ public enum NetworkEndpointValidator {
     // refuse a hostname that DNS-resolves into a private/loopback/reserved address (the
     // residual `validatePublicSourceURL` cannot see, because it only classifies literals).
     // Wrong-length input fails closed (treated as non-public).
-    public static func isPublicResolvedIPv4(octets: [UInt8]) -> Bool {
+    package static func isPublicResolvedIPv4(octets: [UInt8]) -> Bool {
         guard octets.count == 4 else {
             return false
         }
         return IPAddressScope(ipv4Octets: octets).isPublicAddress
     }
 
-    public static func isPublicResolvedIPv6(bytes: [UInt8]) -> Bool {
+    package static func isPublicResolvedIPv6(bytes: [UInt8]) -> Bool {
         guard bytes.count == 16 else {
             return false
         }

@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecAppServices
 import SwiftUI
 
 // The encrypted-backup feature, peeled out of AppViewModel (Phase D1, lavasec-infra
@@ -12,7 +12,7 @@ import SwiftUI
 // only through the narrow `BackupHubBridging` surface below, mirroring the
 // scoped-controller pattern of SecurityController / TemporaryProtectionPauseController.
 
-// EncryptedBackupState moved to LavaSecCore (EncryptedBackupState.swift) so its
+// EncryptedBackupState lives in LavaSecAppServices so its
 // signed-in/signed-out copy branching is unit-tested rather than source-pinned.
 
 enum EncryptedBackupError: Error, LocalizedError {

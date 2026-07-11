@@ -163,4 +163,98 @@ public enum DeviceDNSFallbackPolicy {
         let age = now.timeIntervalSince(lastExhaustedMaskedCaptureAt)
         return age < 0 || age >= deviceDNSCaptureRetryExhaustionCooldown
     }
+
+    // A sleep/wake-thrashing device (UR-48 rc9 follow-up log: 303 wakes in ~9.7 h,
+    // median gaps of seconds) pays a full resolver teardown on EVERY wake — ~292
+    // fresh DoH TLS handshakes + 270 encrypted-fallback context resets in that log,
+    // tearing down the very sessions carrying DNS during micro-sleeps, plus a
+    // SERVFAIL for every pending query. After a brief suspension the pre-sleep
+    // connections are overwhelmingly still valid; the stale-socket risk the
+    // teardown exists for grows with time asleep, not with the wake itself. Below
+    // this threshold wake keeps the live runtime and leans on the existing safety
+    // nets (the coalesced settle probe re-checks the resolver; wedge recovery and
+    // handleNetworkPathUpdate's force reset catch a genuinely dead socket or a
+    // real network change). 30 s is comfortably past the observed micro-sleep
+    // cadence while short enough that DHCP/NAT rebinding across a longer sleep
+    // still gets the conservative teardown.
+    public static let briefWakeResolverPreserveThreshold: TimeInterval = 30
+
+    /// Whether wake() may KEEP the live resolver runtime (DoH/DoT/DoQ sessions,
+    /// response cache, pending queries) instead of force-resetting it. `nil`
+    /// means the suspension start was never observed (fresh process, or an OS
+    /// wake with no paired sleep) — tear down, the conservative default. A
+    /// negative interval (clock set backwards across the sleep) also tears down
+    /// rather than trusting a bogus future stamp.
+    public static func shouldPreserveResolverRuntimeAcrossWake(
+        sleepBeganAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard let sleepBeganAt else {
+            return false
+        }
+
+        let sleptFor = now.timeIntervalSince(sleepBeganAt)
+        return sleptFor >= 0 && sleptFor <= briefWakeResolverPreserveThreshold
+    }
+
+    // On a chronically-failing network the fixed routine cadence is pure radio drain:
+    // the UR-48 rc9 log shows 533 failed wire probes vs 34 successes in ~9.7 h with
+    // `consecutiveSmokeFailures` past 500 and no adaptive behavior. Failures beyond the
+    // activation count stretch the ROUTINE cadence (doubling, capped at the ceiling);
+    // every event-driven probe reason (wedge, fallback-recovery, settle, config-change,
+    // startTunnel) stays unconditional, and the consecutive-failure counter this keys on
+    // already resets on any probe success, recovery, and network-path change — so leaving
+    // backoff is instant on every real change signal. Worst case is bounded: a network
+    // that un-masks silently with NO path change, wake, or traffic evidence waits at most
+    // the ceiling (vs the base cadence) to leave an already-working fallback.
+    public static let smokeProbeBackoffActivationFailureCount = 5
+    public static let maxRoutineSmokeProbeInterval: TimeInterval = 900
+
+    /// Routine smoke-probe cadence given the current consecutive-failure streak: the base
+    /// interval below the activation count (transient blips keep today's behavior exactly),
+    /// then doubling per further failure up to the ceiling.
+    public static func routineSmokeProbeInterval(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        guard failures >= smokeProbeBackoffActivationFailureCount else {
+            return routineSmokeProbeInterval
+        }
+
+        // Cap the exponent well before the ceiling clamp so a persisted multi-hundred
+        // streak can't overflow the multiplication.
+        let doublings = min(failures - smokeProbeBackoffActivationFailureCount + 1, 8)
+        return min(routineSmokeProbeInterval * pow(2.0, Double(doublings)), maxRoutineSmokeProbeInterval)
+    }
+
+    // Log/counter hygiene (UR-48 Phase 2a). The rc9 log's dominant line on a masked network
+    // is `device-dns-captured count=0` (832 of 858 reads), and `consecutiveSmokeFailures`
+    // climbed past 500 with nothing reading values that large — both pure noise in a
+    // capped 5,000-line log that exists to diagnose incidents.
+
+    /// Saturation point for the consecutive smoke-probe failure streak. Every consumer
+    /// threshold (fallback activation, backoff activation, reconnect escalation) sits orders
+    /// of magnitude below this, so saturating changes no behavior — it only stops a
+    /// persisted health counter from growing without bound on a chronically-failing network.
+    public static let maxTrackedConsecutiveSmokeProbeFailures = 999
+
+    /// Next value of the consecutive-failure streak after one more failure (saturating).
+    public static func nextConsecutiveSmokeProbeFailureCount(current: Int) -> Int {
+        min(current + 1, maxTrackedConsecutiveSmokeProbeFailures)
+    }
+
+    /// Whether a device-DNS capture read is worth a log line: any NON-empty capture always
+    /// logs (it can change the adopted resolvers), and an empty (masked) read logs at the
+    /// transition INTO the masked state AND whenever the capture context (`reason`) changes —
+    /// a masked→masked handoff under a new reason (e.g. `network-path-changed` from one masked
+    /// network to another) is a distinct recapture attempt this diagnostic log exists to show,
+    /// so it earns one line. Only SAME-reason repeats within one masked episode are suppressed:
+    /// those were the no-information lines that flooded the log (rc9: 832 of 858 reads were
+    /// `count=0` under one repeating reason). `lastLoggedCount`/`lastLoggedReason` describe the
+    /// previous line this policy allowed; nil `lastLoggedCount` (nothing logged yet) always logs.
+    public static func shouldLogDeviceDNSCapture(
+        capturedCount: Int,
+        reason: String,
+        lastLoggedCount: Int?,
+        lastLoggedReason: String?
+    ) -> Bool {
+        capturedCount > 0 || lastLoggedCount != capturedCount || lastLoggedReason != reason
+    }
 }
