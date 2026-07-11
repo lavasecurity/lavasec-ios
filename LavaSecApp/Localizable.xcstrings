@@ -24729,7 +24729,7 @@
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "改用備用 DNS"
+            "value": "必要時使用備用 DNS"
           }
         }
       }
