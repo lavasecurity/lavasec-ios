@@ -85,4 +85,25 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         let source = try readSource(.diagnosticsDomainHistory)
         XCTAssertTrue(source.contains("reports.domainHistoryEvents("))
     }
+
+    func testLocalLogExportReadsTheDepthStore() throws {
+        let controller = try readSource(.diagnosticsController)
+        let depthExport = try sourceBlock(
+            in: controller,
+            startingAt: "func domainHistoryEventsForExport(at now: Date) -> [DNSQueryEvent]",
+            endingBefore: "private func domainHistorySince(now: Date)"
+        )
+        XCTAssertTrue(depthExport.contains("guard let log = domainHistoryLog() else"))
+        XCTAssertTrue(depthExport.contains("return diagnostics.recentEvents"))
+        XCTAssertTrue(depthExport.contains("let since = domainHistorySince(now: now)"))
+        XCTAssertTrue(depthExport.contains("log.pageAllActions(before: cursor, since: since, limit: batchSize)"))
+
+        let viewModel = try readSource(.appViewModel)
+        let export = try sourceBlock(
+            in: viewModel,
+            startingAt: "func makeLocalLogExportArchive(",
+            endingBefore: "private func makeLocalLogExportMetadata("
+        )
+        XCTAssertTrue(export.contains("domainHistoryEvents: reports.domainHistoryEventsForExport(at: generatedAt)"))
+    }
 }

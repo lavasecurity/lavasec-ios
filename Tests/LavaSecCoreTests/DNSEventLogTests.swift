@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import LavaSecKit
 
@@ -37,6 +38,94 @@ final class DNSEventLogTests: XCTestCase {
 
         XCTAssertEqual(log.page(action: .block, limit: 10).map(\.domain), ["ads.example.com"])
         XCTAssertEqual(log.page(action: .allow, limit: 10).map(\.domain), ["apple.com"])
+    }
+
+    func testAllActionPagesReturnBothActionsNewestFirstAndHonorTheRetentionFloor() throws {
+        let log = try makeLog()
+        try log.append(domain: "expired.example.com", decision: block, timestamp: at(100))
+        try log.append(domain: "blocked.example.com", decision: block, timestamp: at(300))
+        try log.append(domain: "allowed.example.com", decision: allow, timestamp: at(300))
+
+        let firstPage = log.pageAllActions(since: 150_000, limit: 1)
+        let secondPage = log.pageAllActions(before: firstPage.last?.cursor, since: 150_000, limit: 1)
+        let entries = firstPage + secondPage
+
+        XCTAssertEqual(entries.map(\.domain), ["allowed.example.com", "blocked.example.com"])
+        XCTAssertEqual(entries.map(\.decision.action), [.allow, .block])
+    }
+
+    func testAllActionPaginationCoversEveryRowPastTheJSONRingCap() throws {
+        let log = try makeLog()
+        for index in 0..<600 {
+            let decision = index.isMultiple(of: 2) ? block : allow
+            try log.append(
+                domain: "d\(index).example.com",
+                decision: decision,
+                timestamp: at(Double(1_000 + index))
+            )
+        }
+
+        var entries: [DNSEventLog.Entry] = []
+        var cursor: DNSEventLog.Cursor?
+        while true {
+            let page = log.pageAllActions(before: cursor, limit: 73)
+            entries.append(contentsOf: page)
+            guard page.count == 73, let nextCursor = page.last?.cursor else { break }
+            cursor = nextCursor
+        }
+
+        XCTAssertEqual(entries.count, 600)
+        XCTAssertEqual(Set(entries.map(\.id)).count, 600)
+        XCTAssertEqual(entries.first?.domain, "d599.example.com")
+        XCTAssertEqual(entries.last?.domain, "d0.example.com")
+        XCTAssertEqual(Set(entries.map(\.decision.action)), Set([FilterAction.allow, .block]))
+    }
+
+    func testAllActionPagingUsesTheExistingActionTimestampIndexWithoutATemporarySort() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-query-plan") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url)
+            try log.append(domain: "allowed.example.com", decision: allow, timestamp: at(200))
+            try log.append(domain: "blocked.example.com", decision: block, timestamp: at(300))
+            let reader = try DNSEventLog(url: url, readOnly: true)
+            XCTAssertEqual(
+                reader.pageAllActions(since: 0, limit: 10).map(\.domain),
+                ["blocked.example.com", "allowed.example.com"]
+            )
+
+            var databasePointer: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &databasePointer, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let database = try XCTUnwrap(databasePointer)
+            defer { sqlite3_close_v2(database) }
+
+            let sql = "EXPLAIN QUERY PLAN " + DNSEventLog.pageSQL(
+                includesSearch: false,
+                includesSince: true,
+                includesCursor: true
+            )
+            var statementPointer: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(database, sql, -1, &statementPointer, nil), SQLITE_OK)
+            let statement = try XCTUnwrap(statementPointer)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int(statement, 1, 0) // Stable on-disk encoding for `.allow`.
+            sqlite3_bind_int64(statement, 2, 0)
+            sqlite3_bind_int64(statement, 3, 300_000)
+            sqlite3_bind_int64(statement, 4, Int64.max)
+            sqlite3_bind_int(statement, 5, 1_000)
+
+            var plan: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let detail = sqlite3_column_text(statement, 3) {
+                    plan.append(String(cString: detail))
+                }
+            }
+
+            XCTAssertTrue(plan.contains { $0.contains("idx_event_action_ts") }, plan.joined(separator: "\n"))
+            XCTAssertFalse(plan.contains { $0.contains("USE TEMP B-TREE") }, plan.joined(separator: "\n"))
+        }
     }
 
     func testDepthExceedsTheOldEventsBufferCap() throws {

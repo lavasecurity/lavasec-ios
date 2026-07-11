@@ -72,6 +72,47 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("emberObsidian"))
     }
 
+    func testArchiveUsesSuppliedDepthHistoryInsteadOfTheDiagnosticsRing() throws {
+        let generatedAt = Self.date(year: 2026, month: 7, day: 11, hour: 8, minute: 30)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        var diagnostics = DiagnosticsStore(maxEvents: 1, startedAt: generatedAt)
+        diagnostics.record(
+            domain: "ring-only.example",
+            decision: FilterDecision(action: .block, reason: .blocklist),
+            keepFilteringCounts: true,
+            keepDomainHistory: true
+        )
+        let depthHistory = [
+            DNSQueryEvent(
+                timestamp: generatedAt.addingTimeInterval(-60),
+                domain: "depth-allowed.example",
+                decision: .defaultAllow
+            ),
+            DNSQueryEvent(
+                timestamp: generatedAt,
+                domain: "depth-blocked.example",
+                decision: FilterDecision(action: .block, reason: .blocklist)
+            ),
+        ]
+
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: diagnostics,
+            domainHistoryEvents: depthHistory,
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            generatedAt: generatedAt,
+            calendar: calendar
+        )
+
+        let archiveText = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertTrue(archiveText.contains("depth-allowed.example"))
+        XCTAssertTrue(archiveText.contains("depth-blocked.example"))
+        XCTAssertFalse(archiveText.contains("ring-only.example"))
+    }
+
     func testArchiveIncludesRedactedDeviceDebugLogWhenProvided() throws {
         let generatedAt = Self.date(year: 2026, month: 6, day: 18, hour: 14, minute: 12)
         var calendar = Calendar(identifier: .gregorian)

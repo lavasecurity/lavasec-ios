@@ -271,6 +271,40 @@ public final class DNSEventLog: @unchecked Sendable {
         }) ?? []
     }
 
+    /// One page across both allow and block actions, newest first. This is the depth-reader
+    /// primitive for an explicit app-side export: callers advance with ``Entry/cursor`` so the
+    /// SQLite statement stays bounded even when the retained seven-day history is large. The
+    /// Network Extension must continue using point appends/prunes rather than materializing this
+    /// history (INV-MEM-1). Best-effort: returns `[]` on any error.
+    public func pageAllActions(
+        before cursor: Cursor? = nil,
+        since: Int64? = nil,
+        limit: Int = 1_000
+    ) -> [Entry] {
+        (try? queue.sync {
+            // Existing stores already index (action, ts), including upgrades whose tunnel has
+            // not restarted to run a schema migration. Read one bounded page per action and
+            // merge the two ordered streams instead of issuing an unfiltered query that would
+            // rescan and re-sort the retained table for every export page.
+            let pageLimit = Int(Int32(clamping: max(1, limit)))
+            let allowed = try fetchPage(
+                action: .allow,
+                searchText: "",
+                before: cursor,
+                since: since,
+                limit: pageLimit
+            )
+            let blocked = try fetchPage(
+                action: .block,
+                searchText: "",
+                before: cursor,
+                since: since,
+                limit: pageLimit
+            )
+            return Self.mergeNewest(allowed, blocked, limit: pageLimit)
+        }) ?? []
+    }
+
     /// Total number of stored events (all actions). Best-effort: returns 0 on error.
     public func count() -> Int {
         (try? queue.sync {
@@ -292,22 +326,11 @@ public final class DNSEventLog: @unchecked Sendable {
     ) throws -> [Entry] {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        var sql = """
-        SELECT e.rowid, e.ts, d.name, e.action, e.reason
-        FROM dns_event e
-        JOIN domain d ON d.id = e.domain_id
-        WHERE e.action = ?
-        """
-        if !trimmedSearch.isEmpty {
-            sql += " AND d.name LIKE ?"
-        }
-        if since != nil {
-            sql += " AND e.ts >= ?"
-        }
-        if cursor != nil {
-            sql += " AND (e.ts < ? OR (e.ts = ? AND e.rowid < ?))"
-        }
-        sql += " ORDER BY e.ts DESC, e.rowid DESC LIMIT ?;"
+        let sql = Self.pageSQL(
+            includesSearch: !trimmedSearch.isEmpty,
+            includesSince: since != nil,
+            includesCursor: cursor != nil
+        )
 
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -326,13 +349,74 @@ public final class DNSEventLog: @unchecked Sendable {
         if let cursor {
             sqlite3_bind_int64(statement, index, cursor.timestampMs)
             index += 1
-            sqlite3_bind_int64(statement, index, cursor.timestampMs)
-            index += 1
             sqlite3_bind_int64(statement, index, cursor.rowID)
             index += 1
         }
-        sqlite3_bind_int(statement, index, Int32(max(1, limit)))
+        sqlite3_bind_int(statement, index, Int32(clamping: max(1, limit)))
 
+        return readEntries(from: statement, fallbackAction: action)
+    }
+
+    /// Builds the one canonical page query used by both filtered list reads and all-action
+    /// exports. Kept internal so tests can run `EXPLAIN QUERY PLAN` against the exact production
+    /// statement and prevent an accidental return to full scans or temporary sorts.
+    static func pageSQL(
+        includesSearch: Bool,
+        includesSince: Bool,
+        includesCursor: Bool
+    ) -> String {
+        var sql = """
+        SELECT e.rowid, e.ts, d.name, e.action, e.reason
+        FROM dns_event e
+        JOIN domain d ON d.id = e.domain_id
+        WHERE e.action = ?
+        """
+        if includesSearch {
+            sql += " AND d.name LIKE ?"
+        }
+        if includesSince {
+            sql += " AND e.ts >= ?"
+        }
+        if includesCursor {
+            // Row-value comparison is equivalent to the expanded OR predicate, while allowing
+            // SQLite to walk the action/timestamp index instead of building a temp sort.
+            sql += " AND (e.ts, e.rowid) < (?, ?)"
+        }
+        sql += " ORDER BY e.ts DESC, e.rowid DESC LIMIT ?;"
+        return sql
+    }
+
+    private static func mergeNewest(_ left: [Entry], _ right: [Entry], limit: Int) -> [Entry] {
+        var merged: [Entry] = []
+        merged.reserveCapacity(min(limit, left.count + right.count))
+        var leftIndex = 0
+        var rightIndex = 0
+
+        while merged.count < limit, leftIndex < left.count || rightIndex < right.count {
+            let takeLeft: Bool
+            if rightIndex == right.count {
+                takeLeft = true
+            } else if leftIndex == left.count {
+                takeLeft = false
+            } else {
+                let leftEntry = left[leftIndex]
+                let rightEntry = right[rightIndex]
+                takeLeft = leftEntry.timestampMs > rightEntry.timestampMs
+                    || (leftEntry.timestampMs == rightEntry.timestampMs && leftEntry.id > rightEntry.id)
+            }
+
+            if takeLeft {
+                merged.append(left[leftIndex])
+                leftIndex += 1
+            } else {
+                merged.append(right[rightIndex])
+                rightIndex += 1
+            }
+        }
+        return merged
+    }
+
+    private func readEntries(from statement: OpaquePointer, fallbackAction: FilterAction) -> [Entry] {
         var entries: [Entry] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             let rowID = sqlite3_column_int64(statement, 0)
@@ -344,7 +428,7 @@ public final class DNSEventLog: @unchecked Sendable {
             let actionValue = sqlite3_column_int(statement, 3)
             let reasonValue = sqlite3_column_text(statement, 4).map { String(cString: $0) } ?? ""
 
-            let resolvedAction = FilterAction(logValue: actionValue) ?? action
+            let resolvedAction = FilterAction(logValue: actionValue) ?? fallbackAction
             let resolvedReason = FilterDecisionReason(rawValue: reasonValue)
                 ?? (resolvedAction == .block ? .blocklist : .defaultAllow)
             entries.append(

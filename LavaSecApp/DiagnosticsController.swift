@@ -1023,24 +1023,57 @@ final class DiagnosticsController: ObservableObject {
             // is cleared by clearDomainHistory, so this path honors clears too.
             return diagnostics.recentEvents(action: action, searchText: searchText, limit: limit)
         }
-        // Floor the read at BOTH the user-clear timestamp AND the 7-day fine-grained retention
-        // cutoff. The retention floor matters when the tunnel has been stopped >7 days: its
-        // physical prune hasn't run, so stale rows are still on disk — filtering here keeps
-        // Domain History honoring the "kept on this iPhone for 7 days" promise regardless of
-        // tunnel state (the tunnel + app-clear paths handle the physical delete). PR #327 review.
-        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
-        let retentionFloorMs = Int((Date().timeIntervalSince1970 - LocalLogRetention.fineGrainedWindow) * 1000)
-        let floorMs = max(clearFloorMs, retentionFloorMs)
-        let since: Int64? = floorMs > 0 ? Int64(floorMs) : nil
-        return log.page(action: action, searchText: searchText, since: since, limit: limit)
-            .map { entry in
-                DNSQueryEvent(
-                    id: Self.stableEventID(forRowID: entry.id),
-                    timestamp: entry.timestamp,
-                    domain: entry.domain,
-                    decision: entry.decision
-                )
+        return log.page(
+            action: action,
+            searchText: searchText,
+            since: domainHistorySince(now: Date()),
+            limit: limit
+        ).map(Self.domainHistoryEvent)
+    }
+
+    /// Full retained Domain History for the explicit local export. Page through the all-action
+    /// SQLite reader so each query remains bounded; the returned array is materialized only in
+    /// the app process while it builds the user-requested archive, never in the Network Extension
+    /// (INV-MEM-1). When the depth store has not been created yet, preserve the upgraded-install
+    /// fallback to the JSON ring used by the on-screen list.
+    func domainHistoryEventsForExport(at now: Date) -> [DNSQueryEvent] {
+        guard let log = domainHistoryLog() else {
+            return diagnostics.recentEvents
+        }
+
+        let batchSize = 1_000
+        let since = domainHistorySince(now: now)
+        var cursor: DNSEventLog.Cursor?
+        var events: [DNSQueryEvent] = []
+        while true {
+            let page = log.pageAllActions(before: cursor, since: since, limit: batchSize)
+            events.append(contentsOf: page.map(Self.domainHistoryEvent))
+            guard page.count == batchSize, let nextCursor = page.last?.cursor else {
+                return events
             }
+            cursor = nextCursor
+        }
+    }
+
+    private func domainHistorySince(now: Date) -> Int64? {
+        // Floor every read at BOTH the user-clear timestamp AND the 7-day fine-grained retention
+        // cutoff. The retention floor matters when the tunnel has been stopped >7 days: its
+        // physical prune hasn't run, so stale rows are still on disk — filtering here keeps both
+        // the list and export aligned with the "kept on this iPhone for 7 days" promise regardless
+        // of tunnel state (the tunnel + app-clear paths handle physical deletion). PR #327 review.
+        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
+        let retentionFloorMs = Int((now.timeIntervalSince1970 - LocalLogRetention.fineGrainedWindow) * 1_000)
+        let floorMs = max(clearFloorMs, retentionFloorMs)
+        return floorMs > 0 ? Int64(floorMs) : nil
+    }
+
+    private static func domainHistoryEvent(_ entry: DNSEventLog.Entry) -> DNSQueryEvent {
+        DNSQueryEvent(
+            id: stableEventID(forRowID: entry.id),
+            timestamp: entry.timestamp,
+            domain: entry.domain,
+            decision: entry.decision
+        )
     }
 
     /// Deterministic UUID from the sqlite rowid so SwiftUI list identity is stable across

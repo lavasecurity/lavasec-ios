@@ -68,9 +68,12 @@ public struct LocalLogExportArchive: Equatable, Sendable {
     public let data: Data
 
     /// Builds a stored ZIP archive from current diagnostics, activity, progress, and metadata.
-    /// Debug-log entries are archived as supplied; callers choose any required filtering first.
+    /// Debug-log and Domain History entries are archived as supplied; callers choose any required
+    /// retention filtering first. `domainHistoryEvents` defaults to the diagnostics ring for source
+    /// compatibility, while the app supplies its full SQLite-backed retained history.
     public static func make(
         diagnostics: DiagnosticsStore,
+        domainHistoryEvents: [DNSQueryEvent]? = nil,
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
@@ -82,6 +85,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         let timestamp = ExportTimestamp(generatedAt: generatedAt, calendar: calendar)
         let files = makeFiles(
             diagnostics: diagnostics,
+            domainHistoryEvents: domainHistoryEvents ?? diagnostics.recentEvents,
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: lavaGuardUnlocks,
@@ -100,6 +104,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
 
     private static func makeFiles(
         diagnostics: DiagnosticsStore,
+        domainHistoryEvents: [DNSQueryEvent],
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
@@ -117,7 +122,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             ),
             (
                 "domain-history-\(timestamp.filename).csv",
-                domainHistoryCSV(diagnostics: diagnostics)
+                domainHistoryCSV(domainHistoryEvents)
             ),
             (
                 "network-activity-\(timestamp.filename).csv",
@@ -190,9 +195,9 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         return csvData(rows)
     }
 
-    private static func domainHistoryCSV(diagnostics: DiagnosticsStore) -> Data {
+    private static func domainHistoryCSV(_ events: [DNSQueryEvent]) -> Data {
         let rows = [["timestamp", "domain", "action", "reason"]]
-            + diagnostics.recentEvents.map { event in
+            + events.map { event in
                 [
                     isoString(from: event.timestamp),
                     event.domain,

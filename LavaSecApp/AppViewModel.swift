@@ -4959,6 +4959,7 @@ final class AppViewModel: ObservableObject {
 
         return try LocalLogExportArchive.make(
             diagnostics: reports.diagnostics,
+            domainHistoryEvents: reports.domainHistoryEventsForExport(at: generatedAt),
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: configuration.lavaGuardUnlocks,
