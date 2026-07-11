@@ -408,8 +408,15 @@ final class DiagnosticsController: ObservableObject {
     /// Every clear path that erases Domain History must call this, or cleared rows resurface
     /// from dns-events.sqlite on reload.
     private func clearDNSEventLogHistory(at clearedAt: Date) {
+        // Store the FIRST kept millisecond (clear moment + 1ms at the store's rounding) and prune
+        // to the same boundary, so a decision recorded in the clear's exact millisecond is both
+        // hidden by the read filter (ts >= floor) and physically removed (ts < floor). The raw,
+        // truncated clear millisecond used before left such same-ms rows surviving the clear
+        // (lavasec-ios#51 Codex review). This shared floor is read by the app's list/export filter
+        // (domainHistorySince) and the tunnel's prune.
+        let floorMs = DNSEventLog.clearFloorMilliseconds(for: clearedAt)
         LavaSecAppGroup.sharedDefaults.set(
-            Int(clearedAt.timeIntervalSince1970 * 1000),
+            Int(floorMs),
             forKey: LavaSecAppGroup.dnsEventLogClearedAtKey
         )
         guard let dnsEventLogURL,
@@ -417,7 +424,7 @@ final class DiagnosticsController: ObservableObject {
               let writer = try? DNSEventLog(url: dnsEventLogURL) else {
             return
         }
-        try? writer.prune(before: clearedAt)
+        try? writer.prune(before: Date(timeIntervalSince1970: Double(floorMs) / 1000))
     }
 
     func setKeepFilteringCounts(_ keepFilteringCounts: Bool, clearCounts: Bool = true) {

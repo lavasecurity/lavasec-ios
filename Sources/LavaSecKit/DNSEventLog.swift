@@ -549,6 +549,17 @@ public final class DNSEventLog: @unchecked Sendable {
     private static func milliseconds(from date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
     }
+
+    /// The read/prune floor for a "clear at `clearedAt`": the FIRST millisecond that is kept.
+    /// Events are stored at rounded-millisecond precision and read with `ts >= floor` while pruned
+    /// with `ts < floor`, so a decision recorded in the clear's exact millisecond only disappears
+    /// if the floor sits one millisecond past it. Storing the raw clear millisecond (and, worse,
+    /// truncating instead of rounding it) previously left such same-millisecond rows both visible
+    /// and unpruned despite the clear (lavasec-ios#51 Codex review).
+    /// - pinned: DNSEventLogTests.testClearFloorExcludesSameMillisecondEvents
+    public static func clearFloorMilliseconds(for clearedAt: Date) -> Int64 {
+        milliseconds(from: clearedAt) + 1
+    }
 }
 
 private extension FilterAction {

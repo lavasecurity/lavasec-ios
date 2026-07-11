@@ -229,6 +229,32 @@ final class DNSEventLogTests: XCTestCase {
         XCTAssertEqual(entry.domain, "malware.example.com")
     }
 
+    /// A decision recorded in the exact millisecond a user clears Domain History must not survive
+    /// the clear: `clearFloorMilliseconds` sits one ms past the clear moment so the row is both
+    /// hidden by the read floor (ts >= floor) and removed by the prune (ts < floor). Storing the
+    /// raw (truncated) clear millisecond previously left such same-ms rows visible AND unpruned
+    /// (lavasec-ios#51 Codex review).
+    func testClearFloorExcludesSameMillisecondEvents() throws {
+        let log = try DNSEventLog(inMemory: true)
+        // Fractional milliseconds so the test also exercises the rounding, not just whole ms.
+        let clearMoment = Date(timeIntervalSince1970: 1_000.4005)
+        try log.append(domain: "same-ms.example", decision: block, timestamp: clearMoment)
+        try log.append(domain: "post.example", decision: block, timestamp: clearMoment.addingTimeInterval(0.002))
+
+        let floorMs = DNSEventLog.clearFloorMilliseconds(for: clearMoment)
+        // Read floor (ts >= floor) hides the same-ms pre-clear row, keeps the later one.
+        XCTAssertEqual(
+            log.pageAllActions(before: nil, since: floorMs, limit: 10).map(\.domain),
+            ["post.example"]
+        )
+        // Prune to the same boundary (ts < floor) physically removes the same-ms row.
+        _ = try log.prune(before: Date(timeIntervalSince1970: Double(floorMs) / 1000))
+        XCTAssertEqual(
+            log.pageAllActions(before: nil, since: nil, limit: 10).map(\.domain),
+            ["post.example"]
+        )
+    }
+
     /// The async local-log export drains this store off the main actor (#340 follow-up), so a
     /// "clear logs" action from any screen could prune it mid-drain. A dedicated reader that pins
     /// a `beginSnapshot()` read transaction must keep seeing every row it started with even when

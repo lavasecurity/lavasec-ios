@@ -64,7 +64,11 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         // (tunnel stopped, its periodic prune never runs) still removes rows from disk.
         XCTAssertTrue(source.contains("private func clearDNSEventLogHistory(at clearedAt: Date)"))
         XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKey"))
-        XCTAssertTrue(source.contains("try? writer.prune(before: clearedAt)"))
+        // The stored floor AND the prune must use the +1ms clear boundary so a decision recorded
+        // in the clear's exact millisecond is both hidden and pruned (lavasec-ios#51 Codex review;
+        // behaviour pinned by DNSEventLogTests.testClearFloorExcludesSameMillisecondEvents).
+        XCTAssertTrue(source.contains("DNSEventLog.clearFloorMilliseconds(for: clearedAt)"))
+        XCTAssertTrue(source.contains("try? writer.prune(before: Date(timeIntervalSince1970: Double(floorMs) / 1000))"))
 
         let clearDomainHistory = try sourceBlock(
             in: source,
