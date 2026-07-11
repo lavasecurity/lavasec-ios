@@ -269,7 +269,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // Warm reuse is skipped while a catalog sync is in flight — the quiescence gate that makes the
         // warm fast path mutually exclusive with syncs (it bails to a cold compile, which coalesces
         // with / follows the sync) so a warm flip can never race a refresh's recompile/republish.
-        XCTAssertTrue(prepareBlock.contains("!isCatalogSyncInFlight"),
+        XCTAssertTrue(prepareBlock.contains("!catalog.isSyncInFlight"),
                       "Warm reuse must be skipped while a catalog sync is in flight (bail to cold).")
         XCTAssertTrue(prepareBlock.contains("return .warm(reusable)"))
         XCTAssertTrue(prepareBlock.contains("return .compiled(prepared)"))
@@ -305,7 +305,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let loadBlock = try sourceBlock(
             in: loader,
             startingAt: "public static func loadReusable(",
-            endingBefore: "public static func stillReusableAgainstCachedCatalog("
+            endingBefore: "package static func stillReusableAgainstCachedCatalog("
         )
         XCTAssertTrue(loadBlock.contains("versionedDirectoryURL(token: token)"),
                       "Reuse must read the target's specific token directory, not the live pointer.")
@@ -325,11 +325,15 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // Plus user could pointer-flip back to an oversized filter and bypass the free-tier cap. It
         // uses the budget total the cold gate persisted (summary.tierBudgetRuleCount), since the
         // per-field summary counts can't reconstruct it exactly; a legacy artifact without it falls
-        // back to a cold compile.
-        XCTAssertTrue(loadBlock.contains("preparedSnapshot.summary.tierBudgetRuleCount,"),
+        // back to a cold compile. The comparison itself is the shared INV-TIER-1 gate
+        // (FilterRuleBudget.fitsTierBudget — nil-recorded fails closed), one definition for the
+        // warm switch, startup reuse, and every publish veto.
+        XCTAssertTrue(loadBlock.contains("recordedTotal: preparedSnapshot.summary.tierBudgetRuleCount"),
                       "Warm reuse uses the persisted cold-gate budget total, not a re-derived count.")
-        XCTAssertTrue(loadBlock.contains("tierBudgetRuleCount <= configuration.limits.maxFilterRules"),
-                      "Warm reuse must reject a filter exceeding the tier rule limit and fall back to cold compile.")
+        XCTAssertTrue(loadBlock.contains("FilterRuleBudget.fitsTierBudget("),
+                      "Warm reuse must reject a filter exceeding the tier rule limit (shared INV-TIER-1 gate) and fall back to cold compile.")
+        XCTAssertTrue(loadBlock.contains("maxFilterRules: configuration.limits.maxFilterRules"),
+                      "The warm gate binds against the CURRENT tier's limit, so a lapse invalidates oversized reuse.")
         // The warm switch must hydrate the FULL guardrail (the snapshot carries only the
         // allowlist-overlap subset), or AllowlistValidator could allow a threat domain after a switch.
         XCTAssertTrue(loadBlock.contains("loadCached(enabledSourceIDs: [], includesGuardrails: true)"),
@@ -371,10 +375,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // actor) would race the warm flip. The pre-commit gate bails warm→cold on EITHER signal: a sync
         // is in flight RIGHT NOW (liveness), OR the live catalog no longer matches the one the warm
         // snapshot was validated against (content — a sync that started AND finished between the entry
-        // gate and here leaves catalogSyncTask nil yet moved the catalog; liveness alone can't see it).
+        // gate and here leaves the controller idle yet moved the catalog; liveness alone can't see it).
         XCTAssertTrue(switchBlock.contains("if case .warm(let reusable) = publication {"),
                       "The pre-commit gate must bind the reused snapshot to compute catalog movement.")
-        XCTAssertTrue(switchBlock.contains("if isCatalogSyncInFlight || catalogMovedSinceValidation {"),
+        XCTAssertTrue(switchBlock.contains("if catalog.isSyncInFlight || catalogMovedSinceValidation {"),
                       "A warm reuse must bail to cold on a live sync OR a catalog that moved since validation.")
         // The content check is by per-source identity, not the catalog_version string, so a source
         // rotation that keeps catalog_version constant is still caught.
@@ -1004,7 +1008,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Phase 1: surfaces (FiltersView)
 
     func testFiltersViewExposesInEffectRowAllFiltersPageAndSwitch() throws {
-        let source = try readSource(.filtersView)
+        let source = try readFiltersSourceAggregate()
         // The in-effect ("Now filtering") row and the library entry are consolidated
         // under a single conversational "What's filtering?" section.
         XCTAssertTrue(source.contains(#"LavaSectionGroup("What's filtering?")"#))
@@ -1146,14 +1150,18 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // FiltersView: teardown still driven by the navigation binding (both MyListCover sites), the
         // self-healing onAppear re-assert + dismiss-on-stale are kept, and the discard dialogs +
         // PendingFilterAction are gone.
-        let filtersView = try readSource(.filtersView)
+        let filtersView = try [
+            readSource(.filtersView),
+            readSource(.filterLibraryView),
+        ].joined(separator: "\n")
+        let filtersFeature = try readFiltersSourceAggregate()
         let teardownSites = filtersView.components(separatedBy: "if !presented { viewModel.endViewingFilterDetail() }").count - 1
         XCTAssertEqual(teardownSites, 2, "Both MyListCover navigationDestinations must tear down on dismissal.")
-        XCTAssertFalse(filtersView.contains("PendingFilterAction"))
-        XCTAssertFalse(filtersView.contains("Discard unsaved changes?"))
+        XCTAssertFalse(filtersFeature.contains("PendingFilterAction"))
+        XCTAssertFalse(filtersFeature.contains("Discard unsaved changes?"))
         let myList = try sourceBlock(
-            in: filtersView,
-            startingAt: "private struct MyListCover: View",
+            in: try readSource(.filterMyListView),
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
         XCTAssertFalse(myList.contains(".onDisappear"))
@@ -1196,7 +1204,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "A non-active library-only failure must not flip the global catalog/protection error flag.")
 
         // The detail page routes a non-active save to this method and shows its message inline.
-        let filtersView = try readSource(.filtersView)
+        let filtersView = try readSource(.filterMyListView)
         let saveChanges = try sourceBlock(
             in: filtersView,
             startingAt: "private func saveChanges() {",
@@ -1273,7 +1281,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.
         let review = try readSource(.filterReviewFlowView)
         XCTAssertTrue(review.contains("prepareAndApplyFilterDraft(origin: origin)"))
-        let diagnostics = try readSource(.diagnosticsView)
+        let diagnostics = try readSource(.diagnosticsDomainHistory)
         XCTAssertTrue(diagnostics.contains("viewModel.filterPreparationOrigin == .domainHistory"),
                       "The Domain History cover must gate on its own origin.")
 
@@ -1290,21 +1298,22 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testFrozenFiltersAreReadOnlyAndEditModeIsAuthGated() throws {
-        let source = try readSource(.filtersView)
+        let librarySource = try readSource(.filterLibraryView)
+        let myListSource = try readSource(.filterMyListView)
         // Frozen (lapsed-Plus) filters are read-only: delete is gated and rename is refused, but
         // they remain VIEWABLE — the dialog drops Apply and opens a read-only View (Codex r6).
-        XCTAssertTrue(source.contains("&& !viewModel.isFilterFrozen(filter.id)"),
+        XCTAssertTrue(librarySource.contains("&& !viewModel.isFilterFrozen(filter.id)"),
                       "canDelete must exclude frozen filters.")
-        XCTAssertTrue(source.contains("if !isFrozen && !isPendingDeletion { rename() }"),
+        XCTAssertTrue(librarySource.contains("if !isFrozen && !isPendingDeletion { rename() }"),
                       "Rename must be refused for frozen filters (and for a staged-for-delete row).")
         // The Apply button is only offered for non-frozen filters (can't switch to a frozen one).
-        XCTAssertTrue(source.contains("if !viewModel.isFilterFrozen(filter.id) {"),
+        XCTAssertTrue(librarySource.contains("if !viewModel.isFilterFrozen(filter.id) {"),
                       "Apply must be hidden for frozen filters.")
         // MyListCover renders a frozen filter read-only: no Edit affordance, and beginEditing is
         // guarded.
         let myList = try sourceBlock(
-            in: source,
-            startingAt: "private struct MyListCover: View",
+            in: myListSource,
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
         XCTAssertTrue(myList.contains("private var isReadOnly: Bool {"))
@@ -1328,7 +1337,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Entering library edit mode (add/rename/delete) is gated on the filter-editing
         // surface, like My filter's edit entry point — auth must precede isEditing = true.
-        let editButton = try sourceBlock(in: source, startingAt: "accessibilityLabel: \"Edit\") {", endingBefore: ".navigationDestination(")
+        let editButton = try sourceBlock(in: librarySource, startingAt: "accessibilityLabel: \"Edit\") {", endingBefore: ".navigationDestination(")
         let authIdx = try XCTUnwrap(editButton.range(of: "requireAuthentication(")?.lowerBound)
         let enterIdx = try XCTUnwrap(editButton.range(of: "isEditing = true")?.lowerBound)
         XCTAssertLessThan(authIdx, enterIdx, "Auth must gate entering edit mode.")

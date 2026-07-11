@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
-import LavaSecCore
+import LavaSecKit
+import LavaSecPresentation
 
 struct SoftShieldGuardian: View {
     let size: CGFloat

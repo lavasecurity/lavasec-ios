@@ -8,15 +8,16 @@ import LavaSecKit
 /// the substrate that makes the artifact trio atomic to the lock-free, `mmap`-based
 /// tunnel reader (LAV-90 Phase 1).
 public struct FilterArtifactPointer: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    package static let currentSchemaVersion = 1
 
-    public let schemaVersion: Int
+    package let schemaVersion: Int
+    /// Content-addressed directory token selected by this pointer.
     public let token: String
-    public let snapshotIdentityFingerprint: String
-    public let generatedAt: Date
-    public let writtenAt: Date
+    package let snapshotIdentityFingerprint: String
+    package let generatedAt: Date
+    package let writtenAt: Date
 
-    public init(
+    package init(
         token: String,
         snapshotIdentityFingerprint: String,
         generatedAt: Date,
@@ -32,7 +33,9 @@ public struct FilterArtifactPointer: Codable, Equatable, Sendable {
 }
 
 extension FilterArtifactStore {
+    /// Default name of the content-addressed artifact directory.
     public static let defaultArtifactsDirectoryName = "filter-artifacts"
+    /// Default filename of the atomically published artifact pointer.
     public static let defaultArtifactPointerFilename = "current.json"
 
     /// Content-addressed token for a snapshot: its identity fingerprint plus the
@@ -43,19 +46,20 @@ extension FilterArtifactStore {
         return "\(preparedSnapshot.identity.fingerprint)-\(millis)"
     }
 
-    public func artifactsRootURL(
+    package func artifactsRootURL(
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName
     ) -> URL {
         directoryURL.appendingPathComponent(directoryName, isDirectory: true)
     }
 
-    public func artifactPointerURL(
+    package func artifactPointerURL(
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
         pointerFilename: String = FilterArtifactStore.defaultArtifactPointerFilename
     ) -> URL {
         artifactsRootURL(directoryName: directoryName).appendingPathComponent(pointerFilename)
     }
 
+    /// Returns the directory URL for a content-addressed artifact token.
     public func versionedDirectoryURL(
         token: String,
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName
@@ -78,7 +82,7 @@ extension FilterArtifactStore {
     /// is not yet pointed-to, so it is invisible to readers. The caller flips the
     /// pointer (`writeArtifactPointer`) under the publish lock — that flip is the
     /// linearization point.
-    public func stageVersionedArtifacts(
+    package func stageVersionedArtifacts(
         preparedSnapshot: PreparedFilterSnapshot,
         writtenAt: Date,
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName
@@ -111,7 +115,7 @@ extension FilterArtifactStore {
     /// Convenience for callers that own no external lock (e.g. tests); the production
     /// writer stages off-lock then flips `writeArtifactPointer` under the publish lock.
     @discardableResult
-    public func persistVersioned(
+    package func persistVersioned(
         preparedSnapshot: PreparedFilterSnapshot,
         writtenAt: Date,
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
@@ -128,7 +132,7 @@ extension FilterArtifactStore {
 
     /// Atomically (re)writes the pointer file. This is the single publish event for
     /// the directory it names.
-    public func writeArtifactPointer(
+    package func writeArtifactPointer(
         _ pointer: FilterArtifactPointer,
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
         pointerFilename: String = FilterArtifactStore.defaultArtifactPointerFilename
@@ -146,6 +150,7 @@ extension FilterArtifactStore {
         )
     }
 
+    /// Loads the current artifact pointer, returning `nil` when it is absent or invalid.
     public func loadArtifactPointer(
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
         pointerFilename: String = FilterArtifactStore.defaultArtifactPointerFilename
@@ -161,7 +166,7 @@ extension FilterArtifactStore {
     /// Resolve the current pointer to a store scoped at its versioned directory, or
     /// `nil` if there is no pointer or the directory is missing. This is the seam the
     /// (lock-free) tunnel reader will adopt at the Task-6 cutover.
-    public func currentVersionedStore(
+    package func currentVersionedStore(
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
         pointerFilename: String = FilterArtifactStore.defaultArtifactPointerFilename
     ) -> FilterArtifactStore? {
@@ -194,7 +199,7 @@ extension FilterArtifactStore {
     /// peer writer's GC. Must comfortably exceed the time between staging (off-lock,
     /// including the snapshot encode) and the pointer flip, so a second (background)
     /// writer's in-flight token is never reaped out from under it.
-    public static let versionedGarbageGraceInterval: TimeInterval = 120
+    package static let versionedGarbageGraceInterval: TimeInterval = 120
 
     /// Grace window for WARM-dir GC (`collectWarmArtifactGarbage`), deliberately much longer
     /// than `versionedGarbageGraceInterval`: warm GC's only job is reclaiming superseded warm
@@ -206,7 +211,7 @@ extension FilterArtifactStore {
     /// publish GC's keep-previous "survives a single supersession" posture to a redundant
     /// cold rebuild. The long grace restores that protection without a pointer-schema change
     /// (`FilterArtifactPointer` has no previousToken field to retain instead).
-    public static let warmGarbageGraceInterval: TimeInterval = 600
+    package static let warmGarbageGraceInterval: TimeInterval = 600
 
     /// Delete every versioned directory except the retained tokens. The caller passes
     /// the live token plus the immediately-previous one, so a reader mid-pass on the
@@ -221,7 +226,7 @@ extension FilterArtifactStore {
     /// `graceInterval` is therefore NEVER reaped: that protects a concurrently-staged dir
     /// from being deleted before its writer flips to it (which would leave a dangling
     /// pointer). Abandoned/orphaned dirs are simply reaped a cycle later, once aged out.
-    public func collectVersionedGarbage(
+    package func collectVersionedGarbage(
         retaining retainedTokens: [String],
         directoryName: String = FilterArtifactStore.defaultArtifactsDirectoryName,
         graceInterval: TimeInterval = FilterArtifactStore.versionedGarbageGraceInterval

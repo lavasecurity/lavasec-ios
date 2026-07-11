@@ -1,4 +1,4 @@
-import LavaSecCore
+import LavaSecAppServices
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers

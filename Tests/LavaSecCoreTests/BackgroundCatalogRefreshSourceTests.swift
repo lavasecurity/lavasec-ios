@@ -50,8 +50,10 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
             "syncCatalog must accept an isBackgroundRefresh flag."
         )
         XCTAssertTrue(
-            viewModel.contains("func performCatalogSync(operationID: LatencyOperationID = .make(), isBackgroundRefresh: Bool = false) async"),
-            "performCatalogSync must thread the isBackgroundRefresh flag."
+            viewModel.contains("func performCatalogSyncTransaction(")
+                && viewModel.contains("isBackgroundRefresh: Bool,")
+                && viewModel.contains("operationID: LatencyOperationID"),
+            "The whole transaction bridge must thread the background-refresh flag."
         )
         // Background refresh must not network-refresh custom blocklists (would rotate
         // hashes it can't persist into the un-rewritten configuration.json).
@@ -63,7 +65,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         // returns WITHOUT falling into the foreground persist path.
         let branch = try sourceBlock(in: viewModel, startingAt: "if isBackgroundRefresh {", endingBefore: "// Smart refresh:")
         XCTAssertTrue(branch.contains("publishBackgroundRefreshArtifacts(operationID: operationID"))
-        XCTAssertTrue(branch.contains("finishCatalogSyncTask()") && branch.contains("return"))
+        XCTAssertTrue(branch.contains("return transactionResult"))
         XCTAssertFalse(
             branch.contains("persistSharedState("),
             "Background branch must not rewrite configuration.json via persistSharedState()."
@@ -154,7 +156,11 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         let viewModel = try readSource(.appViewModel)
         // The base pointer must be captured BEFORE the sync (so a concurrent foreground
         // publish during the sync is observed as a move) and only for the background path.
-        let perform = try sourceBlock(in: viewModel, startingAt: "private func performCatalogSync(operationID:", endingBefore: "private func publishBackgroundRefreshArtifacts(operationID:")
+        let perform = try sourceBlock(
+            in: viewModel,
+            startingAt: "func performCatalogSyncTransaction(",
+            endingBefore: "private struct BackgroundCatalogCacheSupersededError"
+        )
         XCTAssertTrue(
             perform.contains("let basePublishedPointerToken = isBackgroundRefresh ? currentPublishedArtifactPointerToken() : nil"),
             "Background must capture the published pointer token before syncing."
@@ -208,8 +214,8 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         let viewModel = try readSource(.appViewModel)
         let perform = try sourceBlock(
             in: viewModel,
-            startingAt: "private func performCatalogSync(operationID:",
-            endingBefore: "private func publishBackgroundRefreshArtifacts(operationID:"
+            startingAt: "func performCatalogSyncTransaction(",
+            endingBefore: "private struct BackgroundCatalogCacheSupersededError"
         )
         // On a NON-cancellation sync error the foreground recovery restores from cache
         // (loadCachedCatalogAfterSyncFailure → persistSharedState) and then the tail arms

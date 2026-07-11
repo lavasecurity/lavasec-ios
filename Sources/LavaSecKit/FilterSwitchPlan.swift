@@ -16,9 +16,12 @@ public enum FilterSwitchPlan {
     /// library (active selection moved to the target). `generationBump` is intentionally absent — apply
     /// it at write time against the on-disk generation.
     public struct Outcome: Equatable, Sendable {
+        /// The configuration with the target filter's scoped fields applied.
         public let configuration: AppConfiguration
+        /// The library with the target filter selected as active.
         public let library: FilterLibrary
 
+        /// Creates a planned configuration/library pair without persisting or bumping its generation.
         public init(configuration: AppConfiguration, library: FilterLibrary) {
             self.configuration = configuration
             self.library = library

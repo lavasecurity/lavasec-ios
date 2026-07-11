@@ -44,9 +44,9 @@ public struct PendingDNSResponse: Sendable {
 /// a resolver can never itself require DNS resolution.
 public struct ResolverEndpoint: Hashable, Sendable {
     /// The numeric address literal, exactly as validated.
-    public let address: String
+    internal let address: String
     /// The validated address family: `AF_INET` or `AF_INET6`.
-    public let family: Int32
+    internal let family: Int32
 
     /// Parses and validates `address`; fails for anything that is not a
     /// numeric IPv4 or IPv6 literal.
@@ -69,7 +69,7 @@ public struct ResolverEndpoint: Hashable, Sendable {
     }
 
     /// The `sockaddr` byte length matching `family`, for socket-call plumbing.
-    public var socketAddressLength: socklen_t {
+    internal var socketAddressLength: socklen_t {
         if family == AF_INET6 {
             return socklen_t(MemoryLayout<sockaddr_in6>.size)
         }
@@ -78,7 +78,7 @@ public struct ResolverEndpoint: Hashable, Sendable {
     }
 }
 
-private extension ResolverBackoffPolicy.AttemptOutcome {
+extension ResolverBackoffPolicy.AttemptOutcome {
     /// Bridges a wire-level resolver attempt outcome into the backoff policy's
     /// own outcome domain (the policy lives in LavaSecKit and must not depend
     /// on the DNS layer's types). Case-for-case; new outcomes must be mapped

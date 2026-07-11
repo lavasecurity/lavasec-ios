@@ -1,24 +1,39 @@
 import Foundation
 
+/// The filter list targeted by an action originating in domain history.
 public enum DomainHistoryDomainTarget: Equatable, Sendable {
+    /// Add the domain to the blocked-domain list.
     case blocked
+    /// Add the domain to the allowed-domain list.
     case allowed
 }
 
+/// The configuration and normalized domain produced by a domain-history action.
 public struct DomainHistoryDomainActionResult: Equatable, Sendable {
+    /// The configuration after applying the requested action.
     public let configuration: AppConfiguration
+    /// The normalized domain added to the target list.
     public let normalizedDomain: String
+    /// The list that received the normalized domain.
     public let target: DomainHistoryDomainTarget
 }
 
+/// Errors that can prevent a domain-history action from being applied.
 public enum DomainHistoryDomainActionError: LocalizedError, Equatable, Sendable {
+    /// The supplied domain is invalid, with a message suitable for presentation.
     case invalidDomain(message: String)
+    /// The normalized domain is already blocked.
     case alreadyBlocked(domain: String)
+    /// The normalized domain is already allowed.
     case alreadyAllowed(domain: String)
+    /// The blocked-domain limit has been reached.
     case blockedDomainLimitReached(limit: Int)
+    /// The allowed-domain limit has been reached.
     case allowedDomainLimitReached(limit: Int)
+    /// Allowlist validation rejected the supplied domain.
     case allowedDomainRejected(message: String)
 
+    /// A localized description of the action error.
     public var errorDescription: String? {
         switch self {
         case .invalidDomain(let message):
@@ -37,7 +52,9 @@ public enum DomainHistoryDomainActionError: LocalizedError, Equatable, Sendable 
     }
 }
 
+/// Domain-history actions that produce updated app configurations.
 public extension AppConfiguration {
+    /// Normalizes `rawDomain`, adds it to the target list, and removes it from the opposite list.
     func applyingDomainHistoryDomainAction(
         _ rawDomain: String,
         target: DomainHistoryDomainTarget,

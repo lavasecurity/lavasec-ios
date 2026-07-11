@@ -1,8 +1,8 @@
 import Foundation
 import LavaSecKit
 
-public enum DNSOverHTTPSRequest {
-    public enum Error: Swift.Error, Equatable, Sendable {
+package enum DNSOverHTTPSRequest {
+    package enum Error: Swift.Error, Equatable, Sendable {
         case nonHTTPResponse
         case httpStatus(Int)
         case invalidContentType(String?)
@@ -10,7 +10,7 @@ public enum DNSOverHTTPSRequest {
         case malformedDNSResponse
     }
 
-    public static func makePOSTRequest(
+    package static func makePOSTRequest(
         endpoint: URL,
         query: Data,
         timeoutSeconds: TimeInterval
@@ -31,7 +31,7 @@ public enum DNSOverHTTPSRequest {
         return request
     }
 
-    public static func validatedDNSResponse(
+    package static func validatedDNSResponse(
         body: Data,
         response: URLResponse,
         originalQuery: Data

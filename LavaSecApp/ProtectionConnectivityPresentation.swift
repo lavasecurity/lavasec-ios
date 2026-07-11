@@ -1,5 +1,5 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
 
 /// Per-OS presentation for protection connectivity states.
 ///

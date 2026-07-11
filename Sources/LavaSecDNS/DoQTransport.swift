@@ -61,6 +61,7 @@ import Network
 // idempotent `finishCurrentQuery`/`cancelLocked` completion semantics, and the
 // smoke-probe timeout budgeting in PacketTunnelProvider that today sizes the
 // probe window to include this per-probe connect cost.
+/// Thread-safe DNS-over-QUIC client with bounded endpoint lanes; each query currently owns a fresh QUIC connection.
 public final class DoQTransport: @unchecked Sendable {
     private static let maxConnectionsPerEndpoint = 4
     private let timeoutSeconds: Int
@@ -71,11 +72,13 @@ public final class DoQTransport: @unchecked Sendable {
     private var activeQueryCount = 0
     private var shouldResetWhenIdle = false
 
+    /// Creates endpoint lanes whose connection-and-response timeout budget is measured in whole seconds.
     public init(timeoutSeconds: Int, debugLogger: DNSTransportDebugLogger? = nil) {
         self.timeoutSeconds = timeoutSeconds
         self.debugLogger = debugLogger
     }
 
+    /// Atomically removes and cancels all shared DoQ lanes, including work currently queued on them.
     public func resetConnections() {
         let connectionsToCancel: [DoQConnection]
         connectionLock.lock()
@@ -87,6 +90,7 @@ public final class DoQTransport: @unchecked Sendable {
         connectionsToCancel.forEach { $0.cancel() }
     }
 
+    /// Defers shared-lane cancellation until active queries finish, or resets immediately when idle.
     public func resetConnectionsWhenIdle() {
         let connectionsToCancel: [DoQConnection]?
         connectionLock.lock()
@@ -103,10 +107,12 @@ public final class DoQTransport: @unchecked Sendable {
         connectionsToCancel?.forEach { $0.cancel() }
     }
 
+    /// Cancels all shared lanes during tunnel shutdown using the immediate reset semantics.
     public func cancel() {
         resetConnections()
     }
 
+    /// Queues a query on a bounded endpoint lane and asynchronously returns one classified transport response.
     public func resolve(
         _ query: Data,
         endpoint: DNSOverQUICEndpoint,
@@ -120,6 +126,7 @@ public final class DoQTransport: @unchecked Sendable {
         }
     }
 
+    /// Resolves through a one-shot lane outside the shared pool and cancels that lane after completion.
     public func resolveIsolated(
         _ query: Data,
         endpoint: DNSOverQUICEndpoint,

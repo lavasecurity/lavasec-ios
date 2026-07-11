@@ -8,20 +8,32 @@ import LavaSecKit
 // executors so the policy is testable with fakes; backoff STATE also stays
 // with the caller — the orchestrator only consults the injected gate.
 
+/// Stable per-attempt classification used by retry policy, health scoring, and cross-process diagnostics.
 public enum ResolverAttemptOutcome: String, Sendable {
+    /// The transport completed with a response matching the query identity.
     case success
+    /// The attempt exceeded its configured time budget.
     case timeout
+    /// A DoH endpoint responded with a non-success HTTP status.
     case httpStatusFailure = "http-status-failure"
+    /// Backoff policy suppressed the endpoint without a wire attempt.
     case backedOff = "backed-off"
+    /// The query could not be sent to the selected endpoint.
     case sendFailed = "send-failed"
+    /// The endpoint produced no readable or valid response.
     case receiveFailed = "receive-failed"
+    /// A configured plain-DNS address was not a valid numeric endpoint.
     case invalidAddress = "invalid-address"
+    /// The requested resolver transport is unavailable on this runtime path.
     case unsupported
+    /// A UDP or TCP resolver socket could not be created or configured.
     case socketUnavailable = "socket-unavailable"
+    /// A response arrived for a different DNS transaction or question.
     case mismatchedResponse = "mismatched-response"
+    /// Device DNS was selected but no captured resolver address was available.
     case deviceDNSUnavailable = "device-dns-unavailable"
 
-    public init(_ outcome: DNSTransportOutcome) {
+    internal init(_ outcome: DNSTransportOutcome) {
         switch outcome {
         case .success:
             self = .success
@@ -39,13 +51,19 @@ public enum ResolverAttemptOutcome: String, Sendable {
     }
 }
 
+/// One ordered resolver attempt, including the endpoint label and transport metadata exposed in tunnel diagnostics.
 public struct ResolverAttempt: Sendable {
+    /// Resolver endpoint identifier or address recorded for this attempt.
     public let address: String
+    /// Classified result consumed by fallback and backoff policy.
     public let outcome: ResolverAttemptOutcome
-    public var transport: DNSResolverTransport
-    public var usedTCP: Bool
-    public var negotiatedDoHProtocol: String?
+    /// Effective transport used for this attempt; public clients receive read-only access after construction.
+    public private(set) var transport: DNSResolverTransport
+    internal var usedTCP: Bool
+    /// Negotiated HTTP protocol observed for a DoH attempt, including failed outcomes when metrics were available.
+    public private(set) var negotiatedDoHProtocol: String?
 
+    /// Records one attempt; `usedTCP` is retained only for DNS-internal assembly compatibility.
     public init(
         address: String,
         outcome: ResolverAttemptOutcome,
@@ -61,23 +79,38 @@ public struct ResolverAttempt: Sendable {
     }
 }
 
+/// Aggregate result of primary and optional fallback resolution, with attempts retained in execution order.
 public struct DNSResolutionResult: Sendable {
+    /// DNS response bytes selected for the caller; a failed encrypted fallback may replace a primary packet with `nil`.
     public let response: Data?
+    /// Resolver identifier retained during combination; it may remain non-`nil`
+    /// when an encrypted fallback leaves `response` nil.
     public let successfulResolverAddress: String?
+    /// Every attempted or backoff-suppressed endpoint in execution order.
     public let attempts: [ResolverAttempt]
+    /// Transport associated with the final selected result.
     public let transport: DNSResolverTransport
+    /// Whether a UDP reply carried the DNS truncated bit and required TCP consideration.
     public let udpTruncated: Bool
+    /// Whether plain-DNS resolution attempted TCP after UDP truncation.
     public let tcpFallbackAttempted: Bool
+    /// Whether the TCP fallback produced the selected response.
     public let tcpFallbackSucceeded: Bool
-    public var deviceDNSFallbackAttempted: Bool
-    public var deviceDNSFallbackSucceeded: Bool
-    public var deviceDNSUnavailable: Bool
+    /// Whether the resolver sequence reached the captured Device-DNS fallback route.
+    public private(set) var deviceDNSFallbackAttempted: Bool
+    /// Whether Device-DNS fallback produced the selected response.
+    public private(set) var deviceDNSFallbackSucceeded: Bool
+    /// Whether Device DNS could not run because no captured resolver was available.
+    public private(set) var deviceDNSUnavailable: Bool
     // Set when the encrypted (Mullvad DoH) fallback produced this response because
     // a Device-DNS primary was wedged. Observable so the provider can log/diagnose
     // that the fallback engaged; distinct from the device-DNS-fallback flags.
-    public var usedEncryptedFallback: Bool
-    public var durationMilliseconds: Int?
+    /// Whether an encrypted fallback, rather than the Device-DNS primary, produced the selected response.
+    public private(set) var usedEncryptedFallback: Bool
+    /// End-to-end resolver duration in rounded milliseconds, or `nil` until timing is recorded.
+    public private(set) var durationMilliseconds: Int?
 
+    /// Creates a complete result whose fallback and timing fields are read-only to public clients after construction.
     public init(
         response: Data?,
         successfulResolverAddress: String?,
@@ -106,23 +139,26 @@ public struct DNSResolutionResult: Sendable {
         self.durationMilliseconds = durationMilliseconds
     }
 
+    /// Diagnostic raw value of the final attempt outcome, or `nil` when no attempt was recorded.
     public var failureSummary: String? {
         attempts.last?.outcome.rawValue
     }
 
+    /// Protocol name from the last successful DoH attempt, excluding failed or non-DoH attempts.
     public var negotiatedDoHProtocol: String? {
         attempts.last { attempt in
             attempt.outcome == .success && attempt.transport == .dnsOverHTTPS
         }?.negotiatedDoHProtocol
     }
 
+    /// Whether any non-Device-DNS endpoint was actually attempted instead of merely suppressed by backoff.
     public var hasFallbackActivationEvidence: Bool {
         attempts.contains { attempt in
             attempt.transport != .deviceDNS && attempt.outcome != .backedOff
         }
     }
 
-    public func withAttempts(_ newAttempts: [ResolverAttempt]) -> DNSResolutionResult {
+    internal func withAttempts(_ newAttempts: [ResolverAttempt]) -> DNSResolutionResult {
         DNSResolutionResult(
             response: response,
             successfulResolverAddress: successfulResolverAddress,
@@ -144,7 +180,7 @@ public struct DNSResolutionResult: Sendable {
     /// deviceDNSFallback flags — the encrypted fallback is a per-query safety net,
     /// not the device-DNS-fallback *mode* — so on success the result just looks
     /// like a normal resolution on the fallback's (DoH) transport.
-    public func withEncryptedFallback(_ fallbackResult: DNSResolutionResult) -> DNSResolutionResult {
+    internal func withEncryptedFallback(_ fallbackResult: DNSResolutionResult) -> DNSResolutionResult {
         DNSResolutionResult(
             response: fallbackResult.response,
             successfulResolverAddress: fallbackResult.response == nil
@@ -163,7 +199,7 @@ public struct DNSResolutionResult: Sendable {
         )
     }
 
-    public func withDeviceDNSFallback(_ fallbackResult: DNSResolutionResult) -> DNSResolutionResult {
+    internal func withDeviceDNSFallback(_ fallbackResult: DNSResolutionResult) -> DNSResolutionResult {
         DNSResolutionResult(
             response: fallbackResult.response,
             successfulResolverAddress: fallbackResult.successfulResolverAddress,
@@ -180,6 +216,7 @@ public struct DNSResolutionResult: Sendable {
         )
     }
 
+    /// Returns a copy whose nonnegative elapsed duration is rounded to whole milliseconds.
     public func recordingDuration(since startedAt: Date, now: Date = Date()) -> DNSResolutionResult {
         let elapsedMilliseconds = max(0, Int((now.timeIntervalSince(startedAt) * 1_000).rounded()))
         return DNSResolutionResult(
@@ -199,15 +236,18 @@ public struct DNSResolutionResult: Sendable {
     }
 }
 
+/// Applies resolver routing, endpoint failover, and one permitted fallback while delegating all wire I/O.
 public struct ResolverOrchestrator: Sendable {
+    /// Sendable wire-execution boundary supplied by the packet tunnel for each supported resolver transport.
     public struct Executors: Sendable {
-        public var isEndpointBackedOff: @Sendable (String) -> Bool
-        public var resolveDoH: @Sendable (Data, DNSOverHTTPSEndpoint, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
-        public var resolveDoT: @Sendable (Data, DNSOverTLSEndpoint, Bool, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
-        public var resolveDoQ: @Sendable (Data, DNSOverQUICEndpoint, Bool, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
-        public var resolvePlain: @Sendable (Data, [String], DNSResolverTransport) -> DNSResolutionResult
-        public var resolveDevice: @Sendable (Data, [String]) -> DNSResolutionResult
+        internal var isEndpointBackedOff: @Sendable (String) -> Bool
+        internal var resolveDoH: @Sendable (Data, DNSOverHTTPSEndpoint, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
+        internal var resolveDoT: @Sendable (Data, DNSOverTLSEndpoint, Bool, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
+        internal var resolveDoQ: @Sendable (Data, DNSOverQUICEndpoint, Bool, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void
+        internal var resolvePlain: @Sendable (Data, [String], DNSResolverTransport) -> DNSResolutionResult
+        internal var resolveDevice: @Sendable (Data, [String]) -> DNSResolutionResult
 
+        /// Captures the backoff gate and transport executors without transferring ownership of their underlying clients.
         public init(
             isEndpointBackedOff: @escaping @Sendable (String) -> Bool,
             resolveDoH: @escaping @Sendable (Data, DNSOverHTTPSEndpoint, @escaping @Sendable (DNSTransportResponse) -> Void) -> Void,
@@ -227,6 +267,7 @@ public struct ResolverOrchestrator: Sendable {
 
     private let executors: Executors
 
+    /// Creates an orchestrator backed by caller-owned transport executors and endpoint backoff state.
     public init(executors: Executors) {
         self.executors = executors
     }
@@ -237,6 +278,7 @@ public struct ResolverOrchestrator: Sendable {
     // (shouldFallbackToDeviceDNS); a Device-DNS primary falls back to an encrypted
     // resolver (shouldFallbackToEncrypted, Mullvad DoH). The two are mutually
     // exclusive.
+    /// Resolves the primary route and, only when policy permits, performs a single device or encrypted fallback.
     public func resolveUpstream(
         _ query: Data,
         plan: DNSResolverRuntimePlan,
@@ -296,6 +338,7 @@ public struct ResolverOrchestrator: Sendable {
         }
     }
 
+    /// Executes only the plan's primary route, including ordered endpoint failover but no cross-route fallback.
     public func resolvePrimaryUpstream(
         _ query: Data,
         plan: DNSResolverRuntimePlan,

@@ -1,40 +1,72 @@
 import Foundation
 
+/// Broad network-path categories recorded in tunnel health state.
 public enum TunnelNetworkKind: String, Codable, Sendable {
+    /// The current network kind is unavailable or has not been classified.
     case unknown
+    /// The tunnel is using a Wi-Fi network path.
     case wifi
+    /// The tunnel is using a cellular network path.
     case cellular
+    /// The tunnel is using a wired network path.
     case wired
+    /// The tunnel is using a known path outside the named categories.
     case other
 }
 
+/// A serializable snapshot of tunnel connectivity, resolver, and recovery health.
 public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
+    /// The time at which this health observation period began.
     public var startedAt: Date
+    /// The time of the most recent snapshot update.
     public var updatedAt: Date
+    /// The current broad network-path category.
     public var networkKind: TunnelNetworkKind
+    /// The most recently recorded resolver address, if available.
     public var lastResolverAddress: String?
+    /// The most recently recorded upstream failure reason label.
     public var lastFailureReason: String?
+    /// The number of DNS cache hits recorded in this observation period.
     public var cacheHitCount: Int
+    /// The number of DNS cache misses recorded in this observation period.
     public var cacheMissCount: Int
+    /// The number of DNS queries combined with an in-flight equivalent query.
     public var coalescedQueryCount: Int
+    /// The number of successful upstream resolutions recorded.
     public var upstreamSuccessCount: Int
+    /// The number of failed upstream resolutions recorded.
     public var upstreamFailureCount: Int
+    /// The current streak of consecutive upstream failures.
     public var consecutiveUpstreamFailureCount: Int
+    /// The transport used for the most recently recorded resolver operation.
     public var lastResolverTransport: DNSResolverTransport
+    /// The number of DNS-over-HTTPS HTTP failures recorded.
     public var dohHTTPFailureCount: Int
     /// ALPN id of the last successful DoH negotiation ("h3", "h2", "http/1.1").
     public var lastDoHHTTPVersion: String?
+    /// The number of recorded upstream timeouts.
     public var upstreamTimeoutCount: Int
+    /// The number of truncated UDP DNS responses recorded.
     public var udpTruncatedResponseCount: Int
+    /// The number of TCP fallback attempts recorded.
     public var tcpFallbackAttemptCount: Int
+    /// The number of successful TCP fallback attempts.
     public var tcpFallbackSuccessCount: Int
+    /// The number of Device DNS fallback attempts.
     public var deviceDNSFallbackAttemptCount: Int
+    /// The number of successful Device DNS fallback attempts.
     public var deviceDNSFallbackSuccessCount: Int
+    /// The number of observations in which Device DNS was unavailable.
     public var deviceDNSUnavailableCount: Int
+    /// Whether the most recently observed network path was satisfied.
     public var networkPathIsSatisfied: Bool
+    /// The time of the most recent DNS smoke probe, if one has run.
     public var lastDNSSmokeProbeAt: Date?
+    /// The outcome of the most recent DNS smoke probe, if one has run.
     public var lastDNSSmokeProbeSucceeded: Bool?
+    /// The number of successful DNS smoke probes recorded.
     public var dnsSmokeProbeSuccessCount: Int
+    /// The number of failed DNS smoke probes recorded.
     public var dnsSmokeProbeFailureCount: Int
     /// Consecutive failed DNS smoke probes, reset only by a smoke-probe success.
     /// Unlike `consecutiveUpstreamFailureCount` this is NOT reset by forwarding /
@@ -60,15 +92,25 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// session. QA instrument for the identity scoping: during a steady-hijacker replay this
     /// stays frozen while the streak climbs to the escalation threshold.
     public var rejectedSmokeResponseRescopeCount: Int
+    /// Whether Device DNS fallback mode is currently active.
     public var deviceDNSFallbackModeActive: Bool
+    /// The most recent time Device DNS fallback mode was activated.
     public var lastDeviceDNSFallbackActivatedAt: Date?
+    /// The number of Device DNS fallback mode activations recorded.
     public var deviceDNSFallbackActivationCount: Int
+    /// Resolution attempt counts keyed by resolver address.
     public var resolverAttemptCounts: [String: Int]
+    /// Successful resolution counts keyed by resolver address.
     public var resolverSuccessCounts: [String: Int]
+    /// Failed resolution counts keyed by resolver address.
     public var resolverFailureCounts: [String: Int]
+    /// The time of the most recently recorded network change.
     public var lastNetworkChangeAt: Date?
+    /// The number of network changes recorded.
     public var networkChangeCount: Int
+    /// The time of the most recent resolver runtime reset.
     public var lastResolverRuntimeResetAt: Date?
+    /// The reason label for the most recent resolver runtime reset.
     public var lastResolverRuntimeResetReason: String?
     /// The instant the configured resolver IDENTITY actually changed (a different upstream),
     /// distinct from `lastResolverRuntimeResetAt`, which is also bumped by same-resolver runtime
@@ -76,7 +118,9 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// DNS-health context, so this — not the broad reset timestamp — anchors the smoke-probe /
     /// encrypted-fallback coverage baseline.
     public var lastResolverIdentityChangeAt: Date?
+    /// The number of resolver runtime resets recorded.
     public var resolverRuntimeResetCount: Int
+    /// The time of the most recent successful upstream resolution on any path.
     public var lastUpstreamSuccessAt: Date?
     /// Timestamp of the last forwarding success carried by the configured PRIMARY
     /// upstream (i.e. not the encrypted Device-DNS safety net). The silent recovery
@@ -93,19 +137,28 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// deliberately SEPARATE from `lastPrimaryUpstreamSuccessAt` (never set in the same
     /// branch) so fallback-carried traffic can't paint the wedged primary "healthy".
     public var lastEncryptedFallbackSuccessAt: Date?
+    /// The time of the most recent failed upstream resolution.
     public var lastUpstreamFailureAt: Date?
+    /// The duration, in milliseconds, of the most recently timed upstream operation.
     public var lastUpstreamDurationMilliseconds: Int?
+    /// The number of upstream responses classified as slow.
     public var slowUpstreamResponseCount: Int
+    /// The current streak of upstream responses classified as slow.
     public var consecutiveSlowUpstreamResponseCount: Int
+    /// The time of the most recent upstream response classified as slow.
     public var lastSlowUpstreamResponseAt: Date?
+    /// The time of the most recent network-settings reapply failure.
     public var lastNetworkSettingsReapplyFailureAt: Date?
+    /// The reason label for the most recent network-settings reapply failure.
     public var lastNetworkSettingsReapplyFailureReason: String?
+    /// The number of network-settings reapply failures recorded.
     public var networkSettingsReapplyFailureCount: Int
     /// Queries served fail-closed (`.protectionUnavailable`) this session. Deliberately kept
     /// OUT of user-facing filtering counts and Domain History (a fail-closed block is not a
     /// blocklist match — #164 honesty rule); without a health-side trace, a past fail-closed
     /// window is indistinguishable from "no incident" in a field report.
     public var failClosedServedQueryCount: Int
+    /// The most recent time a query was served fail-closed.
     public var lastFailClosedAt: Date?
     /// "snapshot-unavailable" (no usable snapshot could be loaded/compiled — a restart cannot
     /// fix it) vs "transient-protection-unavailable" (e.g. the cold-start bootstrap window
@@ -171,6 +224,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lastFailClosedReason
     }
 
+    /// Creates a snapshot from explicit health timestamps, counters, and status fields.
     public init(
         startedAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -287,6 +341,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastFailClosedReason = lastFailClosedReason
     }
 
+    /// Decodes a snapshot, defaulting health fields absent from older payloads.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.startedAt = try container.decode(Date.self, forKey: .startedAt)
@@ -455,10 +510,12 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         )
     }
 
+    /// The combined cache hit and miss count.
     public var totalCacheLookups: Int {
         cacheHitCount + cacheMissCount
     }
 
+    /// The fraction of cache lookups that hit, or zero when no lookups were recorded.
     public var cacheHitRate: Double {
         guard totalCacheLookups > 0 else {
             return 0
@@ -467,6 +524,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         return Double(cacheHitCount) / Double(totalCacheLookups)
     }
 
+    /// The fraction of TCP fallback attempts that succeeded, or zero with no attempts.
     public var tcpFallbackSuccessRate: Double {
         guard tcpFallbackAttemptCount > 0 else {
             return 0
@@ -475,6 +533,7 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         return Double(tcpFallbackSuccessCount) / Double(tcpFallbackAttemptCount)
     }
 
+    /// The fraction of Device DNS fallback attempts that succeeded, or zero with no attempts.
     public var deviceDNSFallbackSuccessRate: Double {
         guard deviceDNSFallbackAttemptCount > 0 else {
             return 0

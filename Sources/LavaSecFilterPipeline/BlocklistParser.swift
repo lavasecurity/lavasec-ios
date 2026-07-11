@@ -1,11 +1,17 @@
 import Foundation
 import LavaSecKit
 
+/// Input syntax used when parsing a blocklist payload.
 public enum BlocklistFormat: String, Codable, Sendable {
+    /// Detects a supported syntax independently for each line.
     case auto
+    /// Parses one plain domain per line.
     case plainDomains
+    /// Parses hosts-file address and domain records.
     case hosts
+    /// Parses supported Adblock-style domain rules.
     case adblock
+    /// Parses supported dnsmasq address rules.
     case dnsmasq
 }
 
@@ -14,7 +20,7 @@ public enum BlocklistFormat: String, Codable, Sendable {
 // bytes: clean()/candidateDomains()/auto-format detection, DomainName.normalize
 // semantics, the maxLineLength/maxRules defaults, or the
 // DomainRuleSet.lavaSecProtectedDomains list (cached entries are post-filter).
-public enum BlocklistParsingRules {
+package enum BlocklistParsingRules {
     // v2: parseHosts now emits every host on a multi-domain line (was: first only),
     // so the same source bytes can yield more rules. Bumped to orphan stale RuleSetCache
     // entries parsed under the first-host-only behavior.
@@ -24,14 +30,19 @@ public enum BlocklistParsingRules {
     // filter; bumped to orphan caches parsed under the old cap. (The streaming byte-parse
     // added alongside is output-identical for LF/CR/CRLF text and would not require a
     // bump on its own.)
-    public static let rulesVersion = 3
+    package static let rulesVersion = 3
 }
 
+/// A blocklist line that could not be converted into a rule.
 public struct RejectedBlocklistLine: Equatable, Sendable {
+    /// One-based line number in the parsed input.
     public let lineNumber: Int
+    /// Cleaned source content, or an empty string when content is intentionally omitted.
     public let content: String
+    /// Human-readable explanation for the rejection.
     public let reason: String
 
+    /// Creates a rejected-line diagnostic.
     public init(lineNumber: Int, content: String, reason: String) {
         self.lineNumber = lineNumber
         self.content = content
@@ -39,39 +50,56 @@ public struct RejectedBlocklistLine: Equatable, Sendable {
     }
 }
 
+/// Parsed domain rules together with rejected-line diagnostics.
 public struct BlocklistParseResult: Sendable {
+    /// Accepted domain rules.
+    ///
+    /// ``BlocklistParser/parse(_:format:)`` supplies a deduplicated array; the public initializer
+    /// stores the array it receives without further normalization.
     public let rules: [DomainRule]
+    /// Lines that were rejected while parsing.
     public let rejectedLines: [RejectedBlocklistLine]
 
+    /// Creates a parse result from accepted rules and rejections.
     public init(rules: [DomainRule], rejectedLines: [RejectedBlocklistLine]) {
         self.rules = rules
         self.rejectedLines = rejectedLines
     }
 
+    /// Accepted rules compiled into a domain rule set.
     public var ruleSet: DomainRuleSet {
         DomainRuleSet.build(from: rules)
     }
 }
 
+/// A directly compiled rule set together with rejected-line diagnostics.
 public struct BlocklistRuleSetParseResult: Sendable {
+    /// Accepted rules in lookup-ready form.
     public let ruleSet: DomainRuleSet
+    /// Lines that were rejected while parsing.
     public let rejectedLines: [RejectedBlocklistLine]
 
+    /// Creates a rule-set parse result.
     public init(ruleSet: DomainRuleSet, rejectedLines: [RejectedBlocklistLine]) {
         self.ruleSet = ruleSet
         self.rejectedLines = rejectedLines
     }
 }
 
+/// Parses supported blocklist text formats into normalized domain rules.
 public struct BlocklistParser: Sendable {
+    /// Maximum number of characters accepted on one input line.
     public let maxLineLength: Int
+    /// Maximum number of accepted rules returned by set-building parse operations.
     public let maxRules: Int
 
+    /// Creates a parser with line-length and accepted-rule limits.
     public init(maxLineLength: Int = 4_096, maxRules: Int = 1_000_000) {
         self.maxLineLength = maxLineLength
         self.maxRules = maxRules
     }
 
+    /// Parses text into a deduplicated array of rules and rejection diagnostics.
     public func parse(_ text: String, format: BlocklistFormat = .auto) -> BlocklistParseResult {
         var rules: [DomainRule] = []
         var rejected: [RejectedBlocklistLine] = []
@@ -123,6 +151,7 @@ public struct BlocklistParser: Sendable {
         return BlocklistParseResult(rules: dedupe(rules), rejectedLines: rejected)
     }
 
+    /// Parses text directly into a domain rule set and rejection diagnostics.
     public func parseRuleSet(_ text: String, format: BlocklistFormat = .auto) -> BlocklistRuleSetParseResult {
         parseRuleSet(lines: text.split(whereSeparator: \.isNewline), format: format)
     }

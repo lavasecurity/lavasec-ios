@@ -4,6 +4,7 @@ import Foundation
 // resolver preset catalog and the network-activity log (LavaSecKit) annotate "DoH3"
 // without depending on the transport engine.
 
+/// Helpers for annotating the HTTP version negotiated by a DNS-over-HTTPS request.
 public enum DoHHTTPVersion {
     /// `URLSessionTaskTransactionMetrics.networkProtocolName` reports ALPN
     /// identifiers: "h3" (drafts look like "h3-29"), "h2", "http/1.1".

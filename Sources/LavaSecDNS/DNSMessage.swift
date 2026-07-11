@@ -1,15 +1,24 @@
 import Foundation
 import LavaSecKit
 
+/// DNS resource-record types exchanged with the packet-tunnel client, encoded by their UInt16 wire code.
 public enum DNSRecordType: UInt16, Codable, Sendable {
+    /// IPv4 host-address records (TYPE 1).
     case a = 1
+    /// Arbitrary text records (TYPE 16).
     case txt = 16
+    /// IPv6 host-address records (TYPE 28).
     case aaaa = 28
+    /// Service-location records (TYPE 33).
     case srv = 33
+    /// General service-binding records (TYPE 64).
     case svcb = 64
+    /// HTTPS service-binding records (TYPE 65).
     case https = 65
+    /// Sentinel used when a wire TYPE code is unsupported; construction normalizes its public raw value to zero.
     case unknown = 0
 
+    /// Maps unsupported UInt16 wire codes to `.unknown`; unsupported input codes are intentionally not preserved as `rawValue`.
     public init(rawValue: UInt16) {
         switch rawValue {
         case 1:
@@ -30,15 +39,18 @@ public enum DNSRecordType: UInt16, Codable, Sendable {
     }
 }
 
+/// The validated single-question portion of a DNS query returned across the tunnel-module boundary.
 public struct DNSQuestion: Equatable, Sendable {
-    public let transactionID: UInt16
+    package let transactionID: UInt16
+    /// The domain spelling decoded from the DNS question before normalization.
     public let domain: String
+    /// The canonical domain used for filtering and policy comparisons.
     public let normalizedDomain: String
-    public let recordType: DNSRecordType
-    public let rawRecordType: UInt16
-    public let questionRange: Range<Int>
+    package let recordType: DNSRecordType
+    internal let rawRecordType: UInt16
+    internal let questionRange: Range<Int>
 
-    public init(
+    internal init(
         transactionID: UInt16,
         domain: String,
         normalizedDomain: String? = nil,
@@ -55,7 +67,7 @@ public struct DNSQuestion: Equatable, Sendable {
     }
 }
 
-public enum DNSMessageError: Error, Equatable, Sendable {
+internal enum DNSMessageError: Error, Equatable, Sendable {
     case packetTooShort
     case notAQuery
     case noQuestion
@@ -65,7 +77,9 @@ public enum DNSMessageError: Error, Equatable, Sendable {
     case invalidDomain
 }
 
+/// Parses client DNS queries and synthesizes wire-format responses for locally blocked domains.
 public enum DNSMessage {
+    /// Validates and parses exactly one uncompressed question, throwing when the packet or domain is malformed.
     public static func parseQuestion(from data: Data) throws -> DNSQuestion {
         guard data.count >= 12 else {
             throw DNSMessageError.packetTooShort
@@ -137,11 +151,13 @@ public enum DNSMessage {
         )
     }
 
+    /// Builds a blocked response from a raw query; `ttl` is written in seconds and malformed queries throw.
     public static func blockedResponse(for query: Data, ttl: UInt32 = 60) throws -> Data {
         let question = try parseQuestion(from: query)
         return try blockedResponse(for: query, question: question, ttl: ttl)
     }
 
+    /// Builds a blocked response using a previously validated question, avoiding a second parse on the packet path.
     public static func blockedResponse(for query: Data, question: DNSQuestion, ttl: UInt32 = 60) throws -> Data {
         guard query.count >= 12,
               question.questionRange.lowerBound >= query.startIndex,

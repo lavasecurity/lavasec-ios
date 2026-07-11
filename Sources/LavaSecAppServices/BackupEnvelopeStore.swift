@@ -6,36 +6,48 @@ import LavaSecKit
 /// stored as JSON, with a separate last-upload timestamp). A test double can
 /// implement this in memory; production wraps `UserDefaults`.
 public protocol BackupEnvelopeStorage: Sendable {
+    /// Returns persisted data for a key, or `nil` when no data is stored.
     func data(forKey key: String) -> Data?
+    /// Returns a persisted date for a key, or `nil` when no date is stored.
     func date(forKey key: String) -> Date?
+    /// Stores data under the supplied key.
     func set(_ value: Data, forKey key: String)
+    /// Stores a date under the supplied key.
     func set(_ value: Date, forKey key: String)
+    /// Removes any value stored under the supplied key.
     func removeObject(forKey key: String)
 }
 
+/// `UserDefaults`-backed implementation of backup-envelope key/value storage.
 public struct BackupEnvelopeUserDefaultsStorage: BackupEnvelopeStorage, @unchecked Sendable {
     private let defaults: UserDefaults
 
+    /// Creates storage backed by the supplied defaults database.
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
+    /// Reads a data value from the defaults database.
     public func data(forKey key: String) -> Data? {
         defaults.data(forKey: key)
     }
 
+    /// Reads a date value from the defaults database.
     public func date(forKey key: String) -> Date? {
         defaults.object(forKey: key) as? Date
     }
 
+    /// Writes a data value to the defaults database.
     public func set(_ value: Data, forKey key: String) {
         defaults.set(value, forKey: key)
     }
 
+    /// Writes a date value to the defaults database.
     public func set(_ value: Date, forKey key: String) {
         defaults.set(value, forKey: key)
     }
 
+    /// Removes a value from the defaults database.
     public func removeObject(forKey key: String) {
         defaults.removeObject(forKey: key)
     }
@@ -48,22 +60,24 @@ public struct BackupEnvelopeUserDefaultsStorage: BackupEnvelopeStorage, @uncheck
 /// orchestration. The envelope persists in `UserDefaults.standard` (device
 /// local until uploaded) exactly as before.
 public struct BackupEnvelopeStore: Sendable {
-    public enum Keys {
-        public static let envelope = "lavasec.encryptedBackupEnvelope.pending"
-        public static let lastUploadedAt = "lavasec.encryptedBackup.lastUploadedAt"
+    package enum Keys {
+        package static let envelope = "lavasec.encryptedBackupEnvelope.pending"
+        package static let lastUploadedAt = "lavasec.encryptedBackup.lastUploadedAt"
     }
 
     /// Headroom added to the ciphertext size for the surrounding envelope JSON
     /// when estimating the stored backup size. Centralizes the literal that was
     /// duplicated across the save/load/upload paths.
-    public static let reservedOverheadBytes = 1_024
+    package static let reservedOverheadBytes = 1_024
 
     private let storage: any BackupEnvelopeStorage
 
+    /// Creates a store using the supplied persistence implementation.
     public init(storage: any BackupEnvelopeStorage = BackupEnvelopeUserDefaultsStorage()) {
         self.storage = storage
     }
 
+    /// Encodes an envelope as sorted-key JSON and persists it as the current local envelope.
     public func saveEnvelope(_ envelope: ZeroKnowledgeBackupEnvelope) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -71,6 +85,7 @@ public struct BackupEnvelopeStore: Sendable {
         storage.set(data, forKey: Keys.envelope)
     }
 
+    /// Loads the current envelope, returning `nil` when storage is absent or malformed.
     public func loadEnvelope() -> ZeroKnowledgeBackupEnvelope? {
         guard let data = storage.data(forKey: Keys.envelope) else {
             return nil
@@ -79,7 +94,7 @@ public struct BackupEnvelopeStore: Sendable {
         return try? JSONDecoder().decode(ZeroKnowledgeBackupEnvelope.self, from: data)
     }
 
-    public func recordUpload(at uploadedAt: Date) {
+    package func recordUpload(at uploadedAt: Date) {
         storage.set(uploadedAt, forKey: Keys.lastUploadedAt)
     }
 
@@ -118,7 +133,7 @@ public struct BackupEnvelopeStore: Sendable {
         storage.removeObject(forKey: Keys.lastUploadedAt)
     }
 
-    public func lastUploadedAt() -> Date? {
+    package func lastUploadedAt() -> Date? {
         storage.date(forKey: Keys.lastUploadedAt)
     }
 

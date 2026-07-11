@@ -201,6 +201,7 @@ final class AppViewModelSourceTests: XCTestCase {
 
     func testProtectionActionsRecordRootLatencySpansAndPropagateOperationIDs() throws {
         let source = try readSource(.appViewModel)
+        let catalogController = try readSource(.catalogController)
         let enableBlock = try sourceBlock(
             in: source,
             startingAt: "private func enableProtection(",
@@ -213,8 +214,8 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let refreshBlock = try sourceBlock(
             in: source,
-            startingAt: "private func performCatalogSync(",
-            endingBefore: "func syncCatalogIfStale()"
+            startingAt: "func performCatalogSyncTransaction(",
+            endingBefore: "private struct BackgroundCatalogCacheSupersededError"
         )
         let pauseBlock = try sourceBlock(
             in: source,
@@ -264,7 +265,8 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(disableBlock.contains("makeLatencyTrace(operationID: operationID, operationKind: \"turnOff\")"))
         XCTAssertTrue(disableBlock.contains("trace.beginSpan(\"action.turnOff\""))
 
-        XCTAssertTrue(refreshBlock.contains("operationID: LatencyOperationID = .make()"))
+        XCTAssertTrue(refreshBlock.contains("operationID: LatencyOperationID"))
+        XCTAssertTrue(catalogController.contains("let operationID = LatencyOperationID.make()"))
         XCTAssertTrue(refreshBlock.contains("makeLatencyTrace(operationID: operationID, operationKind: \"refreshLists\")"))
         XCTAssertTrue(refreshBlock.contains("trace.beginSpan(\"action.refreshLists\""))
         XCTAssertTrue(refreshBlock.contains("notifyTunnelSnapshotUpdated(operationID: operationID)"))
@@ -678,44 +680,12 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertFalse(customizationSource.contains("setHapticFeedback"))
     }
 
-    func testCatalogSyncAndReconnectWaitWithoutBusyPolling() throws {
+    func testReconnectWaitWithoutBusyPolling() throws {
         let source = try readSource(.appViewModel)
-        let enableBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
-        )
-        let syncBlock = try sourceBlock(
-            in: source,
-            startingAt: "func syncCatalog(isBackgroundRefresh: Bool = false) async",
-            endingBefore: "func syncCatalogIfStale() async"
-        )
-        let performSyncBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func performCatalogSync(",
-            endingBefore: "func syncCatalogIfStale() async"
-        )
         let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
             endingBefore: "private func resumeTemporaryProtectionIfExpired"
-        )
-
-        XCTAssertTrue(source.contains("private var catalogSyncTask: Task<Void, Never>?"))
-        XCTAssertTrue(syncBlock.contains("catalogSyncTask = task"))
-        XCTAssertTrue(syncBlock.contains("await task.value"))
-        XCTAssertTrue(enableBlock.contains("await waitForCatalogSyncToFinish()"))
-        XCTAssertFalse(enableBlock.contains("while isSyncingCatalog"))
-        XCTAssertFalse(enableBlock.contains("Task.sleep(nanoseconds: 100_000_000)"))
-
-        let finishIndex = try XCTUnwrap(
-            performSyncBlock.range(of: "finishCatalogSyncTask()\n        if shouldAttemptProtectionRestore")?.lowerBound
-        )
-        let restoreIndex = try XCTUnwrap(performSyncBlock.range(of: "await restoreProtectionIfNeeded")?.lowerBound)
-        XCTAssertLessThan(
-            finishIndex,
-            restoreIndex,
-            "Catalog sync must clear its task handle before protection restore can re-enter enableProtection()."
         )
 
         XCTAssertTrue(source.contains("private final class ProtectionStopNotificationWaiter"))
@@ -730,10 +700,6 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("statusPollInterval: Self.protectionStopStatusRefreshInterval"))
         XCTAssertFalse(waitBlock.contains("for _ in 0..<12"))
         XCTAssertFalse(waitBlock.contains("Task.sleep(nanoseconds: 250_000_000)"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("isSyncingCatalog"))
     }
 
     func testCacheFirstTurnOnSkipsSyncWaitWhenArtifactReusable() throws {
@@ -755,13 +721,13 @@ final class AppViewModelSourceTests: XCTestCase {
         // the running tunnel on completion (notifyTunnelSnapshotUpdated +
         // restoreProtectionIfNeeded, which single-flights against this turn-on).
         XCTAssertTrue(enableBlock.contains("if await hasReusableArtifactForCurrentConfiguration()"))
-        XCTAssertTrue(enableBlock.contains("await waitForCatalogSyncToFinish()"))
+        XCTAssertTrue(enableBlock.contains("await catalog.awaitCompletion()"))
 
-        let syncTaskGuardIndex = try XCTUnwrap(enableBlock.range(of: "if catalogSyncTask != nil {")?.lowerBound)
+        let syncTaskGuardIndex = try XCTUnwrap(enableBlock.range(of: "if catalog.isSyncInFlight {")?.lowerBound)
         let gateIndex = try XCTUnwrap(
             enableBlock.range(of: "if await hasReusableArtifactForCurrentConfiguration()")?.lowerBound
         )
-        let waitIndex = try XCTUnwrap(enableBlock.range(of: "await waitForCatalogSyncToFinish()")?.lowerBound)
+        let waitIndex = try XCTUnwrap(enableBlock.range(of: "await catalog.awaitCompletion()")?.lowerBound)
         let beginSessionIndex = try XCTUnwrap(enableBlock.range(of: "beginFreshProtectionVPNSession()")?.lowerBound)
         XCTAssertLessThan(
             syncTaskGuardIndex,

@@ -1,12 +1,16 @@
 import Foundation
 import LavaSecKit
 
+/// Output of preparing catalog, custom-source, and compiled snapshot state.
 public struct FilterSnapshotPreparationResult: Sendable {
+    /// Catalog synchronization result used for the snapshot.
     public let catalogResult: BlocklistCatalogSyncResult
+    /// Custom-source synchronization result used for the snapshot.
     public let customResult: CustomBlocklistSyncResult
+    /// Prepared snapshot and persisted reuse metadata.
     public let snapshot: PreparedFilterSnapshot
 
-    public init(
+    package init(
         catalogResult: BlocklistCatalogSyncResult,
         customResult: CustomBlocklistSyncResult,
         snapshot: PreparedFilterSnapshot
@@ -17,10 +21,14 @@ public struct FilterSnapshotPreparationResult: Sendable {
     }
 }
 
+/// Progress reported while a filter snapshot is prepared.
 public struct FilterPreparationProgressUpdate: Sendable {
+    /// Fractional completion value reported by the preparation pipeline.
     public let progress: Double
+    /// User-facing phase associated with the progress value.
     public let phase: FilterPreparationPhase
 
+    /// Creates a progress update for a preparation phase.
     public init(progress: Double, phase: FilterPreparationPhase) {
         self.progress = progress
         self.phase = phase
@@ -32,34 +40,42 @@ public struct FilterPreparationProgressUpdate: Sendable {
 // and summary build, and the prepared-JSON + compact + manifest writes.
 // Progress callbacks are MainActor-isolated so callers can update UI state
 // directly; everything else runs on this actor's executor.
+/// Network and cache policy used when loading custom blocklists.
 public enum CustomBlocklistSyncPolicy: Sendable {
     // Refresh semantics: fetch fresh custom payloads, fall back to cache.
+    /// Tries the network first, then falls back to cached payloads.
     case networkFirst
     // Startup semantics: serve cached custom payloads so protection becomes
     // actionable without waiting on third-party hosts; network only on a miss.
     // Callers schedule a network refresh after protection is up.
+    /// Tries cached payloads first, then falls back to the network.
     case cacheFirst
     // Frozen semantics: serve cached custom payloads only and never touch the
     // network — not even on a cache miss or stored-hash mismatch. Used when the
     // plan no longer allows custom blocklists (a lapsed Plus user keeps the lists
     // it already had, but their contents are never refreshed). A genuine miss
     // surfaces as an error instead of silently re-downloading the frozen list.
+    /// Uses cached payloads only and never performs a network fetch.
     case cacheOnly
 }
 
+/// Actor that synchronizes blocklists, compiles snapshots, and publishes filter artifacts.
 public actor FilterSnapshotPreparationService {
+    /// Main-actor callback used to report preparation progress.
     public typealias ProgressHandler = @MainActor @Sendable (FilterPreparationProgressUpdate) async -> Void
 
     private let synchronizer: BlocklistCatalogSynchronizer
 
-    public init(synchronizer: BlocklistCatalogSynchronizer) {
+    package init(synchronizer: BlocklistCatalogSynchronizer) {
         self.synchronizer = synchronizer
     }
 
+    /// Creates a preparation service backed by the supplied blocklist cache directory.
     public init(cacheDirectoryURL: URL) {
         self.synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheDirectoryURL)
     }
 
+    /// Synchronizes selected sources, enforces rule budgets, and builds a prepared snapshot.
     public func prepare(
         configuration: AppConfiguration,
         customSources: [CustomBlocklistSource],
@@ -171,10 +187,13 @@ public actor FilterSnapshotPreparationService {
         // Reject an over-budget configuration BEFORE building the snapshot, so
         // protection fails fast with an actionable message instead of compiling
         // an artifact the tunnel would jetsam on. Filter rules (block + allow +
-        // guardrail) drive the resident memory. This is the authoritative cap:
-        // it runs on the deduped union, so it is exact where the UI estimate
-        // (a per-list sum) is not. The device guardrail is checked first (it is
-        // the hard safety floor); the tier limit, if any, binds below it.
+        // guardrail) drive the resident memory. This is the cold-compile gate of
+        // INV-TIER-1: it runs on the deduped union, so it is exact where the UI
+        // estimate (a per-list sum) is not, and it is the one gate that THROWS
+        // the actionable error (the publish/reuse/serve gates elsewhere refuse
+        // silently and rely on reaching this path). The device guardrail is
+        // checked first (it is the hard safety floor); the tier limit, if any,
+        // binds below it.
         let totalRuleCount = mergedBlockRules.count
             + combinedResult.guardrailRuleSet.count
             + snapshotConfiguration.allowedDomains.count
@@ -242,6 +261,7 @@ public actor FilterSnapshotPreparationService {
 
     // Network-first custom-list sync for the post-startup background refresh;
     // returns the fresh hashes so the caller can detect content changes.
+    /// Refreshes custom sources from the network with cache fallback handled by the synchronizer.
     public func refreshCustomBlocklists(_ sources: [CustomBlocklistSource]) async throws -> CustomBlocklistSyncResult {
         try await synchronizer.syncCustomBlocklists(sources)
     }
@@ -294,6 +314,7 @@ public actor FilterSnapshotPreparationService {
         case abortedCancelled
     }
 
+    /// Stages an artifact set and publishes its pointer under the requested lock policy.
     @discardableResult
     public func persistArtifacts(
         _ preparedSnapshot: PreparedFilterSnapshot,
@@ -455,6 +476,7 @@ public actor FilterSnapshotPreparationService {
 
     // MARK: - Pure helpers (moved verbatim from AppViewModel)
 
+    /// Returns the union of rule sets for the enabled source identifiers.
     public static func mergedBlockRules(
         enabledSourceIDs: Set<String>,
         sourceRuleSets: [String: DomainRuleSet]
@@ -471,7 +493,7 @@ public actor FilterSnapshotPreparationService {
         return mergedRules
     }
 
-    public static func blocklistSourceRuleCounts(
+    internal static func blocklistSourceRuleCounts(
         enabledSourceIDs: Set<String>,
         sourceRuleSets: [String: DomainRuleSet]
     ) -> [String: Int] {
@@ -500,6 +522,7 @@ public actor FilterSnapshotPreparationService {
     // tunnel-side CachedFilterSnapshotCompiler unions them instead. The replace
     // semantics are the app's contract for preparation (a custom list overrides
     // the catalog entry it shadows) and are pinned by tests.
+    /// Combines catalog and custom rule sets, with custom sets replacing duplicate identifiers.
     public static func combinedCatalogResult(
         catalogResult: BlocklistCatalogSyncResult,
         customResult: CustomBlocklistSyncResult
@@ -518,7 +541,7 @@ public actor FilterSnapshotPreparationService {
         )
     }
 
-    public static func validateEnabledBlocklistSources(
+    internal static func validateEnabledBlocklistSources(
         in configuration: AppConfiguration,
         sourceRuleSets: [String: DomainRuleSet]
     ) throws {
@@ -527,6 +550,7 @@ public actor FilterSnapshotPreparationService {
         }
     }
 
+    /// Returns a configuration with accepted custom-source hashes applied by source identifier.
     public static func configuration(
         _ configuration: AppConfiguration,
         applyingCustomBlocklistHashes hashes: [String: String]
@@ -548,7 +572,7 @@ public actor FilterSnapshotPreparationService {
     /// ``configuration(_:applyingCustomBlocklistHashes:)``; the warm path applies it to a
     /// NON-active filter's stored `customBlocklists` so a later switch's warm-reuse gate
     /// (`customBlocklistFingerprints`) matches the staged artifact instead of cold-compiling.
-    public static func customBlocklists(
+    internal static func customBlocklists(
         _ customBlocklists: [CustomBlocklistSource],
         applyingHashes hashes: [String: String]
     ) -> [CustomBlocklistSource] {

@@ -1,6 +1,6 @@
 import ActivityKit
 import AppIntents
-import LavaSecCore
+import LavaSecKit
 import SwiftUI
 import UIKit
 import WidgetKit

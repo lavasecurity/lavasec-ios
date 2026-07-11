@@ -2,7 +2,7 @@ import XCTest
 
 final class LavaSecurityPlusSourceTests: XCTestCase {
     func testUpgradeScreenUsesRealPlusProductsAndRestoreActions() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
         let viewModelSource = try readSource(.appViewModel)
         // The billing cluster lives in LavaSecurityPlusController since the Phase D2 peel;
         // the view actions route through the `plus` environment object.
@@ -26,13 +26,13 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     }
 
     func testUpgradeScreenMasksPurchaseControlsWhenPlusIsActive() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
         // The entitlement-check state lives on LavaSecurityPlusController (Phase D2 peel);
         // the paid display gate stays on the hub's persisted configuration.
         let controllerSource = try readSource(.lavaSecurityPlusController)
         let upgradeViewBlock = try sourceBlock(
             in: settingsSource,
-            startingAt: "private struct UpgradeSettingsView: View",
+            startingAt: "struct UpgradeSettingsView: View",
             endingBefore: "struct LavaPlusUpgradeDestination"
         )
 
@@ -93,7 +93,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     }
 
     func testPlanComparisonShowsUnlockedBenefitsInGreen() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
         let comparisonBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct UpgradePlanComparisonView: View",
@@ -134,7 +134,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         let storeSource = try readSource(.lavaSecurityPlusStore)
         // The published offers array lives on LavaSecurityPlusController (Phase D2 peel).
         let controllerSource = try readSource(.lavaSecurityPlusController)
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
 
         XCTAssertTrue(storeSource.contains("case .yearlyPaidMonthly"))
         XCTAssertTrue(storeSource.contains("Product.products(for: LavaSecurityPlusPolicy.paywallProductIDs)"))
@@ -162,7 +162,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
 
     func testYearlySavingsPitchIsComputedFromStoreKitPricesNotHardcoded() throws {
         let storeSource = try readSource(.lavaSecurityPlusStore)
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
 
         // The saving is derived from the customer's own storefront prices
         // (yearly vs 12× monthly), floored so it never overstates, and gated on a
@@ -195,7 +195,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     }
 
     func testUpgradeScreenShowsCommitmentPitchAndFamilySharingBenefit() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
         let comparisonBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct UpgradePlanComparisonView: View",
@@ -213,7 +213,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     }
 
     func testAutoRenewFooterDropsCommitmentSentenceWhenYearlyPaidMonthlyIsAbsent() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.upgradeSettingsView)
 
         // The footer is told whether the yearly-paid-monthly plan is actually offered, computed from
         // the displayed offers (that plan needs its `.monthly` billing plan configured + iOS 26.4+).

@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import Security
 
 enum BackupKeychainStoreError: Error, LocalizedError, Sendable {

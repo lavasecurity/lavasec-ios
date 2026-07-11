@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import LocalAuthentication
 import Security
 import SwiftUI

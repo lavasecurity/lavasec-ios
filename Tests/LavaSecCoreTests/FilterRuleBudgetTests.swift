@@ -74,4 +74,36 @@ final class FilterRuleBudgetTests: XCTestCase {
         XCTAssertEqual(FilterRuleBudget.fraction(knownRuleCount: 600_000, budget: 500_000), 1.0, accuracy: 0.0001)
         XCTAssertEqual(FilterRuleBudget.fraction(knownRuleCount: 100, budget: 0), 0, accuracy: 0.0001)
     }
+
+    // MARK: - INV-TIER-1: compiled totals get the exact budget, never the soft margin
+
+    func testCompiledTotalFitsTierBudgetAtExactBoundary() {
+        XCTAssertTrue(FilterRuleBudget.fitsTierBudget(compiledTotal: 499_999, maxFilterRules: 500_000))
+        XCTAssertTrue(FilterRuleBudget.fitsTierBudget(compiledTotal: 500_000, maxFilterRules: 500_000))
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(compiledTotal: 500_001, maxFilterRules: 500_000))
+    }
+
+    func testCompiledTotalGetsNoSoftMargin() {
+        // The ×1.10 soft ceiling tolerates over-counting in the selection-time
+        // per-list SUM only. A deduped compiled total inside that margin still
+        // violates INV-TIER-1: the field case this pins is a free-tier device
+        // serving a 558,917-rule deduped union past the 500K budget.
+        // …a selection summing 500,001 is still savable (inside the margin)…
+        XCTAssertFalse(FilterRuleBudget.exceedsSoftCeiling(knownRuleCount: 500_001, budget: 500_000))
+        // …but a COMPILED total of 500,001 is already a violation.
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(compiledTotal: 500_001, maxFilterRules: 500_000))
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(compiledTotal: 550_000, maxFilterRules: 500_000))
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(compiledTotal: 558_917, maxFilterRules: 500_000))
+        // The same total is fine under the Plus budget.
+        XCTAssertTrue(FilterRuleBudget.fitsTierBudget(compiledTotal: 558_917, maxFilterRules: 2_000_000))
+    }
+
+    func testNilRecordedTotalFailsClosed() {
+        // A legacy/under-covered artifact that never recorded its compiled
+        // total must not be reused/published on the recorded-total fast path —
+        // callers fall back to the gated cold compile, which recomputes.
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(recordedTotal: nil, maxFilterRules: 2_000_000))
+        XCTAssertTrue(FilterRuleBudget.fitsTierBudget(recordedTotal: 500_000, maxFilterRules: 500_000))
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(recordedTotal: 500_001, maxFilterRules: 500_000))
+    }
 }

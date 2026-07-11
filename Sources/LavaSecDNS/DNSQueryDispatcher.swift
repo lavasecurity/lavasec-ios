@@ -25,8 +25,10 @@ public enum DNSQueryDecision: Equatable, Sendable {
 /// short-circuit (no snapshot read when bootstrap/paused, no pause read when
 /// bootstrap). The provider performs all I/O and diagnostics on the result.
 public struct DNSQueryDispatcher: Sendable {
+    /// Creates a stateless dispatcher; all policy inputs are supplied lazily to each decision.
     public init() {}
 
+    /// Evaluates bootstrap, pause, then filtering in order and invokes no lower-priority closure after a match.
     public func decide(
         bootstrapResponse: () -> Data?,
         isProtectionPaused: () -> Bool,

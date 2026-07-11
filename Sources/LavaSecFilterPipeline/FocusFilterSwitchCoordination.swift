@@ -24,10 +24,12 @@ import LavaSecKit
 /// foreground. `requestedAt` lets a newer request supersede an unreconciled earlier one and lets the
 /// foreground compare-and-clear only the exact request it reconciled.
 public struct PendingFilterSwitchRequest: Codable, Equatable, Sendable {
+    /// Identifier of the filter requested by Focus.
     public let targetFilterID: String
+    /// Time the Focus request was recorded.
     public let requestedAt: Date
 
-    public init(targetFilterID: String, requestedAt: Date) {
+    package init(targetFilterID: String, requestedAt: Date) {
         self.targetFilterID = targetFilterID
         self.requestedAt = requestedAt
     }
@@ -35,14 +37,14 @@ public struct PendingFilterSwitchRequest: Codable, Equatable, Sendable {
 
 /// Single-key store for the pending Focus switch over the shared app-group defaults.
 public enum PendingFilterSwitchStore {
-    public static let defaultsKey = "lavasec.focus.pendingFilterSwitch"
+    package static let defaultsKey = "lavasec.focus.pendingFilterSwitch"
     /// Timestamp of the last FOREGROUND-initiated filter switch. `switchToFilter` stamps the instant it
     /// was INITIATED (captured at entry, before its async prepare), not when it completed — so a slow cold
     /// switch can't backdate-clear a Focus request that fired while it was preparing. The foreground
     /// reconcile drops a pending Focus request whose `requestedAt` is at-or-before this, so a deliberate
     /// manual switch INITIATED after the Focus request always wins — a stale marker never reverts the
     /// user's newer explicit choice.
-    public static let lastForegroundSwitchAtDefaultsKey = "lavasec.focus.lastForegroundSwitchAt"
+    package static let lastForegroundSwitchAtDefaultsKey = "lavasec.focus.lastForegroundSwitchAt"
 
     /// Record (overwriting any prior unreconciled request — the newest Focus change wins). Returns whether
     /// the marker was durably written: a `false` return means the encode failed (theoretically impossible
@@ -53,7 +55,7 @@ public enum PendingFilterSwitchStore {
     /// runs under the shared marker flock to serialize against the foreground's `clearIfMatches` — closing
     /// the cross-process record-vs-clear TOCTOU. `nil` degrades to in-process-only (tests).
     @discardableResult
-    public static func record(_ request: PendingFilterSwitchRequest, in defaults: UserDefaults, lockURL: URL? = nil) -> Bool {
+    package static func record(_ request: PendingFilterSwitchRequest, in defaults: UserDefaults, lockURL: URL? = nil) -> Bool {
         FilterPublishLock.withExclusiveLock(at: lockURL) {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
@@ -63,6 +65,7 @@ public enum PendingFilterSwitchStore {
         }
     }
 
+    /// Returns the pending Focus request, or `nil` when no valid record exists.
     public static func current(in defaults: UserDefaults) -> PendingFilterSwitchRequest? {
         guard let data = defaults.data(forKey: defaultsKey) else { return nil }
         return try? JSONDecoder().decode(PendingFilterSwitchRequest.self, from: data)
@@ -116,17 +119,17 @@ public enum PendingFilterSwitchStore {
 /// alreadyActive). Carries ONLY the outcome, the target filter id (a non-PII slug), and the time — no
 /// domains, rules, or device-global data.
 public struct FocusSwitchDiagnosticRecord: Codable, Equatable, Sendable {
-    public let outcome: String
-    public let targetFilterID: String
-    public let at: Date
+    package let outcome: String
+    package let targetFilterID: String
+    package let at: Date
     /// Why the engine reached `outcome` — the specific gate/defer/commit branch, e.g. "committed",
     /// "deferred-no-warm-artifact", "deferred-catalog-moved", "deferred-superseded", "already-active",
     /// "disallowed-auth-to-edit". Surfaced in the redacted bug report so a closed-app switch is diagnosable
     /// on Release (no QA device log): it distinguishes e.g. "deferred because the target wasn't warm" from
     /// "deferred because a foreground write superseded it", etc.
-    public let reason: String
+    package let reason: String
 
-    public init(outcome: String, targetFilterID: String, at: Date, reason: String = "") {
+    package init(outcome: String, targetFilterID: String, at: Date, reason: String = "") {
         self.outcome = outcome
         self.targetFilterID = targetFilterID
         self.at = at
@@ -137,6 +140,7 @@ public struct FocusSwitchDiagnosticRecord: Codable, Equatable, Sendable {
 
     // Custom decode so a record persisted by an OLDER build (no `reason` key) still decodes (reason: "")
     // instead of failing — keeps the diagnostic forward/backward compatible.
+    /// Decodes a diagnostic record, defaulting a missing legacy reason to an empty string.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         outcome = try c.decode(String.self, forKey: .outcome)
@@ -150,15 +154,16 @@ public struct FocusSwitchDiagnosticRecord: Codable, Equatable, Sendable {
 /// the engine on every `performSwitch` (always-on, NOT QA-gated, so it exists in Release), read by the
 /// bug-report builder.
 public enum FocusSwitchDiagnostics {
-    public static let defaultsKey = "lavasec.focus.lastSwitchDiagnostic"
+    package static let defaultsKey = "lavasec.focus.lastSwitchDiagnostic"
 
-    public static func record(_ record: FocusSwitchDiagnosticRecord, in defaults: UserDefaults) {
+    package static func record(_ record: FocusSwitchDiagnosticRecord, in defaults: UserDefaults) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(record) else { return }
         defaults.set(data, forKey: defaultsKey)
     }
 
+    /// Returns the last valid Focus-switch diagnostic record, when present.
     public static func last(in defaults: UserDefaults) -> FocusSwitchDiagnosticRecord? {
         guard let data = defaults.data(forKey: defaultsKey) else { return nil }
         return try? JSONDecoder().decode(FocusSwitchDiagnosticRecord.self, from: data)

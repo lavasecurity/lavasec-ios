@@ -155,11 +155,30 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         let needGuardrails = includesGuardrails && !normalizedAllowedDomains.isEmpty
         var effectiveThreat = DomainRuleSet()
 
+        // INV-TIER-1 stamp input: the recorded tier total must match the cold gate's
+        // formula, whose block part is `list-merge (WITHOUT manual) + blockedDomains` —
+        // but the deduped tables below fold manual in, collapsing any manual domain a
+        // list also carries. `blockRuleCount + |manual ∩ lists|` reconstructs the cold
+        // block part exactly (collapsed manual domains are re-counted once, disjoint
+        // ones are already in the table once and in no list), so count the overlap
+        // during streaming. Bounded by the manual cap (25 free / 1,000 Plus) — a tiny
+        // Set, never list-sized (INV-MEM-1). Suffix-only on both sides: manual rules
+        // are always suffix, and a byte-equal EXACT list rule does not collapse with a
+        // manual suffix entry (both survive the table dedup), matching the cold gate's
+        // separate counting. (PR #335 Codex P2 rounds 3+4: adding blockedDomains
+        // wholesale over-records by |manual ∖ lists|; omitting it under-records by
+        // |manual ∩ lists|.)
+        let manualSuffixDomains = Set(configuration.blockedDomains.compactMap { try? DomainName.normalize($0) })
+        var manualDomainsMatchedInLists: Set<String> = []
+
         let load = try await synchronizer.streamCachedForInExtensionCompile(
             enabledSourceIDs: configuration.enabledBlocklistIDs,
             customSources: configuration.customBlocklists,
             includesGuardrails: needGuardrails,
             onBlockRule: { domain, matchesSubdomains in
+                if matchesSubdomains, manualSuffixDomains.contains(domain) {
+                    manualDomainsMatchedInLists.insert(domain)
+                }
                 try appendDomain(domain, isSuffix: matchesSubdomains)
             },
             onGuardrailRule: { domain, matchesSubdomains in
@@ -230,12 +249,25 @@ struct StreamingCompactSnapshotCompiler: Sendable {
             // The resident (decoded) snapshot RECOMPUTES this from the tables, `readSummary`
             // does not cross-check it (unlike the three counts above), and no tunnel read
             // gate consumes it from a summary — so the placeholder stays safe even for a
-            // retained artifact. (`tierBudgetRuleCount` likewise stays nil: only the app's
-            // WarmFilterSnapshotLoader needs it, and it never reads the tunnel-retained
-            // path — the tunnel-side budget/cap gates sum the three real counts.)
+            // retained artifact.
             blockedDomainRuleCount: blockRuleCount,
             allowRuleCount: allowRules.count,
-            guardrailRuleCount: threatRules.count
+            guardrailRuleCount: threatRules.count,
+            // INV-TIER-1: the tunnel's serve gates bind the RECORDED tier total and fail
+            // closed on nil, so the retained artifact must stamp one or it becomes
+            // unloadable on the next cold start. This reconstructs the cold gate's block
+            // part EXACTLY: `blockRuleCount + |manual ∩ lists|` = list-merge + manual
+            // (see the overlap-counting comment above the stream). Residual deltas vs the
+            // cold total, both documented and bounded: the full-guardrail term (only the
+            // allowlist-overlap subset is ever materialized here; the guardrail tier is
+            // empty in production today) and raw-vs-normalized manual counting (the cold
+            // gate counts raw blockedDomains entries; the table counts normalized-unique
+            // ones — sub-cap noise). App-published artifacts, which record the exact
+            // total, remain the dominant serve path. PR #335 Codex P1 + P2 rounds.
+            tierBudgetRuleCount: blockRuleCount
+                + manualDomainsMatchedInLists.count
+                + allowRules.count
+                + threatRules.count
         )
 
         let identity = stampIdentity ?? PreparedFilterSnapshotIdentity.make(

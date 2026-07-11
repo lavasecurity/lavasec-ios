@@ -16,7 +16,7 @@ final class AllowedExceptionsReminderSourceTests: XCTestCase {
         XCTAssertTrue(confirmationBlock.contains("title: \"Be extra careful\""))
         XCTAssertTrue(confirmationBlock.contains("Allowed exceptions let a site through even when a blocklist would catch it."))
 
-        let filtersSource = try readSource(.filtersView)
+        let filtersSource = try readFiltersSourceAggregate()
         XCTAssertFalse(filtersSource.contains("AllowedExceptionReminderPanel"))
         XCTAssertFalse(filtersSource.contains("ProtectionGuardrailsHelpView"))
         XCTAssertFalse(filtersSource.contains("Learn more about guardrails"))

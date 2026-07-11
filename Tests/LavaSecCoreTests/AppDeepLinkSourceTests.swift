@@ -104,14 +104,14 @@ final class AppDeepLinkSourceTests: XCTestCase {
     }
 
     func testSettingsHelpOpensCanonicalSupportPage() throws {
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try [readSource(.settingsView), readSource(.settingsCommon)].joined(separator: "\n")
         let settingsBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "struct SettingsView: View",
             endingBefore: "private struct SettingsNavigationRow: View"
         )
 
-        XCTAssertTrue(settingsSource.contains("private enum LavaWebLinks"))
+        XCTAssertTrue(settingsSource.contains("enum LavaWebLinks"))
         XCTAssertTrue(settingsSource.contains("static let support = URL(string: \"https://lavasecurity.app/support/\")!"))
         XCTAssertTrue(settingsBlock.contains("SettingsExternalLinkRow("))
         XCTAssertTrue(settingsBlock.contains("destination: LavaWebLinks.support"))

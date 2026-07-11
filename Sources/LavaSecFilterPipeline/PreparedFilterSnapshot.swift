@@ -2,9 +2,13 @@ import CryptoKit
 import LavaSecKit
 import Foundation
 
+/// Persistable filter snapshot paired with the inputs and summary used for reuse checks.
 public struct PreparedFilterSnapshot: Codable, Sendable {
+    /// Inputs that identify the configuration and catalog used for compilation.
     public let identity: PreparedFilterSnapshotIdentity
+    /// Runtime filter snapshot produced by compilation.
     public let snapshot: FilterSnapshot
+    /// Persisted rule counts and source coverage for the snapshot.
     public let summary: PreparedFilterSnapshotSummary
 
     private enum CodingKeys: String, CodingKey {
@@ -13,6 +17,7 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
         case summary
     }
 
+    /// Creates a prepared snapshot, deriving a summary when one is not supplied.
     public init(
         identity: PreparedFilterSnapshotIdentity,
         snapshot: FilterSnapshot,
@@ -23,6 +28,7 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
         self.summary = summary ?? PreparedFilterSnapshotSummary(snapshot: snapshot)
     }
 
+    /// Decodes a prepared snapshot and rebuilds its table-derived summary fields.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.identity = try container.decode(PreparedFilterSnapshotIdentity.self, forKey: .identity)
@@ -39,10 +45,11 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
         )
     }
 
-    public func matches(identity expectedIdentity: PreparedFilterSnapshotIdentity) -> Bool {
+    package func matches(identity expectedIdentity: PreparedFilterSnapshotIdentity) -> Bool {
         identity == expectedIdentity
     }
 
+    /// Returns whether the snapshot matches the configuration and available catalog inputs.
     public func canReuseForProtectionStartup(
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
@@ -69,13 +76,19 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
     }
 }
 
+/// Persisted rule counts and blocklist coverage for a prepared snapshot.
 public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
+    /// Total parsed blocklist rules before local rule merging, when recorded.
     public let blocklistRuleCount: Int?
+    /// Parsed rule counts keyed by selected blocklist source, when recorded.
     public let blocklistSourceRuleCounts: [String: Int]?
+    /// Number of effective block rules in the runtime snapshot.
     public let blockRuleCount: Int
     /// Raw block rules reduced by configured allowed exceptions that overlap blocked rules.
     public let blockedDomainRuleCount: Int
+    /// Number of configured allow rules in the runtime snapshot.
     public let allowRuleCount: Int
+    /// Number of non-allowable threat rules stored in the runtime snapshot.
     public let guardrailRuleCount: Int
     /// The exact rule total the COLD compile gate budgets against
     /// (`FilterSnapshotPreparationService.prepare`: merged block rules + the FULL guardrail rule
@@ -97,6 +110,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         case tierBudgetRuleCount
     }
 
+    /// Creates a summary from explicit rule counts and optional source coverage.
     public init(
         blocklistRuleCount: Int?,
         blocklistSourceRuleCounts: [String: Int]? = nil,
@@ -115,6 +129,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         self.tierBudgetRuleCount = tierBudgetRuleCount
     }
 
+    /// Decodes current and legacy summaries, defaulting a missing protected count to block count.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         blocklistRuleCount = try container.decodeIfPresent(Int.self, forKey: .blocklistRuleCount)
@@ -130,6 +145,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         tierBudgetRuleCount = try container.decodeIfPresent(Int.self, forKey: .tierBudgetRuleCount)
     }
 
+    /// Creates a summary from the rule tables in a runtime snapshot.
     public init(
         snapshot: FilterSnapshot,
         blocklistRuleCount: Int? = nil,
@@ -150,6 +166,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         )
     }
 
+    /// Returns whether a source count is recorded for every enabled blocklist.
     public func coversEnabledBlocklists(in configuration: AppConfiguration) -> Bool {
         guard !configuration.enabledBlocklistIDs.isEmpty else {
             return true
@@ -163,17 +180,38 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
     }
 }
 
+/// Stable compilation inputs used to validate and content-address prepared artifacts.
 public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
+    /// Identifiers of blocklists enabled for the snapshot.
+    ///
+    /// ``make(configuration:catalog:)`` emits canonical sorted order; decoding and direct
+    /// initialization preserve the order they receive.
     public let enabledBlocklistIDs: [String]
+    /// Manually blocked domains included in the snapshot.
+    ///
+    /// ``make(configuration:catalog:)`` emits canonical sorted order; decoding and direct
+    /// initialization preserve the order they receive.
     public let blockedDomains: [String]
+    /// Manually allowed domains included in the snapshot.
+    ///
+    /// ``make(configuration:catalog:)`` emits canonical sorted order; decoding and direct
+    /// initialization preserve the order they receive.
     public let allowedDomains: [String]
+    /// Resolver transport selected when the snapshot was compiled.
     public let resolverTransport: DNSResolverTransport
+    /// QA probe set included in the snapshot inputs, when configured.
     public let qaProbeSet: QADomainProbeSet?
+    /// Catalog revision used for compilation, when a catalog was available.
     public let catalogVersion: String?
+    /// Selected catalog source version identifiers keyed by source identifier.
     public let selectedSourceVersionIDs: [String: String]
+    /// Selected catalog source hashes keyed by source identifier.
     public let selectedSourceHashes: [String: String]
+    /// Enabled custom-source cache identities keyed by source identifier.
     public let customBlocklistFingerprints: [String: String]
+    /// Guardrail source version identifiers keyed by source identifier.
     public let guardrailVersionIDs: [String: String]
+    /// Guardrail source hashes keyed by source identifier.
     public let guardrailHashes: [String: String]
     // Blocklist parser rules version the artifact was compiled under. Folded into
     // the identity so a parser-behavior change (which bumps
@@ -182,6 +220,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
     // regenerate and the tunnel to reload instead of reusing a stale artifact whose
     // source bytes/hash did not change. Legacy artifacts predating this field decode
     // as 0, which never equals a real version (≥1), so they are always regenerated.
+    /// Parser-rules version used to compile the snapshot.
     public let parserRulesVersion: Int
 
     private enum CodingKeys: String, CodingKey {
@@ -199,7 +238,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         case parserRulesVersion
     }
 
-    public init(
+    package init(
         enabledBlocklistIDs: [String],
         blockedDomains: [String],
         allowedDomains: [String],
@@ -227,6 +266,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         self.parserRulesVersion = parserRulesVersion
     }
 
+    /// Decodes current and legacy identities with compatibility defaults for added fields.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.enabledBlocklistIDs = try container.decode([String].self, forKey: .enabledBlocklistIDs)
@@ -254,6 +294,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         self.parserRulesVersion = try container.decodeIfPresent(Int.self, forKey: .parserRulesVersion) ?? 0
     }
 
+    /// Builds the canonical identity for a configuration and optional catalog.
     public static func make(
         configuration: AppConfiguration,
         catalog: BlocklistCatalog?
@@ -279,15 +320,17 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         )
     }
 
-    public func matches(configuration: AppConfiguration, catalog: BlocklistCatalog?) -> Bool {
+    package func matches(configuration: AppConfiguration, catalog: BlocklistCatalog?) -> Bool {
         self == Self.make(configuration: configuration, catalog: catalog)
     }
 
+    /// Returns whether configuration inputs and resolver transport match.
     public func hasSameConfiguration(as configuration: AppConfiguration) -> Bool {
         hasSameConfigurationInputs(as: configuration)
             && resolverTransport == configuration.resolverPreset.transport
     }
 
+    /// Returns whether all inputs that affect compiled snapshot rules match another identity.
     public func hasSameSnapshotInputs(as other: PreparedFilterSnapshotIdentity) -> Bool {
         snapshotInputMismatches(against: other).isEmpty
     }
@@ -312,6 +355,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         return mismatches
     }
 
+    /// Returns whether configuration-derived inputs and the current parser version match.
     public func hasSameConfigurationInputs(as configuration: AppConfiguration) -> Bool {
         // The no-cached-catalog warm-start branch compares against the running
         // binary's parser rules version (configuration carries no artifact version),
@@ -332,6 +376,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
             }
     }
 
+    /// SHA-256 fingerprint of the identity's sorted-key JSON encoding.
     public var fingerprint: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

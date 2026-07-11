@@ -1,8 +1,11 @@
 import Foundation
 
+/// Four DNS probe hostnames used to verify allow, block, exception, and guardrail behavior.
 public struct QADomainProbeSet: Equatable, Codable, Sendable {
+    /// The hosted QA page that exercises the canonical probe set.
     public static let hostedPageURL = URL(string: "https://lavasecurity.app/qa/")!
 
+    /// The canonical probe set hosted beneath `lavasecurity.app`.
     public static let hosted: QADomainProbeSet = {
         do {
             return try QADomainProbeSet(
@@ -16,11 +19,16 @@ public struct QADomainProbeSet: Equatable, Codable, Sendable {
         }
     }()
 
+    /// The hostname expected to resolve through an allow path.
     public let allowedDomain: String
+    /// The hostname expected to exercise ordinary blocking.
     public let blockedDomain: String
+    /// The hostname expected to exercise an allow exception to blocking.
     public let exceptionDomain: String
+    /// The hostname expected to remain blocked by a non-overridable threat guardrail.
     public let guardrailDomain: String
 
+    /// Creates four probe hostnames by prefixing the validated suffix with their probe roles.
     public init(suffix: String) throws {
         let normalizedSuffix = try DomainName.normalize(suffix)
         try self.init(
@@ -31,6 +39,7 @@ public struct QADomainProbeSet: Equatable, Codable, Sendable {
         )
     }
 
+    /// Creates a probe set after independently validating and normalizing all four hostnames.
     public init(
         allowedDomain: String,
         blockedDomain: String,
@@ -43,6 +52,7 @@ public struct QADomainProbeSet: Equatable, Codable, Sendable {
         self.guardrailDomain = try DomainName.normalize(guardrailDomain)
     }
 
+    /// The four probe hostnames in allow, block, exception, then guardrail order.
     public var allDomains: [String] {
         [allowedDomain, blockedDomain, exceptionDomain, guardrailDomain]
     }

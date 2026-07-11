@@ -1,26 +1,44 @@
 import Foundation
 import LavaSecKit
 
+/// Product surface to which a third-party legal notice applies.
 public enum ThirdPartyLegalNoticeCategory: String, Codable, Sendable {
+    /// Notice for a selectable DNS resolver.
     case dnsResolver
+    /// Notice for an account sign-in provider.
     case signInProvider
+    /// Notice for a bundled or downloadable blocklist source.
     case blocklistSource
 }
 
+/// Display and attribution metadata for one third-party dependency or service.
 public struct ThirdPartyLegalNotice: Identifiable, Hashable, Codable, Sendable {
+    /// Stable identifier used to associate the notice with its product entry.
     public let id: String
+    /// Name presented to the user.
     public let displayName: String
+    /// Product surface associated with the notice.
     public let category: ThirdPartyLegalNoticeCategory
+    /// Name of the third-party owner or organization.
     public let ownerName: String
+    /// Attribution or trademark notice shown to the user.
     public let noticeText: String
+    /// Upstream project or service information URL, when available.
     public let sourceURL: URL?
+    /// Full license-text URL, when separately available.
     public let licenseTextURL: URL?
+    /// Additional notice URL, when supplied by the owner.
     public let noticeURL: URL?
+    /// Description of how Lava Security distributes or retrieves the material.
     public let distributionModeDescription: String?
+    /// Whether the planned product use displays the third party's logo.
     public let usesLogo: Bool
+    /// Whether the described planned use requires written permission.
     public let requiresWrittenPermissionForPlannedUse: Bool
+    /// Plain-language description of Lava Security's planned use.
     public let plannedUse: String
 
+    /// Creates a notice by storing the supplied attribution and planned-use metadata.
     public init(
         id: String,
         displayName: String,
@@ -50,10 +68,13 @@ public struct ThirdPartyLegalNotice: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+/// Built-in third-party notices grouped for the app's legal-notice screens.
 public enum ThirdPartyLegalNotices {
+    /// General non-affiliation disclaimer displayed with third-party notices.
     public static let affiliationDisclaimer = "Third-party names identify services, sign-in providers, or data sources. Lava Security is not affiliated with, endorsed by, sponsored by, or reviewed by these providers or projects."
     private static let dnsResolverPlannedUse = "Plain-text identification of a selectable DNS resolver and optional encrypted upstream forwarding for allowed DNS lookups."
 
+    /// Notices for the built-in DNS resolver catalog.
     public static let dnsResolverNotices: [ThirdPartyLegalNotice] = [
         ThirdPartyLegalNotice(
             id: DNSResolverPreset.device.id,
@@ -174,6 +195,7 @@ public enum ThirdPartyLegalNotices {
         )
     ]
 
+    /// Notices for supported account sign-in providers.
     public static let signInProviderNotices: [ThirdPartyLegalNotice] = [
         ThirdPartyLegalNotice(
             id: "apple-sign-in",
@@ -195,13 +217,14 @@ public enum ThirdPartyLegalNotices {
         )
     ]
 
+    /// Notices derived from the curated and guardrail blocklist catalogs.
     public static let blocklistNotices: [ThirdPartyLegalNotice] = {
         (DefaultCatalog.curatedSources + DefaultCatalog.guardrailSources).map { blocklistNotice(for: $0) }
     }()
 
-    public static let all: [ThirdPartyLegalNotice] = dnsResolverNotices + signInProviderNotices + blocklistNotices
+    package static let all: [ThirdPartyLegalNotice] = dnsResolverNotices + signInProviderNotices + blocklistNotices
 
-    public static func notice(id: String) -> ThirdPartyLegalNotice? {
+    package static func notice(id: String) -> ThirdPartyLegalNotice? {
         all.first { $0.id == id }
     }
 

@@ -28,20 +28,20 @@ import LavaSecKit
 public enum FilterSnapshotMemoryBudget: Sendable {
     /// Fixed process overhead before any rule tables (resolver runtime, packet
     /// buffers, the extension baseline), measured ≈ 3.5 MB; rounded up.
-    public static let baselineMegabytes = 4.0
+    package static let baselineMegabytes = 4.0
     /// Dirty resident bytes per filter rule (the table entry; domain text is
     /// mapped/clean), measured ≈ 8.5 B; rounded up.
-    public static let estimatedBytesPerRule = 9.0
+    package static let estimatedBytesPerRule = 9.0
     /// Target ceiling for steady-state resident memory, leaving ~10 MB headroom
     /// under the observed ~40–46 MB jetsam cliff for the decode transient and
     /// OS variance.
-    public static let maxResidentMegabytes = 32.0
+    package static let maxResidentMegabytes = 32.0
 
     private static let bytesPerMegabyte = 1_048_576.0
 
     /// Estimated steady-state `phys_footprint` for a snapshot with this many
     /// total filter rules (block + allow + guardrail).
-    public static func estimatedResidentMegabytes(forRuleCount ruleCount: Int) -> Double {
+    package static func estimatedResidentMegabytes(forRuleCount ruleCount: Int) -> Double {
         baselineMegabytes + (Double(max(0, ruleCount)) * estimatedBytesPerRule) / bytesPerMegabyte
     }
 
@@ -51,6 +51,7 @@ public enum FilterSnapshotMemoryBudget: Sendable {
         Int(((maxResidentMegabytes - baselineMegabytes) * bytesPerMegabyte) / estimatedBytesPerRule)
     }
 
+    /// Returns whether a rule count exceeds the on-device snapshot budget.
     public static func exceedsBudget(ruleCount: Int) -> Bool {
         ruleCount > maxFilterRuleCount
     }
@@ -59,7 +60,7 @@ public enum FilterSnapshotMemoryBudget: Sendable {
     /// is `UInt32` offset + `UInt16` length → 8 B array stride). The in-extension
     /// streaming compile holds the entry arrays resident while it sorts/dedups them; the
     /// domain bytes themselves live on disk (memory-mapped), so they do NOT count here.
-    public static let estimatedCompactEntryBytesPerRule = 8.0
+    package static let estimatedCompactEntryBytesPerRule = 8.0
 
     /// Largest AGGREGATE rule count the packet-tunnel streaming fallback may compile in
     /// the extension. The streaming compile (`StreamingCompactSnapshotCompiler`) parses
@@ -83,7 +84,7 @@ public enum FilterSnapshotMemoryBudget: Sendable {
     /// app-group container (the same assumption `reusableCompactSnapshot` already relies
     /// on); the safe value wants on-device publish-stress validation, which should include
     /// a near-ceiling config.
-    public static var maxStreamingCompileRuleCount: Int {
+    package static var maxStreamingCompileRuleCount: Int {
         Int(((maxResidentMegabytes - baselineMegabytes) * bytesPerMegabyte) / (estimatedCompactEntryBytesPerRule * 2.0))
     }
 }
@@ -92,11 +93,13 @@ public enum FilterSnapshotMemoryBudget: Sendable {
 /// guardrail. The device guardrail protects against jetsam; the tier limit is a
 /// monetization boundary that binds below it (Free 500K / Plus 2M).
 public struct FilterRuleTierLimit: Equatable, Sendable {
+    /// Maximum filter-rule count admitted by the subscription tier.
     public let limit: Int
     /// Whether the user is already on the paid tier — drives whether the
     /// over-limit copy offers an upgrade.
     public let isPaid: Bool
 
+    /// Creates a tier limit and records whether the current tier is paid.
     public init(limit: Int, isPaid: Bool) {
         self.limit = limit
         self.isPaid = isPaid
@@ -127,6 +130,7 @@ public enum FilterSnapshotPreparationError: Error, Equatable, Sendable {
 }
 
 extension FilterSnapshotPreparationError: LocalizedError {
+    /// Localized, actionable explanation of the exceeded rule budget.
     public var errorDescription: String? {
         switch self {
         case let .exceedsDeviceMemoryBudget(ruleCount, maxRuleCount, perSourceRuleCounts):

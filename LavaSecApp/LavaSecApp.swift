@@ -1,7 +1,7 @@
 import BackgroundTasks
 import GoogleSignIn
 import Darwin
-import LavaSecCore
+import LavaSecKit
 import SwiftUI
 import UIKit
 @preconcurrency import NetworkExtension
@@ -241,6 +241,15 @@ struct LavaSecApp: App {
     @StateObject private var viewModel = AppViewModel()
     @StateObject private var security = SecurityController()
 
+    init() {
+        // Register / refresh the "Switch Filter" App Shortcut at launch so a fresh install surfaces
+        // it in Shortcuts & Siri and its filter parameter reflects the current library (Codex #325).
+        // updateAppShortcutParameters re-reads the entity query, which loads the on-disk filter
+        // library directly (no AppViewModel), so this is correct here in App.init before the model
+        // finishes loading. The library-change refresh lives in AppViewModel.persistLibraryOnlyChange.
+        LavaShortcuts.updateAppShortcutParameters()
+    }
+
     var body: some Scene {
         WindowGroup {
             appRoot
@@ -272,6 +281,9 @@ struct LavaSecApp: App {
     private var productionRoot: some View {
         RootView()
             .environmentObject(viewModel)
+            // Catalog sync single-flight/presentation is observed separately from the hub's
+            // authoritative metadata and transaction state.
+            .environmentObject(viewModel.catalog)
             // The backup scope peeled from the hub (Phase D1): views observe it as its own
             // environment object; the hub creates it so the bridge is wired to live state.
             .environmentObject(viewModel.backup)

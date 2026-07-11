@@ -90,17 +90,9 @@ final class ColorContrastSourceTests: XCTestCase {
             (.settingsView,         [".foregroundStyle(LavaStyle.lavaOrange)"]),
             (.backupSetupView,      [".foregroundStyle(LavaStyle.lavaOrange)"]),
             (.filterReviewFlowView, [".foregroundStyle(LavaStyle.lavaOrange)"]),
-            (.diagnosticsView,      ["return isWarning ? LavaStyle.lavaOrange : LavaStyle.safeGreen"]),
+            (.diagnosticsNetworkActivity, ["return isWarning ? LavaStyle.lavaOrange : LavaStyle.safeGreen"]),
             (.lavaComponents,       ["characterLimit ? LavaStyle.lavaOrange : LavaStyle.tertiaryText"]),
             (.lavaCondensedList,    ["text: \"Pending remove\", tint: LavaStyle.lavaOrange)"]),
-            (.filtersView, [
-                ".foregroundStyle(LavaStyle.lavaOrange)",
-                ".foregroundColor(LavaStyle.lavaOrange)",
-                ".foregroundStyle(isUnprotected ? LavaStyle.lavaOrange :",
-                "usageTextIsError ? LavaStyle.lavaOrange :",
-                "selectionStatusIsError ? LavaStyle.lavaOrange :",
-                ".fill(isActive ? LavaStyle.lavaOrange :",
-            ]),
         ]
         for (file, banned) in bannedBySite {
             let source = try readSource(file)
@@ -110,6 +102,21 @@ final class ColorContrastSourceTests: XCTestCase {
                     "\(file.rawValue): `\(needle)` reverts a retinted text/selected-fill site to bright lavaOrange — use lavaOrangeText / lavaOrangeSelectedFill (contrast Task 3)."
                 )
             }
+        }
+
+        let filtersSource = try readFiltersSourceAggregate()
+        for needle in [
+            ".foregroundStyle(LavaStyle.lavaOrange)",
+            ".foregroundColor(LavaStyle.lavaOrange)",
+            ".foregroundStyle(isUnprotected ? LavaStyle.lavaOrange :",
+            "usageTextIsError ? LavaStyle.lavaOrange :",
+            "selectionStatusIsError ? LavaStyle.lavaOrange :",
+            ".fill(isActive ? LavaStyle.lavaOrange :",
+        ] {
+            XCTAssertFalse(
+                filtersSource.contains(needle),
+                "Filters feature: `\(needle)` reverts a retinted text/selected-fill site to bright lavaOrange — use lavaOrangeText / lavaOrangeSelectedFill (contrast Task 3)."
+            )
         }
     }
 }

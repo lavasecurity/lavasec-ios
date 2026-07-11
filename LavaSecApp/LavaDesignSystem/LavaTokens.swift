@@ -1,5 +1,4 @@
 import SwiftUI
-import LavaSecCore
 import UIKit
 
 enum LavaStyle {
@@ -133,7 +132,7 @@ enum LavaSurface {
     /// any per-call-site hand adjustments (UR-4: Clear/Disable backup no longer
     /// disagree with the sign-in/standalone buttons beside them).
     static let actionButtonHeight: CGFloat = 44
-    /// Metric-pill corner radius (e.g. `LavaMetricPill`).
+    /// Portable pill-shape radius retained by the cross-platform design-token contract.
     static let pillCornerRadius: CGFloat = 14
     /// Small icon-badge corner radius (e.g. the 34×34 nav-row glyph chip).
     static let iconBadgeCornerRadius: CGFloat = 10
@@ -214,7 +213,7 @@ enum LavaSpacing {
 /// (`.headline`, `.subheadline`, …) so it tracks the user's text-size setting; this
 /// enum is only for genuinely fixed display faces that those styles don't cover.
 ///
-/// Portable *numeric* glyph sizes live in `LavaIconSize` (in `LavaSecCore`, so the
+/// Portable *numeric* glyph sizes live in `LavaIconSize` (in `LavaSecKit`, so the
 /// widget can share them); these helpers wrap SwiftUI's `Font`, which is app-only.
 /// The app's type scale — one named role per kind of text, so the same kind is one size
 /// everywhere and cannot drift per screen (the color analog is `LavaStyle`). All roles are

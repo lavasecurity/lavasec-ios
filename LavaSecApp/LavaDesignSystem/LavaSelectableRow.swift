@@ -1,5 +1,4 @@
 import SwiftUI
-import LavaSecCore
 
 /// Selection state for a ``LavaSelectableRow``. `.locked` renders a lock glyph for
 /// rows still gated behind usage/Plus instead of the selection checkmark.

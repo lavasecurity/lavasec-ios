@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import LavaSecDNS
 @testable import LavaSecCore
 @testable import LavaSecKit
 
@@ -301,12 +302,12 @@ final class DNSOverHTTPSRequestTests: XCTestCase {
         klass: UInt16
     ) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)
-        appendUInt16(flags, to: &data)
-        appendUInt16(questionCount, to: &data)
-        appendUInt16(answerCount, to: &data)
-        appendUInt16(0, to: &data)
-        appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(id, to: &data)
+        DNSWireTestSupport.appendUInt16(flags, to: &data)
+        DNSWireTestSupport.appendUInt16(questionCount, to: &data)
+        DNSWireTestSupport.appendUInt16(answerCount, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
         appendQuestion(domain: domain, type: type, klass: klass, to: &data)
         return data
     }
@@ -318,12 +319,8 @@ final class DNSOverHTTPSRequestTests: XCTestCase {
             data.append(contentsOf: bytes)
         }
         data.append(0)
-        appendUInt16(type, to: &data)
-        appendUInt16(klass, to: &data)
+        DNSWireTestSupport.appendUInt16(type, to: &data)
+        DNSWireTestSupport.appendUInt16(klass, to: &data)
     }
 
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
-    }
 }

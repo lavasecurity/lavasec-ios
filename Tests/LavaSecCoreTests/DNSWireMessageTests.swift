@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import LavaSecDNS
 @testable import LavaSecCore
 @testable import LavaSecKit
 
@@ -215,10 +216,10 @@ final class DNSWireMessageTests: XCTestCase {
     private static func dnsAResponse(id: UInt16, domain: String, ttl: UInt32) -> Data {
         var data = dnsMessage(id: id, flags: 0x8180, questionCount: 1, answerCount: 1, domain: domain, type: 1, klass: 1)
         data.append(contentsOf: [0xC0, 0x0C])
-        appendUInt16(1, to: &data)
-        appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
         appendUInt32(ttl, to: &data)
-        appendUInt16(4, to: &data)
+        DNSWireTestSupport.appendUInt16(4, to: &data)
         data.append(contentsOf: [93, 184, 216, 34])
         return data
     }
@@ -230,11 +231,11 @@ final class DNSWireMessageTests: XCTestCase {
         ttl: UInt32
     ) -> Data {
         var data = dnsMessage(id: id, flags: 0x8180, questionCount: 1, answerCount: 1, domain: domain, type: 1, klass: 1)
-        appendUInt16(pointer, to: &data)
-        appendUInt16(1, to: &data)
-        appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(pointer, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
         appendUInt32(ttl, to: &data)
-        appendUInt16(4, to: &data)
+        DNSWireTestSupport.appendUInt16(4, to: &data)
         data.append(contentsOf: [93, 184, 216, 34])
         return data
     }
@@ -281,10 +282,10 @@ final class DNSWireMessageTests: XCTestCase {
         )
         appendARecord(namePointer: 0xC00C, ttl: answerTTL, address: [93, 184, 216, 34], to: &data)
         data.append(0)
-        appendUInt16(41, to: &data)
-        appendUInt16(1232, to: &data)
+        DNSWireTestSupport.appendUInt16(41, to: &data)
+        DNSWireTestSupport.appendUInt16(1232, to: &data)
         appendUInt32(optMetadata, to: &data)
-        appendUInt16(0, to: &data)
+        DNSWireTestSupport.appendUInt16(0, to: &data)
         return data
     }
 
@@ -294,11 +295,11 @@ final class DNSWireMessageTests: XCTestCase {
         address: [UInt8],
         to data: inout Data
     ) {
-        appendUInt16(namePointer, to: &data)
-        appendUInt16(1, to: &data)
-        appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(namePointer, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
+        DNSWireTestSupport.appendUInt16(1, to: &data)
         appendUInt32(ttl, to: &data)
-        appendUInt16(UInt16(address.count), to: &data)
+        DNSWireTestSupport.appendUInt16(UInt16(address.count), to: &data)
         data.append(contentsOf: address)
     }
 
@@ -307,8 +308,8 @@ final class DNSWireMessageTests: XCTestCase {
             return nil
         }
 
-        let questionCount = Int(readUInt16(data, at: 4))
-        let answerCount = Int(readUInt16(data, at: 6))
+        let questionCount = Int(DNSWireTestSupport.readUInt16(data, at: 4))
+        let answerCount = Int(DNSWireTestSupport.readUInt16(data, at: 6))
         guard answerCount > 0 else {
             return nil
         }
@@ -333,10 +334,10 @@ final class DNSWireMessageTests: XCTestCase {
             return []
         }
 
-        let questionCount = Int(readUInt16(data, at: 4))
-        let recordCount = Int(readUInt16(data, at: 6))
-            + Int(readUInt16(data, at: 8))
-            + Int(readUInt16(data, at: 10))
+        let questionCount = Int(DNSWireTestSupport.readUInt16(data, at: 4))
+        let recordCount = Int(DNSWireTestSupport.readUInt16(data, at: 6))
+            + Int(DNSWireTestSupport.readUInt16(data, at: 8))
+            + Int(DNSWireTestSupport.readUInt16(data, at: 10))
         var cursor = 12
         for _ in 0..<questionCount {
             guard skipName(in: data, cursor: &cursor), cursor + 4 <= data.count else {
@@ -352,7 +353,7 @@ final class DNSWireMessageTests: XCTestCase {
             }
 
             let ttl = readUInt32(data, at: cursor + 4)
-            let dataLength = Int(readUInt16(data, at: cursor + 8))
+            let dataLength = Int(DNSWireTestSupport.readUInt16(data, at: cursor + 8))
             cursor += 10
             guard cursor + dataLength <= data.count else {
                 return []
@@ -376,26 +377,21 @@ final class DNSWireMessageTests: XCTestCase {
         klass: UInt16
     ) -> Data {
         var data = Data()
-        appendUInt16(id, to: &data)
-        appendUInt16(flags, to: &data)
-        appendUInt16(questionCount, to: &data)
-        appendUInt16(answerCount, to: &data)
-        appendUInt16(authorityCount, to: &data)
-        appendUInt16(additionalCount, to: &data)
+        DNSWireTestSupport.appendUInt16(id, to: &data)
+        DNSWireTestSupport.appendUInt16(flags, to: &data)
+        DNSWireTestSupport.appendUInt16(questionCount, to: &data)
+        DNSWireTestSupport.appendUInt16(answerCount, to: &data)
+        DNSWireTestSupport.appendUInt16(authorityCount, to: &data)
+        DNSWireTestSupport.appendUInt16(additionalCount, to: &data)
         for label in domain.split(separator: ".") {
             let bytes = Array(label.utf8)
             data.append(UInt8(bytes.count))
             data.append(contentsOf: bytes)
         }
         data.append(0)
-        appendUInt16(type, to: &data)
-        appendUInt16(klass, to: &data)
+        DNSWireTestSupport.appendUInt16(type, to: &data)
+        DNSWireTestSupport.appendUInt16(klass, to: &data)
         return data
-    }
-
-    private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-        data.append(UInt8((value >> 8) & 0xFF))
-        data.append(UInt8(value & 0xFF))
     }
 
     private static func appendUInt32(_ value: UInt32, to data: inout Data) {
@@ -430,10 +426,6 @@ final class DNSWireMessageTests: XCTestCase {
         }
 
         return false
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
     }
 
     private static func readUInt32(_ data: Data, at offset: Int) -> UInt32 {

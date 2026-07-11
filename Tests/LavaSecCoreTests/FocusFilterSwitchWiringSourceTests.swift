@@ -1,8 +1,8 @@
 import XCTest
 
-/// Structural invariants for the Focus-driven headless warm switch. The switch ENGINE now lives in
-/// LavaSecCore (`HeadlessFocusFilterSwitchEngine`, LAV-100 Phase 4 — relocated out of the app target so
-/// the App Intents extension can drive it with no `AppViewModel`); the foreground reconcile + the
+/// Structural invariants for the Focus-driven headless warm switch. The switch engine now lives in
+/// LavaSecFilterPipeline (`HeadlessFocusFilterSwitchEngine`, LAV-100 Phase 4 — relocated out of the app
+/// target so the App Intents extension can drive it with no `AppViewModel`); the foreground reconcile + the
 /// foreground-activity publisher + the manual `switchToFilter` stay in `AppViewModel`. The engine has
 /// real unit tests (`HeadlessFocusFilterSwitchEngineTests`); these pin its safety-critical wiring as
 /// source text (the app-target reconcile is not reachable from `swift test`).
@@ -423,12 +423,14 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
 
     func testFocusSwitchEntryDrivesTheSharedEngineThroughOneFactory() throws {
         // The single entry: FocusSwitchEnvironment (Shared/, compiled into BOTH the app and the extension)
-        // builds the engine environment and drives the SAME LavaSecCore engine — no app-target reimpl.
+        // builds the environment and drives the SAME FilterPipeline engine — no app-target reimpl.
         let envFactory = try readSource(.focusSwitchEnvironment)
-        XCTAssertTrue(envFactory.contains("static func performSwitch(toFilterID filterID: String) async -> HeadlessFocusSwitchOutcome"),
-                      "FocusSwitchEnvironment must expose the single performSwitch entry.")
+        XCTAssertTrue(envFactory.contains("static func performSwitch(")
+                        && envFactory.contains("feedback: OutcomeFeedback")
+                        && envFactory.contains(") async -> HeadlessFocusSwitchOutcome"),
+                      "FocusSwitchEnvironment must expose the single performSwitch entry, taking the per-caller OutcomeFeedback.")
         XCTAssertTrue(envFactory.contains("HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: filterID, env: env)"),
-                      "FocusSwitchEnvironment.performSwitch must drive the shared core engine.")
+                      "FocusSwitchEnvironment.performSwitch must drive the shared FilterPipeline engine.")
         XCTAssertTrue(envFactory.contains("LavaSecAppGroup.focusFilterSwitchLockFilename"),
                       "The environment must wire the dedicated focus-switch lock file.")
         XCTAssertTrue(envFactory.contains("LavaSecAppGroup.configurationWriteLockFilename"),
@@ -449,18 +451,18 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     }
 
     /// The headless poster and the foreground observer MUST use the same source constants for the Darwin
-    /// names, or a rename would silently desync them. The foreground observer + the foreground reconcile
-    /// nudge name stay in the app; the engine posts both the foreground nudge and the tunnel-reload name.
+    /// names, or a rename would silently desync them. The foreground observer stays in the app; the engine
+    /// posts the foreground reconcile nudge, while the poll remains the tunnel's adoption mechanism.
     func testDarwinNudgeObserverAndPosterShareTheConstant() throws {
         let app = try readSource(.appViewModel)
         XCTAssertTrue(app.contains("focusPendingSwitchObserver = DarwinNotificationObserver("),
                       "The foreground reconcile observer must be registered.")
         XCTAssertTrue(app.contains("name: FocusFilterSwitchSignal.darwinNotificationName"),
                       "The foreground reconcile observer must register the shared Darwin name constant.")
-        // The engine's default poster uses the shared core Darwin notifier; the engine posts both names.
+        // The engine's default poster uses the shared notifier for the foreground reconcile nudge.
         let engine = try readSource(.headlessFocusFilterSwitchEngine)
         XCTAssertTrue(engine.contains("DarwinProtectionSignalNotifier().postNotification(named: $0)"),
-                      "The engine's default signal poster must use the shared core Darwin notifier.")
+                      "The engine's default signal poster must use the shared Darwin notifier.")
         XCTAssertTrue(engine.contains("FocusFilterSwitchSignal.darwinNotificationName"),
                       "The engine must post the shared foreground-nudge name on defer.")
     }
@@ -494,6 +496,41 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
             startingAt: "func reloadSnapshotIfConfigurationGenerationAdvanced() {",
             endingBefore: "private func "
         )
+        let beginBlock = try sourceBlock(
+            in: tunnel,
+            startingAt: "private func nextSnapshotReloadGeneration() -> UInt64",
+            endingBefore: "/// Clear the in-flight marker"
+        )
+        let finishBlock = try sourceBlock(
+            in: tunnel,
+            startingAt: "private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64)",
+            endingBefore: "private func isCurrentSnapshotReloadGeneration"
+        )
+        let currentBlock = try sourceBlock(
+            in: tunnel,
+            startingAt: "private func isCurrentSnapshotReloadGeneration(_ generation: UInt64)",
+            endingBefore: "private func invalidateSnapshotReloadGeneration"
+        )
+        let invalidateBlock = try sourceBlock(
+            in: tunnel,
+            startingAt: "private func invalidateSnapshotReloadGeneration(reason: String)",
+            endingBefore: "private func loadSnapshotInBackground"
+        )
+        let watermarkBlock = try sourceBlock(
+            in: tunnel,
+            startingAt: "private func advanceFocusConfigurationWatermark(",
+            endingBefore: "/// One poll tick"
+        )
+        let watermarkAsyncBlock = try sourceBlock(
+            in: watermarkBlock,
+            startingAt: "dnsStateQueue.async { [weak self] in",
+            endingBefore: "\n        }\n    }"
+        )
+        let finishAsyncBlock = try sourceBlock(
+            in: finishBlock,
+            startingAt: "dnsStateQueue.async { [weak self] in",
+            endingBefore: "\n        }\n    }"
+        )
         XCTAssertFalse(pollBlock.isEmpty, "The poll-body extraction must not be empty (guards the assertions below).")
 
         // PST-7 defense-in-depth: this existing 60s poll must also pick up a mid-session diagnostics-clear
@@ -506,27 +543,55 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertFalse(pollBlock.contains("applyDiagnosticsControlIfNeeded(force: true)"),
                        "The poll tick must NEVER force:true — that was the PST-1 re-wipe bug (force:false respects the durable marker).")
         let diagApplyIdx = try XCTUnwrap(pollBlock.range(of: "applyDiagnosticsControlIfNeeded(force: false)")?.lowerBound)
-        let inFlightGuardIdx = try XCTUnwrap(pollBlock.range(of: "guard !snapshotReloadInFlight else { return }")?.lowerBound)
-        XCTAssertLessThan(diagApplyIdx, inFlightGuardIdx,
+        let inFlightReadIdx = try XCTUnwrap(
+            pollBlock.range(
+                of: "let reloadInFlight = snapshotReloadCoordinator.assumeIsolated { $0.isReloadInFlight }"
+            )?.lowerBound
+        )
+        XCTAssertLessThan(diagApplyIdx, inFlightReadIdx,
                           "The diagnostics apply must run BEFORE the config-generation guards so it fires every tick regardless of a Focus switch.")
 
         XCTAssertFalse(pollBlock.contains("lastObservedConfigurationGeneration = "),
                        "The poll must NOT advance the watermark on observation (only the adopt point may).")
         // The watermark advances via one guarded helper, called at BOTH adopt points: a full snapshot decode
         // AND the resident-already-satisfies early return (else a config-only / equivalent-filter bump would
-        // never advance it → a 60s reload+DNS-reset loop — Codex P2).
+        // never advance it, causing a 60s reload and DNS-reset loop).
         XCTAssertTrue(tunnel.contains("self.lastObservedConfigurationGeneration = max(self.lastObservedConfigurationGeneration, adoptedGeneration)"),
                       "The watermark helper must advance to the adopted generation, guarded by the live reload token.")
         XCTAssertEqual(tunnel.components(separatedBy: "self.advanceFocusConfigurationWatermark(").count - 1, 2,
                        "The watermark must advance at BOTH adopt points (full decode + resident-satisfies early return).")
+        let watermarkMutation = "self.lastObservedConfigurationGeneration = "
+            + "max(self.lastObservedConfigurationGeneration, adoptedGeneration)"
+        let watermarkGenerationGuard = "guard self.isCurrentSnapshotReloadGeneration(generation) "
+            + "else { return }"
+        let watermarkGuardIdx = try XCTUnwrap(
+            watermarkAsyncBlock.range(of: watermarkGenerationGuard)?.lowerBound
+        )
+        let watermarkMutationIdx = try XCTUnwrap(
+            watermarkAsyncBlock.range(of: watermarkMutation)?.lowerBound
+        )
+        XCTAssertLessThan(
+            watermarkGuardIdx,
+            watermarkMutationIdx,
+            "The async watermark mutation must remain fenced by the live reload generation."
+        )
+        XCTAssertEqual(
+            watermarkBlock.components(separatedBy: watermarkMutation).count - 1,
+            1,
+            "The sole watermark mutation must remain inside the dnsStateQueue.async closure."
+        )
+        XCTAssertFalse(
+            watermarkBlock.contains("Task {"),
+            "Watermark advancement must remain in the same dnsStateQueue FIFO as reload completion."
+        )
 
-        // Round 5 (Codex): the poll must NOT seed the watermark from the on-disk generation at start — that
+        // The poll must NOT seed the watermark from the on-disk generation at start — that
         // generation may reflect a closed-app switch not yet ADOPTED, and seeding from it would suppress the
         // retry forever. The watermark is left to the startup load's adopt point.
         XCTAssertFalse(tunnel.contains("lastObservedConfigurationGeneration = loadConfiguration()?.configurationGeneration ?? 0"),
                        "startFocusConfigurationPoll must NOT seed the watermark from an unadopted on-disk generation.")
 
-        // Round 7 (Codex round 6): the poll must NOT permanently bound a non-adopting generation. A bound
+        // The poll must NOT permanently bound a non-adopting generation. A bound
         // suppressed same-generation pointer-flip retries — a pre-flip recompile that transiently failed would
         // record gen N, then the poll would skip N even after the extension flipped current.json for N,
         // stranding the tunnel fail-closed (the extension can't send a provider reload). The retry-until-adopt
@@ -536,19 +601,64 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertFalse(tunnel.contains("recordNonAdoptingReloadGeneration"),
                        "The non-adopting-generation bound must be fully removed.")
 
-        // Round 5 (Codex): the poll must NOT re-request while the latest reload is still running — re-requesting
+        // The poll must NOT re-request while the latest reload is still running — re-requesting
         // bumps the reload generation and invalidates the in-flight load (a >interval load would never adopt).
-        XCTAssertTrue(pollBlock.contains("guard !snapshotReloadInFlight else { return }"),
+        XCTAssertTrue(pollBlock.contains("guard !reloadInFlight else { return }"),
                       "The poll must skip a tick while a snapshot reload is already in flight.")
-        XCTAssertTrue(tunnel.contains("snapshotReloadInFlight = true"),
-                      "The reload chokepoint (nextSnapshotReloadGeneration) must mark the load in flight.")
+        XCTAssertTrue(beginBlock.contains("DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true"),
+                      "The begin adapter must retain its already-on-queue check.")
+        XCTAssertTrue(beginBlock.contains("return dnsStateQueue.sync"),
+                      "Off-queue begins must synchronously hop to dnsStateQueue before actor access.")
+        XCTAssertTrue(
+            beginBlock.contains("return snapshotReloadCoordinator.assumeIsolated { $0.begin() }"),
+            "The reload chokepoint must delegate ownership to the coordinator."
+        )
         XCTAssertTrue(tunnel.contains("defer { self.clearSnapshotReloadInFlight(ifCurrentGeneration: generation) }"),
                       "The detached load must clear the in-flight marker via defer on every exit path.")
-        XCTAssertTrue(tunnel.contains("snapshotReloadInFlight = false"),
-                      "The in-flight marker must be cleared (on load resolve + on invalidation, so the poll can't wedge).")
-        // The clear must be generation-gated so an overlapping newer reload keeps ownership of the marker.
-        XCTAssertTrue(tunnel.contains("func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64)"),
-                      "The in-flight clear must exist and be generation-gated.")
+        let coordinatorFinish = "self.snapshotReloadCoordinator.assumeIsolated { $0.finish(generation) }"
+        XCTAssertTrue(
+            finishAsyncBlock.contains(coordinatorFinish),
+            "Coordinator completion must remain inside the dnsStateQueue.async closure."
+        )
+        XCTAssertEqual(
+            finishBlock.components(separatedBy: coordinatorFinish).count - 1,
+            1,
+            "The sole coordinator finish must remain inside the dnsStateQueue.async closure."
+        )
+        XCTAssertFalse(
+            finishBlock.contains("Task {"),
+            "Completion must not use an unsequenced task hop that can overtake the Focus watermark."
+        )
+        XCTAssertFalse(finishBlock.contains("Task.detached"),
+                       "Completion must remain a dnsStateQueue FIFO operation.")
+        XCTAssertEqual(tunnel.components(separatedBy: ".finish(generation)").count - 1, 1,
+                       "The coordinator finish must have one queue-confined provider chokepoint.")
+        XCTAssertTrue(
+            currentBlock.contains("DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true"),
+            "The current-generation adapter must retain its already-on-queue check."
+        )
+        XCTAssertTrue(currentBlock.contains("return dnsStateQueue.sync"),
+                      "Off-queue generation reads must synchronously hop to dnsStateQueue.")
+        XCTAssertTrue(
+            currentBlock.contains(
+                "return snapshotReloadCoordinator.assumeIsolated { $0.isCurrent(generation) }"
+            ),
+            "The live-token adapter must read only coordinator state."
+        )
+        XCTAssertTrue(
+            invalidateBlock.contains("DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true"),
+            "The invalidate adapter must retain its already-on-queue check."
+        )
+        XCTAssertTrue(invalidateBlock.contains("dnsStateQueue.async"),
+                      "Off-queue invalidation must enqueue on dnsStateQueue.")
+        XCTAssertTrue(
+            invalidateBlock.contains(
+                "let generation = snapshotReloadCoordinator.assumeIsolated { $0.invalidate() }"
+            ),
+            "Teardown invalidation must supersede work and clear ownership through the coordinator."
+        )
+        XCTAssertTrue(invalidateBlock.contains("\"generation\": \"\\(generation)\""),
+                      "Invalidation logging must preserve the coordinator's returned generation.")
     }
 
     /// Codex review (lavasec-ios#29): the foreground manual switch must treat an `.abortedSuperseded`

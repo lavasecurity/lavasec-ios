@@ -98,6 +98,7 @@ function build() {
   lines.push("");
   lines.push("import Foundation");
   lines.push("");
+  lines.push("/// Bundled blocklist sources generated from the canonical catalog.");
   lines.push("public extension DefaultCatalog {");
 
   for (const source of sources) {
@@ -117,6 +118,7 @@ function build() {
       fail(`"${source.id}" must be source_url_only.`);
     }
 
+    lines.push(`    /// Curated metadata for catalog source ${source.id}.`);
     lines.push(`    static let ${name} = BlocklistSource(`);
     lines.push(`        id: ${swiftStringLiteral(source.id)},`);
     lines.push(`        name: ${swiftStringLiteral(source.name)},`);

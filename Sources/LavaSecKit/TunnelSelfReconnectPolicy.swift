@@ -47,6 +47,7 @@ public enum TunnelSelfReconnectPolicy {
         case deviceDNSRecapture
     }
 
+    /// The outcome of evaluating whether a tunnel self-reconnect may proceed.
     public enum Decision: Equatable, Sendable {
         /// Restart now (and record `now` in the persisted attempt history).
         case reconnect
@@ -68,6 +69,7 @@ public enum TunnelSelfReconnectPolicy {
             .filter { now.timeIntervalSince($0) < attemptWindow }
     }
 
+    /// Chooses a reconnect outcome after checking severity, on-demand recovery, cooldown, and window limits.
     public static func decision(
         assessment: ProtectionConnectivityAssessment,
         protectionEnabled: Bool,

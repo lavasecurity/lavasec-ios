@@ -1,6 +1,152 @@
 import SwiftUI
-import LavaSecCore
 import UIKit
+
+struct LavaNavigationCardBadge {
+    let content: AnyView
+    let background: Color
+    let cornerRadius: CGFloat
+
+    static func systemImage(
+        _ systemImage: String,
+        font: Font = .headline,
+        tint: Color = LavaStyle.safeGreen,
+        background: Color = LavaStyle.softGreen,
+        cornerRadius: CGFloat = LavaSurface.iconBadgeCornerRadius
+    ) -> LavaNavigationCardBadge {
+        LavaNavigationCardBadge(
+            content: AnyView(
+                Image(systemName: systemImage)
+                    .font(font)
+                    .foregroundStyle(tint)
+            ),
+            background: background,
+            cornerRadius: cornerRadius
+        )
+    }
+
+    static func custom(
+        _ content: some View,
+        background: Color = LavaStyle.softGreen,
+        cornerRadius: CGFloat = LavaSurface.iconBadgeCornerRadius
+    ) -> LavaNavigationCardBadge {
+        LavaNavigationCardBadge(
+            content: AnyView(content),
+            background: background,
+            cornerRadius: cornerRadius
+        )
+    }
+}
+
+enum LavaNavigationCardSummary {
+    case standardLocalized(String)
+    case localizedUnclamped(String)
+    case verbatimSingleLine(String)
+    case warningLocalized(String)
+
+    @MainActor
+    @ViewBuilder
+    var content: some View {
+        switch self {
+        case .standardLocalized(let value):
+            Text(value.lavaLocalized)
+                .lavaRowSubtitleText()
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+        case .localizedUnclamped(let value):
+            Text(value.lavaLocalized)
+                .lavaRowSubtitleText()
+        case .verbatimSingleLine(let value):
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(LavaStyle.secondaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        case .warningLocalized(let value):
+            Text(value.lavaLocalized)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(LavaStyle.lavaOrangeText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+}
+
+enum LavaNavigationCardAccessory {
+    case chevron
+    case externalLink
+
+    var content: some View {
+        Image(systemName: systemImage)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.tertiary)
+    }
+
+    private var systemImage: String {
+        switch self {
+        case .chevron:
+            "chevron.right"
+        case .externalLink:
+            "arrow.up.right"
+        }
+    }
+}
+
+struct LavaNavigationCardLabel: View {
+    let badge: LavaNavigationCardBadge?
+    let badgeSize: CGFloat
+    let rowSpacing: CGFloat
+    let title: String
+    let titleLineLimit: Int?
+    let summary: LavaNavigationCardSummary
+    let accessory: LavaNavigationCardAccessory
+
+    init(
+        badge: LavaNavigationCardBadge?,
+        badgeSize: CGFloat,
+        rowSpacing: CGFloat,
+        title: String,
+        titleLineLimit: Int? = nil,
+        summary: LavaNavigationCardSummary,
+        accessory: LavaNavigationCardAccessory
+    ) {
+        self.badge = badge
+        self.badgeSize = badgeSize
+        self.rowSpacing = rowSpacing
+        self.title = title
+        self.titleLineLimit = titleLineLimit
+        self.summary = summary
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        HStack(spacing: rowSpacing) {
+            if let badge {
+                badge.content
+                    .frame(width: badgeSize, height: badgeSize)
+                    .background(badge.background, in: RoundedRectangle(cornerRadius: badge.cornerRadius))
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title.lavaLocalized)
+                    .lavaCardTitleText()
+                    .foregroundStyle(.primary)
+                    .lineLimit(titleLineLimit)
+
+                summary.content
+            }
+
+            Spacer(minLength: LavaSpacing.sm)
+
+            accessory.content
+                .accessibilityHidden(true)
+        }
+        .padding(LavaSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .lavaSurface(.card)
+        .contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous))
+    }
+}
 
 struct LavaNavigationRow<Destination: View>: View {
     let icon: LavaIconRole?
@@ -24,37 +170,14 @@ struct LavaNavigationRow<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            HStack(spacing: 12) {
-                if let icon {
-                    Image(systemName: icon.sfSymbolName)
-                        .font(.headline)
-                        .foregroundStyle(LavaStyle.safeGreen)
-                        .frame(width: 34, height: 34)
-                        .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.iconBadgeCornerRadius))
-                        .accessibilityHidden(true)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title.lavaLocalized)
-                        .lavaCardTitleText()
-                        .foregroundStyle(.primary)
-                    Text(summary.lavaLocalized)
-                        .lavaRowSubtitleText()
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.82)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .lavaSurface(.card)
-            .contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous))
+            LavaNavigationCardLabel(
+                badge: icon.map { .systemImage($0.sfSymbolName) },
+                badgeSize: 34,
+                rowSpacing: LavaSpacing.md,
+                title: title,
+                summary: .standardLocalized(summary),
+                accessory: .chevron
+            )
         }
         .buttonStyle(LavaNavigationRowButtonStyle())
         .hoverEffect(.highlight)
@@ -139,6 +262,11 @@ struct LavaStandaloneActionButtonStyle: ButtonStyle {
 struct LavaSecondaryActionButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
+    let disabledOpacity: Double
+
+    init(disabledOpacity: Double = 0.45) {
+        self.disabledOpacity = disabledOpacity
+    }
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -157,7 +285,7 @@ struct LavaSecondaryActionButtonStyle: ButtonStyle {
                     }
             }
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .opacity(isEnabled ? 1 : 0.45)
+            .opacity(isEnabled ? 1 : disabledOpacity)
             .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
@@ -197,7 +325,7 @@ struct LavaPlainCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(16)
+            .padding(LavaSpacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
             .lavaSurface(.card)
     }
@@ -340,7 +468,7 @@ struct LavaDetailRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: LavaSpacing.md) {
             Image(systemName: systemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(tint)
@@ -365,31 +493,6 @@ struct LavaDetailRow: View {
     }
 }
 
-/// Compact metric chip: a `.headline` (17 pt) value over a small label, sized for a
-/// row of side-by-side stats. The larger sibling `LavaOverviewMetricBlock` renders its
-/// value at the 42 pt `LavaTypography.metricNumeral`. The two scales are **intentionally
-/// different** — a hero "blocked today" numeral versus a dense stat chip — not a drift to
-/// reconcile; keep them apart.
-struct LavaMetricPill: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.headline)
-                .lineLimit(2)
-                .minimumScaleFactor(0.75)
-            Text(title.lavaLocalized)
-                .lavaMetricLabelText()
-        }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 54)
-        .accessibilityElement(children: .combine)
-        .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.pillCornerRadius))
-    }
-}
-
 struct LavaInfoCard<Content: View>: View {
     let content: Content
     let borderTint: Color?
@@ -403,7 +506,7 @@ struct LavaInfoCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(16)
+            .padding(LavaSpacing.lg)
             .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
             .lavaPanelBackground(cornerRadius: 20, borderTint: borderTint)
     }

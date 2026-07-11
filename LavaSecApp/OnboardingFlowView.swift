@@ -1,5 +1,6 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
+import LavaSecAppServices
 
 struct LavaOnboardingView: View {
     @Binding var hasSeenOnboarding: Bool

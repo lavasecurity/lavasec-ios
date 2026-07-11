@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecAppServices
 @testable import LavaSecKit
 
 /// Behavioural harness for the recovery-phrase unlock precedence that the restore path

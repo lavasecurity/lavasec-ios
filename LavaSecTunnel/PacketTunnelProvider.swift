@@ -5,7 +5,9 @@ import Network
 @preconcurrency import NetworkExtension
 import Security
 @preconcurrency import UserNotifications
-import LavaSecCore
+import LavaSecDNS
+import LavaSecFilterPipeline
+import LavaSecKit
 
 // MARK: - Completion & helper types
 
@@ -68,6 +70,13 @@ private final class ResolverSmokeProbeTimeout: @unchecked Sendable {
     func cancel() {
         workItem.cancel()
     }
+}
+
+private struct ResolverHealthEffectHooks {
+    var beforeResolverRuntimeReset: (() -> Void)?
+    var afterResolverRuntimeReset: (() -> Void)?
+    var beforeProtectionNotification: (() -> Void)?
+    var beforePendingResolverFailures: (([PendingDNSResponse], String, String) -> Void)?
 }
 
 private enum ResolverQueryPurpose: Sendable {
@@ -199,11 +208,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         bound: PacketTunnelProvider.maxConcurrentResolverQueries
     )
     private let protectionPauseStateQueue = DispatchQueue(label: "com.lavasec.tunnel.protection-pause-state", qos: .utility)
-    private let dnsStateQueue: DispatchQueue = {
-        let queue = DispatchQueue(label: "com.lavasec.tunnel.dns-state", qos: .utility)
+    // DispatchSerialQueue (not plain DispatchQueue) so dispatch-backed actors can adopt
+    // it as their executor (INV-QUEUE-1 actors migration, slice 1) — every existing
+    // async/sync/specific-key use is source-compatible (it IS-A DispatchQueue).
+    private let dnsStateQueue: DispatchSerialQueue = {
+        let queue = DispatchSerialQueue(label: "com.lavasec.tunnel.dns-state", qos: .utility)
         queue.setSpecific(key: dnsStateQueueSpecificKey, value: true)
         return queue
     }()
+    // INV-DNS-4 wiring: canonical resolver-health evidence and smoke-probe ownership live on
+    // dnsStateQueue. Provider code projects the actor's bounded state into the persisted
+    // health snapshot, then executes emitted IO effects synchronously in reducer order.
+    // pinned: PacketTunnelDNSRuntimeSourceTests.testResolverHealthUsesOneCoordinatorChokepoint
+    private lazy var resolverHealthCoordinator = ResolverHealthCoordinator(
+        queue: dnsStateQueue
+    )
     private static let udpDNSTimeoutSeconds = 1
     private static let tcpDNSTimeoutSeconds = 2
     private static let dohTimeoutSeconds = 5
@@ -227,11 +246,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private static let resolverRecoveryProbeTimeoutSeconds = 4
     // Probe reasons that run while the user may be wedged, where fast detection
     // matters; everything else (periodic-health-check, startTunnel,
-    // configuration-changed) keeps the routine timeout.
+    // configuration-changed) keeps the routine timeout. The exhaustion
+    // verification belongs here (UR-55, PR #342 review): after a REAL handoff it
+    // is the first wire check that can classify the preserved Device-DNS primary
+    // as dead, and the routine 8s would delay the fallback/wedge evidence the
+    // exhaustion branch exists to apply promptly. On the stable-network side of
+    // UR-55 the probe answers in milliseconds, so the short timeout costs nothing.
     private static let recoveryContextProbeReasons: Set<String> = [
         "network-settled",
         "resolver-wedge-recovery",
-        "device-dns-fallback-recovery"
+        "device-dns-fallback-recovery",
+        "device-dns-exhaustion-verification"
     ]
     // The short recovery timeout is only SAFE for the fast, UDP-based device/plain
     // primary path with no fallback branch to cut short:
@@ -252,7 +277,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
         return resolverSmokeProbeTimeoutSeconds
     }
-    private static let slowUpstreamResponseThresholdMilliseconds = 2_500
     private let resolverBackoffStateQueue = DispatchQueue(label: "com.lavasec.tunnel.resolver-backoff", qos: .utility)
     // Recreated per lifecycle in `startPathMonitor` (hence `var`): a cancelled
     // NWPathMonitor delivers ZERO updates when restarted, so reusing one object
@@ -299,8 +323,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // generation transitions are executable there (TransientBootstrapDNSWaitTests);
     // the provider keeps the SERVFAIL writes, the replay through the filter, the
     // device-log events, and lifecycle-generation ownership (generations are passed
-    // in per call, the machine never reads tunnel state). dnsStateQueue-confined,
-    // with the one-shot timeout armed on the same queue.
+    // in per call, the machine never reads tunnel state). A dispatch-backed actor
+    // on dnsStateQueue since actors slice 3 (INV-QUEUE-1) — confined call sites
+    // reach it via synchronous assumeIsolated, with the one-shot timeout armed on
+    // the same queue.
     private lazy var transientBootstrapDNSWait = TransientBootstrapDNSWait<PendingDNSResponse>(
         queue: dnsStateQueue,
         scheduleAfter: { [dnsStateQueue] interval, body in
@@ -312,10 +338,34 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var resolverBackoffPolicy = ResolverBackoffPolicy()
     private var health = TunnelHealthSnapshot()
     private var diagnostics = DiagnosticsStore()
+    // SQLite depth store for Domain History (INV-MEM-1: O(1) appends instead of the JSON
+    // store's O(rows) whole-blob rewrite, so it can hold the full 7-day window the 250-entry
+    // `diagnostics.events` buffer cannot). The tunnel is the SOLE writer; the app opens it
+    // read-only. Set once in `loadInitialSharedState` and thereafter appended on
+    // `dnsStateQueue`; `DNSEventLog` is internally serial so the periodic prune can run off
+    // that queue. Best-effort throughout — a log failure never affects filtering (INV-DNS-1).
+    private var dnsEventLog: DNSEventLog?
     private var appConfiguration = AppConfiguration()
     private var deviceDNSResolverAddresses: [String] = []
-    private var deviceDNSFallbackModeActive = false
-    private var consecutiveQueryFallbackSuccessCount = 0
+    // dnsStateQueue-confined (INV-QUEUE-1). Stamped by sleep(), consumed-and-cleared by the
+    // next wake() to compute the suspension length for the brief-wake resolver-preserve
+    // decision (DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake). nil when no
+    // sleep was observed → wake takes the conservative full teardown.
+    private var resolverSleepBeganAt: Date?
+    // dnsStateQueue-confined (INV-QUEUE-1). Last time ANY smoke probe actually hit the wire —
+    // the anchor for the chronic-failure routine-probe backoff (UR-48 Phase 2a): the routine
+    // tick keeps firing at the base cadence, but the wire query is skipped until the adaptive
+    // interval has elapsed. Event-driven probes stamp too (their result is an equally fresh
+    // sample), which only ever pushes the next routine probe out, never suppresses them.
+    private var lastWireSmokeProbeAt: Date?
+    // dnsStateQueue-confined (INV-QUEUE-1). Episode-transition gate for the `device-dns-captured`
+    // log line (UR-48 Phase 2a): the `count` and `reason` of the last line the gate allowed, plus
+    // how many no-information repeats were suppressed since (reported on the next allowed line).
+    // Tracking `reason` too keeps a masked→masked handoff under a new context loggable while still
+    // collapsing same-reason repeats within one masked episode.
+    private var lastLoggedDeviceDNSCaptureCount: Int?
+    private var lastLoggedDeviceDNSCaptureReason: String?
+    private var suppressedDeviceDNSCaptureLogCount = 0
     // Coalesce the per-query `dns-encrypted-fallback` debug marker. A wedged Device-DNS
     // primary routes EVERY organic query to the encrypted (Mullvad DoH) fallback, so a
     // per-query log floods the debug ring (~1.6k lines in a 6h flaky-network export,
@@ -326,33 +376,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var encryptedFallbackCarriedSinceLastLog = 0
     private var lastEncryptedFallbackLogAt: Date?
     private let encryptedFallbackLogThrottleInterval: TimeInterval = 60
-    // Consecutive REAL client-query total failures (primary AND every fallback leg
-    // failed) since the last carried success. Deliberately separate from
-    // health.consecutiveUpstreamFailureCount, which a failed PRIMARY smoke probe also
-    // bumps (applyResolverSmokeProbeResult) — that pollution would let a lone forwarding
-    // transient, layered on a smoke-inflated count, tear down encrypted-fallback coverage.
-    // This forwarding-only streak gates the coverage teardown so only a SUSTAINED
-    // carried-query outage (a genuinely dead DoH/DoT leg) clears the serving timestamp.
-    private var consecutiveCarriedQueryFailureCount = 0
-    /// Consecutive carried-query failures that mark the encrypted fallback as no longer
-    /// serving. Matched to the policy reconnect threshold so a dead fallback loses coverage
-    /// on the same "sustained, not transient" scale; the policy's 30s coverage freshness
-    /// window is the independent backstop when carried traffic is too sparse to reach this.
-    private let encryptedFallbackCoverageClearFailureThreshold = 3
-    private var resolverSmokeProbeGeneration = 0
     private var resolverSmokeProbeTimer: DispatchSourceTimer?
-    // NRG-3a (founder-approved 2026-07-02): acceptance-checked primary evidence lets the
-    // PERIODIC probe skip its wire query — the 300s cadence itself is the honesty budget
-    // and stays untouched; only the redundant radio wake is saved. Stamped by an ACCEPTED
-    // primary smoke probe or an organic primary answer passing the SAME acceptance check
-    // the probe applies (NOERROR + answers). Deliberately NOT lastPrimaryUpstreamSuccessAt:
-    // that field is stamped by any reply that merely resolved — including a hijacking
-    // resolver's REFUSED/SERVFAIL — and the LAV-87 streak advances only via probes, so a
-    // resolved-only gate would let a hijacker suppress routine probes indefinitely.
-    // In-memory only (a restart re-proves) and cleared on every resolver-runtime reset,
-    // so evidence can never outlive the runtime (or primary identity) it was observed under.
-    // dnsStateQueue-confined.
-    private var lastAcceptedPrimaryEvidenceAt: Date?
     // LAV-100 Phase 4 P4d: dedicated poll that adopts a Focus-committed filter switch made by the App
     // Intents extension while the app is closed. The extension can't push to the tunnel (sendProviderMessage
     // is app-only) and a tunnel-side Darwin observer was proven unreliable in the NE extension (0 callbacks /
@@ -363,15 +387,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private lazy var focusConfigurationPollTimer = QueueConfinedRepeatingTimer(queue: dnsStateQueue)
     private var lastObservedConfigurationGeneration = 0
     private var protectionPauseResumeTimer: DispatchSourceTimer?
-    private var snapshotReloadGeneration: UInt64 = 0
-    // dnsStateQueue-confined: true while the LATEST-requested snapshot reload is still running. The Focus
-    // config poll checks it and SKIPS a tick rather than calling requestSnapshotReload again — re-requesting
-    // would bump `snapshotReloadGeneration` and invalidate the in-flight load (and reset the DNS runtime), so
-    // a load/compile slower than the poll interval would be restarted forever and never adopt (Codex round 5).
-    // Set at the single reload chokepoint (`nextSnapshotReloadGeneration`), cleared when the load resolves
-    // (generation-gated, so an overlapping newer load keeps ownership) and on an explicit invalidation.
-    private var snapshotReloadInFlight = false
-    // CON-3: single-flights the in-extension snapshot compile so two overlapping reloads (a first-start
+    // INV-QUEUE-1: the coordinator owns only the reload generation and latest-owner in-flight marker on
+    // dnsStateQueue. Provider adapters preserve dual-entry queue hops, while deferred completion remains
+    // FIFO-after an adopted Focus watermark so a poll cannot restart a slow load before adoption is visible.
+    private lazy var snapshotReloadCoordinator = SnapshotReloadCoordinator(queue: dnsStateQueue)
+    // INV-MEM-1: single-flights the in-extension snapshot compile so two overlapping reloads (a first-start
     // compile still running when a pull-to-refresh requests another) can never hold two ~32 MiB compile
     // peaks resident at once — ≈60 MiB in the 50 MB-limited NE process would jetsam the tunnel mid-serve.
     // The generation only fences the COMMIT; this gate serializes the peak itself. Wraps ONLY the compile
@@ -393,7 +413,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // empty (masked) and superseded on the next network change / wake / reset.
     // Cycle STATE machine extracted to DeviceDNSCaptureRetryCycle (Phase E2, after the
     // rc5 field log showed the wake-suppression cooldown being bypassed — see
-    // DeviceDNSCaptureRetryCycleTests). The provider keeps the capture WORK.
+    // DeviceDNSCaptureRetryCycleTests). The provider keeps the capture WORK. A
+    // dispatch-backed actor on dnsStateQueue since actors slice 2 (INV-QUEUE-1) —
+    // confined call sites reach it via synchronous assumeIsolated.
     private lazy var deviceDNSCaptureRetryCycle = DeviceDNSCaptureRetryCycle(
         queue: dnsStateQueue,
         now: Date.init,
@@ -422,7 +444,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // (`lastAppliedDomainHistoryClearAt` / `lastAppliedFilteringCountsClearAt`), written
     // in the same file the clear mutates.
     // Health and diagnostics share one debounced dirty-flush persistence machine
-    // (extracted to LavaSecCore; replaces the two byte-for-byte-identical inline
+    // (extracted to LavaSecKit; replaces the two byte-for-byte-identical inline
     // copies that were the disk-churn class behind the 2026-06-14 heat regression).
     // Stateless scheduler → one instance serves both controllers; each owns its
     // own pending token. dnsStateQueue-confined, like the inline state it replaces.
@@ -450,6 +472,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return false
             }
             self.diagnostics.resetForCurrentDayIfNeeded(now: now)
+            // Prune the SQLite depth store below BOTH the 7-day fine-grained window AND the
+            // app's "cleared at" floor, on the same debounced cadence the JSON store is
+            // pruned/persisted. The floor makes a user's Clear Domain History / Clear All Logs
+            // physically delete rows within one cadence (~30s) instead of leaving them
+            // hidden-but-stored until they age out — the clear UI promises they leave the phone,
+            // and the read path already hides them immediately via the same floor (PR #327
+            // review). Cheap (indexed DELETE), mostly a no-op — the orphan sweep inside
+            // prune only runs on a pass that actually deleted events (UR-53) — and off
+            // the DNS path.
+            if let dnsEventLog = self.dnsEventLog {
+                let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
+                let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
+                let cutoff = clearFloorMs > 0
+                    ? max(retentionCutoff, Date(timeIntervalSince1970: Double(clearFloorMs) / 1000))
+                    : retentionCutoff
+                try? dnsEventLog.prune(before: cutoff)
+            }
             guard let diagnosticsURL = self.diagnosticsURL else {
                 return false
             }
@@ -498,13 +537,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private let endpointHostnameNormalizationCacheLock = NSLock()
     private var endpointHostnameNormalizationCache: [String: String] = [:]
     private var activeResolverRuntimeIdentifier: String?
-    // The PRIMARY-resolver identity of the active runtime (no fallback/encrypted-fallback/mode
-    // components). The DNS-health-context boundary (smokeProbeContextBaseline) and the rejected
-    // streak are about the PRIMARY, so they advance/clear only when THIS changes — never on a
-    // fallback-only runtime reset (encrypted-fallback resolver change, device-DNS fallback toggle).
-    private var activeResolverPrimaryIdentifier: String?
     private var resolverRuntimeGeneration = 0
     private var tunnelLifecycleGeneration: UInt64 = 0
+    // Synchronous admission gate for callbacks that can outlive stop-time source
+    // cancellation. Generation guards reject lifecycle-bound callback work; this
+    // bit additionally prevents any stale timer/work item from creating a new
+    // smoke owner after invalidation and before final queue cleanup.
+    private var tunnelLifecycleIsActive = false
     private var lastObservedPathKind: TunnelNetworkKind?
     private var lastObservedPathIsSatisfied: Bool?
     // Freshest path-satisfied state the monitor has delivered, stamped SYNCHRONOUSLY
@@ -516,28 +555,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // matches "no adverse path info yet".
     private var latestMonitoredPathIsSatisfied = true
     private var lastNetworkSettingsReapplyAt = Date.distantPast
-    private let reconnectNeededActivityReminderInterval: TimeInterval = 300
-    private var lastReconnectNeededActivityAt: Date?
-    // When the current reconnect-needed wedge *began* (set once on entry, cleared
-    // on recovery). Distinct from lastReconnectNeededActivityAt, which refreshes on
-    // When the current reconnect-needed wedge *began* (set once on entry, cleared
-    // only when a recovery is actually logged or on a tunnel-lifecycle reset).
-    // Deliberately NOT cleared by clearReconnectNeededActivitySuppression: a
-    // network change routes through that clear before the network-settled probe
-    // recovers, and wiping the marker there would make the handoff recovery (a
-    // primary path this logging targets) silently no-op. Distinct from
-    // lastReconnectNeededActivityAt (300s notify throttle) and lastUpstreamFailureAt
-    // (refreshes on every failed query), so a recovery reports the true wedge
-    // duration, not the gap since the last failed lookup.
-    private var reconnectNeededSince: Date?
-    private var reconnectNeededReason: String?
-    // Peak consecutive-upstream-failure count seen during the current wedge.
-    // Captured on the marker because the success paths reset
-    // health.consecutiveUpstreamFailureCount to 0 before logging recovery, so the
-    // exported dns-recovered would otherwise lose how many failures the wedge
-    // accumulated (orthogonal to duration: few failures over a long idle wedge vs.
-    // many under heavy browsing). max() preserves it across a network-change reset.
-    private var reconnectNeededPeakFailureCount = 0
     // Last-resort recovery: when DNS stays wedged after a handoff (device-DNS
     // resolvers can't be re-captured while the tunnel is active), restart the
     // tunnel so startup re-captures them. Latched so we issue the cancel once, and
@@ -548,9 +565,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // rate-limited (cooldown/cap). The recovery retry re-enters the wedge path
     // (selfReconnectIfPolicyAllows), which would otherwise apply the lower `.wedge`
     // ceiling and discard the intended third recapture restart until the window ages
-    // out (Codex P1). This carries the `.deviceDNSRecapture` ceiling across that hop.
-    // Cleared on recovery (clearReconnectNeededActivitySuppression) and on a fresh tunnel
-    // lifecycle (resetHealth), so a reused provider instance can't carry it into an
+    // out. This carries the `.deviceDNSRecapture` ceiling across that hop.
+    // Cleared by the ordered recovery effect and on a fresh tunnel lifecycle event, so a
+    // reused provider instance can't carry it into an
     // unrelated wedge. In-memory only: a fired restart kills the process, and the next
     // launch is itself a fresh recapture.
     private var deviceDNSRecaptureRestartPending = false
@@ -625,7 +642,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         refreshDeviceDNSResolverAddresses(reason: "startTunnel")
         resetHealth()
         resetResolverRuntimeForTunnelLifecycle(reason: "startTunnel")
-        startPathMonitor()
+        startPathMonitor(lifecycleGeneration: lifecycleGeneration)
 
         let settingsBundle = makeTunnelNetworkSettingsForCurrentConfiguration()
 
@@ -750,14 +767,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // Stamp when the suspension began so the next wake() can tell a micro-sleep from a
+    // real one. The stamp is dnsStateQueue-confined (INV-QUEUE-1); the completion is
+    // signalled only after the stamp lands so iOS cannot suspend us between the two.
+    override func sleep(completionHandler: @escaping () -> Void) {
+        LavaSecDeviceDebugLog.append(component: "tunnel", event: "sleep")
+        let completion = TunnelCompletion(handler: completionHandler)
+        dnsStateQueue.async { [weak self] in
+            self?.resolverSleepBeganAt = Date()
+            completion.complete()
+        }
+    }
+
     // iOS can suspend the extension while the device sleeps (e.g. in a pocket
-    // while walking out the door) and then call wake() when it resumes. By then
-    // the upstream resolver connections and bootstrapped endpoint IPs are likely
-    // stale, so drop them and re-probe: refresh device DNS, force-drop cached
-    // responses and tear down stale UDP sockets / DoH/DoT/DoQ connections,
+    // while walking out the door) and then call wake() when it resumes. After a
+    // REAL sleep the upstream resolver connections and bootstrapped endpoint IPs
+    // are likely stale, so drop them and re-probe: refresh device DNS, force-drop
+    // cached responses and tear down stale UDP sockets / DoH/DoT/DoQ connections,
     // invalidate the bootstrap cache, then schedule the resolver re-handshake once
     // the path settles. The forced reset is what keeps a query arriving before the
     // coalesced settle probe from reusing a pre-sleep connection.
+    //
+    // BRIEF sleeps are the exception (UR-48 Phase 2a): a thrashing device (rc9 log:
+    // 303 wakes/9.7 h) paid a fresh DoH TLS handshake + SERVFAIL'd pending queries
+    // on every micro-sleep, tearing down the very sessions carrying DNS. When the
+    // observed suspension is within DeviceDNSFallbackPolicy's preserve threshold,
+    // wake keeps the live runtime. Safety nets for the skip: the settle probe
+    // scheduled below re-checks the resolver (wedge recovery tears down a dead
+    // socket), and a genuine network change still gets a force reset from
+    // handleNetworkPathUpdate independently of wake.
+    // pinned: PacketTunnelDNSRuntimeSourceTests.testWakePreservesResolverRuntimeAcrossBriefSleeps
     //
     // We deliberately do NOT clear the device-DNS fallback decision here. wake()
     // also fires on ordinary sleep with no network change; clearing fallback would
@@ -777,13 +816,57 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
 
+            let sleepBeganAt = self.resolverSleepBeganAt
+            self.resolverSleepBeganAt = nil
+
             // Invalidate any smoke probe already in flight (regular or
             // fallback-recovery) so a result computed before sleep can't apply
             // after resume and flip the fallback decision on stale, pre-sleep
             // network conditions — without itself clearing fallback.
             self.invalidateInFlightSmokeProbes()
+            let preWakeResolverIdentifier = self.currentResolverRuntimeConfiguration().cacheIdentifier
             self.refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "wake")
             let resolverIdentifier = self.currentResolverRuntimeConfiguration().cacheIdentifier
+
+            // Preserve only when the wake capture kept the SAME effective resolver identity:
+            // a brief Wi-Fi/cellular handoff can adopt a different device-DNS set during the
+            // refresh above, and preserving then would leave in-flight completions from the
+            // old runtime valid against a runtime whose queries now use different resolvers
+            // (PR #330 review). An identity change takes the full reset below with the fresh
+            // identifier, exactly like a long sleep.
+            if resolverIdentifier == preWakeResolverIdentifier,
+               DeviceDNSFallbackPolicy.shouldPreserveResolverRuntimeAcrossWake(
+                   sleepBeganAt: sleepBeganAt,
+                   now: Date()
+               ) {
+                // Brief suspension: keep the live sessions and in-flight queries — anything
+                // the (possibly swapped) network actually killed fails fast and rides the
+                // existing failure-evidence → wedge-recovery reset within seconds, which is
+                // the probe-confirm this skip leans on (the settle probe below re-checks).
+                // The response CACHE is the one channel with no such self-heal: if the sleep
+                // spanned a SAME-IDENTITY network swap (Wi-Fi→Wi-Fi where both LANs hand out
+                // 192.168.1.1, invisible to the identity guard above AND to
+                // handleNetworkPathUpdate's kind/satisfied meaningful-change test), stale
+                // answers would keep serving silently. Drop it — a cache clear costs no
+                // radio, so the energy win (no TLS re-handshake) is untouched (PR #330 review).
+                self.dnsResponseCache.removeAll()
+                // Same reasoning for the bootstrap hostname→IP cache: prewarm suppresses
+                // refresh while an entry is cached, so a stale bootstrap IP after a
+                // same-identity swap would persist even through a later wedge reset — with
+                // no failure-driven self-heal of its own. Invalidation is metadata-only
+                // (live sessions untouched; the next re-dial just re-resolves the
+                // hostname), so the energy win is unaffected (PR #330 review).
+                self.resolverBootstrapService.invalidateAll()
+                if let sleepBeganAt {
+                    LavaSecDeviceDebugLog.append(component: "tunnel", event: "wake-resolver-reset-skipped", details: [
+                        "sleptSeconds": String(format: "%.1f", Date().timeIntervalSince(sleepBeganAt))
+                    ])
+                }
+                self.resolverProbeCoalescer.noteUnsettled()
+                self.scheduleDeviceDNSCaptureRetryIfNeeded(reason: "wake")
+                return
+            }
+
             let pendingResponses = self.collectPendingResponsesAndResetResolverRuntime(
                 identifier: resolverIdentifier,
                 reason: "wake",
@@ -831,6 +914,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func beginTunnelLifecycle(reason: String) -> UInt64 {
         let begin: () -> UInt64 = {
             self.tunnelLifecycleGeneration += 1
+            self.tunnelLifecycleIsActive = true
             #if DEBUG || LAVA_QA_TOOLS
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "lifecycle-begin", details: [
                 "reason": reason,
@@ -850,6 +934,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func invalidateTunnelLifecycle(reason: String) {
         let invalidate = {
             self.tunnelLifecycleGeneration += 1
+            self.tunnelLifecycleIsActive = false
+            self.invalidateResolverSmokeProbeToken()
             self.cancelTransientBootstrapDNSWait(reason: "lifecycle-invalidated-\(reason)")
             #if DEBUG || LAVA_QA_TOOLS
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "lifecycle-invalidated", details: [
@@ -907,11 +993,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // ~1.5s settle window would otherwise leave one live timer that runs
             // resolver work after teardown.
             self.resolverProbeCoalescer.cancel()
+            // The synchronous lifecycle gate blocks new probe admission after
+            // invalidation. Keep a second token fence after every queued source
+            // cancellation as defense in depth: a source already executing at the
+            // boundary, or a future admission path, still cannot project resolver
+            // evidence into a stopped provider.
+            self.invalidateResolverSmokeProbeToken()
             self.invalidateSnapshotReloadGeneration(reason: reason)
             self.diagnostics.stopLocalProtectionUptime()
             self.markDiagnosticsUpdated()
             self.persistHealthIfNeeded(force: true)
             self.persistDiagnosticsIfNeeded(force: true)
+            // Drain any fire-and-forget SQLite appends still queued on the log before we signal
+            // stop completion. The JSON diagnostics were just force-flushed, but the app reads
+            // Domain History from SQLite — so if the NE process is suspended with appends still
+            // queued, the newest decisions would vanish from the list (PR #327 review).
+            self.dnsEventLog?.flush()
             completion()
         }
     }
@@ -1048,16 +1145,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 #endif
 
                 if resolverChanged {
-                    self.deviceDNSFallbackModeActive = false
-                    self.consecutiveQueryFallbackSuccessCount = 0
-                    self.clearEncryptedFallbackLogThrottle(phase: "context-reset")
-                    self.health.deviceDNSFallbackModeActive = false
-                    self.health.lastDeviceDNSFallbackActivatedAt = nil
-                    self.health.consecutiveUpstreamFailureCount = 0
-                    self.cancelFallbackRecoverySmokeProbe()
-                    self.markHealthUpdated()
-                    self.persistHealthIfNeeded(force: true)
-                    self.resolverSmokeProbeGeneration += 1
+                    self.applyResolverHealthEvent(.resolverConfigurationChanged(occurredAt: Date()))
+                    self.invalidateResolverSmokeProbeToken()
                     self.replaceSnapshotResolver(self.currentAppConfiguration().resolverPreset)
                     self.refreshDNSRuntimeAfterSnapshotOrConfigurationChange()
                     self.reapplyTunnelNetworkSettings(reason: "configuration-changed", enforceThrottle: false)
@@ -2032,7 +2121,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        guard health.networkPathIsSatisfied else {
+        guard currentResolverHealthSchedulingView().networkPathIsSatisfied else {
             return
         }
 
@@ -2353,14 +2442,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         allowsQueryFallback: Bool = true
     ) -> ResolverRuntimeConfiguration {
         let configuration = currentAppConfiguration()
+        let schedulingView = currentResolverHealthSchedulingView()
         return DNSResolverRuntimePlan.make(
             configuration: configuration,
             deviceDNSAddresses: currentDeviceDNSResolverAddresses(),
             networkKind: currentNetworkKind(),
-            deviceDNSFallbackModeActive: currentDeviceDNSFallbackModeActive(),
+            deviceDNSFallbackModeActive: schedulingView.deviceDNSFallbackModeActive,
             ignoresDeviceDNSFallbackMode: ignoresDeviceDNSFallbackMode,
             allowsQueryFallback: allowsQueryFallback,
-            deviceResolverWedged: currentDeviceResolverWedged()
+            deviceResolverWedged: schedulingView.reconnectEpisodeIsActive
         )
     }
 
@@ -2371,13 +2461,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // resolver that refuses everything still trips it via the smoke probe, while a
     // healthy resolver answering one blocked domain with REFUSED does not.
     private func currentDeviceResolverWedged() -> Bool {
-        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
-            return reconnectNeededSince != nil
-        }
-
-        return dnsStateQueue.sync {
-            reconnectNeededSince != nil
-        }
+        currentResolverHealthSchedulingView().reconnectEpisodeIsActive
     }
 
     private func orderedResolverAddressesForCurrentNetwork(_ addresses: [String]) -> [String] {
@@ -2668,17 +2752,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // switch the tunnel has NOT yet ADOPTED (config-leads-pointer), and seeding from it would suppress the
         // retry forever. Leave the watermark at whatever the startup snapshot LOAD adopted — the load advances
         // it at its adopt point — so the first tick reloads iff the on-disk generation is genuinely ahead of
-        // what we actually adopted (Codex round 5).
+        // what the tunnel actually adopted.
         //
         // 10 s leeway: the ~60 s Focus-adoption promise tolerates the jitter, no tick is
         // phase-dependent (retry-until-adopt re-fires every tick regardless), and the
         // kernel can coalesce the wake. The poll itself is a hard invariant and stays.
         // (start() re-arms safely — the driver cancels any prior timer first.)
-        focusConfigurationPollTimer.start(
-            interval: Self.focusConfigurationPollInterval,
-            leeway: .seconds(10)
-        ) { [weak self] in
-            self?.reloadSnapshotIfConfigurationGenerationAdvanced()
+        // Synchronous isolated access: this method is dnsStateQueue-confined (hop guard
+        // above), which IS the actor's executor — assumeIsolated traps on a wrong queue
+        // where the old dispatchPrecondition merely asserted in debug.
+        focusConfigurationPollTimer.assumeIsolated { timer in
+            timer.start(
+                interval: Self.focusConfigurationPollInterval,
+                leeway: .seconds(10)
+            ) { [weak self] in
+                self?.reloadSnapshotIfConfigurationGenerationAdvanced()
+            }
         }
     }
 
@@ -2690,7 +2779,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        focusConfigurationPollTimer.stop()
+        focusConfigurationPollTimer.assumeIsolated { $0.stop() }
     }
 
     /// Advance the Focus config-poll watermark to a generation the tunnel has ADOPTED — either via a full
@@ -2698,14 +2787,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// reload-generation token (like `replaceSnapshot`) so a superseded load doesn't record. Passive
     /// bookkeeping only — never touches the recovery/fail-closed flow. A reload that fail-closed never
     /// reaches an adopt point, so the poll keeps retrying until the flipped artifact is adopted; a successful
-    /// foreground/app-message reload advances it too, so the poll never redundantly reloads after one. (P4d.)
+    /// foreground/app-message reload advances it too, so the poll never redundantly reloads after one.
     private func advanceFocusConfigurationWatermark(toAdoptedGeneration adoptedGeneration: Int, ifCurrentReloadGeneration generation: UInt64) {
         dnsStateQueue.async { [weak self] in
             guard let self else { return }
-            // dnsStateQueue-confined invariant (Kilo #29): the watermark advance and the in-flight-marker
-            // clear are both enqueued on dnsStateQueue so they stay strictly FIFO-ordered (the snapshot-reload
-            // correctness relies on it). Assert here so a future refactor that moves this mutation off the
-            // queue trips instead of silently breaking the ordering.
+            // INV-QUEUE-1: the watermark advance and in-flight-marker clear are both enqueued on
+            // dnsStateQueue so they stay strictly FIFO-ordered. Assert here so an off-queue refactor
+            // trips instead of silently breaking snapshot-reload ordering.
             dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
             guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
             self.lastObservedConfigurationGeneration = max(self.lastObservedConfigurationGeneration, adoptedGeneration)
@@ -2723,17 +2811,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// watermark on mere observation would skip the retry if this reload runs before the flip (loads the old
     /// pointer / fail-closes). Leaving the watermark to the adopt point means the poll keeps retrying every
     /// interval until the flipped artifact is actually adopted, and a foreground provider-message reload (which
-    /// also adopts) advances it too, so the poll never redundantly reloads after a foreground switch (Codex P2).
+    /// also adopts) advances it too, so the poll never redundantly reloads after a foreground switch.
     ///
-    /// In-flight guard (round 5, Codex): never re-request while the latest reload is still running. Each
-    /// request bumps `snapshotReloadGeneration`, which invalidates the in-flight load (and resets the DNS
-    /// runtime), so a load/compile slower than the poll interval would be restarted forever and never adopt.
+    /// In-flight guard: never re-request while the latest reload is still running. Each request begins a new
+    /// coordinator generation, which invalidates the in-flight load (and resets the DNS runtime), so a
+    /// load/compile slower than the poll interval would be restarted forever and never adopt.
     /// We retry on the NEXT tick after it resolves — preserving the retry-until-adopted behavior (which is what
     /// correctly picks up the artifact-pointer FLIP in the config-leads-pointer window) without starving a slow
     /// load. The poll deliberately does NOT permanently bound a non-adopting generation: a same-generation
     /// pointer flip must still be retried (the extension cannot send a provider reload), so the only cost of a
     /// genuinely-unadoptable config is one in-flight-gated reload per interval until the generation advances or
-    /// a publish makes it adoptable (Codex round 6).
+    /// a publish makes it adoptable.
     private func reloadSnapshotIfConfigurationGenerationAdvanced() {
         // PST-7 defense-in-depth: pick up a mid-session diagnostics-clear whose IPC message
         // was dropped, off the tunnel-start force-apply. `force: false` respects the durable
@@ -2753,7 +2841,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             persistDiagnosticsIfNeeded(force: true)
         }
 
-        guard !snapshotReloadInFlight else { return }
+        let reloadInFlight = snapshotReloadCoordinator.assumeIsolated { $0.isReloadInFlight }
+        guard !reloadInFlight else { return }
         let onDiskGeneration = loadConfiguration()?.configurationGeneration ?? lastObservedConfigurationGeneration
         guard onDiskGeneration > lastObservedConfigurationGeneration else { return }
         requestSnapshotReload(reason: "focus-config-poll", force: true)
@@ -2769,11 +2858,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
+        guard tunnelLifecycleIsActive else {
+            return
+        }
+
+        let schedulingView = currentResolverHealthSchedulingView()
         guard DeviceDNSFallbackPolicy.shouldScheduleFallbackFollowUpProbe(
-                deviceDNSFallbackModeActive: deviceDNSFallbackModeActive,
-                consecutiveFallbackEvidenceCount: consecutiveQueryFallbackSuccessCount
+                deviceDNSFallbackModeActive: schedulingView.deviceDNSFallbackModeActive,
+                consecutiveFallbackEvidenceCount: schedulingView.deviceDNSFallbackEvidenceCount
               ),
-              health.networkPathIsSatisfied,
+              schedulingView.networkPathIsSatisfied,
               fallbackRecoverySmokeProbeWorkItem == nil
         else {
             return
@@ -2785,9 +2879,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
 
             self.fallbackRecoverySmokeProbeWorkItem = nil
+            let schedulingView = self.currentResolverHealthSchedulingView()
             guard DeviceDNSFallbackPolicy.shouldScheduleFallbackFollowUpProbe(
-                deviceDNSFallbackModeActive: self.deviceDNSFallbackModeActive,
-                consecutiveFallbackEvidenceCount: self.consecutiveQueryFallbackSuccessCount
+                deviceDNSFallbackModeActive: schedulingView.deviceDNSFallbackModeActive,
+                consecutiveFallbackEvidenceCount: schedulingView.deviceDNSFallbackEvidenceCount
             ) else {
                 return
             }
@@ -2826,7 +2921,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // user is most stuck. This lighter recovery resets the resolver backoff +
     // stale upstream connections and re-probes on a short cadence, with no
     // process restart and no per-query hammering (one re-probe per interval).
-    // Cancelled by clearReconnectNeededActivitySuppression as soon as DNS recovers.
+    // Cancelled by the ordered resolver-health recovery effect as soon as DNS recovers.
     private func scheduleResolverWedgeRecoveryProbeIfNeeded() {
         guard DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true else {
             dnsStateQueue.async { [weak self] in
@@ -2835,7 +2930,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        guard health.networkPathIsSatisfied else {
+        guard currentResolverHealthSchedulingView().networkPathIsSatisfied else {
             return
         }
 
@@ -2858,8 +2953,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // SAME way the probe computes it (transport + device-DNS-fallback availability). A probe
             // that can hang to its timeout — an encrypted primary OR a fallback-capable plain
             // primary that runs primary-then-fallback — must not be re-armed sooner, or the new
-            // probe bumps resolverSmokeProbeGeneration mid-flight, discards the in-flight result,
-            // and churns the session before it can recover (Codex P2 r3/r4). Since every re-arm
+            // probe supersedes the actor-owned smoke token mid-flight, discards the stale result,
+            // and churns the session before it can recover. Since every re-arm
             // happens at-or-after the wedge fired and delay >= that timeout, the next probe never
             // fires before the in-flight one completes. A fast local probe (recovery timeout) still
             // effectively gets the short ramp.
@@ -2885,10 +2980,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             //  * the cadence MODE changed (covered<->uncovered) — re-arm on the correct cadence for
             //    the new state: coverage lapsing speeds an offline user up to the fast ramp, and
             //    coverage engaging slows an online user back to the gentle cadence so a fast probe
-            //    can't tear down a fallback that's keeping DNS working (Codex P2 r5); OR
+            //    can't tear down a fallback that's keeping DNS working; OR
             //  * within the same mode, a strictly-sooner probe is now warranted.
             // An equal/later same-mode deadline keeps the pending probe, so repeated calls never
-            // churn it. (Codex P2 r1/r2/r5.)
+            // churn it.
             let modeChanged = resolverWedgeRecoveryArmedCovered != coveredNow
             guard modeChanged || deadline < armedDeadline else {
                 return
@@ -2916,14 +3011,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // Re-confirm the primary is still wedged before disrupting the runtime.
             // THREE independent signals can mean "primary still wedged"; honour ANY:
             //   * the assessment derived from `health` says `.reconnect` (DNS down), OR
-            //   * the wedge marker (`reconnectNeededSince`, via currentDeviceResolverWedged)
+            //   * the coordinator's reconnect episode (via currentDeviceResolverWedged)
             //     is still held — the masked-healthy DOWN wedge: a fallback-carried success
             //     clears health's failure counters so the assessment reads healthy, but the
-            //     fallback branch in recordUpstreamResult HOLDS the marker, OR
+            //     organic encrypted-fallback evidence preserves the marker, OR
             //   * the assessment says `.usingEncryptedFallback` — the COVERED wedge, where
             //     DoH/DoT is actively carrying DNS for a transition-stale Device-DNS primary.
             //     This signal is derived purely from `health` (the fallback serving timestamp
-            //     + smoke state) and NEVER stamps `reconnectNeededSince`, so it does not flip
+            //     + smoke state) and NEVER starts a reconnect episode, so it does not flip
             //     `treatsResolverRejectionAsFallbackTrigger` or bypass authoritative
             //     SERVFAIL/REFUSED — the exact reason recovery-in-place could not reuse the
             //     marker. It accelerates recapture from the routine cadence to this one.
@@ -2945,7 +3040,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // one-off fallback-carried query with no failed probe.
             let isCoveredWedge = ProtectionConnectivityPolicy.isEncryptedFallbackCoveringWedge(health: self.health, now: now)
             let isCarryingFallback = ProtectionConnectivityPolicy.isEncryptedFallbackCarryingWedge(health: self.health, now: now)
-            guard self.health.networkPathIsSatisfied, isDownWedge || isCarryingFallback else {
+            let schedulingView = self.currentResolverHealthSchedulingView()
+            guard schedulingView.networkPathIsSatisfied, isDownWedge || isCarryingFallback else {
                 // The wedge cleared without a logged recovery cancelling us (e.g. a covered episode
                 // whose coverage lapsed to a non-reconnect state, or a config/identity change reset
                 // the runtime). End the episode so a later wedge restarts the fast ramp rather than
@@ -2985,9 +3081,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             if isDownWedge, !isCoveredWedge {
                 self.resetResolverTransientState()
             }
-            // A failed re-probe re-arms this recovery (down wedge: via
-            // appendReconnectNeededIfPolicyRequiresReconnect / the marker; covered wedge:
-            // via the covered re-arm in the smoke-probe-failure path), so the loop
+            // A failed re-probe re-arms this recovery through the reducer's held-marker
+            // or encrypted-fallback-carrying evidence, so the loop
             // self-sustains at the wedge cadence until the primary recaptures (the success
             // path cancels it).
             self.scheduleResolverSmokeProbeIfNeeded(reason: isCoveredWedge ? "covered-primary-recapture" : "resolver-wedge-recovery")
@@ -3026,8 +3121,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // fresh addresses and reset the runtime so live queries use them. Only runs
     // when the active config actually depends on Device DNS (primary or fallback)
     // and the path is satisfied; superseded on the next handoff/wake/lifecycle
-    // reset. A fully-masked network exhausts the cap and falls through to the
-    // wedge-recovery probe + on-demand-gated self-reconnect, which are unchanged.
+    // reset. A fully-masked network exhausts the cap; exhaustion PRESERVES the
+    // captured addresses (UR-55 / INV-DNS-5 — masked reads carry no handoff
+    // evidence) and fires a policy-gated verification probe of the preserved
+    // primary, leaving the wedge-recovery probe + on-demand-gated self-reconnect
+    // as the backstops, which are unchanged.
     // MARK: - Device-DNS capture retry
 
     private func scheduleDeviceDNSCaptureRetryIfNeeded(reason: String) {
@@ -3040,7 +3138,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         cancelDeviceDNSCaptureRetry()
 
-        guard health.networkPathIsSatisfied, currentConfigurationDependsOnDeviceDNS() else {
+        guard currentResolverHealthSchedulingView().networkPathIsSatisfied,
+              currentConfigurationDependsOnDeviceDNS()
+        else {
             return
         }
 
@@ -3049,7 +3149,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // network each wake, so restarting the full retry cycle within the cooldown
         // of an exhausted-still-masked cycle only repeats reads that just failed.
         // Any non-wake reason means a real change — clear the cooldown and retry.
-        switch deviceDNSCaptureRetryCycle.noteScheduleRequest(isWake: reason == "wake") {
+        // Synchronous isolated access: this method is dnsStateQueue-confined (hop guard
+        // above), which IS the cycle actor's executor — assumeIsolated traps on a wrong
+        // queue where the old dispatchPrecondition merely asserted in debug. The log
+        // append and the arm run OUTSIDE isolation: they strictly follow the decision,
+        // nothing interleaves with the cycle state.
+        let decision = deviceDNSCaptureRetryCycle.assumeIsolated { cycle in
+            cycle.noteScheduleRequest(isWake: reason == "wake")
+        }
+        switch decision {
         case .suppress(let logOnce):
             if logOnce {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-suppressed", details: [
@@ -3063,10 +3171,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func armDeviceDNSCaptureRetry(reason: String) {
-        deviceDNSCaptureRetryCycle.armAttempt(
-            after: DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
-        ) { [weak self] in
-            self?.runDeviceDNSCaptureRetry(reason: reason)
+        // Reached only from dnsStateQueue-confined code (the schedule entry's hop guard,
+        // or a retry attempt delivered on dnsStateQueue by the cycle's scheduleAfter),
+        // which IS the cycle actor's executor — synchronous assumeIsolated, zero hops.
+        deviceDNSCaptureRetryCycle.assumeIsolated { cycle in
+            cycle.armAttempt(
+                after: DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
+            ) { [weak self] in
+                self?.runDeviceDNSCaptureRetry(reason: reason)
+            }
         }
     }
 
@@ -3074,122 +3187,139 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // The network or resolver config may have moved on since this was armed
         // (each handoff/wake supersedes via scheduleDeviceDNSCaptureRetryIfNeeded);
         // re-confirm before disturbing the runtime.
-        guard health.networkPathIsSatisfied, currentConfigurationDependsOnDeviceDNS() else {
+        guard currentResolverHealthSchedulingView().networkPathIsSatisfied,
+              currentConfigurationDependsOnDeviceDNS()
+        else {
             return
         }
 
-        let attemptNumber = deviceDNSCaptureRetryCycle.noteAttemptRan()
-        let previousAddresses = deviceDNSResolverAddresses
-        let captured = Self.currentSystemDNSServerAddresses()
-        deviceDNSResolverAddresses = DeviceDNSFallbackPolicy.refreshedResolverAddresses(
-            current: deviceDNSResolverAddresses,
-            captured: captured,
-            preserveOnEmptyCapture: true
-        )
-
-        LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry", details: [
-            "reason": reason,
-            "attempt": "\(attemptNumber)",
-            "capturedCount": "\(captured.count)",
-            "activeCount": "\(deviceDNSResolverAddresses.count)"
-        ])
-
-        if !captured.isEmpty {
-            // The mask lifted: we have this network's resolvers. If they actually
-            // changed, reset the resolver runtime so in-flight + future queries use
-            // them (mirrors the settle path) and fire a confirming smoke probe; a
-            // genuine recovery then clears the wedge marker. Either way, stop
-            // retrying — the capture is no longer masked.
-            deviceDNSCaptureRetryCycle.noteCaptureSucceeded(
-                addressesChanged: deviceDNSResolverAddresses != previousAddresses
-            )
-            if deviceDNSResolverAddresses != previousAddresses {
-                let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
-                let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
-                    identifier: resolverIdentifier,
-                    reason: "device-dns-recaptured-on-retry",
-                    force: true
-                )
-                writeServerFailures(for: pendingResponses, reason: "device-dns-recaptured-on-retry")
-                scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-recaptured-on-retry")
-            }
-            return
-        }
-
-        guard deviceDNSCaptureRetryCycle.shouldContinue(capturedNonEmpty: false) else {
-            // Capture stayed masked across the whole window — this is a genuine
-            // resolver-changing handoff, not a transient mask. The previous network's
-            // resolvers are now unreachable; keeping them serves a dead address, so
-            // every query burns a multi-second timeout — the "slow guide" limp the
-            // field log showed (~90s to wedge-recovery).
-            //
-            // Whether dropping them to empty is an IMPROVEMENT depends on whether
-            // anything catches the queries afterward. Empty device DNS makes
-            // resolveDeviceDNS return a fast structured `deviceDNSUnavailable`:
-            //   * WITH a per-query encrypted fallback configured (the alt guide):
-            //     dropping is strictly better — every organic query routes straight to
-            //     the encrypted fallback (resolveUpstream: shouldFallbackToEncrypted +
-            //     no usable primary answer) instead of waiting on the dead primary
-            //     first. So drop.
-            //   * NO encrypted fallback (Device-DNS-ONLY): `deviceDNSUnavailable` is
-            //     deliberately NOT in restartFailureReasons (it is the cold-start
-            //     "wait for capture" state), so dropping would leave the no-fallback
-            //     masked handoff fail-closed WITHOUT escalating — removing the
-            //     slow-but-real restart recovery the stale resolver's restart-worthy
-            //     timeout/send-failed still drives (Codex P1 on #110). So PRESERVE the
-            //     stale resolver here and let the existing self-reconnect recovery fire.
-            //     The prompt, controlled re-capture for this no-fallback case is Track 4
-            //     (the gated cold-restart hooked in below) — the preserved stale resolver is
-            //     the backstop if that restart is throttled/declined (its restart-worthy
-            //     timeouts still drive the slow wedge path).
-            // `currentResolverRuntimeConfiguration()` builds with allowsQueryFallback,
-            // so `encryptedFallback != nil` is exactly the organic-query routing
-            // condition, and it is independent of whether the addresses are empty.
-            let routesToEncryptedFallback = currentResolverRuntimeConfiguration().encryptedFallback != nil
+        // One isolated region for the whole attempt: the cycle transitions
+        // (noteAttemptRan → noteCaptureSucceeded / shouldContinue → noteExhausted +
+        // attemptsMade) are data-dependently interleaved with the capture work between
+        // them (the C-shim read feeds the outcome calls, the stale-drop computation
+        // feeds the exhaustion log), so the provider work cannot move outside without
+        // reordering it. This body already runs on dnsStateQueue by construction
+        // (armAttempt's scheduleAfter delivers there), which IS the cycle actor's
+        // executor — the capture work is exactly as queue-confined as it was
+        // pre-actor, and assumeIsolated now checks that instead of a comment
+        // (INV-QUEUE-1). The re-arm at the bottom nests armDeviceDNSCaptureRetry's own
+        // assumeIsolated — a re-entrant executor check on the same queue, not a hop.
+        deviceDNSCaptureRetryCycle.assumeIsolated { cycle in
+            let attemptNumber = cycle.noteAttemptRan()
             let previousAddresses = deviceDNSResolverAddresses
+            let captured = Self.currentSystemDNSServerAddresses()
             deviceDNSResolverAddresses = DeviceDNSFallbackPolicy.refreshedResolverAddresses(
                 current: deviceDNSResolverAddresses,
-                captured: [],
-                preserveOnEmptyCapture: !routesToEncryptedFallback
+                captured: captured,
+                preserveOnEmptyCapture: true
             )
-            let droppedStale = deviceDNSResolverAddresses != previousAddresses
-            deviceDNSCaptureRetryCycle.noteExhausted()
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-exhausted", details: [
+
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry", details: [
                 "reason": reason,
-                "attempts": "\(deviceDNSCaptureRetryCycle.attemptsMade)",
-                "routesToEncryptedFallback": "\(routesToEncryptedFallback)",
-                "droppedStale": "\(droppedStale)"
+                "attempt": "\(attemptNumber)",
+                "capturedCount": "\(captured.count)",
+                "activeCount": "\(deviceDNSResolverAddresses.count)"
             ])
-            Self.recordIncident(.deviceDNSRecaptureExhausted, reason: reason)
 
-            // Make the drop take effect on in-flight + future queries (the cached
-            // runtime still points at the stale resolver otherwise), then fire a
-            // confirming probe so the policy sees the unavailable primary now rather
-            // than on the next routine cadence. Mirrors the recapture path above.
-            if droppedStale {
-                let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
-                let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
-                    identifier: resolverIdentifier,
-                    reason: "device-dns-stale-dropped-on-exhaustion",
-                    force: true
+            if !captured.isEmpty {
+                // The mask lifted: we have this network's resolvers. If they actually
+                // changed, reset the resolver runtime so in-flight + future queries use
+                // them (mirrors the settle path) and fire a confirming smoke probe; a
+                // genuine recovery then clears the wedge marker. Either way, stop
+                // retrying — the capture is no longer masked.
+                cycle.noteCaptureSucceeded(
+                    addressesChanged: deviceDNSResolverAddresses != previousAddresses
                 )
-                writeServerFailures(for: pendingResponses, reason: "device-dns-stale-dropped-on-exhaustion")
-                scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-stale-dropped-on-exhaustion")
+                if deviceDNSResolverAddresses != previousAddresses {
+                    let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
+                    let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
+                        identifier: resolverIdentifier,
+                        reason: "device-dns-recaptured-on-retry",
+                        force: true
+                    )
+                    writeServerFailures(for: pendingResponses, reason: "device-dns-recaptured-on-retry")
+                    scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-recaptured-on-retry")
+                }
+                return
             }
 
-            // Track 4 — no-fallback handoff: cold restart is the ONLY thing that re-captures
-            // the new network's resolver (Phase 0), so escalate PROMPTLY here rather than
-            // waiting on the 30s wedge-recovery loop + smoke-streak climb. Gated/capped
-            // inside (own ceiling + on-demand + Track-1 path guard); declines arm the
-            // in-place wedge probe. The fallback case (routesToEncryptedFallback) must NOT
-            // restart — Option-A keeps serving over the encrypted path (Track 3).
-            if !routesToEncryptedFallback {
-                promptDeviceDNSRecaptureRestartIfPolicyAllows(now: Date())
+            guard cycle.shouldContinue(capturedNonEmpty: false) else {
+                // Capture stayed masked across the whole window. That is NOT evidence of
+                // a resolver-changing handoff: the in-process read is masked in STEADY
+                // STATE while the tunnel owns device DNS (Phase 0, lavasec-infra
+                // plans/2026-06-21-network-handoff-device-dns-recapture-plan.md — zero
+                // real-resolver reads in the tunnel-up window), so on such a network
+                // EVERY armed cycle exhausts, including wake-armed cycles on a perfectly
+                // stable Wi-Fi. 1.2.1 inferred a handoff here and dropped the captured
+                // addresses whenever an encrypted fallback would catch the queries; on a
+                // stable network that discarded a WORKING resolver and stranded the user
+                // on the fallback until the next tunnel start, because the empty list
+                // also blinded the recovery probes (UR-55).
+                //
+                // UR-55 rule (plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-
+                // plan.md): the captured addresses are never mutated at exhaustion
+                // (INV-DNS-5). The discriminator is a wire probe of the preserved
+                // primary — success keeps it in service; failure lands wedge/health
+                // evidence (recovery cadences + the rejection trigger). The probe
+                // deliberately does NOT write the live backoff map: a false-negative
+                // probe benching a WORKING primary is the same weak-evidence failure
+                // class this branch exists to remove.
+                // pinned: PacketTunnelDNSRuntimeSourceTests.testSmokeProbesDoNotMutateLiveResolverBackoff
+                // The bench instead comes from the FIRST organic failures via
+                // recordUpstreamResult: after a real handoff each preserved address
+                // costs one fallback-carried query the dead-primary wait (~1s UDP,
+                // +2s TCP on timeout) before ResolverBackoffPolicy benches it on that
+                // single failure (30s, refreshed by later failures) and subsequent
+                // queries take the fast `backed-off` skip. That bounded first-query
+                // cost — the user stays online throughout; the per-query encrypted
+                // fallback answers under INV-DNS-1's fail-closed/LKG rules — is the
+                // price of reversibility versus the old drop's instant-but-stranding
+                // `deviceDNSUnavailable` (PR #342 review). The covered-primary-
+                // recapture loop keeps re-probing so traffic RETURNS the moment the
+                // resolver answers again, and the next unmasked capture (tunnel start)
+                // adopts a genuinely-new network's resolver. The probe is policy-gated
+                // so equivalent evidence — fresh accepted-primary proof (NRG-3a mirror)
+                // or an already-confirmed chronic failure streak inside its backoff
+                // spacing (UR-48 rc9 drain class) — skips the radio wake.
+                // pinned: PacketTunnelDNSRuntimeSourceTests.testDeviceDNSCaptureExhaustionPreservesResolversAndVerifiesByProbe
+                let routesToEncryptedFallback = currentResolverRuntimeConfiguration().encryptedFallback != nil
+                cycle.noteExhausted()
+
+                let schedulingView = currentResolverHealthSchedulingView()
+                let verification = DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                    lastAcceptedPrimaryEvidenceAt: schedulingView.lastAcceptedPrimaryEvidenceAt,
+                    consecutiveSmokeProbeFailures: schedulingView.consecutiveSmokeProbeFailureCount,
+                    lastWireSmokeProbeAt: lastWireSmokeProbeAt,
+                    now: Date()
+                )
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-exhausted", details: [
+                    "reason": reason,
+                    "attempts": "\(cycle.attemptsMade)",
+                    "routesToEncryptedFallback": "\(routesToEncryptedFallback)",
+                    "verification": verification.rawValue
+                ])
+                Self.recordIncident(.deviceDNSRecaptureExhausted, reason: reason)
+
+                if verification == .probe {
+                    scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-exhaustion-verification")
+                }
+
+                // Track 4 — no-fallback handoff: cold restart is the ONLY thing that re-captures
+                // the new network's resolver (Phase 0), so escalate PROMPTLY here rather than
+                // waiting on the 30s wedge-recovery loop + smoke-streak climb. Gated/capped
+                // inside (own ceiling + on-demand + Track-1 path guard); declines arm the
+                // in-place wedge probe. The fallback case (routesToEncryptedFallback) must NOT
+                // restart — Option-A keeps serving over the encrypted path (Track 3).
+                // `currentResolverRuntimeConfiguration()` builds with allowsQueryFallback,
+                // so `encryptedFallback != nil` is exactly the organic-query routing condition.
+                if !routesToEncryptedFallback {
+                    promptDeviceDNSRecaptureRestartIfPolicyAllows(now: Date())
+                }
+                return
             }
-            return
+
+            armDeviceDNSCaptureRetry(reason: reason)
         }
-
-        armDeviceDNSCaptureRetry(reason: reason)
     }
 
     private func cancelDeviceDNSCaptureRetry() {
@@ -3200,7 +3330,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        deviceDNSCaptureRetryCycle.cancelPendingAttempt()
+        deviceDNSCaptureRetryCycle.assumeIsolated { $0.cancelPendingAttempt() }
     }
 
     // True when live queries can route through Device DNS — either it is the
@@ -3227,7 +3357,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        guard health.networkPathIsSatisfied else {
+        guard tunnelLifecycleIsActive else {
+            return
+        }
+
+        let schedulingView = currentResolverHealthSchedulingView()
+        guard schedulingView.networkPathIsSatisfied else {
             return
         }
 
@@ -3241,12 +3376,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // probe interval. The staleness guarantee is unchanged: real traffic that
         // passed the probe's own acceptance check IS fresher proof than a probe.
         if reason == "periodic-health-check",
-           health.consecutiveRejectedSmokeResponseCount == 0,
-           health.consecutiveDNSSmokeProbeFailureCount == 0,
-           health.consecutiveUpstreamFailureCount == 0,
-           !deviceDNSFallbackModeActive,
-           reconnectNeededSince == nil,
-           let evidenceAt = lastAcceptedPrimaryEvidenceAt {
+           schedulingView.consecutiveRejectedResponseCount == 0,
+           schedulingView.consecutiveSmokeProbeFailureCount == 0,
+           schedulingView.consecutiveUpstreamFailureCount == 0,
+           !schedulingView.deviceDNSFallbackModeActive,
+           !schedulingView.reconnectEpisodeIsActive,
+           let evidenceAt = schedulingView.lastAcceptedPrimaryEvidenceAt {
             // Future-dated evidence (a backward wall-clock jump after the stamp) must
             // NOT skip: a negative age would satisfy an upper bound alone until the
             // clock caught up — indefinitely suppressing routine probes. Out-of-range
@@ -3264,6 +3399,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
         }
 
+        // UR-48 Phase 2a: chronic-failure backoff — the routine tick, and ONLY the routine
+        // tick (same scoping rule as NRG-3a above: every event-driven reason stays
+        // unconditional, so wedge/recovery/settle/config/start probes are never delayed).
+        // Past the activation streak, skip the wire query until the adaptive interval since
+        // the last wire probe has elapsed. The interval keys on the LIVE consecutive-failure
+        // counter, which resets on any probe success, recovery, and network-path change —
+        // so leaving backoff is instant on every real change signal. A negative elapsed
+        // (wall clock set backwards) probes normally rather than trusting a future stamp,
+        // mirroring the NRG-3a evidence-age guard.
+        if reason == "periodic-health-check",
+           schedulingView.consecutiveSmokeProbeFailureCount >= DeviceDNSFallbackPolicy.smokeProbeBackoffActivationFailureCount,
+           let lastWireSmokeProbeAt {
+            let requiredInterval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval(
+                afterConsecutiveFailures: schedulingView.consecutiveSmokeProbeFailureCount
+            )
+            let sinceLastWireProbe = Date().timeIntervalSince(lastWireSmokeProbeAt)
+            if sinceLastWireProbe >= 0, sinceLastWireProbe < requiredInterval {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-skipped", details: [
+                    "reason": reason,
+                    "chronicFailures": "\(schedulingView.consecutiveSmokeProbeFailureCount)",
+                    "backoffIntervalS": "\(Int(requiredInterval))",
+                    "sinceLastProbeS": "\(Int(sinceLastWireProbe))"
+                ])
+                #if DEBUG || LAVA_QA_TOOLS
+                EnergyCounters.shared.bump(.smokeProbeSkip)   // NRG smoke-probe lever: chronic backoff suppressed the wire query
+                #endif
+                return
+            }
+        }
+
         let resolverConfiguration = currentResolverRuntimeConfiguration(
             ignoresDeviceDNSFallbackMode: true,
             allowsQueryFallback: false
@@ -3275,13 +3440,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         EnergyCounters.shared.bump(.smokeProbeWire)   // NRG smoke-probe lever: this probe hits the wire (radio wake)
         EnergySignpost.event("smoke-probe-wire")      // NRG Phase 2: mark the radio wake for Instruments
         #endif
-        resolverSmokeProbeGeneration += 1
-        let generation = resolverSmokeProbeGeneration
+        lastWireSmokeProbeAt = Date()
+        let probeStart = resolverHealthCoordinator.assumeIsolated { $0.beginSmokeProbe() }
         // Rotate the canary domain per probe so a single blocked/hijacked domain
         // can't sustain a false "unhealthy" verdict (a different domain's success
         // resets the consecutive-failure count); a resolver that refuses them all
         // still escalates.
-        let probeDomain = DNSResolverSmokeProbe.probeDomain(forSequence: generation)
+        let probeDomain = DNSResolverSmokeProbe.probeDomain(forSequence: probeStart.rotationSequence)
         let query = DNSResolverSmokeProbe.query(
             transactionID: UInt16.random(in: 0...UInt16.max),
             domain: probeDomain
@@ -3315,7 +3480,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         resolverConfiguration: resolverConfiguration
                     )
                     self.completeResolverSmokeProbeResult(
-                        generation: generation,
+                        token: probeStart.token,
                         reason: reason,
                         primaryResult: timeoutResult,
                         primarySucceeded: false,
@@ -3356,7 +3521,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     timeout.cancel()
                     self.dnsStateQueue.async { [weak self] in
                         self?.completeResolverSmokeProbeResult(
-                            generation: generation,
+                            token: probeStart.token,
                             reason: reason,
                             primaryResult: primaryResult,
                             primarySucceeded: primarySucceeded,
@@ -3400,7 +3565,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     timeout.cancel()
                     self.dnsStateQueue.async { [weak self] in
                         self?.completeResolverSmokeProbeResult(
-                            generation: generation,
+                            token: probeStart.token,
                             reason: reason,
                             primaryResult: primaryResult,
                             primarySucceeded: primarySucceeded,
@@ -3435,303 +3600,296 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func completeResolverSmokeProbeResult(
-        generation: Int,
+        token: ResolverSmokeProbeToken,
         reason: String,
         primaryResult: DNSResolutionResult,
         primarySucceeded: Bool,
         fallbackResult: DNSResolutionResult?,
         fallbackSucceeded: Bool
     ) {
-        guard generation == resolverSmokeProbeGeneration else {
-            return
-        }
-
-        applyResolverSmokeProbeResult(
-            generation: generation,
+        dispatchPrecondition(condition: .onQueue(dnsStateQueue))
+        let completion = ResolverHealthSmokeProbeCompletion(
+            occurredAt: Date(),
             reason: reason,
             primaryResult: primaryResult,
-            primarySucceeded: primarySucceeded,
+            primaryAccepted: primarySucceeded,
             fallbackResult: fallbackResult,
-            fallbackSucceeded: fallbackSucceeded
+            fallbackAccepted: fallbackSucceeded,
+            modeInsensitivePrimaryIdentifier:
+                currentResolverRuntimeConfiguration(ignoresDeviceDNSFallbackMode: true).primaryCacheIdentifier,
+            configuredResolverDisplayName:
+                currentAppConfiguration().resolverPreset.displayName
         )
+        let snapshot = health
+        guard let transition = resolverHealthCoordinator.assumeIsolated({
+            $0.completeSmokeProbe(
+                completion,
+                token: token,
+                projectingOnto: snapshot
+            )
+        }) else {
+            return
+        }
+        applyResolverHealthTransition(transition)
+    }
 
-        if resolverSmokeProbeGeneration == generation {
-            resolverSmokeProbeGeneration += 1
+    private func applyResolverHealthEvent(
+        _ event: ResolverHealthGatewayEvent,
+        hooks: ResolverHealthEffectHooks = ResolverHealthEffectHooks()
+    ) {
+        dispatchPrecondition(condition: .onQueue(dnsStateQueue))
+        let snapshot = health
+        let transition = resolverHealthCoordinator.assumeIsolated {
+            $0.apply(event, projectingOnto: snapshot)
+        }
+        applyResolverHealthTransition(transition, hooks: hooks)
+    }
+
+    private func applyResolverHealthTransition(
+        _ transition: ResolverHealthCoordinatorTransition,
+        hooks: ResolverHealthEffectHooks = ResolverHealthEffectHooks()
+    ) {
+        dispatchPrecondition(condition: .onQueue(dnsStateQueue))
+        transition.projection.apply(to: &health)
+        executeResolverHealthEffects(transition.effects, hooks: hooks)
+    }
+
+    private func currentResolverHealthSchedulingView() -> ResolverHealthSchedulingView {
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            return resolverHealthCoordinator.assumeIsolated { $0.schedulingView }
+        }
+
+        return dnsStateQueue.sync {
+            resolverHealthCoordinator.assumeIsolated { $0.schedulingView }
         }
     }
 
-    private func applyResolverSmokeProbeResult(
-        generation: Int,
-        reason: String,
-        primaryResult: DNSResolutionResult,
-        primarySucceeded: Bool,
-        fallbackResult: DNSResolutionResult?,
-        fallbackSucceeded: Bool
+    private func executeResolverHealthEffects(
+        _ effects: [ResolverHealthGatewayEffect],
+        hooks: ResolverHealthEffectHooks
     ) {
-        guard generation == resolverSmokeProbeGeneration else {
-            return
-        }
+        var pendingResponses: [PendingDNSResponse] = []
+        var pendingResolverIdentifier: String?
 
-        let now = Date()
-        let wasDeviceDNSFallbackModeActive = deviceDNSFallbackModeActive
-        let previousDNSSmokeProbeSucceeded = health.lastDNSSmokeProbeSucceeded
-        health.lastDNSSmokeProbeAt = now
-        health.lastDNSSmokeProbeSucceeded = primarySucceeded || fallbackSucceeded
-
-        if primarySucceeded {
-            consecutiveQueryFallbackSuccessCount = 0
-            deviceDNSFallbackModeActive = false
-            // Primary smoke probe passed → the wedge is over even if no organic primary
-            // query has arrived yet, so end the coalesced fallback episode here (the
-            // recovers-via-smoke-probe case, incl. a sub-wedge blip that never set the
-            // wedge marker, so `logConnectivityRecoveredIfWedged` alone would miss it).
-            clearEncryptedFallbackLogThrottle()
-            health.deviceDNSFallbackModeActive = false
-            health.lastDeviceDNSFallbackActivatedAt = nil
-            health.dnsSmokeProbeSuccessCount += 1
-            health.consecutiveDNSSmokeProbeFailureCount = 0
-            // The primary is proven healthy, so the encrypted fallback is no longer covering
-            // anything — clear its serving timestamp so a stale (<30s) success from before this
-            // recovery can't cover a brand-new outage's probe. (The connectivity policy keys
-            // coverage on an absolute freshness window, so clearing on recovery is what scopes
-            // the signal to the CURRENT outage. Mirrors the forwarding-success clear below.)
-            health.lastEncryptedFallbackSuccessAt = nil
-            // An ACCEPTED primary smoke probe (known-good domain, acceptance-checked) is the
-            // authoritative proof the primary is healthy, so it is the only place that clears
-            // the LAV-87 rejected-response streak — the organic forwarding path must not
-            // (a REFUSED reply counts as `didResolve` there). See recordUpstreamResult.
-            health.consecutiveRejectedSmokeResponseCount = 0
-            health.rejectedSmokeResponseResolverIdentity = nil
-            // NRG-3a: an accepted primary probe is acceptance-checked evidence — but ONLY
-            // when its completion is not in lockstep with the periodic timer, or the skip
-            // would stretch the idle cadence to ~600s effective (the honesty-budget
-            // widening the founder rejected). Two such reasons: the routine tick itself
-            // (its success completes moments after its own tick, self-feeding every
-            // subsequent tick — Codex round 1) and the startTunnel probe (it runs
-            // immediately before startPeriodicResolverSmokeProbe arms the timer, so its
-            // evidence is fractionally younger than the interval at the FIRST tick and an
-            // idle session would go ~600s before its first routine wire probe — Codex
-            // round 5). Settle/wedge-recovery/config-change probes keep the timer's
-            // original phase, so their evidence making the following tick redundant is
-            // the intended saving.
-            if reason != "periodic-health-check", reason != "startTunnel" {
-                lastAcceptedPrimaryEvidenceAt = now
-            }
-            health.lastFailureReason = nil
-            health.lastResolverAddress = primaryResult.successfulResolverAddress
-            health.lastResolverTransport = primaryResult.transport
-            if primaryResult.transport == .dnsOverHTTPS, let negotiatedDoHProtocol = primaryResult.negotiatedDoHProtocol {
-                health.lastDoHHTTPVersion = negotiatedDoHProtocol
-            }
-            health.consecutiveUpstreamFailureCount = 0
-            // In-place recovery via the (wedge-recovery / settle) smoke probe — the
-            // common self-heal path that never reaches recordUpstreamResult. Record
-            // it before clearing the wedge state so the recovery isn't silent.
-            logConnectivityRecoveredIfWedged(transport: primaryResult.transport, verifiedBy: "smoke-probe", now: now)
-            // A confirmed primary recovery — credit a productive pre-launch self-reconnect
-            // (Track 4). Decoupled from the wedge marker above (which the restart's process
-            // kill wipes) so a cold-restart recapture is credited on the relaunched process.
-            creditProductiveSelfReconnectIfPending(now: now)
-            clearReconnectNeededActivitySuppression()
-            cancelFallbackRecoverySmokeProbe()
-            let pendingResponses = wasDeviceDNSFallbackModeActive
-                ? collectPendingResponsesAndResetResolverRuntime(
-                    identifier: currentResolverRuntimeConfiguration().cacheIdentifier,
-                    reason: "device-dns-fallback-recovered",
-                    force: true
-                )
-                : []
-            markHealthUpdated()
-            if wasDeviceDNSFallbackModeActive {
-                appendNetworkActivity(event: .deviceDNSFallbackRecovered, now: now)
-            } else if reason == "network-path-changed" || previousDNSSmokeProbeSucceeded == false {
-                appendNetworkActivity(
-                    event: .dnsSmokeProbeSucceeded(
-                        resolver: currentAppConfiguration().resolverPreset.displayName,
-                        transport: primaryResult.transport,
-                        dohHTTPVersion: primaryResult.negotiatedDoHProtocol
-                    ),
-                    now: now
-                )
-            }
-            scheduleProtectionNotificationIfNeeded(now: now)
-            writeServerFailures(for: pendingResponses, reason: "device-dns-fallback-recovered")
-            #if LAVA_QA_TOOLS
-            logQAConnectivityAssessmentIfNeeded(reason: "dns-smoke-probe-success", now: now)
-            #endif
-
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-success", details: [
-                "reason": reason,
-                "transport": primaryResult.transport.rawValue,
-                "resolver": primaryResult.successfulResolverAddress ?? "nil",
-                "dohHTTPVersion": primaryResult.negotiatedDoHProtocol ?? "nil"
-            ])
-            return
-        }
-
-        if fallbackSucceeded, let fallbackResult {
-            health.dnsSmokeProbeSuccessCount += 1
-            health.consecutiveDNSSmokeProbeFailureCount = 0
-            consecutiveQueryFallbackSuccessCount = DeviceDNSFallbackPolicy.nextConsecutiveFallbackEvidenceCount(
-                currentCount: consecutiveQueryFallbackSuccessCount,
-                primaryResolverWasAttempted: primaryResult.hasFallbackActivationEvidence
-            )
-            if DeviceDNSFallbackPolicy.shouldActivateFallbackMode(
-                consecutiveQueryFallbackSuccesses: consecutiveQueryFallbackSuccessCount
-            ) {
-                deviceDNSFallbackModeActive = true
-                health.deviceDNSFallbackModeActive = true
-                if !wasDeviceDNSFallbackModeActive {
-                    health.lastDeviceDNSFallbackActivatedAt = now
-                    health.deviceDNSFallbackActivationCount += 1
-                } else if health.lastDeviceDNSFallbackActivatedAt == nil {
-                    health.lastDeviceDNSFallbackActivatedAt = now
+        for effect in effects {
+            switch effect {
+            case .persistHealth(let urgency):
+                markResolverHealthProjectionUpdated()
+                if urgency == .immediate {
+                    persistHealthIfNeeded(force: true)
                 }
-            } else {
-                health.deviceDNSFallbackModeActive = false
-            }
-            health.lastFailureReason = nil
-            health.lastResolverAddress = fallbackResult.successfulResolverAddress
-            health.lastResolverTransport = .deviceDNS
-            health.consecutiveUpstreamFailureCount = 0
-            // Device-DNS fallback now resolving after a wedge counts as recovery
-            // (DNS flows again); record it before clearing the wedge state.
-            logConnectivityRecoveredIfWedged(transport: .deviceDNS, verifiedBy: "smoke-probe", now: now)
-            // Confirmed device-DNS recovery — credit a productive pre-launch self-reconnect (Track 4).
-            creditProductiveSelfReconnectIfPending(now: now)
-            clearReconnectNeededActivitySuppression()
-            let pendingResponses = deviceDNSFallbackModeActive
-                ? collectPendingResponsesAndResetResolverRuntime(
-                    identifier: currentResolverRuntimeConfiguration().cacheIdentifier,
-                    reason: "device-dns-fallback-activated",
-                    force: true
+
+            case .evaluateProtectionNotification(let occurredAt):
+                hooks.beforeProtectionNotification?()
+                scheduleProtectionNotificationIfNeeded(now: occurredAt)
+
+            case .evaluateQAConnectivityLog(let reason, let occurredAt):
+                #if LAVA_QA_TOOLS
+                logQAConnectivityAssessmentIfNeeded(reason: reason, now: occurredAt)
+                #endif
+
+            case .appendNetworkActivity(let event, let occurredAt):
+                appendNetworkActivity(event: event, now: occurredAt)
+
+            case .recordEncryptedFallbackCarry(let carry):
+                recordEncryptedFallbackCarry(carry)
+
+            case .endEncryptedFallbackLogEpisode(let end):
+                switch end {
+                case .episodeEnd:
+                    clearEncryptedFallbackLogThrottle()
+                case .contextReset:
+                    clearEncryptedFallbackLogThrottle(phase: "context-reset")
+                }
+
+            case .cancelFallbackRecoveryProbe:
+                cancelFallbackRecoverySmokeProbe()
+
+            case .cancelWedgeRecoveryProbe:
+                cancelResolverWedgeRecoveryProbe()
+
+            case .requestResolverRuntimeReset(let request):
+                hooks.beforeResolverRuntimeReset?()
+                switch request {
+                case .full(let reason, let force):
+                    let resolverIdentifier =
+                        currentResolverRuntimeConfiguration().cacheIdentifier
+                    pendingResponses = collectPendingResponsesAndResetResolverRuntime(
+                        identifier: resolverIdentifier,
+                        reason: reason,
+                        force: force
+                    )
+                    pendingResolverIdentifier = resolverIdentifier
+                }
+                hooks.afterResolverRuntimeReset?()
+
+            case .deliverPendingResolverFailures(let reason):
+                guard let pendingResolverIdentifier else {
+                    assertionFailure("Pending resolver failures had no preceding runtime reset")
+                    continue
+                }
+                hooks.beforePendingResolverFailures?(
+                    pendingResponses,
+                    reason,
+                    pendingResolverIdentifier
                 )
-                : []
-            markHealthUpdated()
-            if deviceDNSFallbackModeActive, !wasDeviceDNSFallbackModeActive {
-                appendNetworkActivity(event: .deviceDNSFallbackActivated(reason: reason), now: now)
+                writeServerFailures(for: pendingResponses, reason: reason)
+
+            case .clearDeviceDNSRecaptureRestartPending:
+                deviceDNSRecaptureRestartPending = false
+
+            case .signalConnectivityProjectionChanged:
+                signalAppIfConnectivityStateChanged()
+
+            case .recordIncident(let incident):
+                Self.recordIncident(
+                    incident.kind,
+                    reason: incident.reason,
+                    durationMs: incident.durationMilliseconds,
+                    verifiedBy: incident.verifiedBy,
+                    now: incident.occurredAt
+                )
+
+            case .deviceLog(let event):
+                appendResolverHealthDeviceLog(event)
+
+            case .reportConnectivityRecovery(let recovery):
+                reportResolverConnectivityRecovery(recovery)
+
+            case .creditProductiveSelfReconnect(let occurredAt):
+                creditProductiveSelfReconnectIfPending(now: occurredAt)
+
+            case .evaluateSelfReconnect(let occurredAt):
+                let assessment = ProtectionConnectivityPolicy.assessment(
+                    isConnected: true,
+                    health: health,
+                    now: occurredAt
+                )
+                selfReconnectIfPolicyAllows(assessment: assessment, now: occurredAt)
+
+            case .scheduleFallbackRecoveryProbe:
+                scheduleFallbackRecoverySmokeProbeIfNeeded()
+
+            case .scheduleWedgeRecoveryProbe:
+                scheduleResolverWedgeRecoveryProbeIfNeeded()
             }
-            scheduleFallbackRecoverySmokeProbeIfNeeded()
-            if deviceDNSFallbackModeActive {
-                scheduleProtectionNotificationIfNeeded(now: now)
-            }
-            persistHealthIfNeeded(force: true)
-            writeServerFailures(for: pendingResponses, reason: "device-dns-fallback-activated")
-            #if LAVA_QA_TOOLS
-            logQAConnectivityAssessmentIfNeeded(
-                reason: deviceDNSFallbackModeActive ? "device-dns-fallback-activated" : "device-dns-fallback-candidate",
-                now: now
+        }
+    }
+
+    private func recordEncryptedFallbackCarry(
+        _ carry: ResolverHealthGatewayEncryptedFallbackCarry
+    ) {
+        encryptedFallbackCarriedSinceLastLog += 1
+        let dueForFallbackLog = lastEncryptedFallbackLogAt.map {
+            carry.occurredAt.timeIntervalSince($0) >= encryptedFallbackLogThrottleInterval
+        } ?? true
+        if dueForFallbackLog {
+            LavaSecDeviceDebugLog.append(
+                component: "tunnel",
+                event: "dns-encrypted-fallback",
+                details: [
+                    "transport": carry.transport.rawValue,
+                    "resolver": carry.resolverAddress ?? "nil",
+                    "carriedSinceLastLog": "\(encryptedFallbackCarriedSinceLastLog)",
+                ]
             )
-            #endif
+            lastEncryptedFallbackLogAt = carry.occurredAt
+            encryptedFallbackCarriedSinceLastLog = 0
+        }
+    }
 
-            LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-device-fallback", details: [
-                "reason": reason,
-                "evidenceCount": "\(consecutiveQueryFallbackSuccessCount)",
-                "fallbackModeActive": "\(deviceDNSFallbackModeActive)",
-                "resolver": fallbackResult.successfulResolverAddress ?? "nil"
-            ])
-            return
-        }
+    private func appendResolverHealthDeviceLog(
+        _ event: ResolverHealthGatewayDeviceLogEvent
+    ) {
+        switch event {
+        case .smokeProbeSucceeded(
+            let reason,
+            let transport,
+            let resolverAddress,
+            let dohHTTPVersion,
+            _
+        ):
+            LavaSecDeviceDebugLog.append(
+                component: "tunnel",
+                event: "dns-smoke-probe-success",
+                details: [
+                    "reason": reason,
+                    "transport": transport.rawValue,
+                    "resolver": resolverAddress ?? "nil",
+                    "dohHTTPVersion": dohHTTPVersion ?? "nil",
+                ]
+            )
 
-        health.dnsSmokeProbeFailureCount += 1
-        health.consecutiveDNSSmokeProbeFailureCount += 1
-        if wasDeviceDNSFallbackModeActive {
-            deviceDNSFallbackModeActive = false
-            health.deviceDNSFallbackModeActive = false
-            health.lastDeviceDNSFallbackActivatedAt = nil
-            consecutiveQueryFallbackSuccessCount = 0
-            cancelFallbackRecoverySmokeProbe()
-        }
-        // A response that arrived but failed acceptance (rcode != 0, no answers, or
-        // a question mismatch) means the resolver is REACHABLE but unusable — e.g. a
-        // stale off-network resolver refusing queries, or a hijacked/blocked answer.
-        // Its last attempt's wire outcome is `.success`, so failureSummary would
-        // record the nonsensical "success" — which is NOT a restart-worthy reason,
-        // so the connectivity policy mis-read it as healthy and never engaged
-        // recovery (the 1941 "DNS smoke probe failed: success" wedge). Classify it
-        // as `rejected-response` (a restart-worthy reason) so recovery engages.
-        let primaryReason: String
-        if primaryResult.response != nil {
-            primaryReason = "rejected-response"
-        } else {
-            primaryReason = primaryResult.failureSummary ?? fallbackResult?.failureSummary ?? "dns-smoke-failed"
-        }
-        health.lastFailureReason = primaryReason
-        health.lastUpstreamFailureAt = now
-        health.consecutiveUpstreamFailureCount += 1
-        health.lastResolverAddress = primaryResult.successfulResolverAddress ?? primaryResult.attempts.last?.address
-        health.lastResolverTransport = primaryResult.transport
-        // Resolver-identity-scoped rejected-response streak (LAV-87): a reachable-but-
-        // rejected answer from the SAME resolver is strong evidence it is hijacking /
-        // stale. Kept out of the generic streak's reset paths (network-change recovery,
-        // settle/recapture, wake) so it survives the churn that keeps
-        // `consecutiveDNSSmokeProbeFailureCount` under the reconnect threshold on a
-        // roaming network; cleared only by an accepted primary smoke-probe success or a
-        // resolver change (NOT the organic forwarding path — a REFUSED counts as resolved there).
-        // Keyed on the PRIMARY identity, mirroring the clear site in
-        // collectPendingResponsesAndResetResolverRuntime: the full runtime cacheIdentifier also
-        // folds in `|fallback:device:<captured addresses>`, which churns on every handoff /
-        // capture-retry adoption while fallbackToDeviceDNS is enabled (the default) — counting
-        // under it re-scopes the streak to 1 on each flap, pinning the escalation below the
-        // reconnect threshold for a steadily-rejecting primary (the exact churn LAV-87 must survive).
-        // The primary identity is also taken MODE-INSENSITIVELY (COH-1): when device-DNS-fallback
-        // MODE is active, `primaryCacheIdentifier` folds in the *effective* transport (`.deviceDNS`
-        // + device addresses) instead of the configured encrypted endpoint, so a mode flip on a
-        // rejecting DoH primary would otherwise re-scope the streak — a second DNS-1 channel.
-        if primaryReason == "rejected-response" {
-            let rejectedResolverIdentity = currentResolverRuntimeConfiguration(ignoresDeviceDNSFallbackMode: true).primaryCacheIdentifier
-            if health.rejectedSmokeResponseResolverIdentity == rejectedResolverIdentity {
-                health.consecutiveRejectedSmokeResponseCount += 1
-            } else {
-                health.rejectedSmokeResponseResolverIdentity = rejectedResolverIdentity
-                health.consecutiveRejectedSmokeResponseCount = 1
-                health.rejectedSmokeResponseRescopeCount += 1
-            }
-            // Ledger record exactly at the policy's own escalation bar (== not >=, so a
-            // sustained hijack writes ONE record per episode, not one per probe).
-            if health.consecutiveRejectedSmokeResponseCount
-                == ProtectionConnectivityPolicy.sustainedRejectedSmokeResponseThreshold {
-                Self.recordIncident(.rejectedResponseStreak, reason: "rejected-response", now: now)
-            }
-        }
-        markHealthUpdated()
-        let failureReason = health.lastFailureReason ?? "dns-smoke-failed"
-        appendNetworkActivity(event: .dnsSmokeProbeFailed(reason: failureReason), now: now)
-        appendReconnectNeededIfPolicyRequiresReconnect(now: now)
-        // appendReconnectNeededIfPolicyRequiresReconnect only re-arms the wedge-
-        // recovery probe when the failure counters cross the reconnect threshold. An
-        // encrypted-fallback success resets consecutiveUpstreamFailureCount to 0, so a
-        // marker-only recovery probe whose own re-probe fails leaves the count at 1
-        // (< threshold) and would NOT re-arm — stalling the cadence until organic
-        // fallback traffic happens to reschedule it. While the wedge marker is still
-        // held the primary is still down, so keep the recovery loop running directly
-        // (idempotent: the schedule helper no-ops if a probe is already pending, and a
-        // genuine recovery clears the marker + cancels the probe before we get here).
-        // The encrypted-fallback-COVERED wedge holds no marker (round 11), so re-arm on the
-        // carrying-a-FAILED-PROBE signal too — otherwise the covered recapture loop would stall
-        // after its own failed re-probe until organic fallback traffic rescheduled it. Use
-        // isEncryptedFallbackCarryingWedge (= the gated covering predicate MINUS its rejected==0
-        // gate), NOT the gated isEncryptedFallbackCoveringWedge: a single rejected recapture probe
-        // flips the gated predicate false (rejected != 0) while the marker is still unstamped, so
-        // both gates died and the loop stalled until the 300s routine probe. The carrying predicate
-        // keeps the loop alive across the rejection (the streak climbs to the escalation threshold,
-        // or the primary recovers) while still REQUIRING a failed smoke-probe context — so a one-off
-        // fallback-carried query with no failed probe does not trip recovery. The down-wedge stays
-        // marker-only.
-        if currentDeviceResolverWedged() || ProtectionConnectivityPolicy.isEncryptedFallbackCarryingWedge(health: health, now: now) {
-            scheduleResolverWedgeRecoveryProbeIfNeeded()
-        }
-        scheduleProtectionNotificationIfNeeded(now: now)
-        #if LAVA_QA_TOOLS
-        logQAConnectivityAssessmentIfNeeded(reason: "dns-smoke-probe-failed", now: now)
-        #endif
+        case .smokeProbeDeviceFallback(
+            let reason,
+            let evidenceCount,
+            let fallbackModeActive,
+            let resolverAddress,
+            _
+        ):
+            LavaSecDeviceDebugLog.append(
+                component: "tunnel",
+                event: "dns-smoke-probe-device-fallback",
+                details: [
+                    "reason": reason,
+                    "evidenceCount": "\(evidenceCount)",
+                    "fallbackModeActive": "\(fallbackModeActive)",
+                    "resolver": resolverAddress ?? "nil",
+                ]
+            )
 
-        LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-smoke-probe-failed", details: [
-            "reason": reason,
-            "failure": health.lastFailureReason ?? "nil",
-            "consecutiveSmokeFailures": "\(health.consecutiveDNSSmokeProbeFailureCount)",
-            "consecutiveRejectedResponses": "\(health.consecutiveRejectedSmokeResponseCount)"
-        ])
+        case .smokeProbeFailed(
+            let reason,
+            let failure,
+            let consecutiveSmokeFailures,
+            let consecutiveRejectedResponses,
+            _
+        ):
+            LavaSecDeviceDebugLog.append(
+                component: "tunnel",
+                event: "dns-smoke-probe-failed",
+                details: [
+                    "reason": reason,
+                    "failure": failure,
+                    "consecutiveSmokeFailures": "\(consecutiveSmokeFailures)",
+                    "consecutiveRejectedResponses": "\(consecutiveRejectedResponses)",
+                ]
+            )
+        }
+    }
+
+    private func reportResolverConnectivityRecovery(
+        _ recovery: ResolverHealthGatewayRecovery
+    ) {
+        appendNetworkActivity(
+            event: .connectivityRecovered(
+                reason: "\(recovery.reason) via \(recovery.transport.rawValue)"
+            ),
+            now: recovery.recoveredAt,
+            frozenHealthContext: recovery.activityContext
+        )
+        LavaSecDeviceDebugLog.append(
+            component: "tunnel",
+            event: "dns-recovered",
+            details: [
+                "reason": recovery.reason,
+                "transport": recovery.transport.rawValue,
+                "verifiedBy": recovery.verifiedBy,
+                "durationMs": "\(recovery.durationMilliseconds)",
+                "consecutiveUpstreamFailureCount":
+                    "\(recovery.peakUpstreamFailureCount)",
+            ]
+        )
+        Self.recordIncident(
+            .wedgeRecovered,
+            reason: recovery.reason,
+            durationMs: recovery.durationMilliseconds,
+            verifiedBy: recovery.verifiedBy,
+            now: recovery.recoveredAt
+        )
+        lastSelfReconnectSuppressionSignature = nil
+        lastSelfReconnectSuppressionLogAt = nil
+        lastSelfReconnectPathSkipLogAt = nil
     }
 
     // MARK: - Health reset & network path monitoring
@@ -3743,40 +3901,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
 
             self.health = TunnelHealthSnapshot(networkKind: self.currentNetworkKind())
-            // Lifecycle reset owns the other half of the wedge-marker lifetime
-            // (the recovery path owns the rest), so a stale marker can't survive a
-            // fresh tunnel session and mis-date a later "recovery".
-            self.reconnectNeededSince = nil
-            self.reconnectNeededReason = nil
-            self.reconnectNeededPeakFailureCount = 0
+            // These delivery-only suppression markers are not reducer evidence.
+            // A reused provider instance must not carry them into the next session.
             self.lastSelfReconnectSuppressionSignature = nil
             self.lastSelfReconnectSuppressionLogAt = nil
             self.lastSelfReconnectPathSkipLogAt = nil
-            // The coalesced encrypted-fallback marker is episode-scoped too: a reused
-            // provider instance starts a fresh session, so a marker logged <interval ago in
-            // the previous session must not suppress (or mis-count) the new session's first
-            // carried query.
-            self.clearEncryptedFallbackLogThrottle(phase: "context-reset")
-            // A reused provider instance (manual stop/start without a process kill) starts a
-            // fresh lifecycle that cold-recaptures Device DNS, so a recapture owed by the
-            // previous session is moot. Clear it here as well as on recovery, or a later
-            // unrelated wedge would be evaluated with the recapture ceiling (Codex P2).
-            self.deviceDNSRecaptureRestartPending = false
-            // Episode-scoped carried-query failure streak (see
-            // resetFailureAndFallbackStateForRecovery) must not survive a fresh tunnel session.
-            self.consecutiveCarriedQueryFailureCount = 0
             // A fresh tunnel session re-captures Device DNS at cold start, so any
             // pending masked-handoff capture retry from the previous session is moot.
             self.cancelDeviceDNSCaptureRetry()
-            // Likewise drop any wedge-recovery probe (and its fast-ramp attempt counter) owed by
-            // the previous session, so a reused provider instance starts the next wedge fresh
-            // rather than inheriting a stranded, backed-off cadence.
-            self.cancelResolverWedgeRecoveryProbe()
-            self.persistHealthIfNeeded(force: true)
+            self.applyResolverHealthEvent(.lifecycleReset(occurredAt: Date()))
         }
     }
 
-    private func startPathMonitor() {
+    private func startPathMonitor(lifecycleGeneration: UInt64) {
         // A cancelled NWPathMonitor never delivers again, and cleanup cancels the
         // monitor on every stop AND every failed start. Reusing the same object
         // across a same-instance restart (manual stop/start without a process
@@ -3807,7 +3944,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         monitor.pathUpdateHandler = { [weak self] path in
-            guard let self else {
+            guard let self,
+                  self.isCurrentTunnelLifecycle(lifecycleGeneration) else {
                 return
             }
 
@@ -3823,44 +3961,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // into a path update that's been delivered but not yet applied.
             self.latestMonitoredPathIsSatisfied = update.isSatisfied
             self.dnsStateQueue.async { [weak self] in
-                self?.handleNetworkPathUpdate(update)
+                guard let self,
+                      self.isCurrentTunnelLifecycle(lifecycleGeneration) else {
+                    return
+                }
+                self.handleNetworkPathUpdate(update)
             }
         }
 
         monitor.start(queue: dnsStateQueue)
-    }
-
-    // Clears recent-failure + device-DNS-fallback state so the next resolver
-    // runtime computation and forced reset target the configured DoH/DoT/DoQ
-    // resolver, not the fallback (the per-query and smoke-probe paths re-engage
-    // fallback if the primary still fails). Shared by the network-change and wake
-    // recovery paths so they pick the same runtime. Runs on dnsStateQueue.
-    private func resetFailureAndFallbackStateForRecovery() {
-        health.lastFailureReason = nil
-        health.consecutiveUpstreamFailureCount = 0
-        // A fresh network is a fresh primary-health context: drop the smoke-failure
-        // streak too, or failures from the previous path would carry over and the first
-        // failed settle probe on the new network could cross the reconnect threshold
-        // before the new network has actually failed three times.
-        health.consecutiveDNSSmokeProbeFailureCount = 0
-        deviceDNSFallbackModeActive = false
-        consecutiveQueryFallbackSuccessCount = 0
-        // The carried-query failure streak is episode-scoped just like the fallback-success
-        // evidence above and the smoke streak: a fresh context starts a fresh fallback episode,
-        // so drop it too. Otherwise a 1–2 count left from the previous episode would carry over
-        // and the first carried failure in the next one could cross the coverage-clear threshold
-        // and tear down a freshly-serving encrypted fallback (the single-transient over-escalation
-        // the streak gate exists to prevent).
-        consecutiveCarriedQueryFailureCount = 0
-        // The coalesced encrypted-fallback log marker is episode-scoped exactly like the
-        // streaks above: a fresh network/resolver context is a fresh fallback episode, so
-        // clear it too, or a marker logged <interval ago on the previous context would
-        // suppress the first carried query of the new one.
-        clearEncryptedFallbackLogThrottle(phase: "context-reset")
-        health.deviceDNSFallbackModeActive = false
-        health.lastDeviceDNSFallbackActivatedAt = nil
-        clearReconnectNeededActivitySuppression()
-        invalidateInFlightSmokeProbes()
     }
 
     /// Clear the coalesced encrypted-fallback log throttle so the NEXT wedge episode logs
@@ -3876,7 +3985,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // when the throttle is already clear (the common no-op reset).
         //
         // `phase` labels the flush honestly: "episode-end" when the primary genuinely
-        // recovered (organic primary query / smoke-probe pass / logConnectivityRecoveredIfWedged),
+        // recovered (organic primary query or ordered smoke-recovery effect),
         // "context-reset" when the episode was instead interrupted by a fresh network/resolver
         // context or a reused-instance session start — the count is still real, but the episode
         // did not "end" via recovery.
@@ -3890,15 +3999,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         encryptedFallbackCarriedSinceLastLog = 0
     }
 
-    // Cancels a scheduled fallback-recovery probe and bumps the smoke-probe
-    // generation so a probe already in flight can't apply its result after the
-    // runtime moved on (the generation guard in completeResolverSmokeProbeResult
-    // then discards it). Independent of the fallback decision: wake() invalidates
-    // stale probes this way without clearing fallback, while a network change also
-    // clears fallback via resetFailureAndFallbackStateForRecovery().
+    // Cancels a scheduled fallback-recovery probe and retires the actor-owned
+    // smoke token so a probe already in flight can't apply after the runtime moved
+    // on. Independent of the fallback decision: wake() invalidates stale probes
+    // without clearing fallback, while a network-path transition clears fallback
+    // before invoking this fence.
     private func invalidateInFlightSmokeProbes() {
         cancelFallbackRecoverySmokeProbe()
-        resolverSmokeProbeGeneration += 1
+        invalidateResolverSmokeProbeToken()
+    }
+
+    private func invalidateResolverSmokeProbeToken() {
+        dispatchPrecondition(condition: .onQueue(dnsStateQueue))
+        resolverHealthCoordinator.assumeIsolated { $0.invalidateInFlightSmokeProbe() }
     }
 
     private func handleNetworkPathUpdate(_ update: NetworkPathUpdate) {
@@ -3906,63 +4019,54 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let previousIsSatisfied = lastObservedPathIsSatisfied
         let isInitialPathUpdate = previousKind == nil && previousIsSatisfied == nil
         let didMeaningfullyChange = previousKind != update.kind || previousIsSatisfied != update.isSatisfied
+        let now = Date()
 
         lastObservedPathKind = update.kind
         lastObservedPathIsSatisfied = update.isSatisfied
         networkKind = update.kind
         health.networkKind = update.kind
-        health.networkPathIsSatisfied = update.isSatisfied
-
+        applyResolverHealthEvent(
+            .networkPathObserved(
+                previousKind: previousKind,
+                previousIsSatisfied: previousIsSatisfied,
+                kind: update.kind,
+                isSatisfied: update.isSatisfied,
+                observedAt: now
+            ),
+            hooks: ResolverHealthEffectHooks(
+                beforeResolverRuntimeReset: {
+                    self.invalidateInFlightSmokeProbes()
+                    self.refreshDeviceDNSResolverAddressesOnDNSQueue(
+                        reason: "network-path-changed"
+                    )
+                },
+                afterResolverRuntimeReset: {
+                    self.resolverBootstrapService.invalidateAll()
+                },
+                beforeProtectionNotification: {
+                    // A down path cannot settle a proactive resolver probe.
+                    self.resolverProbeCoalescer.cancel()
+                },
+                beforePendingResolverFailures: { pendingResponses, _, resolverIdentifier in
+                    LavaSecDeviceDebugLog.append(
+                        component: "tunnel",
+                        event: "network-path-changed",
+                        details: [
+                            "previousKind": previousKind?.rawValue ?? "nil",
+                            "kind": update.kind.rawValue,
+                            "previousSatisfied": previousIsSatisfied.map { "\($0)" } ?? "nil",
+                            "isSatisfied": "\(update.isSatisfied)",
+                            "status": update.statusDescription,
+                            "pendingResponses": "\(pendingResponses.count)",
+                            "resolverIdentifier": resolverIdentifier
+                        ]
+                    )
+                }
+            )
+        )
         guard !isInitialPathUpdate, didMeaningfullyChange else {
-            markHealthUpdated()
-            if isInitialPathUpdate {
-                persistHealthIfNeeded(force: true)
-            }
             return
         }
-
-        let now = Date()
-        health.lastNetworkChangeAt = now
-        health.networkChangeCount += 1
-        resetFailureAndFallbackStateForRecovery()
-        refreshDeviceDNSResolverAddressesOnDNSQueue(reason: "network-path-changed")
-
-        let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
-        let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
-            identifier: resolverIdentifier,
-            reason: "network-path-changed",
-            force: true
-        )
-        resolverBootstrapService.invalidateAll()
-        // Bootstrap pre-warm is deferred to the coalesced settle probe below so a
-        // flap burst re-resolves once, not per flap (plan item 430).
-        markHealthUpdated()
-        appendNetworkActivity(
-            event: .networkChanged(from: previousKind, to: update.kind, isSatisfied: update.isSatisfied),
-            now: now
-        )
-        #if LAVA_QA_TOOLS
-        logQAConnectivityAssessmentIfNeeded(reason: "network-path-changed", now: now)
-        #endif
-        persistHealthIfNeeded(force: true)
-        if !update.isSatisfied {
-            // Path is down: drop any pending settle probe so we don't re-handshake
-            // into a dead network when the timer fires.
-            resolverProbeCoalescer.cancel()
-            scheduleProtectionNotificationIfNeeded(now: now)
-        }
-
-        LavaSecDeviceDebugLog.append(component: "tunnel", event: "network-path-changed", details: [
-            "previousKind": previousKind?.rawValue ?? "nil",
-            "kind": update.kind.rawValue,
-            "previousSatisfied": previousIsSatisfied.map { "\($0)" } ?? "nil",
-            "isSatisfied": "\(update.isSatisfied)",
-            "status": update.statusDescription,
-            "pendingResponses": "\(pendingResponses.count)",
-            "resolverIdentifier": resolverIdentifier
-        ])
-
-        writeServerFailures(for: pendingResponses, reason: "network-path-changed")
 
         if update.isSatisfied {
             reapplyTunnelNetworkSettings(reason: "network-path-changed", enforceThrottle: true)
@@ -4035,11 +4139,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self.health.lastNetworkSettingsReapplyFailureAt = now
             self.health.lastNetworkSettingsReapplyFailureReason = failureReason
             self.health.networkSettingsReapplyFailureCount += 1
-            self.health.lastFailureReason = failureReason
-            self.markHealthUpdated()
-            self.persistHealthIfNeeded(force: true)
-            self.appendNetworkActivity(event: .networkSettingsReapplyFailed(reason: failureReason), now: now)
-            self.scheduleProtectionNotificationIfNeeded(now: now)
+            self.applyResolverHealthEvent(
+                .networkSettingsReapplyFailed(
+                    reason: failureReason,
+                    occurredAt: now
+                )
+            )
         }
     }
 
@@ -4095,8 +4200,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // self-reconnect that kills + relaunches the process) does NOT serve a block-all
             // FailClosedRuntimeSnapshot window while the async load decodes — the transient
             // false-positives behind LAV-92/93. Wrap + set the identity exactly like the async
-            // commit so the immediately-following loadSnapshotInBackground hits the no-op reload
-            // gate and SKIPS the redundant multi-MB decode (and its 2x-resident peak).
+            // commit. For a STRICT resume the immediately-following loadSnapshotInBackground
+            // hits the no-op reload gate and SKIPS the redundant multi-MB decode (and its
+            // 2x-resident peak); for a LAST-KNOWN-GOOD resume (UR-48 Phase 2a) the stale-hash
+            // identity can never satisfy that gate, so the fresh compile still runs and
+            // replaces the stale rules within seconds — LKG here only covers the window.
             bootstrapSnapshot = ResolverAdjustedRuntimeSnapshot(
                 base: resumed.snapshot,
                 resolver: configuration.resolverPreset
@@ -4122,11 +4230,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false
             shouldBeginTransientBootstrapDNSWait = launchFollowsRecentSelfReconnect
-            // Deliberately NOT ledgered at ENTRY (OBS-C2): this window is transient by design —
+            // Deliberately NOT ledgered at ENTRY (INV-OBS-1): this window is transient by design —
             // the async loadSnapshotInBackground commits a real snapshot within ~seconds, and the
             // marker stays false below. It is taken on EVERY start for the over-sync-cap /
             // stale-artifact cohort, so an unconditional record here would flood the 50-record
-            // ring with routine startups — the exact OBS-1 misleading-true failure the ledger
+            // ring with routine startups — the exact INV-OBS-1 misleading-true failure the ledger
             // exists to prevent. Coverage instead splits on user visibility (Codex follow-up):
             // a window that actually SERVES a fail-closed query records once from the serve
             // path (recordDiagnostic — durable past the next resetHealth), a quiet window
@@ -4162,6 +4270,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             diagnostics = DiagnosticsPersistence.load(from: diagnosticsURL)
         }
 
+        // Open the Domain History depth store (best-effort) and, on first run, seed it from the
+        // JSON events buffer so an upgrading install isn't briefly blank until fresh queries
+        // accrue. Sole-writer opens read-write; the app opens the same file read-only.
+        if let dnsEventLogURL {
+            dnsEventLog = try? DNSEventLog(url: dnsEventLogURL)
+            try? dnsEventLog?.seedIfEmpty(from: diagnostics.recentEvents)
+        }
+
         applyDiagnosticsControlIfNeeded(force: true)
         // A prune performed during load (resetForCurrentDayIfNeeded once the fine-grained
         // retention window has elapsed) sets the store's pending-prune flag but not the
@@ -4194,7 +4310,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // stay a provider concern: the query-shape guards, the SERVFAIL writes
     // (writeServerFailures), the replay THROUGH the filter, the device-log events
     // (names/keys unchanged), the INV-QUEUE-1 dual-entry hops, and
-    // tunnelLifecycleGeneration ownership.
+    // tunnelLifecycleGeneration ownership. Since actors slice 3 the machine is a
+    // dispatch-backed actor whose executor IS dnsStateQueue: the dual-entry hops
+    // below land on that executor, and each confined region reaches the machine
+    // through synchronous assumeIsolated (which traps on the wrong queue where the
+    // old dispatchPrecondition merely asserted in debug). Placement rule per
+    // region: only the machine's decision runs inside isolation — the log appends
+    // and SERVFAIL writes strictly follow it, nothing interleaves with wait state.
 
     private func enqueueTransientBootstrapDNSRequestIfNeeded(
         request: IPv4UDPDNSPacket,
@@ -4220,7 +4342,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 maximumAnswerTTL: nil,
                 temporaryPauseNormalizedDomain: nil
             )
-            switch transientBootstrapDNSWait.enqueue(pending, generation: tunnelLifecycleGeneration) {
+            // On dnsStateQueue (the sync above), which IS the wait actor's executor —
+            // synchronous assumeIsolated, zero hops (INV-QUEUE-1). Only the admission
+            // decision runs inside isolation; the per-case log appends and the SERVFAIL
+            // bookkeeping strictly follow the decision.
+            let decision = transientBootstrapDNSWait.assumeIsolated { wait in
+                wait.enqueue(pending, generation: tunnelLifecycleGeneration)
+            }
+            switch decision {
             case .rejectExpiredGeneration:
                 serverFailure = pending
                 serverFailureReason = "transient-bootstrap-dns-wait-timeout"
@@ -4258,7 +4387,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func drainTransientBootstrapDNSWait(reason: String) {
         let drain = { [self] () -> (pendingResponses: [PendingDNSResponse], replayGeneration: UInt64?) in
-            switch transientBootstrapDNSWait.drain(currentGeneration: tunnelLifecycleGeneration) {
+            // On dnsStateQueue via the dual-entry hop below, which IS the wait actor's
+            // executor — synchronous assumeIsolated, zero hops (INV-QUEUE-1). Only the
+            // drain decision runs inside isolation; the log appends and the stale-
+            // lifecycle SERVFAIL write strictly follow the returned queue.
+            let decision = transientBootstrapDNSWait.assumeIsolated { wait in
+                wait.drain(currentGeneration: tunnelLifecycleGeneration)
+            }
+            switch decision {
             case .idle:
                 return ([], nil)
 
@@ -4306,12 +4442,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // Only the TIMEOUT exit stamps the expired-generation marker (same-
             // lifecycle latecomers keep receiving SERVFAIL); a snapshot-unavailable
             // fail leaves no marker, so latecomers take the normal immediate
-            // fail-closed answer. pinned: TransientBootstrapDNSWaitTests
+            // fail-closed answer.
+            // pinned: TransientBootstrapDNSWaitTests.testSnapshotUnavailableFailDrainsWithoutMarkingTheGenerationExpired
             let isTimeout = reason == "transient-bootstrap-dns-wait-timeout"
-            let pendingResponses = transientBootstrapDNSWait.fail(
-                expectedGeneration: expectedGeneration,
-                marksGenerationExpired: isTimeout
-            )
+            // On dnsStateQueue via the dual-entry hop below (the timeout handler
+            // arrives already confined — the wait's scheduleAfter delivers it there),
+            // which IS the wait actor's executor — synchronous assumeIsolated, zero
+            // hops (INV-QUEUE-1). The log appends strictly follow the returned queue.
+            let pendingResponses = transientBootstrapDNSWait.assumeIsolated { wait in
+                wait.fail(
+                    expectedGeneration: expectedGeneration,
+                    marksGenerationExpired: isTimeout
+                )
+            }
             if !pendingResponses.isEmpty {
                 if isTimeout {
                     LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-timeout", details: [
@@ -4383,11 +4526,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
 
         let generation = tunnelLifecycleGeneration
-        let replacedPendingResponses = transientBootstrapDNSWait.beginWait(generation: generation) { [weak self] expiredGeneration in
-            self?.failTransientBootstrapDNSWait(
-                reason: "transient-bootstrap-dns-wait-timeout",
-                expectedGeneration: expiredGeneration
-            )
+        // Already on dnsStateQueue (the specific-key guard above), which IS the wait
+        // actor's executor — synchronous assumeIsolated, zero hops (INV-QUEUE-1).
+        // Only the arm runs inside isolation; the replaced queue's SERVFAIL write and
+        // the begin log strictly follow it. The @Sendable timeout handler re-enters
+        // through failTransientBootstrapDNSWait's own dual entry when the wait's
+        // scheduleAfter delivers it on this same queue.
+        let replacedPendingResponses = transientBootstrapDNSWait.assumeIsolated { wait in
+            wait.beginWait(generation: generation) { [weak self] expiredGeneration in
+                self?.failTransientBootstrapDNSWait(
+                    reason: "transient-bootstrap-dns-wait-timeout",
+                    expectedGeneration: expiredGeneration
+                )
+            }
         }
         writeServerFailures(
             for: replacedPendingResponses,
@@ -4402,7 +4553,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func cancelTransientBootstrapDNSWait(reason: String) {
         let cancel = { [self] () -> [PendingDNSResponse] in
-            let pendingResponses = transientBootstrapDNSWait.cancelWait()
+            // On dnsStateQueue via the dual-entry hop below, which IS the wait actor's
+            // executor — synchronous assumeIsolated, zero hops (INV-QUEUE-1). The
+            // cancel log and the SERVFAIL write strictly follow the returned queue.
+            let pendingResponses = transientBootstrapDNSWait.assumeIsolated { wait in
+                wait.cancelWait()
+            }
             if !pendingResponses.isEmpty {
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "transient-bootstrap-dns-wait-cancel", details: [
                     "generation": "\(tunnelLifecycleGeneration)",
@@ -4430,6 +4586,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         decision: FilterDecision,
         failClosedReason: String? = nil
     ) {
+        // Stamp the event at the DECISION moment, not when this queued block later runs. A clear
+        // can advance the SQLite clear floor in between, so a queued pre-clear decision stamped
+        // with a post-clear `Date()` would sit at `ts >= floor` and survive the clear/prune in
+        // the depth store even though the JSON buffer is wiped — reappearing in Domain History
+        // (PR #327 review). Using the decision time keeps the depth store on the same side of the
+        // floor as the buffer.
+        let decisionTime = Date()
         dnsStateQueue.async { [weak self] in
             guard let self else {
                 return
@@ -4460,7 +4623,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 self.markHealthUpdated()
                 if isFirstTraceOfWindowClass {
                     self.persistHealthIfNeeded(force: true)
-                    // OBS-C2 refinement (Codex): the transient bootstrap window is NOT
+                    // INV-OBS-1 refinement (Codex): the transient bootstrap window is NOT
                     // ledgered at entry — quiet routine starts must stay silent — but a
                     // window that actually SERVED a query is a user-visible outage whose
                     // only other trace (the health counters above) is session-scoped:
@@ -4487,6 +4650,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 keepFilteringCounts: configuration.keepFilteringCounts,
                 keepDomainHistory: configuration.keepDomainDiagnostics
             )
+            // Mirror the JSON events buffer's population into the SQLite depth store: same gate
+            // (`keepDomainDiagnostics`) and same exclusion of fail-closed blocks (which are not
+            // curated matches and aren't shown in Domain History). Paused-allows are included,
+            // exactly as they are in the events buffer. Fire-and-forget so `dnsStateQueue` never
+            // blocks on sqlite, best-effort so a log failure can't affect filtering (INV-DNS-1).
+            if configuration.keepDomainDiagnostics, decision.reason != .protectionUnavailable {
+                self.dnsEventLog?.appendBestEffort(domain: domain, decision: decision, timestamp: decisionTime)
+            }
             // Suppressed fail-closed queries leave the store unchanged (record drops them from
             // history + counts), so don't re-dirty/re-persist the same diagnostics file ~every
             // 30s during a fail-closed outage. Still persist when the day rolled over or expired
@@ -4572,338 +4743,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func recordUpstreamResult(_ result: DNSResolutionResult) {
         updateResolverBackoff(from: result.attempts)
         let now = Date()
-        let wasDeviceDNSFallbackModeActive = deviceDNSFallbackModeActive
-        var activatedDeviceDNSFallback = false
-        var recoveredDeviceDNSFallback = false
-        let didResolve = result.response != nil
-
         health.networkKind = currentNetworkKind()
-        health.lastResolverAddress = result.successfulResolverAddress ?? result.attempts.last?.address
-        health.lastResolverTransport = result.transport
-        health.lastUpstreamDurationMilliseconds = result.durationMilliseconds
-
-        if !didResolve {
-            consecutiveQueryFallbackSuccessCount = 0
-            health.consecutiveSlowUpstreamResponseCount = 0
-            health.upstreamFailureCount += 1
-            health.consecutiveUpstreamFailureCount += 1
-            health.lastFailureReason = result.failureSummary
-            health.lastUpstreamFailureAt = now
-            // A real client query failed outright — primary AND every fallback leg
-            // (incl. the encrypted safety net) failed. Once these are SUSTAINED the
-            // encrypted fallback is no longer carrying DNS, so drop its serving
-            // timestamp: a stale-but-still-<30s success must not keep the policy at
-            // `.usingEncryptedFallback`/`.turnOff` (suppressing the self-reconnect)
-            // after DoH/DoT has died. Gated on a streak — NOT the first failure —
-            // because in the covered state the primary is wedged, so the policy is
-            // re-assessed in THIS call (appendReconnectNeededIfPolicyRequiresReconnect)
-            // with a durable smoke-failure count already at the reconnect threshold;
-            // clearing on a lone DoH transient would synchronously fire a full
-            // self-reconnect — the LAV-80-class restart this path exists to prevent.
-            // The policy can't key off `lastUpstreamFailureAt` for this (a covered
-            // primary smoke probe bumps that same field), so the streak is tracked here
-            // on the forwarding path only; the next carried success resets it (below).
-            consecutiveCarriedQueryFailureCount += 1
-            if consecutiveCarriedQueryFailureCount >= encryptedFallbackCoverageClearFailureThreshold {
-                health.lastEncryptedFallbackSuccessAt = nil
-            }
-            // NRG-3a: an outright forwarding failure revokes probe-skip evidence — even
-            // if a fallback-carried success later resets the failure streak, pre-failure
-            // evidence must not let the routine tick skip the probe that re-proves the
-            // PRIMARY.
-            lastAcceptedPrimaryEvidenceAt = nil
-        } else {
-            health.upstreamSuccessCount += 1
-            health.lastFailureReason = nil
-            health.lastUpstreamSuccessAt = now
-            health.consecutiveUpstreamFailureCount = 0
-            // A carried success means the forwarding path resolves again — reset the
-            // carried-failure streak so a fresh outage must re-accumulate from zero
-            // before it can tear down encrypted-fallback coverage.
-            consecutiveCarriedQueryFailureCount = 0
-            if result.usedEncryptedFallback {
-                // NRG-3a: a fallback-carried query means the PRIMARY failed to serve it —
-                // revoke any pre-failure probe-skip evidence (Codex round 3: coverage can
-                // hold the wedge marker and every streak at zero, so nothing else in the
-                // skip gate would notice), so the next routine tick probes the primary.
-                lastAcceptedPrimaryEvidenceAt = nil
-                // The encrypted safety net carried this query — the *primary* device
-                // resolver is still wedged. Recording it as a primary recovery would
-                // clear `reconnectNeededSince` (the wedge marker `currentDeviceResolverWedged`
-                // reads), so the next REFUSED from the still-stale resolver would be
-                // treated as authoritative and bypass the fallback — a flap. Keep the
-                // lighter recovery probe armed; only a genuine primary success or the
-                // primary-only smoke probe clears the wedge.
-                //
-                // Record that the encrypted fallback is actively serving DNS (a separate
-                // signal from `lastPrimaryUpstreamSuccessAt`, which stays untouched so the
-                // honesty floor still surfaces the wedged primary). The connectivity policy
-                // reads this so a transition-induced primary staleness that the fallback is
-                // already covering does not escalate to a user-visible self-reconnect.
-                //
-                // NB: we deliberately do NOT stamp `reconnectNeededSince` for the covered
-                // state. The marker is overloaded — besides arming the in-place recovery
-                // probe it also feeds `deviceResolverWedged` into `DNSResolverRuntimePlan`,
-                // flipping `treatsResolverRejectionAsFallbackTrigger` (and surviving a path
-                // change), which would bypass authoritative SERVFAIL/REFUSED on the wedged
-                // and on a freshly-handed-off network. Coverage already works via the
-                // per-query fallback (this branch) + the policy's `.usingEncryptedFallback`
-                // suppression; the primary re-captures via the existing settle/periodic smoke
-                // probes. Faster in-place recovery for the covered state is a separate
-                // follow-up that must not reuse this marker.
-                health.lastEncryptedFallbackSuccessAt = now
-                scheduleResolverWedgeRecoveryProbeIfNeeded()
-            } else {
-                // The silent recovery banner-clear keys off `lastPrimaryUpstreamSuccessAt`,
-                // so record it ONLY for a genuine answer from the *configured primary*
-                // resolver — never one a fallback carried while the primary is still
-                // down. Two non-encrypted fallback shapes must be excluded here:
-                //   * Per-query Device-DNS fallback: `withDeviceDNSFallback` keeps
-                //     `usedEncryptedFallback` false (so we land in this branch) but sets
-                //     `deviceDNSFallbackSucceeded` — the configured primary failed and the
-                //     device resolver answered.
-                //   * Device-DNS fallback *mode*: for a non-device configured resolver,
-                //     `DNSResolverRuntimePlan.make` makes the effective transport
-                //     `.deviceDNS`, so the query resolves via device DNS without setting
-                //     `deviceDNSFallbackSucceeded`. That is still fallback traffic, not the
-                //     configured primary.
-                // A Device-DNS *primary* answering directly is neither (fallback mode can't
-                // be active for a device primary), so it still counts. Treating any of the
-                // fallback shapes as recovery would silently clear the reconnect banner
-                // while DNS still depends on the fallback.
-                let resolvedThroughFallbackMode = result.transport == .deviceDNS && wasDeviceDNSFallbackModeActive
-                if !result.deviceDNSFallbackSucceeded, !resolvedThroughFallbackMode {
-                    // A LEGITIMATE primary answer — NOERROR-with-answers OR an authoritative
-                    // negative (NXDOMAIN / NODATA) — proves the configured primary is alive and
-                    // serving, so it credits primary recovery. A SERVFAIL/REFUSED or malformed-RR
-                    // NOERROR reply does NOT: `completeForward` synthesizes a SERVFAIL for the
-                    // client, so crediting it here would let a resolver returning failures between
-                    // smoke probes suppress the failed-probe / rejected-response escalation —
-                    // `hasUncoveredFailedSmokeProbe` reads `lastPrimaryUpstreamSuccessAt`, and the
-                    // reconnect threshold reads `consecutiveDNSSmokeProbeFailureCount` — while
-                    // clients keep receiving SERVFAILs (Codex P1). `indicatesServedAnswer` is the
-                    // exact `completeForward` bar — not a SERVFAIL/REFUSED rcode AND all RR
-                    // sections well-formed — so legitimate NXDOMAIN/NODATA still count as healthy
-                    // (no false-reconnect regression) while a SERVFAIL/REFUSED or a malformed
-                    // reply, INCLUDING a malformed negative whose authority/additional section is
-                    // truncated, does not. `didResolve` guarantees `result.response != nil` here.
-                    let primaryServedLegitimateAnswer =
-                        DNSResolverSmokeProbe.indicatesServedAnswer(result.response)
-                    if primaryServedLegitimateAnswer {
-                        health.lastPrimaryUpstreamSuccessAt = now
-                    }
-                    // NRG-3a: only an answer passing the probe's OWN acceptance check
-                    // (NOERROR + answers with WELL-FORMED RRs; the transport already
-                    // verified the query identity) counts as probe-equivalent evidence — STAMP.
-                    // `didResolve` alone must not — a hijacking resolver's REFUSED/SERVFAIL
-                    // reply reaches this branch too (see the LAV-87 NB below). And any reply the
-                    // client sees as a SERVFAIL — a SERVFAIL/REFUSED rcode OR a malformed reply
-                    // (answer OR authority/additional truncated, which `completeForward` downgrades)
-                    // — REVOKES existing evidence (Codex round 2/final): the resolver just proved it
-                    // is misbehaving NOW, so pre-failure evidence must not let the next routine tick
-                    // skip the very probe that advances the LAV-87 escalation. `indicatesServedAnswer`
-                    // is the same `completeForward` bar as the recovery gate above, so a legitimate
-                    // well-formed NODATA/NXDOMAIN neither stamps nor revokes.
-                    if DNSResolverSmokeProbe.indicatesAcceptedAnswer(result.response) {
-                        lastAcceptedPrimaryEvidenceAt = now
-                    } else if !primaryServedLegitimateAnswer {
-                        // `primaryServedLegitimateAnswer` (bound above) is
-                        // `indicatesServedAnswer(result.response)` — reuse it instead of
-                        // recomputing the same full-RR walk on the same immutable response.
-                        lastAcceptedPrimaryEvidenceAt = nil
-                    }
-                    // A genuine primary answer also proves the primary's health, so it
-                    // clears the consecutive smoke-failure streak — otherwise isolated
-                    // probe failures separated by healthy primary traffic would
-                    // accumulate to the reconnect threshold and falsely prompt a
-                    // reconnect. Gated by the same primary-only condition so a
-                    // fallback-carried success never resets it — AND by
-                    // `primaryServedLegitimateAnswer` so a SERVFAIL/REFUSED/malformed reply
-                    // (which is NOT the primary serving) can't reset the escalation streak.
-                    if primaryServedLegitimateAnswer {
-                        health.consecutiveDNSSmokeProbeFailureCount = 0
-                    }
-                    // The encrypted fallback did NOT carry THIS query (we're in the
-                    // !usedEncryptedFallback branch), so it is not covering — clear its serving
-                    // timestamp on ANY non-fallback primary reply, INCLUDING a failing one
-                    // (Codex P1). `isUsingEncryptedFallback` has no freshness ceiling, so a stale
-                    // fallback-success from an earlier carried query would otherwise make a later
-                    // timeout/receive-failed smoke probe look covered and suppress the reconnect.
-                    // Deliberately NOT gated on `primaryServedLegitimateAnswer` (unlike the
-                    // primary-success stamp / streak clear above): those credit primary RECOVERY,
-                    // which a SERVFAIL is not; this only records that the fallback isn't the
-                    // active carrier, which holds regardless of the primary's rcode.
-                    health.lastEncryptedFallbackSuccessAt = nil
-                    // NB (LAV-87): the rejected-response streak is deliberately NOT cleared
-                    // here. `didResolve` is `response != nil`, so a hijacking resolver's
-                    // REFUSED/SERVFAIL reply to an ordinary query reaches this "primary
-                    // success" branch too (pre-wedge, ResolverOrchestrator passes rejections
-                    // through). Clearing it would let organic rejected replies reset the
-                    // streak between smoke probes so it never reaches the threshold. Only an
-                    // accepted primary *smoke* probe (known-good domain) or a resolver change
-                    // clears it; a genuine organic recovery is still covered by the
-                    // `lastPrimaryUpstreamSuccessAt` guard in `hasUncoveredFailedSmokeProbe`.
-                }
-                // Record recovery before clearing the wedge state (organic-query path).
-                logConnectivityRecoveredIfWedged(transport: result.transport, verifiedBy: "forwarding", now: now)
-                clearReconnectNeededActivitySuppression()
-            }
-            if let durationMilliseconds = result.durationMilliseconds,
-               durationMilliseconds >= Self.slowUpstreamResponseThresholdMilliseconds {
-                health.slowUpstreamResponseCount += 1
-                health.consecutiveSlowUpstreamResponseCount += 1
-                health.lastSlowUpstreamResponseAt = now
-            } else {
-                health.consecutiveSlowUpstreamResponseCount = 0
-            }
-            if !result.deviceDNSFallbackSucceeded, result.transport != .deviceDNS {
-                consecutiveQueryFallbackSuccessCount = 0
-            }
-            if wasDeviceDNSFallbackModeActive,
-               result.transport != .deviceDNS,
-               !result.deviceDNSFallbackSucceeded {
-                deviceDNSFallbackModeActive = false
-                health.deviceDNSFallbackModeActive = false
-                health.lastDeviceDNSFallbackActivatedAt = nil
-                consecutiveQueryFallbackSuccessCount = 0
-                cancelFallbackRecoverySmokeProbe()
-                recoveredDeviceDNSFallback = true
-            }
-        }
-
-        if result.udpTruncated {
-            health.udpTruncatedResponseCount += 1
-        }
-
-        if result.tcpFallbackAttempted {
-            health.tcpFallbackAttemptCount += 1
-        }
-
-        if result.tcpFallbackSucceeded {
-            health.tcpFallbackSuccessCount += 1
-        }
-
-        if result.deviceDNSFallbackAttempted {
-            health.deviceDNSFallbackAttemptCount += 1
-        }
-
-        if result.deviceDNSFallbackSucceeded {
-            // NRG-3a: the Device-DNS LEG carried this query because the configured
-            // primary failed it — revoke probe-skip evidence even below the fallback-
-            // mode activation threshold (Codex round 4: mode stays inactive and every
-            // streak stays clear down here, so if the routine tick lands before the
-            // ~30s recovery probe, pre-failure evidence would skip the very probe
-            // that counts toward activation).
-            lastAcceptedPrimaryEvidenceAt = nil
-            health.deviceDNSFallbackSuccessCount += 1
-            consecutiveQueryFallbackSuccessCount = DeviceDNSFallbackPolicy.nextConsecutiveFallbackEvidenceCount(
-                currentCount: consecutiveQueryFallbackSuccessCount,
-                primaryResolverWasAttempted: result.hasFallbackActivationEvidence
-            )
-            if !deviceDNSFallbackModeActive {
-                if DeviceDNSFallbackPolicy.shouldActivateFallbackMode(
-                    consecutiveQueryFallbackSuccesses: consecutiveQueryFallbackSuccessCount
-                ) {
-                    deviceDNSFallbackModeActive = true
-                    health.deviceDNSFallbackModeActive = true
-                    health.lastDeviceDNSFallbackActivatedAt = now
-                    health.deviceDNSFallbackActivationCount += 1
-                    activatedDeviceDNSFallback = true
-                }
-            } else {
-                health.deviceDNSFallbackModeActive = true
-            }
-        }
-
-        if result.deviceDNSUnavailable {
-            health.deviceDNSUnavailableCount += 1
-        }
-
-        for attempt in result.attempts {
-            health.resolverAttemptCounts[attempt.address, default: 0] += 1
-
-            switch attempt.outcome {
-            case .success:
-                health.resolverSuccessCounts[attempt.address, default: 0] += 1
-                if attempt.transport == .dnsOverHTTPS, let negotiatedDoHProtocol = attempt.negotiatedDoHProtocol {
-                    health.lastDoHHTTPVersion = negotiatedDoHProtocol
-                }
-            case .timeout:
-                health.upstreamTimeoutCount += 1
-                health.resolverFailureCounts[attempt.address, default: 0] += 1
-            case .httpStatusFailure:
-                health.dohHTTPFailureCount += 1
-                health.resolverFailureCounts[attempt.address, default: 0] += 1
-            case .backedOff,
-                 .sendFailed,
-                 .receiveFailed,
-                 .invalidAddress,
-                 .unsupported,
-                 .socketUnavailable,
-                 .mismatchedResponse,
-                 .deviceDNSUnavailable:
-                health.resolverFailureCounts[attempt.address, default: 0] += 1
-            }
-        }
-
-        health.deviceDNSFallbackModeActive = deviceDNSFallbackModeActive
-        markHealthUpdated()
-        if activatedDeviceDNSFallback {
-            appendNetworkActivity(event: .deviceDNSFallbackActivated(reason: "query-fallback"), now: now)
-            scheduleFallbackRecoverySmokeProbeIfNeeded()
-        } else if recoveredDeviceDNSFallback {
-            appendNetworkActivity(event: .deviceDNSFallbackRecovered, now: now)
-        } else if result.deviceDNSFallbackSucceeded {
-            scheduleFallbackRecoverySmokeProbeIfNeeded()
-        }
-
-        if !didResolve {
-            appendReconnectNeededIfPolicyRequiresReconnect(now: now)
-        }
-
-        if result.usedEncryptedFallback {
-            // The Device-DNS primary was wedged and the encrypted (Mullvad DoH)
-            // fallback carried this query — un-gated + privacy-safe (resolver
-            // endpoint, never a queried domain), so field exports show the safety
-            // net engaging and how often it saves a wedge. Coalesced: log the first
-            // carried query of an episode immediately, then throttle to one marker per
-            // `encryptedFallbackLogThrottleInterval` carrying `carriedSinceLastLog`, so a
-            // sustained wedge does not flood the debug ring. The throttle is reset when the
-            // episode ends — either the primary serves a query (the `else` below) or the
-            // wedge recovers via the smoke probe (`logConnectivityRecoveredIfWedged`).
-            encryptedFallbackCarriedSinceLastLog += 1
-            let dueForFallbackLog = lastEncryptedFallbackLogAt.map {
-                now.timeIntervalSince($0) >= encryptedFallbackLogThrottleInterval
-            } ?? true
-            if dueForFallbackLog {
-                LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-encrypted-fallback", details: [
-                    "transport": result.transport.rawValue,
-                    "resolver": result.successfulResolverAddress ?? "nil",
-                    "carriedSinceLastLog": "\(encryptedFallbackCarriedSinceLastLog)"
-                ])
-                lastEncryptedFallbackLogAt = now
-                encryptedFallbackCarriedSinceLastLog = 0
-            }
-        } else if didResolve && !result.deviceDNSFallbackSucceeded {
-            // The PRIMARY carried this query — not the Device-DNS fallback, which is a distinct
-            // fallback path (see usedEncryptedFallback vs deviceDNSFallbackSucceeded) and not a
-            // primary recovery — so the encrypted-fallback episode is genuinely over. Clear the
-            // throttle so the next wedge logs its first carried query. (Covers a brief blip that
-            // never set the wedge marker, so `logConnectivityRecoveredIfWedged` would not fire.)
-            // Excluding the Device-DNS fallback keeps a mixed-fallback interleave from
-            // prematurely resetting the encrypted-fallback throttle.
-            clearEncryptedFallbackLogThrottle()
-        }
-        #if LAVA_QA_TOOLS
-        logQAConnectivityAssessmentIfNeeded(
-            reason: didResolve ? "upstream-success" : "upstream-failure",
-            now: now
+        let completion = ResolverHealthOrganicUpstreamCompletion(
+            occurredAt: now,
+            result: result
         )
-        #endif
-
-        if activatedDeviceDNSFallback || didResolve {
-            scheduleProtectionNotificationIfNeeded(now: now)
-        }
+        applyResolverHealthEvent(.organicUpstreamCompleted(completion))
     }
 
     private func updateResolverBackoff(from attempts: [ResolverAttempt], now: Date = Date()) {
@@ -4921,10 +4766,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func markHealthUpdated() {
-        health.updatedAt = Date()
-        health.networkKind = currentNetworkKind()
+        refreshHealthEnvelope()
         signalAppIfConnectivityStateChanged()
         healthPersistence.markDirty()
+    }
+
+    private func markResolverHealthProjectionUpdated() {
+        refreshHealthEnvelope()
+        healthPersistence.markDirty()
+    }
+
+    private func refreshHealthEnvelope() {
+        health.updatedAt = Date()
+        health.networkKind = currentNetworkKind()
     }
 
     /// The per-query counter bumps (`recordCacheHit` / `recordCacheMiss` /
@@ -4935,10 +4789,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     /// was pure steady-state CPU work that always produced the same severity
     /// (the Darwin nudge is deduped by key anyway, so the post was already a
     /// no-op there). Connectivity-relevant mutations keep going through
-    /// `markHealthUpdated`, which still reassesses and signals. dnsStateQueue-confined.
+    /// `markHealthUpdated`, while resolver-health projections use
+    /// `markResolverHealthProjectionUpdated` plus their ordered signal effect.
+    /// Both paths still reassess and signal when required. dnsStateQueue-confined.
     private func markHealthCountersUpdated() {
-        health.updatedAt = Date()
-        health.networkKind = currentNetworkKind()
+        refreshHealthEnvelope()
         healthPersistence.markDirty()
     }
 
@@ -5159,7 +5014,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func appendNetworkActivity(
         event: NetworkActivityEvent,
-        now: Date = Date()
+        now: Date = Date(),
+        frozenHealthContext: ResolverHealthGatewayActivityContext? = nil
     ) {
         let configuration = currentAppConfiguration()
         guard configuration.keepNetworkActivity else {
@@ -5170,19 +5026,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        let assessment = ProtectionConnectivityPolicy.assessment(isConnected: true, health: health, now: now)
+        let connectivitySeverity = frozenHealthContext?.connectivitySeverity
+            ?? ProtectionConnectivityPolicy.assessment(
+                isConnected: true,
+                health: health,
+                now: now
+            ).severity
         let entry = NetworkActivityLogEntry(
             timestamp: now,
             event: event,
             lavaState: LavaStateSnapshot(
                 protectionStatus: "Connected",
-                connectivityStatus: assessment.severity.diagnosticLabel,
-                networkKind: health.networkKind,
-                networkPathIsSatisfied: health.networkPathIsSatisfied,
+                connectivityStatus: connectivitySeverity.diagnosticLabel,
+                networkKind: frozenHealthContext?.networkKind ?? health.networkKind,
+                networkPathIsSatisfied: frozenHealthContext?.networkPathIsSatisfied
+                    ?? health.networkPathIsSatisfied,
                 resolverDisplayName: configuration.resolverPreset.displayName,
-                resolverTransport: health.lastResolverTransport,
+                resolverTransport: frozenHealthContext?.resolverTransport
+                    ?? health.lastResolverTransport,
                 fallbackToDeviceDNS: configuration.fallbackToDeviceDNS,
-                deviceDNSFallbackActive: deviceDNSFallbackModeActive
+                deviceDNSFallbackActive: frozenHealthContext?.deviceDNSFallbackActive
+                    ?? currentDeviceDNSFallbackModeActive()
             )
         )
         // The entry is built synchronously on the calling (DNS-serving) queue from
@@ -5196,57 +5060,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // blocking `append` so its user-action writes are never dropped (CON-1 P2).
             NetworkActivityLogPersistence.tryAppend(entry, to: logURL)
         }
-    }
-
-    private func appendReconnectNeededIfPolicyRequiresReconnect(now: Date) {
-        let assessment = ProtectionConnectivityPolicy.assessment(
-            isConnected: true,
-            health: health,
-            now: now
-        )
-        guard assessment.primaryAction == .reconnect else {
-            return
-        }
-
-        // Stamp the wedge start once, on entry — the basis for the recovery
-        // duration (not lastUpstreamFailureAt, which refreshes on every failed
-        // query and would shrink a multi-minute outage to "since the last lookup").
-        // Capture the reason here too, so a recovery logged after a network-change
-        // reset (which clears the notify-throttle reason) still reports it.
-        if reconnectNeededSince == nil {
-            reconnectNeededSince = now
-            reconnectNeededReason = health.lastFailureReason ?? "upstream-failed"
-            Self.recordIncident(.wedgeDetected, reason: reconnectNeededReason, now: now)
-        }
-        // Track the worst failure depth across the wedge (survives the
-        // network-change reset that zeroes the live counter).
-        reconnectNeededPeakFailureCount = max(reconnectNeededPeakFailureCount, health.consecutiveUpstreamFailureCount)
-
-        let shouldNotify: Bool
-        if let lastReconnectNeededActivityAt {
-            shouldNotify = now.timeIntervalSince(lastReconnectNeededActivityAt) >= reconnectNeededActivityReminderInterval
-        } else {
-            shouldNotify = true
-        }
-
-        if shouldNotify {
-            let reason = health.lastFailureReason ?? "upstream-failed"
-            appendNetworkActivity(event: .reconnectNeeded(reason: reason), now: now)
-            lastReconnectNeededActivityAt = now
-        }
-
-        // When the wedge persists, escalate from notifying to actually restarting
-        // the tunnel — startup re-captures Device DNS for the current network,
-        // which an in-place recovery can't while the tunnel is active.
-        selfReconnectIfPolicyAllows(assessment: assessment, now: now)
-
-        // Always arm the lighter in-place recovery too: self-reconnect is
-        // rate-limited and gated on confirmed Connect-On-Demand, so it can be
-        // suppressed exactly when the user is stuck. The wedge-recovery re-probe
-        // resets the backoff penalty box and re-tests without a process restart,
-        // so DNS self-heals on a same-network wedge instead of waiting on a manual
-        // toggle. No-op while one is already pending or once DNS recovers.
-        scheduleResolverWedgeRecoveryProbeIfNeeded()
     }
 
     // Restart the tunnel to recover wedged DNS, rate-limited so a network that
@@ -5406,8 +5219,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // because traffic is idle/low, or on-demand not yet confirmed; `.noAction` is NOT
             // exclusively "DNS still works"). Mark it pending so the recovery retry that
             // re-enters selfReconnectIfPolicyAllows carries the recapture ceiling instead of
-            // the lower wedge cap (Codex P1/P2). It clears the moment the resolver is confirmed
-            // recovered (a smoke-probe success routes through clearReconnectNeededActivitySuppression),
+            // the lower wedge cap. It clears the moment the resolver is confirmed
+            // recovered (a smoke-probe success emits the equivalent resolver-health effects),
             // so a genuinely-healthy stale resolver does not leave it stuck on.
             deviceDNSRecaptureRestartPending = true
             // Always-eventually-retry backstop: the in-place wedge-recovery probe re-tests
@@ -5445,7 +5258,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // synchronously. We deliberately do NOT rely on `health.networkPathIsSatisfied`
         // alone: handleNetworkPathUpdate applies that one via a SECOND deferred hop, so a
         // delivered-but-not-yet-applied path update would leave the cached flag
-        // stale-satisfied and let the cancel through (the race Codex flagged). Require BOTH.
+        // stale-satisfied and let the cancel through. Require BOTH.
         // On an unsatisfied path, release the latch and re-arm the lighter wedge-recovery
         // probe instead of cancelling blind — and do NOT burn a cap attempt for a teardown
         // that never ran (the cap-strand that otherwise compounds into a longer off).
@@ -5457,7 +5270,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // the decision and this fresh turn, clearing the wedge WITHOUT clearing this
             // latch. Re-RUN THE FULL self-reconnect policy against fresh `health` (NOT just
             // `primaryAction == .reconnect`: a wedge cleared to `.dnsSlow` still reports
-            // `.reconnect` while the policy is `.noAction` — Codex P2), threading the same
+            // `.reconnect` while the policy is `.noAction`), threading the same
             // `reason` so the ceiling matches. Only commit + cancel while the policy STILL
             // says reconnect; otherwise release the latch and bail (recovery owns its probe).
             let revalidatedAssessment = ProtectionConnectivityPolicy.assessment(
@@ -5480,10 +5293,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // Re-check the freshest delivered path AND health. The teardown is issued in THIS
             // same synchronous dnsStateQueue block — no main-queue hop — so the path cannot
             // flip between this guard and the cancel, and the persisted attempt is never
-            // burned for a skipped teardown (Codex P2 + Track 1). cancelTunnelWithError is
+            // burned for a skipped teardown. cancelTunnelWithError is
             // async to iOS, and setTunnelNetworkSettings is already invoked off-main here, so
             // an off-main cancel is safe and keeps the path check + teardown atomic.
-            guard self.latestMonitoredPathIsSatisfied, self.health.networkPathIsSatisfied else {
+            let schedulingView = self.currentResolverHealthSchedulingView()
+            guard self.latestMonitoredPathIsSatisfied, schedulingView.networkPathIsSatisfied else {
                 self.hasRequestedSelfReconnect = false
                 let cooldownElapsed = self.lastSelfReconnectPathSkipLogAt.map {
                     now.timeIntervalSince($0) >= Self.selfReconnectSuppressionLogInterval
@@ -5505,7 +5319,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // primary recovery credits this attempt back (creditProductiveSelfReconnectIfPending),
             // so a productive restart nets ~0 against the cap while a true loop — which never
             // reaches a post-restart recovery — accrues to the ceiling. Must be persisted, NOT
-            // tracked via the in-memory `reconnectNeededSince` wedge marker, which the cancel
+            // tracked via the coordinator's in-memory reconnect episode, which the cancel
             // wipes (the relaunched process would never credit otherwise).
             Self.saveLastSelfReconnectAt(now)
             // Durable GAP evidence, decoupled from the rate-limiter's stores (which forget by
@@ -5733,7 +5547,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // `lastSelfReconnectAt`) and we've now recovered within the credit window, that restart
     // was PRODUCTIVE: remove ONLY that restart's own attempt from the shared store, leaving
     // any earlier UNproductive attempts counted so the cap still bounds a restart-without-
-    // recovery loop (Codex P2). Decoupled from the in-memory wedge marker on purpose — that
+    // recovery loop. Decoupled from the in-memory wedge marker on purpose — that
     // marker does not survive the cancel's process kill, so crediting through it would be a
     // no-op for the cold restart this serves.
     private func creditProductiveSelfReconnectIfPending(now: Date) {
@@ -5748,7 +5562,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // Remove a SINGLE matching attempt — the one stamped for the restart that recovered
         // (the marker and the persisted attempt are the same instant) — not every attempt at-
         // or-before it. Crediting all of them would erase earlier failures and let an
-        // intermittent loop exceed the per-window cap after one success (Codex P2).
+        // intermittent loop exceed the per-window cap after one success.
         var remaining = Self.loadSelfReconnectAttemptTimes()
         if let creditedIndex = remaining.firstIndex(of: lastSelfReconnectAt) {
             remaining.remove(at: creditedIndex)
@@ -5765,89 +5579,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             "recoveredAfterMs": "\(max(0, Int((now.timeIntervalSince(lastSelfReconnectAt) * 1_000).rounded())))",
             "attemptsRemaining": "\(remaining.count)"
         ])
-    }
-
-    // Pairs a logged "Reconnect needed" with a visible recovery row + a firm
-    // device-log line (mechanism + true wedge duration). Call BEFORE
-    // clearReconnectNeededActivitySuppression (which drops the wedge state). Fires
-    // only when a wedge is in progress (reconnectNeededSince set), so it no-ops on
-    // ordinary successes and routine probes. Both the organic-query path
-    // (recordUpstreamResult) and the in-place smoke-probe recovery path
-    // (applyResolverSmokeProbeResult) route through here, so a self-recovery that
-    // never sees an organic query is still recorded.
-    // `verifiedBy` distinguishes a recovery proven by a real client query that
-    // resolved through the tunnel ("forwarding", the full downstream path) from one
-    // seen only by the smoke probe ("smoke-probe", the provider→resolver upstream
-    // leg). The two can diverge — the probe can pass while the device still isn't
-    // routing DNS through the tunnel — so recording which proved it makes a
-    // "recovered but the user still had to toggle" incident diagnosable from the log.
-    private func logConnectivityRecoveredIfWedged(
-        transport: DNSResolverTransport,
-        verifiedBy: String,
-        now: Date
-    ) {
-        guard let wedgeStart = reconnectNeededSince else {
-            return
-        }
-
-        let durationMs = max(0, Int((now.timeIntervalSince(wedgeStart) * 1_000).rounded()))
-        let failureReason = reconnectNeededReason ?? "dns-wedged"
-        // Carry the wedge's failure reason (not just the transport) so the recovery
-        // row pairs 1:1 with its "Reconnect needed: <reason>" and two distinct-cause
-        // wedges that recover within the activity log's 30s duplicate-coalescing
-        // window aren't collapsed into one row. (Same-cause+same-transport recoveries
-        // within 30s still coalesce — they're indistinguishable in the summary; the
-        // un-coalesced device-log dns-recovered below keeps the per-recovery detail.)
-        appendNetworkActivity(
-            event: .connectivityRecovered(reason: "\(failureReason) via \(transport.rawValue)"),
-            now: now
-        )
-        LavaSecDeviceDebugLog.append(component: "tunnel", event: "dns-recovered", details: [
-            "reason": failureReason,
-            "transport": transport.rawValue,
-            "verifiedBy": verifiedBy,
-            "durationMs": "\(durationMs)",
-            "consecutiveUpstreamFailureCount": "\(reconnectNeededPeakFailureCount)"
-        ])
-        Self.recordIncident(
-            .wedgeRecovered,
-            reason: failureReason,
-            durationMs: durationMs,
-            verifiedBy: verifiedBy,
-            now: now
-        )
-        // The wedge marker is owned here (and by the lifecycle reset): clearing it
-        // only after a recovery is logged is what lets a handoff recovery — which
-        // passes through clearReconnectNeededActivitySuppression on the network
-        // change before recovering — still be captured.
-        reconnectNeededSince = nil
-        reconnectNeededReason = nil
-        reconnectNeededPeakFailureCount = 0
-        // The wedge ended, so the next one should log its suppression fresh.
-        lastSelfReconnectSuppressionSignature = nil
-        lastSelfReconnectSuppressionLogAt = nil
-        lastSelfReconnectPathSkipLogAt = nil
-        // Close the coalesced encrypted-fallback episode here too: this is the single
-        // authoritative recovery point (both the organic-query and the smoke-probe
-        // recovery route through it), so a wedge that recovers via the smoke probe with
-        // no intervening primary query still lets the next wedge log its first carried
-        // query — the episode-level diagnostic contract.
-        clearEncryptedFallbackLogThrottle()
-    }
-
-    private func clearReconnectNeededActivitySuppression() {
-        lastReconnectNeededActivityAt = nil
-        // NOTE: reconnectNeededSince/Reason are deliberately NOT cleared here. This
-        // runs on the network-change/wake reset path too (before the settle probe
-        // recovers), and clearing the wedge marker there would make the handoff
-        // recovery silently no-op. The marker is cleared only by a logged recovery
-        // (logConnectivityRecoveredIfWedged) or a tunnel-lifecycle reset (resetHealth).
-        // DNS recovered (or the runtime was reset for recovery): drop any pending
-        // wedge-recovery re-probe so it can't reset a now-healthy resolver.
-        cancelResolverWedgeRecoveryProbe()
-        // A recapture restart is owed only while DNS is wedged; once recovered (or
-        // reset for recovery) drop it so a later unrelated wedge uses the wedge ceiling.
-        deviceDNSRecaptureRestartPending = false
     }
 
     #if LAVA_QA_TOOLS
@@ -5888,7 +5619,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             "dnsSmokeProbeFailureCount": "\(health.dnsSmokeProbeFailureCount)",
             "lastDNSSmokeProbeSucceeded": health.lastDNSSmokeProbeSucceeded.map { "\($0)" } ?? "nil",
             "deviceDNSFallbackActivationCount": "\(health.deviceDNSFallbackActivationCount)",
-            "deviceDNSFallbackModeActive": "\(deviceDNSFallbackModeActive)",
+            "deviceDNSFallbackModeActive": "\(currentDeviceDNSFallbackModeActive())",
             "resolverRuntimeResetCount": "\(health.resolverRuntimeResetCount)",
             "lastNetworkChangeAt": Self.qaDebugDateString(health.lastNetworkChangeAt),
             "lastResolverRuntimeResetAt": Self.qaDebugDateString(health.lastResolverRuntimeResetAt),
@@ -5998,13 +5729,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func currentDeviceDNSFallbackModeActive() -> Bool {
-        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
-            return deviceDNSFallbackModeActive
-        }
-
-        return dnsStateQueue.sync {
-            deviceDNSFallbackModeActive
-        }
+        currentResolverHealthSchedulingView().deviceDNSFallbackModeActive
     }
 
     private func refreshDeviceDNSResolverAddresses(
@@ -6035,11 +5760,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             preserveOnEmptyCapture: preserveOnEmptyCapture
         )
 
-        LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-captured", details: [
-            "reason": reason,
-            "count": "\(addresses.count)",
-            "activeCount": "\(deviceDNSResolverAddresses.count)"
-        ])
+        // Log only episode transitions (UR-48 Phase 2a): on a masked network this read runs
+        // on every wake/retry and `count=0` was the log's dominant line (832 of 858 reads in
+        // the rc9 bundle) — pure noise in a capped diagnostic log. Non-empty captures always
+        // log; a suppressed-repeat tally rides on the next allowed line so the episode's
+        // volume stays reconstructable. A masked read under a NEW `reason` (e.g. a
+        // `network-path-changed` handoff between two masked networks) also logs — that's a
+        // distinct recapture the log is meant to show, not a same-reason repeat. This
+        // queue-confined gate covers only THIS variant — the storm path; the rare off-queue
+        // refresh keeps unconditional logging.
+        if DeviceDNSFallbackPolicy.shouldLogDeviceDNSCapture(
+            capturedCount: addresses.count,
+            reason: reason,
+            lastLoggedCount: lastLoggedDeviceDNSCaptureCount,
+            lastLoggedReason: lastLoggedDeviceDNSCaptureReason
+        ) {
+            var details = [
+                "reason": reason,
+                "count": "\(addresses.count)",
+                "activeCount": "\(deviceDNSResolverAddresses.count)"
+            ]
+            if suppressedDeviceDNSCaptureLogCount > 0 {
+                details["suppressedRepeats"] = "\(suppressedDeviceDNSCaptureLogCount)"
+            }
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-captured", details: details)
+            lastLoggedDeviceDNSCaptureCount = addresses.count
+            lastLoggedDeviceDNSCaptureReason = reason
+            suppressedDeviceDNSCaptureLogCount = 0
+        } else {
+            suppressedDeviceDNSCaptureLogCount += 1
+        }
     }
 
     private static func currentSystemDNSServerAddresses() -> [String] {
@@ -6220,11 +5970,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
         }
 
-        snapshotReloadGeneration += 1
-        // A reload is now starting and is the latest. Mark it in flight so the Focus config poll won't bump
-        // the generation out from under it (cleared when this load resolves — see clearSnapshotReloadInFlight).
-        snapshotReloadInFlight = true
-        return snapshotReloadGeneration
+        return snapshotReloadCoordinator.assumeIsolated { $0.begin() }
     }
 
     /// Clear the in-flight marker when a load resolves, but ONLY if it is still the latest reload — an
@@ -6233,12 +5979,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64) {
         dnsStateQueue.async { [weak self] in
             guard let self else { return }
-            // dnsStateQueue-confined invariant (Kilo #29): see advanceFocusConfigurationWatermark — the clear
-            // is FIFO-after the watermark advance only because both run on this queue. Assert so an off-queue
-            // refactor trips.
+            // INV-QUEUE-1: see advanceFocusConfigurationWatermark — the clear is FIFO-after the watermark
+            // advance only because both run on this queue. Assert so an off-queue refactor trips.
             dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
-            guard self.isCurrentSnapshotReloadGeneration(generation) else { return }
-            self.snapshotReloadInFlight = false
+            self.snapshotReloadCoordinator.assumeIsolated { $0.finish(generation) }
         }
     }
 
@@ -6249,7 +5993,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
         }
 
-        return generation == snapshotReloadGeneration
+        return snapshotReloadCoordinator.assumeIsolated { $0.isCurrent(generation) }
     }
 
     private func invalidateSnapshotReloadGeneration(reason: String) {
@@ -6260,16 +6004,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        snapshotReloadGeneration += 1
-        // An invalidation abandons any in-flight load (it will be rejected by the generation gate), and no new
-        // load follows — so clear the in-flight marker, else the poll would skip forever waiting on a load that
-        // will never resolve.
-        snapshotReloadInFlight = false
+        // Invalidation fences the abandoned load and clears ownership so the Focus poll cannot remain wedged.
+        let generation = snapshotReloadCoordinator.assumeIsolated { $0.invalidate() }
 
         #if DEBUG || LAVA_QA_TOOLS
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "snapshot-reload-invalidated", details: [
             "reason": reason,
-            "generation": "\(snapshotReloadGeneration)"
+            "generation": "\(generation)"
         ])
         #endif
     }
@@ -6294,8 +6035,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 return
             }
             // Clear the in-flight marker once the (expensive) load body finishes via ANY of its returns, so the
-            // poll can fire the next reload. Generation-gated, so a newer overlapping load keeps the marker
-            // (Codex round 5). CORRECTNESS INVARIANT: this clear is `dnsStateQueue.async`, enqueued from `defer`
+            // poll can fire the next reload. Generation-gated, so a newer overlapping load keeps the marker.
+            // INV-QUEUE-1: this clear is `dnsStateQueue.async`, enqueued from `defer`
             // when the SYNCHRONOUS body returns — therefore strictly FIFO-AFTER the watermark advance the body
             // already enqueued (advanceFocusConfigurationWatermark). A poll tick that later observes the marker
             // cleared is dequeued after this clear, hence after that watermark advance, so it never sees a stale
@@ -6322,7 +6063,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 // The resident already covers this config ⇒ the tunnel has effectively ADOPTED this
                 // generation, so advance the Focus config-poll watermark here too — otherwise a config-only
                 // / equivalent-filter generation bump would never advance it and the poll would force a
-                // reload (+ DNS-runtime reset) every interval (Codex P2). Same guarded advance as a full adopt.
+                // reload (+ DNS-runtime reset) every interval. Same guarded advance as a full adopt.
                 self.advanceFocusConfigurationWatermark(
                     toAdoptedGeneration: configuration.configurationGeneration,
                     ifCurrentReloadGeneration: generation
@@ -6901,11 +6642,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         residentHasEnabledFilters: Bool = false,
         generation: UInt64
     ) -> Bool {
-        // The reload-generation token (`snapshotReloadGeneration`) lives on
-        // dnsStateQueue; the snapshot pointer lives on snapshotQueue. Gate the commit
-        // on the LIVE token while holding dnsStateQueue, then swap the pointer under
-        // snapshotQueue. Comparing against the live token (not merely a "highest
-        // committed" high-water mark) rejects a stale load as soon as a newer reload
+        // The reload-generation coordinator lives on dnsStateQueue; the snapshot pointer
+        // lives on snapshotQueue. Gate the commit on the LIVE token while holding
+        // dnsStateQueue, then swap under snapshotQueue. Comparing against the live token
+        // (not merely a "highest committed" high-water mark) rejects a stale load as soon as a newer reload
         // has been *requested* — even before that newer load has committed anything —
         // so a slow stale decode can't briefly reinstall an older/permissive snapshot
         // for the new configuration. Holding dnsStateQueue across the read+swap closes
@@ -6920,7 +6660,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // superseded reload's no-op must not record an incident that was never served.
         var didCommit = false
         let applyIfStillCurrent: () -> Void = { [self] in
-            guard generation == snapshotReloadGeneration else {
+            guard isCurrentSnapshotReloadGeneration(generation) else {
                 return
             }
             snapshotQueue.sync {
@@ -6957,7 +6697,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // stale reload can never clear a fresher commit's marker.
     private func clearResidentFailClosedDueToUnavailableSnapshot(ifCurrentGeneration generation: UInt64) {
         let applyIfStillCurrent: () -> Void = { [self] in
-            guard generation == snapshotReloadGeneration else {
+            guard isCurrentSnapshotReloadGeneration(generation) else {
                 return
             }
             snapshotQueue.sync { residentFailClosedDueToUnavailableSnapshot = false }
@@ -7135,13 +6875,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let pendingResponses = inFlightQueryCoalescer.drainAll()
         dnsResponseCache.removeAll()
         clearEndpointHostnameNormalizationCache()
-        // NRG-3a: probe-equivalent evidence never survives a runtime reset — the new
-        // runtime (wake, config change, identity change, fallback flip) re-proves with
-        // a real probe, exactly like the pre-skip behavior.
-        lastAcceptedPrimaryEvidenceAt = nil
-        health.lastResolverRuntimeResetAt = Date()
-        health.lastResolverRuntimeResetReason = reason
-        health.resolverRuntimeResetCount += 1
+        applyResolverHealthEvent(
+            .resolverRuntimeResetOccurred(
+                kind: .protectionPolicyRefresh,
+                reason: reason,
+                occurredAt: Date()
+            )
+        )
         writeServerFailures(for: pendingResponses, reason: reason)
     }
 
@@ -7216,81 +6956,30 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let previousIdentifier = activeResolverRuntimeIdentifier
         let isInitialActivation = previousIdentifier == nil
         activeResolverRuntimeIdentifier = identifier
-        // Track the PRIMARY-only identity separately: the full `identifier` (the runtime cache key)
-        // also folds in fallback / encrypted-fallback / fallback-mode components, which change on
-        // fallback-only resets that must NOT advance the context baseline or clear the rejected streak.
-        // Taken MODE-INSENSITIVELY (COH-1): with device-DNS-fallback MODE active, the plain
-        // `primaryCacheIdentifier` reflects the *effective* transport (`.deviceDNS`), so a mode flip
-        // on an unchanged encrypted primary would read as a primary-identity change here — advancing
-        // `lastResolverIdentityChangeAt` and zeroing the rejected streak below (the second DNS-1
-        // channel this closes). `ignoresDeviceDNSFallbackMode: true` pins it to the configured upstream.
-        let previousPrimaryIdentifier = activeResolverPrimaryIdentifier
+        // Supply only the current PRIMARY-only identity. The coordinator owns the prior identity,
+        // so fallback-only runtime resets cannot accidentally rewrite the comparison baseline.
+        // Taken MODE-INSENSITIVELY (COH-1): a Device-DNS fallback-mode flip must not look like a
+        // configured-primary change or clear the rejected-response streak.
         let currentPrimaryIdentifier = currentResolverRuntimeConfiguration(ignoresDeviceDNSFallbackMode: true).primaryCacheIdentifier
-        activeResolverPrimaryIdentifier = currentPrimaryIdentifier
         resolverRuntimeGeneration += 1
         let pendingResponses = inFlightQueryCoalescer.drainAll()
         dnsResponseCache.removeAll()
         clearEndpointHostnameNormalizationCache()
-        // NRG-3a: probe-equivalent evidence never survives a runtime reset — the new
-        // runtime (wake, config change, identity change, fallback flip) re-proves with
-        // a real probe, exactly like the pre-skip behavior.
-        lastAcceptedPrimaryEvidenceAt = nil
-        // The negotiated-protocol observation belongs to the previous
-        // resolver/network; the new runtime re-observes before claiming DoH3.
-        health.lastDoHHTTPVersion = nil
         resolverBackoffStateQueue.sync {
             resolverBackoffPolicy.reset()
         }
         resetResolverTransientState()
         prewarmResolverBootstrapIfNeeded()
-        if force || !isInitialActivation {
-            health.lastResolverRuntimeResetAt = Date()
-            health.lastResolverRuntimeResetReason = reason
-            health.resolverRuntimeResetCount += 1
-            // A resolver-runtime reset opens a fresh fallback episode (mirrors
-            // resetFailureAndFallbackStateForRecovery for the network-change path): drop the
-            // episode-scoped carried-failure streak and the stale failure reason so they can't
-            // gate the NEW resolver's coverage assessment. The identity-scoped rejected streak is
-            // NOT cleared on a SAME-resolver reset — it is LAV-87 hijack evidence that must survive
-            // network-flap churn — but IS cleared on a genuine identity change below.
-            consecutiveCarriedQueryFailureCount = 0
-            // A resolver-runtime reset opens a fresh fallback episode (per the comment
-            // above), so the coalesced encrypted-fallback log marker is stale too — clear
-            // it so the new runtime's first carried query logs rather than being throttled
-            // by the previous runtime's marker.
-            clearEncryptedFallbackLogThrottle(phase: "context-reset")
-            health.lastFailureReason = nil
-            // Invalidate the encrypted-fallback COVERAGE timestamp on ANY runtime reset. It proves
-            // "the CURRENT encrypted fallback served a query recently", but a reset may have changed
-            // the fallback itself (disabled it, or swapped its resolver) — and the PRIMARY-identity
-            // branch below deliberately doesn't move the baseline for a fallback-only change, so
-            // nothing else would invalidate it. Leaving it would let a just-disabled / unproven
-            // fallback keep suppressing the reconnect via the OLD fallback's success. For non-fallback
-            // resets this is redundant (the context baseline already lapses coverage) and harmless
-            // (the next carried success through the active fallback re-stamps it).
-            health.lastEncryptedFallbackSuccessAt = nil
-            // Advance the DNS-health-context baseline ONLY on a genuine PRIMARY-resolver identity
-            // change (a different upstream) — never on a forced same-resolver runtime reset
-            // (recovery; snapshot-reload/pause go through resetDNSRuntimeForProtectionPolicyChange,
-            // not here) NOR on a fallback-only change (encrypted-fallback resolver swap, device-DNS
-            // fallback toggle) that leaves the primary unchanged. Keyed on the PRIMARY identity, not
-            // the full `identifier`, so a benign fallback reset can't make an existing failed smoke
-            // probe look pre-context and hide a still-wedged primary (smokeProbeContextBaseline reads
-            // lastResolverIdentityChangeAt).
-            if let previousPrimaryIdentifier, previousPrimaryIdentifier != currentPrimaryIdentifier {
-                health.lastResolverIdentityChangeAt = Date()
-                // The rejected-response streak is identity-scoped evidence about the PREVIOUS
-                // resolver. Once we switch to a different upstream it is stale; left intact, the
-                // coverage gate (which declines on ANY nonzero count) would force the NEW resolver
-                // to `.needsReconnect` even with the fallback serving, until its own first rejection
-                // re-scopes the streak. Clear it on the switch — the new resolver starts with no
-                // pending rejection evidence and rebuilds its own streak if IT rejects. Safe for
-                // LAV-87: a same-resolver network flap keeps the same cacheIdentifier, so this branch
-                // does not fire and the streak survives the churn it is meant to.
-                health.consecutiveRejectedSmokeResponseCount = 0
-                health.rejectedSmokeResponseResolverIdentity = nil
-            }
-        }
+        applyResolverHealthEvent(
+            .resolverRuntimeResetOccurred(
+                kind: .fullRuntime(
+                    currentPrimaryIdentifier: currentPrimaryIdentifier,
+                    recordsObservableReset: force || !isInitialActivation
+                ),
+                reason: reason,
+                occurredAt: Date()
+            )
+        )
         return pendingResponses
     }
 
@@ -7417,6 +7106,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             artifactStores.append((store: tunnelCompiledStore, route: "tunnel-compiled"))
         }
 
+        var missedOverTierBudget = false
         for (artifactStore, route) in artifactStores {
             // Both reads gate (reuse + budget) BEFORE the multi-MB decode and re-validate
             // from consistent bytes, so a stale/over-budget artifact is never materialized
@@ -7446,6 +7136,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     "route": route
                 ])
                 return (preparedSnapshot.snapshot, preparedSnapshot.identity)
+            }
+
+            if compactResult.missReason == "over-tier-budget" || preparedResult.missReason == "over-tier-budget" {
+                missedOverTierBudget = true
             }
 
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-store-miss", details: [
@@ -7516,7 +7210,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return serveLastKnownGoodOrFailClosed()
         }
 
-        // CON-3: skip a DOOMED compile. A newer reload only bumps the generation (it fences
+        // INV-TIER-1 + INV-MEM-1: skip a compile DOOMED by the tier cap. A store miss with
+        // reason "over-tier-budget" means an identity-valid artifact for exactly this
+        // configuration + catalog was rejected ONLY for its recorded tier total — a fresh
+        // compile of the same inputs deterministically reproduces an over-tier result, so
+        // running it would spend the ~32 MiB peak once per reload tick, forever, in the
+        // over-budget steady state (the retained artifact it writes is itself tier-rejected
+        // on the next read, so the retain never terminates the loop the way it does for
+        // ordinary recompiles). Genuinely-new content never takes this branch: a moved
+        // catalog changes the expected identity, so the miss reason is "reuse:...", not
+        // "over-tier-budget". An UNRECORDED total ("tier-budget-unrecorded", a legacy or
+        // pre-stamp artifact) deliberately does NOT set this flag — that recompile is the
+        // repair path that stamps the missing total for an in-budget configuration (PR #335
+        // Codex P1 round 2). Degrade exactly like an over-tier compile result: LKG if one
+        // fits the budget, else fail-closed (INV-DNS-1), while the app-side gates surface
+        // the actionable tier error.
+        if missedOverTierBudget {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compile-skipped-over-tier-budget", details: [
+                "generation": "\(generation)"
+            ])
+            return serveLastKnownGoodOrFailClosed()
+        }
+
+        // INV-MEM-1: skip a DOOMED compile. A newer reload only bumps the generation (it fences
         // the commit); without this the superseded compile still runs its full ~32 MiB peak.
         // Re-check the reload generation IMMEDIATELY before the compiler so a reload the app
         // (or the Focus poll) has already superseded never spends the peak. Return nil, NOT the
@@ -7536,13 +7252,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // NOTE: scratch from a jetsam-killed compile is swept ONCE at startTunnel, not
             // here — sweeping per-compile would race a concurrent reload's in-flight scratch.
             //
-            // CON-3: run the compile behind snapshotCompileGate so at most one ~32 MiB peak is
+            // INV-MEM-1: run the compile behind snapshotCompileGate so at most one ~32 MiB peak is
             // resident at a time — two overlapping reloads (start + pull-to-refresh) would
             // otherwise peak ≈60 MiB in the 50 MB-limited NE process and jetsam the tunnel.
             // Only the compile is serialized (the cheap header reads above stay concurrent);
             // the gate holds exclusivity across the WHOLE await, unlike a bare actor.
             let compiled = try await snapshotCompileGate.run { [weak self] in
-                // CON-3 (Codex #213): re-check the reload generation AFTER the gate grants exclusivity.
+                // INV-MEM-1 (Codex #213): re-check the reload generation AFTER the gate grants exclusivity.
                 // The pre-gate check only catches supersession BEFORE entering the gate; a reload that
                 // queued behind an earlier compile can be superseded WHILE it waits its turn. Re-check
                 // here so a now-doomed compile never spends its ~32 MiB peak (its commit would be
@@ -7597,6 +7313,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 ])
                 return serveLastKnownGoodOrFailClosed()
             }
+            // INV-TIER-1: the in-extension compile enforces only memory caps while it runs
+            // (per-source/streaming budgets), so a persisted over-budget configuration —
+            // a lapsed-Plus selection or an upstream-grown union — would recompile here
+            // tier-blind. Gate the RECORDED total the streaming compiler just stamped (its
+            // conservative equivalent of the app formula; nil ⇒ fail toward the fallback,
+            // matching the load gates). Route over-tier results through the same degrade
+            // order as over-memory: last-known-good (itself tier- and budget-gated, so it
+            // can only serve an in-budget artifact) → fail-closed, and the app's gated
+            // prepare surfaces the actionable tier error (INV-DNS-1 order preserved).
+            if !FilterRuleBudget.fitsTierBudget(
+                recordedTotal: compiled.tierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            ) {
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compiled-over-tier-budget", details: [
+                    "tierBudgetRuleCount": compiled.tierBudgetRuleCount.map(String.init) ?? "nil",
+                    "maxFilterRules": "\(configuration.limits.maxFilterRules)"
+                ])
+                return serveLastKnownGoodOrFailClosed()
+            }
             return (compiled, expectedIdentity)
         } catch is SnapshotCompileSuperseded {
             // A newer reload superseded this one while it waited in the compile gate — skipped the
@@ -7616,7 +7351,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     /// Thrown inside the compile gate when a reload is superseded while awaiting its turn, so the
-    /// doomed compile bails before spending its memory peak (CON-3, Codex #213). Sendable so it can
+    /// doomed compile bails before spending its memory peak (INV-MEM-1, Codex #213). Sendable so it can
     /// cross the gate's `@Sendable` operation boundary.
     private struct SnapshotCompileSuperseded: Error {}
 
@@ -7673,6 +7408,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return (nil, "over-budget")
         }
 
+        // INV-TIER-1 serve backstop: the reuse identity contains no isPaid input, so an artifact
+        // compiled under Plus stays identity-valid after a lapse — this is the last gate before
+        // those rules are LOADED into service (an already-resident snapshot is the documented
+        // INV-TIER-1 carve-out until its next adopting reload). The cap is read from the decoded
+        // shared configuration's derived limits, never as a feature switch (the tunnel's behavior
+        // is otherwise tier-blind). It binds the RECORDED tier total from the header metadata — the
+        // resident table sum under-counts it by the full-guardrail term (only the allowlist-overlap
+        // subset is resident), which would let a recorded-over artifact keep serving (PR #335
+        // Codex P1). The two rejection reasons are deliberately DISTINCT: an UNRECORDED total
+        // (legacy/unstamped artifact) must let the recompile run — it stamps a fresh total and
+        // repairs the store — while a recorded-OVER total marks the recompile doomed and the
+        // loader short-circuits it (PR #335 Codex P1 round 2).
+        guard let recordedTierBudget = summary.tierBudgetRuleCount else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-tier-budget-unrecorded", details: [
+                "identity": summary.identity.fingerprint
+            ])
+            return (nil, "tier-budget-unrecorded")
+        }
+        guard FilterRuleBudget.fitsTierBudget(
+            compiledTotal: recordedTierBudget,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-compact-over-tier-budget", details: [
+                "identity": summary.identity.fingerprint,
+                "tierBudgetRuleCount": "\(recordedTierBudget)",
+                "maxFilterRules": "\(configuration.limits.maxFilterRules)"
+            ])
+            return (nil, "over-tier-budget")
+        }
+
         guard let snapshot = try? CompactFilterSnapshot.decode(from: data) else {
             return (nil, "decode-failed")
         }
@@ -7719,7 +7484,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // build regenerates it regardless — there is nothing a prepared fallback could serve.
     private func lastKnownGoodCompactSnapshot(
         from store: FilterArtifactStore,
-        configuration: AppConfiguration
+        configuration: AppConfiguration,
+        syncDecodeRuleCap: Int? = nil
     ) -> CompactFilterSnapshot? {
         guard let data = try? Data(contentsOf: store.compactSnapshotURL, options: [.mappedIfSafe]),
               let summary = try? CompactFilterSnapshot.readSummary(from: data),
@@ -7733,6 +7499,49 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-last-known-good-over-budget", details: [
                 "identity": summary.identity.fingerprint,
                 "ruleCount": "\(ruleCount)"
+            ])
+            return nil
+        }
+
+        // INV-TIER-1: LKG is config-exact (INV-DNS-3), and an over-budget artifact is exactly
+        // config-exact after a lapse — without this gate the LKG fallback would re-serve the
+        // rules every other serve gate just rejected. Binds the RECORDED total (nil fails
+        // closed), like every serve gate. No LKG candidate ⇒ fail-closed, never fail open
+        // (INV-DNS-1). The nil and over-limit rejections log DISTINCT events, like the
+        // strict compact path: exported field logs redact detail values (LAV-94), so the
+        // event name alone must say which one happened — "unrecorded" is a legacy artifact
+        // that heals on the next stamped write, "over" is a real tier violation (the
+        // 2026-07-10 UR-48 field log logged a pre-#335 unrecorded artifact as over-tier,
+        // hiding why LKG declined the bootstrap).
+        guard let recordedTierBudget = summary.tierBudgetRuleCount else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-last-known-good-tier-budget-unrecorded", details: [
+                "identity": summary.identity.fingerprint
+            ])
+            return nil
+        }
+        guard FilterRuleBudget.fitsTierBudget(
+            compiledTotal: recordedTierBudget,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-last-known-good-over-tier-budget", details: [
+                "identity": summary.identity.fingerprint,
+                "tierBudgetRuleCount": "\(recordedTierBudget)",
+                "maxFilterRules": "\(configuration.limits.maxFilterRules)"
+            ])
+            return nil
+        }
+
+        // Synchronous callers (the cold-start bootstrap) re-enforce their decode cap HERE, on
+        // the same mmapped bytes this decode reads (INV-MEM-2): the bootstrap's readSyncBootstrapInfo
+        // pre-gate is a separate earlier read, so an atomic republish between the two could
+        // otherwise slip an over-cap artifact into a synchronous decode on startTunnel — the
+        // exact TOCTOU the strict path closes with reusableCompactSnapshot's syncDecodeRuleCap
+        // (PR #330 review).
+        if let syncDecodeRuleCap, ruleCount > syncDecodeRuleCap {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-last-known-good-over-sync-cap", details: [
+                "identity": summary.identity.fingerprint,
+                "ruleCount": "\(ruleCount)",
+                "syncCap": "\(syncDecodeRuleCap)"
             ])
             return nil
         }
@@ -7752,10 +7561,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // relaunched by a self-reconnect that killed the previous process — does NOT serve a block-all
     // FailClosedRuntimeSnapshot window while the async load decodes. Reuses the SAME budget/header-
     // gated reuseCompactSnapshot as the async path, capped to the synchronous-decode ceiling.
-    // Returns nil (→ fail-closed bootstrap, async load resumes) when no strict-reusable in-budget
-    // summary-schema artifact exists, it exceeds the cap, or it is legacy. NEVER fails open — and
-    // deliberately serves NO last-known-good here (that would risk under-blocking with stale rules;
-    // the async serveLastKnownGoodOrFailClosed provides LKG when the fresh compile genuinely fails).
+    // On a strict miss it falls back to the config-exact LAST-KNOWN-GOOD artifact (INV-DNS-3
+    // gates: exact enabled-list set / manual rules / custom fingerprints / parser version —
+    // only catalog content hashes may be stale), so the first post-rotation start filters with
+    // yesterday's rules for the few seconds the fresh compile runs instead of blocking all DNS
+    // (founder decision 2026-07-09, UR-48 Phase 2a plan — the async path already served LKG for
+    // hours on compile failure, so refusing it here for a ~7 s window was inconsistent).
+    // Returns nil (→ fail-closed bootstrap, async load resumes) when NEITHER a strict nor an
+    // LKG-eligible in-budget summary-schema artifact exists. NEVER fails open: LKG can serve
+    // stale rules but never a different configuration's rules.
     private func bootstrapResidentSnapshotFromDisk(
         configuration: AppConfiguration
     ) -> (snapshot: any FilterRuntimeSnapshot, identity: PreparedFilterSnapshotIdentity)? {
@@ -7867,14 +7681,34 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "syncCap": "\(cap)"
             ])
         }
-        // No strict-reusable, sync-eligible CURRENT artifact → fail closed; the async load handles
-        // everything else off the critical path. Deliberately NO last-known-good resume here: a
-        // config-matched-but-stale artifact (e.g. a smaller preserved root copy while the current
-        // artifact is reusable-but-over-cap) would UNDER-BLOCK domains added since it was built,
-        // breaking the over-cap-→-fail-closed guarantee. The async serveLastKnownGoodOrFailClosed
-        // still provides last-known-good when the fresh (re)compile genuinely fails.
+        // Strict miss → try config-exact last-known-good over the SAME sync-eligible stores
+        // (already pre-gated to summary-schema and the sync decode cap above, so this stays
+        // bounded on the startTunnel path). lastKnownGoodCompactSnapshot applies the INV-DNS-3
+        // gates + the authoritative budget re-check on the same mmapped bytes it decodes.
+        // Trade-off accepted by the 2026-07-09 decision: until the async compile commits, this
+        // serves rules that may predate the current catalog — including the over-cap case,
+        // where the async path lands on the SAME LKG via serveLastKnownGoodOrFailClosed anyway.
+        // The LKG identity carries stale hashes, so the async no-op reload gate can never treat
+        // it as current — the fresh (re)compile always still runs and replaces it.
+        for (store, route) in eligibleStores {
+            guard let lastKnownGood = lastKnownGoodCompactSnapshot(
+                from: store,
+                configuration: configuration,
+                syncDecodeRuleCap: cap
+            ) else {
+                continue
+            }
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-last-known-good-resume", details: [
+                "route": route,
+                "identity": lastKnownGood.identity.fingerprint
+            ])
+            return (lastKnownGood, lastKnownGood.identity)
+        }
+
+        // Neither strict nor last-known-good → fail closed; the async load handles everything
+        // else off the critical path. NEVER fail open.
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "bootstrap-fast-resume-miss", details: [
-            "reason": eligibleStores.isEmpty ? "no-eligible-stores" : "strict-miss",
+            "reason": eligibleStores.isEmpty ? "no-eligible-stores" : "strict-and-lkg-miss",
             "storeCount": "\(artifactStores.count)",
             "eligibleStoreCount": "\(eligibleStores.count)",
             "syncCap": "\(cap)",
@@ -7916,6 +7750,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         guard !FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: manifestRuleCount) else {
             return (nil, "over-budget")
         }
+        // INV-TIER-1 cheap pre-gate on the manifest's RECORDED total (see
+        // reusableCompactSnapshot for why the table sum can't substitute, and for the
+        // unrecorded/over split — unrecorded must not mark the recompile doomed);
+        // re-enforced on the decoded summary below so a root republish between the two
+        // reads can't slip past it.
+        guard let manifestTierBudget = manifest.summary.tierBudgetRuleCount else {
+            return (nil, "tier-budget-unrecorded")
+        }
+        guard FilterRuleBudget.fitsTierBudget(
+            compiledTotal: manifestTierBudget,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            return (nil, "over-tier-budget")
+        }
 
         guard FileManager.default.fileExists(atPath: store.preparedSnapshotURL.path) else {
             return (nil, "missing")
@@ -7940,6 +7788,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "ruleCount": "\(ruleCount)"
             ])
             return (nil, "over-budget")
+        }
+        // INV-TIER-1 authority gate on the decoded prepared's OWN recorded total, same
+        // decoded-bytes rationale as the budget gate above (and the same unrecorded/over
+        // split as the pre-gate).
+        guard let decodedTierBudget = prepared.summary.tierBudgetRuleCount else {
+            return (nil, "tier-budget-unrecorded")
+        }
+        guard FilterRuleBudget.fitsTierBudget(
+            compiledTotal: decodedTierBudget,
+            maxFilterRules: configuration.limits.maxFilterRules
+        ) else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-prepared-over-tier-budget", details: [
+                "identity": prepared.identity.fingerprint,
+                "tierBudgetRuleCount": "\(decodedTierBudget)",
+                "maxFilterRules": "\(configuration.limits.maxFilterRules)"
+            ])
+            return (nil, "over-tier-budget")
         }
 
         guard prepared.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: cachedCatalog) else {
@@ -8014,6 +7879,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private var diagnosticsURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.diagnosticsFilename)
+    }
+
+    private var dnsEventLogURL: URL? {
+        LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.dnsEventLogFilename)
     }
 
     private var networkActivityLogURL: URL? {

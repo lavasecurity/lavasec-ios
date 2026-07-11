@@ -2,7 +2,7 @@ import XCTest
 
 final class BlocklistSelectionSourceTests: XCTestCase {
     func testFilterDraftBlocklistSheetStartsFromCurrentDraftSelection() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let blockedDomainsSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "case .blocklist:",
@@ -16,7 +16,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterDraftBlocklistSheetShowsAllCuratedLists() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let availableBlocklistsBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private var availableBlocklists: [BlocklistSource]",
@@ -34,7 +34,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterDraftBlocklistSheetSavesTheFullSelection() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let appViewModelSource = try readSource(.appViewModel)
         let addSelectionBlock = try sourceBlock(
             in: filtersViewSource,
@@ -84,24 +84,35 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterEditToolbarUsesIconOnlyNativeActions() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let toolbarBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
-            endingBefore: "private struct LavaInlineInfoContent: View"
+            endingBefore: "private struct BlocklistEffectRow: View"
+        )
+        let viewingToolbarBlock = try sourceBlock(
+            in: filtersViewSource,
+            startingAt: "ToolbarItemGroup(placement: .primaryAction)",
+            endingBefore: "// NOTE: teardown (endViewingFilterDetail)"
         )
 
         XCTAssertTrue(toolbarBlock.contains("NativeToolbarIconButton(systemName: \"checkmark\", accessibilityLabel: \"Save\", role: .confirm, action: save)"))
-        XCTAssertTrue(toolbarBlock.contains("NativeToolbarIconButton(systemName: \"square.and.pencil\", accessibilityLabel: \"Edit\", action: beginEditing)"))
+        XCTAssertFalse(toolbarBlock.contains("square.and.pencil"))
+        let compactViewingToolbar = viewingToolbarBlock
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        XCTAssertTrue(compactViewingToolbar.contains(
+            "NativeToolbarIconButton( systemName: \"square.and.pencil\", accessibilityLabel: \"Edit\", action: beginEditing )"
+        ))
         XCTAssertFalse(toolbarBlock.contains("Button(\"Save\""))
         XCTAssertFalse(toolbarBlock.contains("Button(\"Edit\""))
     }
 
     func testFilterDiscardUsesPopupDialogWithStandardActions() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let myListBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct MyListCover: View",
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
 
@@ -117,10 +128,11 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testMyListPanelShowsActiveRuleCountNotRawDisplayCountsOrBudgetBar() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
+        let pickerSource = try readSource(.blocklistPickerView)
         let myListBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct MyListCover: View",
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
 
@@ -132,21 +144,21 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(filtersViewSource.contains("FilterRuleBudgetBar"))
+        XCTAssertTrue(pickerSource.contains("FilterRuleBudgetBar"))
     }
 
     func testMyListPullToRefreshUsesCatalogSync() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let myListBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct MyListCover: View",
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
 
         // Pull-to-refresh syncs the catalog — but only for the active filter; a non-active
         // "View" target passes a nil refreshAction (it isn't loaded, nothing to refresh).
         XCTAssertTrue(myListBlock.contains("refreshAction: viewModel.isViewingNonActiveFilter ? nil : {"))
-        XCTAssertTrue(myListBlock.contains("await viewModel.syncCatalog()"))
+        XCTAssertTrue(myListBlock.contains("await catalog.sync()"))
         XCTAssertFalse(
             filtersViewSource.contains("private struct CatalogSyncPanel: View"),
             "The catalog refresh panel is replaced by pull-to-refresh on the My list cover."
@@ -154,16 +166,16 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterActionButtonsUseLeadingGlyphsWithStableLabelSpacing() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
+        let sharedSource = try readSource(.filterSharedViews)
         let myListBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct MyListCover: View",
+            startingAt: "struct MyListCover: View",
             endingBefore: "private enum BlockedDomainSheet"
         )
         let filterAddButtonBlock = try sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct FilterAddButton: View",
-            endingBefore: "private struct DomainEntryForm: View"
+            in: sharedSource,
+            startingAt: "struct FilterAddButton: View"
         )
 
         XCTAssertTrue(myListBlock.contains("FilterAddButton(title: \"Add a blocklist\", systemImage: \"plus\")"))
@@ -181,11 +193,11 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(filtersViewSource.contains("lavaLocalized"))
+        XCTAssertTrue(sharedSource.contains("lavaLocalized"))
     }
 
     func testBlocklistEditRowsUseStrikethroughInsteadOfPendingStatusPills() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let blocklistRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistEffectRow: View",
@@ -202,11 +214,10 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testDomainEditRowsUseStrikethroughInsteadOfPendingStatusPills() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let domainRowBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct DomainEffectRow: View",
-            endingBefore: "private struct FilterAddButton: View"
+            startingAt: "private struct DomainEffectRow: View"
         )
 
         XCTAssertTrue(domainRowBlock.contains("Text(domain.lavaLocalized)"))
@@ -225,7 +236,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testStandaloneToolbarIconButtonsUseFullTapAreas() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let rootViewSource = try readSource(.lavaScaffold)
         let toolbarBlock = try sourceBlock(
             in: rootViewSource,
@@ -244,8 +255,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
         let domainRowBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct DomainEffectRow: View",
-            endingBefore: "private struct FilterAddButton: View"
+            startingAt: "private struct DomainEffectRow: View"
         )
 
         XCTAssertTrue(toolbarBlock.contains(".frame(width: LavaToolbarMetrics.buttonSize, height: LavaToolbarMetrics.buttonSize)"))
@@ -260,7 +270,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
     func testBlocklistPickerUsesFlatRowsInsteadOfCondensedCard() throws {
         let addBlocklistSheetBlock = try sourceBlock(
-            in: try readSource(.filtersView),
+            in: try readSource(.blocklistPickerView),
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private enum CustomBlocklistFocusField"
         )
@@ -284,8 +294,22 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         // rather than a bespoke leading selection glyph.
         XCTAssertTrue(rowBlock.contains("LavaSelectableRow("))
         XCTAssertFalse(rowBlock.contains("BlocklistPickerSelectionGlyph("))
-        XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedList {"))
+        // The DATA rows stay flat — no condensed card in the flat list or its rows. The one
+        // condensed card allowed in the sheet is the empty-state wrapper, so the picker's
+        // empty placeholder sits on the same card scaffold (shared LavaEmptyListRow) as
+        // every other empty list.
+        XCTAssertFalse(flatListBlock.contains("LavaCondensedList"))
+        XCTAssertFalse(rowBlock.contains("LavaCondensedList"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaCondensedListItem("))
+        XCTAssertEqual(
+            addBlocklistSheetBlock.components(separatedBy: "LavaCondensedList {").count - 1, 1,
+            "the empty-state wrapper is the only condensed card allowed in the picker sheet"
+        )
+        XCTAssertTrue(
+            addBlocklistSheetBlock.components(separatedBy: .whitespacesAndNewlines).joined()
+                .contains("LavaCondensedList{LavaEmptyListRow("),
+            "the sheet's sole condensed card must be the shared empty-state row"
+        )
 
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
@@ -294,7 +318,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testBlocklistPickerUsesAllBlocklistsSearchAndCustomListRoute() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
@@ -305,14 +329,21 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(addBlocklistSheetBlock.contains("@State private var searchText = \"\""))
         XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistSearchField(text: $searchText)"))
         // The single "All blocklists" section is replaced by category sections plus a
-        // row of jump-pills under the search box.
-        XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistCategoryJumpPills("))
+        // row of jump-pills under the search box. The pills are hosted by `BlocklistJumpPillBar`,
+        // which reads the scaffold's published scroll proxy (`hostsScrollProxy`) so the pinned
+        // header can drive the list without an external `ScrollViewReader` wrapping — and
+        // collapsing — the scaffold (which floated the footer; lavasec-ios#326 follow-up).
+        XCTAssertTrue(addBlocklistSheetBlock.contains("BlocklistJumpPillBar("))
+        XCTAssertFalse(
+            addBlocklistSheetBlock.contains("ScrollViewReader {"),
+            "The picker must not wrap the scaffold in its own reader; the scaffold hosts one internally."
+        )
         XCTAssertTrue(addBlocklistSheetBlock.contains("private var visibleSections: [BlocklistPickerSection]"))
         XCTAssertTrue(addBlocklistSheetBlock.contains("ForEach(visibleSections)"))
         XCTAssertTrue(addBlocklistSheetBlock.contains("LavaSectionGroup(section.title)"))
         // The jump-pills scroll to a section via an anchor placed slightly above it (so
         // the section title clears the pinned header) rather than the section's own `.id`.
-        XCTAssertTrue(addBlocklistSheetBlock.contains(".blocklistJumpAnchor(id: section.id)"))
+        XCTAssertTrue(addBlocklistSheetBlock.contains(".blocklistJumpAnchor(id: section.id, pinnedHeaderHeight: pinnedHeaderHeight)"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"All blocklists\")"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"Third-party blocklists\")"))
         XCTAssertFalse(addBlocklistSheetBlock.contains("LavaSectionGroup(\"Bring your own list\")"))
@@ -330,8 +361,34 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         XCTAssertTrue(addBlocklistSheetBlock.contains("item.matchesSearch(searchText)"))
     }
 
+    func testCategoryJumpInsetTracksMeasuredHeaderHeightNotAFixedConstant() throws {
+        // Regression: a fixed pill-jump inset left the section title tucked under the pinned
+        // header ("still too high") — worst in `.filterDraft`, whose header carries the search
+        // field the shorter `.onboardingSelection` header omits. The landing inset must be
+        // sized from the LIVE header height, so the header is measured and threaded through.
+        let filtersViewSource = try readSource(.blocklistPickerView)
+        let addBlocklistSheetBlock = try sourceBlock(
+            in: filtersViewSource,
+            startingAt: "struct AddBlocklistSheet: View",
+            endingBefore: "private struct BlocklistSearchField: View"
+        )
+        let jumpMetricsBlock = try sourceBlock(
+            in: filtersViewSource,
+            startingAt: "private enum BlocklistJumpMetrics",
+            endingBefore: "extension View"
+        )
+
+        XCTAssertTrue(addBlocklistSheetBlock.contains("@State private var pinnedHeaderHeight: CGFloat = 0"))
+        XCTAssertTrue(addBlocklistSheetBlock.contains(".onGeometryChange(for: CGFloat.self)"))
+        XCTAssertTrue(addBlocklistSheetBlock.contains("pinnedHeaderHeight = newHeight"))
+        XCTAssertTrue(jumpMetricsBlock.contains("static func topInset(pinnedHeaderHeight: CGFloat) -> CGFloat"))
+        XCTAssertTrue(jumpMetricsBlock.contains("pinnedHeaderHeight + scaffoldHeaderVerticalPadding + headerBottomGap"))
+        // The old fixed inset is gone.
+        XCTAssertFalse(jumpMetricsBlock.contains("static let topInset: CGFloat"))
+    }
+
     func testBlocklistSearchFieldMatchesDomainHistorySearchDesign() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let searchFieldBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct BlocklistSearchField: View",
@@ -351,11 +408,10 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testBringYourOwnListSheetGatesFreeUsersAndUsesBackNavigation() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let byolBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BringYourOwnListView: View",
-            endingBefore: "private struct AddBlockedDomainSheet: View"
+            startingAt: "private struct BringYourOwnListView: View"
         )
         let customListFormBlock = try sourceBlock(
             in: byolBlock,
@@ -398,7 +454,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistRowsUsePendingRefreshAndTrashConfirmation() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let customRowBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct CustomBlocklistPickerRow: View",
@@ -426,7 +482,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testDomainEntrySheetsAutoFocusAndKeepStableKeyboardFriendlyLayout() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterDomainSheets)
         let formBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainEntryForm: View",
@@ -435,16 +491,16 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         let fieldBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct DomainTextField: View",
-            endingBefore: "private enum AddBlocklistRoute"
+            endingBefore: "struct AddBlockedDomainSheet: View"
         )
         let blockedSheetBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct AddBlockedDomainSheet: View",
-            endingBefore: "private struct AddAllowedExceptionSheet: View"
+            startingAt: "struct AddBlockedDomainSheet: View",
+            endingBefore: "struct AddAllowedExceptionSheet: View"
         )
         let allowedSheetBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct AddAllowedExceptionSheet: View"
+            startingAt: "struct AddAllowedExceptionSheet: View"
         )
 
         XCTAssertTrue(formBlock.contains("@FocusState private var isDomainFieldFocused"))
@@ -471,7 +527,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistURLInputStateLivesInDedicatedSubview() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.blocklistPickerView)
         let addBlocklistSheetBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "struct AddBlocklistSheet: View",
@@ -479,8 +535,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
         )
         let bringYourOwnListBlock = try sourceBlock(
             in: filtersViewSource,
-            startingAt: "private struct BringYourOwnListView: View",
-            endingBefore: "private struct AddBlockedDomainSheet: View"
+            startingAt: "private struct BringYourOwnListView: View"
         )
 
         XCTAssertTrue(addBlocklistSheetBlock.contains("BringYourOwnListView("))
@@ -563,26 +618,28 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterSheetsUseNativeToolbarGlyphActions() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let sharedSource = try readSource(.filterSharedViews)
+        let pickerSource = try readSource(.blocklistPickerView)
+        let domainSource = try readSource(.filterDomainSheets)
 
         let lavaPlusSheetBlock = try sourceBlock(
-            in: filtersViewSource,
+            in: sharedSource,
             startingAt: "struct LavaPlusUpgradeSheet: View",
-            endingBefore: "private struct FilterEditToolbar: ToolbarContent"
+            endingBefore: "struct FilterAddButton: View"
         )
         let addBlocklistSheetBlock = try sourceBlock(
-            in: filtersViewSource,
+            in: pickerSource,
             startingAt: "struct AddBlocklistSheet: View",
             endingBefore: "private enum CustomBlocklistFocusField"
         )
         let addBlockedDomainSheetBlock = try sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct AddBlockedDomainSheet: View",
-            endingBefore: "private struct AddAllowedExceptionSheet: View"
+            in: domainSource,
+            startingAt: "struct AddBlockedDomainSheet: View",
+            endingBefore: "struct AddAllowedExceptionSheet: View"
         )
         let addAllowedExceptionSheetBlock = try sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct AddAllowedExceptionSheet: View"
+            in: domainSource,
+            startingAt: "struct AddAllowedExceptionSheet: View"
         )
 
         for sheetBlock in [
@@ -671,19 +728,21 @@ final class BlocklistSelectionSourceTests: XCTestCase {
     }
 
     func testFilterEditToolbarUsesSemanticNativePlacements() throws {
-        let filtersViewSource = try readSource(.filtersView)
+        let filtersViewSource = try readSource(.filterMyListView)
         let editToolbarBlock = try sourceBlock(
             in: filtersViewSource,
             startingAt: "private struct FilterEditToolbar: ToolbarContent",
-            endingBefore: "private struct LavaInlineInfoContent: View"
+            endingBefore: "private struct BlocklistEffectRow: View"
         )
 
         XCTAssertTrue(editToolbarBlock.contains("ToolbarItem(placement: .cancellationAction)"))
         XCTAssertTrue(editToolbarBlock.contains("ToolbarItem(placement: .confirmationAction)"))
-        XCTAssertTrue(editToolbarBlock.contains("ToolbarItem(placement: .primaryAction)"))
+        XCTAssertFalse(editToolbarBlock.contains("ToolbarItem(placement: .primaryAction)"))
+        XCTAssertTrue(filtersViewSource.contains("ToolbarItemGroup(placement: .primaryAction)"))
         XCTAssertTrue(editToolbarBlock.contains("NativeToolbarIconButton(systemName: \"xmark\""))
         XCTAssertTrue(editToolbarBlock.contains("NativeToolbarIconButton(systemName: \"checkmark\""))
-        XCTAssertTrue(editToolbarBlock.contains("NativeToolbarIconButton(systemName: \"square.and.pencil\""))
+        XCTAssertFalse(editToolbarBlock.contains("NativeToolbarIconButton(systemName: \"square.and.pencil\""))
+        XCTAssertTrue(filtersViewSource.contains("systemName: \"square.and.pencil\""))
         XCTAssertFalse(editToolbarBlock.contains("LavaToolbarIconButton("))
         XCTAssertFalse(editToolbarBlock.contains("ToolbarItem(placement: .topBarLeading)"))
         XCTAssertFalse(editToolbarBlock.contains("ToolbarItem(placement: .topBarTrailing)"))

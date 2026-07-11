@@ -10,34 +10,57 @@ public enum BackupConfigurationPayloadError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
 }
 
+/// Portable settings snapshot stored inside an encrypted backup envelope.
 public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     /// Bumped only when the wire format changes in a way an older reader cannot safely
     /// restore. A payload whose `schemaVersion` exceeds this is rejected at decode time
     /// (mirrors `ShareableFilterConfiguration.decode(configurationCode:)`) so a future
     /// vN+1 backup is never silently downgraded on a vN device.
-    public static let currentSupportedSchemaVersion = 1
+    package static let currentSupportedSchemaVersion = 1
 
+    /// Schema version stored with this payload; direct initialization preserves the supplied value.
     public let schemaVersion: Int
+    /// Identifiers of curated blocklists selected when the snapshot was made.
     public let enabledBlocklistIDs: Set<String>
+    /// User domains allowed by the backed-up configuration.
     public let allowedDomains: Set<String>
+    /// User domains blocked by the backed-up configuration.
     public let blockedDomains: Set<String>
+    /// Identifier of the selected primary resolver preset.
     public let resolverPresetID: String
+    /// Primary custom-resolver address, when one was configured.
     public let customResolverAddress: String?
+    /// Secondary primary-resolver address, when one was configured.
     public let customResolverSecondaryAddress: String?
+    /// User-facing name of the primary custom resolver.
     public let customResolverName: String?
+    /// Whether unresolved primary lookups may fall back to device DNS.
     public let fallbackToDeviceDNS: Bool
+    /// Whether device-DNS fallback should prefer an encrypted system resolver.
     public let usesEncryptedDeviceDNSFallback: Bool
+    /// Identifier of the selected fallback resolver preset.
     public let fallbackResolverPresetID: String
+    /// Fallback custom-resolver address, when one was configured.
     public let fallbackCustomResolverAddress: String?
+    /// Secondary fallback-resolver address, when one was configured.
     public let fallbackCustomResolverSecondaryAddress: String?
+    /// User-facing name of the fallback custom resolver.
     public let fallbackCustomResolverName: String?
+    /// Whether filtering counters were enabled when the snapshot was made.
     public let keepFilteringCounts: Bool
+    /// Whether domain-level diagnostics were enabled when the snapshot was made.
     public let keepDomainDiagnostics: Bool
+    /// Whether network-activity recording was enabled when the snapshot was made.
     public let keepNetworkActivity: Bool
+    /// Whether Lava Guard progress recording was enabled when the snapshot was made.
     public let keepLavaGuardProgress: Bool
+    /// Lava Guard achievement progress included in the snapshot.
     public let lavaGuardUnlocks: LavaGuardAchievementLedger
+    /// Advisory protection-enabled state captured for restoration.
     public let protectionEnabledHint: Bool
+    /// Catalog version observed when the snapshot was made, when available.
     public let catalogVersionHint: String?
+    /// Custom blocklist definitions included in the snapshot.
     public let customBlocklists: [CustomBlocklistSource]
     /// The full multi-filter library (hosted filters + active selection). Optional so
     /// pre-multi-filter backups decode to `nil` and restore as a single "Default" filter.
@@ -69,6 +92,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         case filterLibrary
     }
 
+    /// Stores the supplied backup fields without validating cross-field coherence.
     public init(
         schemaVersion: Int = 1,
         enabledBlocklistIDs: Set<String>,
@@ -119,6 +143,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.filterLibrary = filterLibrary
     }
 
+    /// Decodes supported payloads, applying legacy defaults and rejecting a future schema.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedSchemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
@@ -157,6 +182,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         self.filterLibrary = try container.decodeIfPresent(FilterLibrary.self, forKey: .filterLibrary)
     }
 
+    /// Captures backup-eligible configuration and strips device-local cache state from the library.
     public init(
         configuration: AppConfiguration,
         catalogVersionHint: String? = nil,
@@ -238,6 +264,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         filterLibrary
     }
 
+    /// Rebuilds an app configuration and migrates known custom-list URLs to catalog selections.
     public func restoredConfiguration() -> AppConfiguration {
         AppConfiguration(
             protectionEnabled: protectionEnabledHint,

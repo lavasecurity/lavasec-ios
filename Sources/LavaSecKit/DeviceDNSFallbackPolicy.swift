@@ -163,4 +163,167 @@ public enum DeviceDNSFallbackPolicy {
         let age = now.timeIntervalSince(lastExhaustedMaskedCaptureAt)
         return age < 0 || age >= deviceDNSCaptureRetryExhaustionCooldown
     }
+
+    // UR-55 (plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-plan.md): a masked
+    // capture-retry exhaustion is NOT evidence of a resolver-changing handoff. While the
+    // tunnel owns device DNS the in-process resolver read is masked in STEADY STATE
+    // (Phase 0, plans/2026-06-21-network-handoff-device-dns-recapture-plan.md), so on
+    // such a network EVERY armed cycle exhausts — including wake-armed cycles on a
+    // perfectly stable Wi-Fi. 1.2.1 inferred a handoff from exhaustion and dropped the
+    // captured (still working) resolver whenever an encrypted fallback would catch the
+    // queries; the empty list then blinded the recovery probes, stranding the user on
+    // the fallback until the next tunnel start. The rule now: preserved addresses are
+    // never discarded on masked-read evidence alone — a wire probe of the preserved
+    // primary is the discriminator. Probe outcomes feed the health/wedge chain
+    // (recovery cadences, rejection trigger) but never the live backoff map (smoke
+    // probes must not bench a working primary on a false negative); the per-address
+    // bench comes from the first organic failures, with the per-query encrypted
+    // fallback carrying every no-response query — so service yields on real failure
+    // and returns when probes succeed again.
+
+    /// Whether the exhaustion-time verification probe should hit the wire, or which
+    /// equivalent-evidence rule makes it redundant. The raw value is the
+    /// `device-dns-capture-retry-exhausted` log detail.
+    public enum ExhaustionVerificationDecision: String, Equatable, Sendable {
+        /// No equivalent evidence — probe the preserved primary now.
+        case probe
+        /// Acceptance-checked primary evidence younger than one routine probe interval
+        /// already proves the resolver serves; a probe adds radio, not information
+        /// (mirrors the routine tick's NRG-3a skip).
+        case skipFreshPrimaryEvidence = "skipped-fresh-primary-evidence"
+        /// The failure streak is past the chronic-backoff activation and the adaptive
+        /// spacing since the last wire probe has not elapsed; on a chronically-failing
+        /// network re-confirming the failure per exhaustion is pure radio drain — the
+        /// wedge/recovery cadence owns re-checks (mirrors the routine tick's UR-48
+        /// backoff; the UR-48 rc9 log's 533 failed wire probes are the drain class
+        /// this guards against).
+        case skipChronicFailureBackoff = "skipped-chronic-failure-backoff"
+    }
+
+    /// Decides the exhaustion-time verification probe from the same evidence the
+    /// routine-tick gates consult. Boundary semantics deliberately mirror those gates:
+    /// fresh evidence skips while `0 <= age <= routineSmokeProbeInterval`; chronic
+    /// spacing skips while `0 <= sinceLastWireProbe < requiredInterval`. Negative ages
+    /// (wall clock set backwards past a stamp) probe normally rather than trusting a
+    /// future stamp.
+    public static func exhaustionVerificationDecision(
+        lastAcceptedPrimaryEvidenceAt: Date?,
+        consecutiveSmokeProbeFailures: Int,
+        lastWireSmokeProbeAt: Date?,
+        now: Date
+    ) -> ExhaustionVerificationDecision {
+        if let lastAcceptedPrimaryEvidenceAt {
+            let evidenceAge = now.timeIntervalSince(lastAcceptedPrimaryEvidenceAt)
+            if evidenceAge >= 0, evidenceAge <= routineSmokeProbeInterval {
+                return .skipFreshPrimaryEvidence
+            }
+        }
+
+        if consecutiveSmokeProbeFailures >= smokeProbeBackoffActivationFailureCount,
+           let lastWireSmokeProbeAt {
+            let sinceLastWireProbe = now.timeIntervalSince(lastWireSmokeProbeAt)
+            let requiredInterval = routineSmokeProbeInterval(
+                afterConsecutiveFailures: consecutiveSmokeProbeFailures
+            )
+            if sinceLastWireProbe >= 0, sinceLastWireProbe < requiredInterval {
+                return .skipChronicFailureBackoff
+            }
+        }
+
+        return .probe
+    }
+
+    // A sleep/wake-thrashing device (UR-48 rc9 follow-up log: 303 wakes in ~9.7 h,
+    // median gaps of seconds) pays a full resolver teardown on EVERY wake — ~292
+    // fresh DoH TLS handshakes + 270 encrypted-fallback context resets in that log,
+    // tearing down the very sessions carrying DNS during micro-sleeps, plus a
+    // SERVFAIL for every pending query. After a brief suspension the pre-sleep
+    // connections are overwhelmingly still valid; the stale-socket risk the
+    // teardown exists for grows with time asleep, not with the wake itself. Below
+    // this threshold wake keeps the live runtime and leans on the existing safety
+    // nets (the coalesced settle probe re-checks the resolver; wedge recovery and
+    // handleNetworkPathUpdate's force reset catch a genuinely dead socket or a
+    // real network change). 30 s is comfortably past the observed micro-sleep
+    // cadence while short enough that DHCP/NAT rebinding across a longer sleep
+    // still gets the conservative teardown.
+    public static let briefWakeResolverPreserveThreshold: TimeInterval = 30
+
+    /// Whether wake() may KEEP the live resolver runtime (DoH/DoT/DoQ sessions,
+    /// response cache, pending queries) instead of force-resetting it. `nil`
+    /// means the suspension start was never observed (fresh process, or an OS
+    /// wake with no paired sleep) — tear down, the conservative default. A
+    /// negative interval (clock set backwards across the sleep) also tears down
+    /// rather than trusting a bogus future stamp.
+    public static func shouldPreserveResolverRuntimeAcrossWake(
+        sleepBeganAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard let sleepBeganAt else {
+            return false
+        }
+
+        let sleptFor = now.timeIntervalSince(sleepBeganAt)
+        return sleptFor >= 0 && sleptFor <= briefWakeResolverPreserveThreshold
+    }
+
+    // On a chronically-failing network the fixed routine cadence is pure radio drain:
+    // the UR-48 rc9 log shows 533 failed wire probes vs 34 successes in ~9.7 h with
+    // `consecutiveSmokeFailures` past 500 and no adaptive behavior. Failures beyond the
+    // activation count stretch the ROUTINE cadence (doubling, capped at the ceiling);
+    // every event-driven probe reason (wedge, fallback-recovery, settle, config-change,
+    // startTunnel) stays unconditional, and the consecutive-failure counter this keys on
+    // already resets on any probe success, recovery, and network-path change — so leaving
+    // backoff is instant on every real change signal. Worst case is bounded: a network
+    // that un-masks silently with NO path change, wake, or traffic evidence waits at most
+    // the ceiling (vs the base cadence) to leave an already-working fallback.
+    public static let smokeProbeBackoffActivationFailureCount = 5
+    public static let maxRoutineSmokeProbeInterval: TimeInterval = 900
+
+    /// Routine smoke-probe cadence given the current consecutive-failure streak: the base
+    /// interval below the activation count (transient blips keep today's behavior exactly),
+    /// then doubling per further failure up to the ceiling.
+    public static func routineSmokeProbeInterval(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        guard failures >= smokeProbeBackoffActivationFailureCount else {
+            return routineSmokeProbeInterval
+        }
+
+        // Cap the exponent well before the ceiling clamp so a persisted multi-hundred
+        // streak can't overflow the multiplication.
+        let doublings = min(failures - smokeProbeBackoffActivationFailureCount + 1, 8)
+        return min(routineSmokeProbeInterval * pow(2.0, Double(doublings)), maxRoutineSmokeProbeInterval)
+    }
+
+    // Log/counter hygiene (UR-48 Phase 2a). The rc9 log's dominant line on a masked network
+    // is `device-dns-captured count=0` (832 of 858 reads), and `consecutiveSmokeFailures`
+    // climbed past 500 with nothing reading values that large — both pure noise in a
+    // capped 5,000-line log that exists to diagnose incidents.
+
+    /// Saturation point for the consecutive smoke-probe failure streak. Every consumer
+    /// threshold (fallback activation, backoff activation, reconnect escalation) sits orders
+    /// of magnitude below this, so saturating changes no behavior — it only stops a
+    /// persisted health counter from growing without bound on a chronically-failing network.
+    public static let maxTrackedConsecutiveSmokeProbeFailures = 999
+
+    /// Next value of the consecutive-failure streak after one more failure (saturating).
+    public static func nextConsecutiveSmokeProbeFailureCount(current: Int) -> Int {
+        min(current + 1, maxTrackedConsecutiveSmokeProbeFailures)
+    }
+
+    /// Whether a device-DNS capture read is worth a log line: any NON-empty capture always
+    /// logs (it can change the adopted resolvers), and an empty (masked) read logs at the
+    /// transition INTO the masked state AND whenever the capture context (`reason`) changes —
+    /// a masked→masked handoff under a new reason (e.g. `network-path-changed` from one masked
+    /// network to another) is a distinct recapture attempt this diagnostic log exists to show,
+    /// so it earns one line. Only SAME-reason repeats within one masked episode are suppressed:
+    /// those were the no-information lines that flooded the log (rc9: 832 of 858 reads were
+    /// `count=0` under one repeating reason). `lastLoggedCount`/`lastLoggedReason` describe the
+    /// previous line this policy allowed; nil `lastLoggedCount` (nothing logged yet) always logs.
+    public static func shouldLogDeviceDNSCapture(
+        capturedCount: Int,
+        reason: String,
+        lastLoggedCount: Int?,
+        lastLoggedReason: String?
+    ) -> Bool {
+        capturedCount > 0 || lastLoggedCount != capturedCount || lastLoggedReason != reason
+    }
 }

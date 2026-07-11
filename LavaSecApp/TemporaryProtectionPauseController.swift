@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecKit
 
 /// Owns the temporary-protection-pause state machine that previously lived
 /// inline in `AppViewModel`: the `ProtectionPauseStore`, the one-shot resume

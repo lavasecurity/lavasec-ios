@@ -1,9 +1,34 @@
 import Foundation
 import XCTest
+import LavaSecDNS
 @testable import LavaSecCore
 @testable import LavaSecKit
 
 final class DNSMessageTests: XCTestCase {
+    func testRecordTypeRawValuesAndCodableContract() throws {
+        let knownCases: [(type: DNSRecordType, rawValue: UInt16)] = [
+            (.unknown, 0),
+            (.a, 1),
+            (.txt, 16),
+            (.aaaa, 28),
+            (.srv, 33),
+            (.svcb, 64),
+            (.https, 65),
+        ]
+
+        for knownCase in knownCases {
+            XCTAssertEqual(knownCase.type.rawValue, knownCase.rawValue)
+            XCTAssertEqual(DNSRecordType(rawValue: knownCase.rawValue), knownCase.type)
+
+            let encoded = try JSONEncoder().encode(knownCase.type)
+            XCTAssertEqual(try JSONDecoder().decode(DNSRecordType.self, from: encoded), knownCase.type)
+        }
+
+        for unrecognizedRawValue: UInt16 in [2, 63, 66, .max] {
+            XCTAssertEqual(DNSRecordType(rawValue: unrecognizedRawValue), .unknown)
+        }
+    }
+
     func testParsesQuestion() throws {
         let query = makeQuery(domain: "ads.example.com", type: 1)
         let question = try DNSMessage.parseQuestion(from: query)

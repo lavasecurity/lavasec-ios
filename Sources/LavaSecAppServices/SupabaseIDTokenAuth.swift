@@ -1,22 +1,32 @@
 import Foundation
 import LavaSecKit
 
+/// Endpoint and public API credential used to construct Supabase Auth requests.
 public struct SupabaseIDTokenAuthConfiguration: Equatable, Sendable {
+    /// Base URL of the Supabase project.
     public let projectURL: URL
+    /// Publishable project key sent in the `apikey` request header.
     public let publishableKey: String
 
+    /// Creates an authentication configuration from a project URL and publishable key.
     public init(projectURL: URL, publishableKey: String) {
         self.projectURL = projectURL
         self.publishableKey = publishableKey
     }
 }
 
+/// Supabase user identity retained with an authenticated session.
 public struct SupabaseIDTokenAuthUser: Codable, Equatable, Sendable {
+    /// Stable Supabase user identifier.
     public let id: String
+    /// User email returned by Supabase, when available.
     public let email: String?
+    /// Primary provider value from Supabase app metadata.
     public let provider: String?
+    /// Deduplicated, lowercase provider list assembled from available identity metadata.
     public let providers: [String]
 
+    /// Creates a user and normalizes the supplied provider list while preserving the primary value.
     public init(id: String, email: String?, provider: String? = nil, providers: [String] = []) {
         self.id = id
         self.email = email
@@ -31,6 +41,7 @@ public struct SupabaseIDTokenAuthUser: Codable, Equatable, Sendable {
         case identities
     }
 
+    /// Decodes user and identity metadata, merging provider sources into normalized order.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -45,6 +56,7 @@ public struct SupabaseIDTokenAuthUser: Codable, Equatable, Sendable {
         )
     }
 
+    /// Encodes persisted user fields and app metadata using Supabase wire keys.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -77,11 +89,17 @@ private struct SupabaseIDTokenAuthIdentity: Codable, Equatable, Sendable {
     let provider: String
 }
 
+/// Access and refresh credentials plus the Supabase user returned for a session.
 public struct SupabaseIDTokenAuthSession: Codable, Equatable, Sendable {
+    /// Bearer access token returned by Supabase Auth.
     public let accessToken: String
+    /// Refresh token used to obtain a replacement access token.
     public let refreshToken: String
+    /// Server-reported access-token lifetime in seconds, when supplied.
     public let expiresIn: Int?
+    /// Server-reported Unix expiry timestamp, when supplied.
     public let expiresAt: Int?
+    /// User identity associated with the session.
     public let user: SupabaseIDTokenAuthUser
 
     enum CodingKeys: String, CodingKey {
@@ -92,6 +110,7 @@ public struct SupabaseIDTokenAuthSession: Codable, Equatable, Sendable {
         case user
     }
 
+    /// Creates a session from the supplied token, expiry, and user values.
     public init(
         accessToken: String,
         refreshToken: String,
@@ -107,12 +126,12 @@ public struct SupabaseIDTokenAuthSession: Codable, Equatable, Sendable {
     }
 }
 
-public enum SupabaseIDTokenAuthError: Error, Equatable, LocalizedError {
+package enum SupabaseIDTokenAuthError: Error, Equatable, LocalizedError {
     case invalidEndpoint
     case invalidResponse
     case requestFailed(statusCode: Int, message: String?)
 
-    public var errorDescription: String? {
+    package var errorDescription: String? {
         switch self {
         case .invalidEndpoint:
             "The Supabase Auth endpoint is not valid."
@@ -128,7 +147,9 @@ public enum SupabaseIDTokenAuthError: Error, Equatable, LocalizedError {
     }
 }
 
+/// Constructs Supabase ID-token and refresh requests and decodes their session responses.
 public enum SupabaseIDTokenAuth {
+    /// Builds an ID-token grant request with optional provider access-token support.
     public static func makeTokenRequest(
         configuration: SupabaseIDTokenAuthConfiguration,
         provider: String,
@@ -148,6 +169,7 @@ public enum SupabaseIDTokenAuth {
         )
     }
 
+    /// Builds a refresh-token grant request.
     public static func makeRefreshTokenRequest(
         configuration: SupabaseIDTokenAuthConfiguration,
         refreshToken: String
@@ -159,6 +181,7 @@ public enum SupabaseIDTokenAuth {
         )
     }
 
+    /// Decodes a session from a successful HTTP response or throws a categorized auth error.
     public static func decodeSession(data: Data, response: URLResponse) throws -> SupabaseIDTokenAuthSession {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseIDTokenAuthError.invalidResponse

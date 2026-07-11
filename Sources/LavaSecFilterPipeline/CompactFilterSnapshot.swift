@@ -1,7 +1,7 @@
 import Foundation
 import LavaSecKit
 
-public enum CompactFilterSnapshotError: Error, Equatable {
+package enum CompactFilterSnapshotError: Error, Equatable {
     case invalidMagic
     case unsupportedVersion(UInt32)
     case truncatedData
@@ -11,8 +11,9 @@ public enum CompactFilterSnapshotError: Error, Equatable {
     case artifactTooLarge
 }
 
+/// Binary filter snapshot optimized for low-memory runtime lookups.
 public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
-    public static let fileVersion: UInt32 = 1
+    package static let fileVersion: UInt32 = 1
 
     // Bumped when the stored metadata summary becomes trustworthy for cheap
     // reads. Artifacts without this marker fall back to full-table recompute.
@@ -20,15 +21,17 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
 
     private static let magic = Data("LSCFSNP1".utf8)
 
+    /// Inputs that identify the configuration and catalog used to build the snapshot.
     public let identity: PreparedFilterSnapshotIdentity
-    public let generatedAt: Date
+    package let generatedAt: Date
+    /// Resolver configuration used by the runtime snapshot.
     public let resolver: DNSResolverPreset
-    public let blockRules: CompactDomainRuleSet
-    public let allowRules: CompactDomainRuleSet
-    public let nonAllowableThreatRules: CompactDomainRuleSet
-    public let summary: PreparedFilterSnapshotSummary
+    package let blockRules: CompactDomainRuleSet
+    package let allowRules: CompactDomainRuleSet
+    package let nonAllowableThreatRules: CompactDomainRuleSet
+    package let summary: PreparedFilterSnapshotSummary
 
-    public init(
+    package init(
         identity: PreparedFilterSnapshotIdentity,
         generatedAt: Date,
         resolver: DNSResolverPreset,
@@ -46,7 +49,10 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         // Catalog-level counts come from the caller, but table-derived counts are
         // always recomputed from the actual rule tables so the stored summary is
         // trustworthy by construction (older writers persisted stale protected
-        // counts, which is why reads used to recompute).
+        // counts, which is why reads used to recompute). tierBudgetRuleCount is
+        // caller-recorded like the catalog-level counts: the tables cannot
+        // reconstruct it (resident guardrail = allowlist-overlap subset only),
+        // and the tunnel's INV-TIER-1 serve gates bind it, nil failing closed.
         self.summary = PreparedFilterSnapshotSummary(
             blocklistRuleCount: summary?.blocklistRuleCount,
             blocklistSourceRuleCounts: summary?.blocklistSourceRuleCounts,
@@ -56,11 +62,12 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
                 nonAllowableThreatRules: nonAllowableThreatRules
             ),
             allowRuleCount: allowRules.count,
-            guardrailRuleCount: nonAllowableThreatRules.count
+            guardrailRuleCount: nonAllowableThreatRules.count,
+            tierBudgetRuleCount: summary?.tierBudgetRuleCount
         )
     }
 
-    public init(preparedSnapshot: PreparedFilterSnapshot) {
+    package init(preparedSnapshot: PreparedFilterSnapshot) {
         self.init(
             identity: preparedSnapshot.identity,
             generatedAt: preparedSnapshot.snapshot.generatedAt,
@@ -72,23 +79,34 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         )
     }
 
+    /// Number of block rules in the snapshot.
     public var blockRuleCount: Int {
         blockRules.count
     }
 
+    /// Number of allow rules in the snapshot.
     public var allowRuleCount: Int {
         allowRules.count
     }
 
+    /// Number of non-allowable threat guardrail rules in the snapshot.
     public var guardrailRuleCount: Int {
         nonAllowableThreatRules.count
     }
 
-    public func matches(identity expectedIdentity: PreparedFilterSnapshotIdentity) -> Bool {
+    /// Recorded compiled-rule total used for exact tier-budget enforcement.
+    ///
+    /// A missing value identifies a legacy or otherwise unstamped artifact and must be
+    /// treated as not reusable by process-boundary consumers.
+    public var tierBudgetRuleCount: Int? {
+        summary.tierBudgetRuleCount
+    }
+
+    package func matches(identity expectedIdentity: PreparedFilterSnapshotIdentity) -> Bool {
         identity == expectedIdentity
     }
 
-    public func canReuseForProtectionStartup(
+    package func canReuseForProtectionStartup(
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
     ) -> Bool {
@@ -118,7 +136,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
     /// tolerates ONLY stale catalog/guardrail content hashes while still requiring the same
     /// configuration inputs + coverage + resolver transport (so it never fails OPEN and a
     /// parser bump still forces a regenerate).
-    public func canServeAsLastKnownGood(for configuration: AppConfiguration) -> Bool {
+    package func canServeAsLastKnownGood(for configuration: AppConfiguration) -> Bool {
         guard resolver.transport == configuration.resolverPreset.transport else {
             return false
         }
@@ -132,6 +150,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         return identity.hasSameConfigurationInputs(as: configuration)
     }
 
+    /// Evaluates a raw domain, blocking invalid input and applying guardrail, allow, then block rules.
     public func decision(for rawDomain: String) -> FilterDecision {
         guard let normalizedDomain = try? DomainName.normalize(rawDomain) else {
             return FilterDecision(action: .block, reason: .invalidDomain)
@@ -140,6 +159,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         return decision(forNormalizedDomain: normalizedDomain)
     }
 
+    /// Evaluates an already normalized domain against the compact rule tables.
     public func decision(forNormalizedDomain normalizedDomain: String) -> FilterDecision {
         if nonAllowableThreatRules.containsNormalized(normalizedDomain) {
             return FilterDecision(action: .block, reason: .threatGuardrail)
@@ -156,7 +176,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         return .defaultAllow
     }
 
-    public func encodedData() throws -> Data {
+    package func encodedData() throws -> Data {
         let header = try Self.encodedHeader(
             identity: identity,
             generatedAt: generatedAt,
@@ -292,6 +312,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
     /// streaming the block entry table and copying the domain blob.
     static let streamingFlushThreshold = 64 * 1024
 
+    /// Decodes and validates a compact snapshot artifact.
     public static func decode(from data: Data) throws -> CompactFilterSnapshot {
         var reader = CompactBinaryReader(data: data)
         let magic = try reader.readData(count: Self.magic.count)
@@ -331,6 +352,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         )
     }
 
+    /// Reads and validates a snapshot summary without retaining decoded rule tables.
     public static func readSummary(from data: Data) throws -> CompactFilterSnapshotSummary {
         var reader = CompactBinaryReader(data: data)
         let magic = try reader.readData(count: Self.magic.count)
@@ -376,7 +398,11 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
                 blockRuleCount: storedSummary.blockRuleCount,
                 blockedDomainRuleCount: storedSummary.blockedDomainRuleCount,
                 allowRuleCount: storedSummary.allowRuleCount,
-                guardrailRuleCount: storedSummary.guardrailRuleCount
+                guardrailRuleCount: storedSummary.guardrailRuleCount,
+                // Not cross-checkable against the tables (see the field doc) — trusted the
+                // same way the catalog-level counts above are: written by the same encoder
+                // that wrote the tables.
+                tierBudgetRuleCount: storedSummary.tierBudgetRuleCount
             )
         }
 
@@ -401,7 +427,8 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
             blockRuleCount: summary.blockRuleCount,
             blockedDomainRuleCount: summary.blockedDomainRuleCount,
             allowRuleCount: summary.allowRuleCount,
-            guardrailRuleCount: summary.guardrailRuleCount
+            guardrailRuleCount: summary.guardrailRuleCount,
+            tierBudgetRuleCount: summary.tierBudgetRuleCount
         )
     }
 
@@ -449,22 +476,41 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
                 nonAllowableThreatRules: nonAllowableThreatRules
             ),
             allowRuleCount: allowRules.count,
-            guardrailRuleCount: nonAllowableThreatRules.count
+            guardrailRuleCount: nonAllowableThreatRules.count,
+            tierBudgetRuleCount: metadata.summary?.tierBudgetRuleCount
         )
     }
 }
 
+/// Header-level identity and rule counts for a compact snapshot artifact.
 public struct CompactFilterSnapshotSummary: Equatable, Sendable {
+    /// Inputs that identify the configuration and catalog used for the artifact.
     public let identity: PreparedFilterSnapshotIdentity
+    /// Time the snapshot represented by the artifact was generated.
     public let generatedAt: Date
+    /// Resolver configuration stored in the artifact.
     public let resolver: DNSResolverPreset
+    /// Total parsed blocklist rules before local rule merging, when recorded.
     public let blocklistRuleCount: Int?
+    /// Parsed rule counts keyed by selected blocklist source, when recorded.
     public let blocklistSourceRuleCounts: [String: Int]?
+    /// Number of effective block-table entries.
     public let blockRuleCount: Int
+    /// Number of blocked-domain entries after overlapping allow rules are applied.
     public let blockedDomainRuleCount: Int
+    /// Number of allow-table entries.
     public let allowRuleCount: Int
+    /// Number of non-allowable threat guardrail entries.
     public let guardrailRuleCount: Int
+    /// The recorded INV-TIER-1 total the writer's gate evaluated (block-merge + FULL
+    /// guardrail + allowed + blocked). Carried in the header's metadata JSON — the resident
+    /// table counts CANNOT reconstruct it (the resident guardrail is only the
+    /// allowlist-overlap subset), which is why the tunnel's tier gates bind this recorded
+    /// value and fail closed on nil (a legacy artifact regenerates through a stamping
+    /// compile). PR #335 Codex P1.
+    public let tierBudgetRuleCount: Int?
 
+    /// Returns whether the summary records every blocklist enabled by a configuration.
     public func coversEnabledBlocklists(in configuration: AppConfiguration) -> Bool {
         guard !configuration.enabledBlocklistIDs.isEmpty else {
             return true
@@ -540,7 +586,7 @@ public struct CompactFilterSnapshotSummary: Equatable, Sendable {
     }
 }
 
-public struct CompactDomainRuleSet: Equatable, Sendable {
+package struct CompactDomainRuleSet: Equatable, Sendable {
     // Internal (not fileprivate) so the in-extension streaming writer
     // (`StreamingCompactSnapshotCompiler`) can build entries that point into the blob it
     // streams to disk and hand them to `CompactFilterSnapshot.writeStreaming`.
@@ -553,14 +599,14 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
     private let suffixEntries: [Entry]
     private let domainData: Data
 
-    public init(ruleSet: DomainRuleSet) {
+    package init(ruleSet: DomainRuleSet) {
         self.init(
             exactDomains: ruleSet.exactDomainList,
             suffixDomains: ruleSet.suffixDomainList
         )
     }
 
-    public init(
+    package init(
         exactDomains: [String] = [],
         suffixDomains: [String] = []
     ) {
@@ -594,7 +640,7 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
         }
     }
 
-    public var count: Int {
+    package var count: Int {
         exactEntries.count + suffixEntries.count
     }
 
@@ -610,7 +656,7 @@ public struct CompactDomainRuleSet: Equatable, Sendable {
         12 + ((exactEntries.count + suffixEntries.count) * 6) + domainData.count
     }
 
-    public func containsNormalized(_ normalizedDomain: String) -> Bool {
+    package func containsNormalized(_ normalizedDomain: String) -> Bool {
         // Normalized domains are pure ASCII (`DomainName.normalize` restricts
         // every label to `[a-z0-9-]`), so byte-lexicographic ordering is
         // identical to the `String` ordering the entry tables were sorted by.

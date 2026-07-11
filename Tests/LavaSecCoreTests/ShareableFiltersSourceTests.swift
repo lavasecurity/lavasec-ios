@@ -8,6 +8,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
     func testFiltersScreenOffersShareAndImportRows() throws {
         let filtersSource = try readSource(.filtersView)
+        let librarySource = try readSource(.filterLibraryView)
         let screen = try sourceBlock(
             in: filtersSource,
             startingAt: "private var filtersScreen: some View",
@@ -24,7 +25,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         // Share now opens a "Choose a filter to share" picker that presents the share
         // sheet per chosen filter (was a single ShareFiltersSheet() of the active filter).
         XCTAssertTrue(filtersSource.contains("ChooseFilterToShareView()"))
-        XCTAssertTrue(filtersSource.contains("ShareFiltersSheet(code:"))
+        XCTAssertTrue(librarySource.contains("ShareFiltersSheet(code:"))
         XCTAssertTrue(filtersSource.contains("ImportFiltersFlow("))
         XCTAssertTrue(filtersSource.contains("startMode: .chooseMethod"))
         // The in-app import sheet (live QR scanner / preview) is withheld while
@@ -162,7 +163,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(rename.contains("isFilterNameAvailable(trimmed, excluding: id)"))
 
         // The create/rename sheets disable their confirm action on a duplicate name.
-        let filtersView = try readSource(.filtersView)
+        let filtersView = try readSource(.filterLibraryView)
         XCTAssertTrue(filtersView.contains("viewModel.isFilterNameAvailable($0, excluding: filter.id)"))
         XCTAssertTrue(filtersView.contains("private var isDuplicate: Bool"))
     }

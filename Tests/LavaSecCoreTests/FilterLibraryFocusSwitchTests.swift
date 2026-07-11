@@ -52,8 +52,7 @@ final class FilterLibraryFocusSwitchTests: XCTestCase {
     // MARK: - retainedWarmArtifactTokens
 
     func testRetainsActiveFirstThenNonFrozenHostedThenEligibleSidecar() {
-        var lib = library(active: "f1", ids: [("f1", "t1"), ("f2", "t2"), ("f3", "t3")])
-        _ = lib // silence if unused warnings on some toolchains
+        let lib = library(active: "f1", ids: [("f1", "t1"), ("f2", "t2"), ("f3", "t3")])
         var index = BackgroundWarmIndex()
         index.setEntry(BackgroundWarmIndexEntry(token: "side2", syncedAt: Date()), forFilterID: "f2")
         index.setEntry(BackgroundWarmIndexEntry(token: "ghost", syncedAt: Date()), forFilterID: "deleted")

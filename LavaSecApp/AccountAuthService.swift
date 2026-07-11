@@ -2,7 +2,8 @@
 import CryptoKit
 import Foundation
 @preconcurrency import GoogleSignIn
-import LavaSecCore
+import LavaSecFilterPipeline
+import LavaSecAppServices
 import Security
 import UIKit
 

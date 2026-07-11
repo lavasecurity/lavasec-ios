@@ -12,7 +12,11 @@
 # - Source lists are EXPLICIT (no directory globs): `Shared/` files compile into
 #   multiple targets by membership, and a stray file on disk must never silently
 #   join a target — membership stays a reviewed act, exactly as with the hand-kept
-#   pbxproj. pinned: FocusFilterIntentWiringSourceTests
+#   pbxproj. `scripts/check-xcodegen-sources.mjs` enforces this manifest contract.
+# - The boundary parser intentionally accepts a strict XcodeGen subset. Top-level keys
+#   and generator options are pinned; source mappings use only `path`/`buildPhase`;
+#   dependencies use `package`/`product` or `target`/`embed`/`codeSign`. Extend the
+#   parser, policy, and fixtures together before adopting other schema keys.
 # - `settingPresets: none`: every build setting below is copied verbatim from the
 #   pre-C1 hand-kept pbxproj so the generated project is setting-for-setting
 #   identical. Do not re-enable presets — they would inject defaults the drift
@@ -103,7 +107,7 @@ settings:
     GCC_WARN_UNINITIALIZED_AUTOS: "YES_AGGRESSIVE"
     GCC_WARN_UNUSED_FUNCTION: "YES"
     GCC_WARN_UNUSED_VARIABLE: "YES"
-    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
     SDKROOT: iphoneos
     SWIFT_EMIT_CONST_VALUE_PROTOCOLS: ""
     SWIFT_VERSION: "6.0"
@@ -159,16 +163,27 @@ targets:
       - path: LavaSecApp/BackupRestoreView.swift
       - path: LavaSecApp/BackupSetupView.swift
       - path: LavaSecApp/BackupSyncService.swift
+      - path: LavaSecApp/CatalogController.swift
       - path: LavaSecApp/CustomizationController.swift
       - path: LavaSecApp/DarwinNotificationObserver.swift
       - path: LavaSecApp/DeveloperPreviewViews.swift
       - path: LavaSecApp/DiagnosticsController.swift
+      - path: LavaSecApp/DiagnosticsDateControls.swift
+      - path: LavaSecApp/DiagnosticsDomainHistory.swift
+      - path: LavaSecApp/DiagnosticsLocalLogSupport.swift
+      - path: LavaSecApp/DiagnosticsNetworkActivity.swift
+      - path: LavaSecApp/DiagnosticsTopDomains.swift
       - path: LavaSecApp/DiagnosticsView.swift
+      - path: LavaSecApp/BlocklistPickerView.swift
+      - path: LavaSecApp/FilterDomainSheets.swift
+      - path: LavaSecApp/FilterLibraryView.swift
+      - path: LavaSecApp/FilterMyListView.swift
       - path: LavaSecApp/FilterPreparationPresentation.swift
       - path: LavaSecApp/FilterReviewFlowView.swift
+      - path: LavaSecApp/FilterSharedViews.swift
       - path: LavaSecApp/FiltersView.swift
       - path: LavaSecApp/GuardView.swift
-      - path: LavaSecApp/LavaCondensedList.swift
+      - path: LavaSecApp/LavaDesignSystem/LavaCondensedList.swift
       - path: LavaSecApp/LavaDesignSystem/LavaComponents.swift
       - path: LavaSecApp/LavaDesignSystem/LavaConfirmationDialog.swift
       - path: LavaSecApp/LavaDesignSystem/LavaIcon.swift
@@ -186,14 +201,24 @@ targets:
       - path: LavaSecApp/RageShakeDetector.swift
       - path: LavaSecApp/RootView.swift
       - path: LavaSecApp/SecurityController.swift
+      - path: LavaSecApp/AccountBackupSettingsView.swift
+      - path: LavaSecApp/BugReportSettingsView.swift
+      - path: LavaSecApp/CustomizationSettingsView.swift
+      - path: LavaSecApp/DNSResolverSettingsView.swift
+      - path: LavaSecApp/LegalVersionSettingsView.swift
+      - path: LavaSecApp/PrivacySecuritySettingsView.swift
+      - path: LavaSecApp/SettingsCommon.swift
       - path: LavaSecApp/SettingsView.swift
+      - path: LavaSecApp/UpgradeSettingsView.swift
       - path: LavaSecApp/ShareableFiltersUI.swift
+      - path: LavaSecApp/SwitchFilterShortcut.swift
       - path: LavaSecApp/TemporaryProtectionPauseController.swift
       # Shared/ files compiled into the app process (each Shared file lists every
       # process it compiles into; keep the per-target lists in sync when adding one).
       - path: Shared/AppGroup.swift
       - path: Shared/FocusSwitchEnvironment.swift
       - path: Shared/LavaActivityAttributes.swift
+      - path: Shared/LavaFilterEntity.swift
       - path: Shared/LavaLiveActivityActionRequest.swift
       - path: Shared/LavaLiveActivityIntents.swift
       - path: Shared/LavaProtectionCommandService.swift
@@ -230,7 +255,17 @@ targets:
         embed: true
         codeSign: false
       - package: LavaSecPackage
-        product: LavaSecCore
+        product: LavaSecKit
+      - package: LavaSecPackage
+        product: LavaSecNetworking
+      - package: LavaSecPackage
+        product: LavaSecDNS
+      - package: LavaSecPackage
+        product: LavaSecFilterPipeline
+      - package: LavaSecPackage
+        product: LavaSecPresentation
+      - package: LavaSecPackage
+        product: LavaSecAppServices
       - package: GoogleSignIn
         product: GoogleSignIn
     settings:
@@ -243,7 +278,7 @@ targets:
         DEVELOPMENT_TEAM: "$(inherited)"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: LavaSecApp/Info.plist
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         LAVA_DISPLAY_NAME: Lava Security
         LAVA_GOOGLE_IOS_CLIENT_ID: "$(inherited)"
         LAVA_GOOGLE_REVERSED_CLIENT_ID: "$(inherited)"
@@ -286,7 +321,13 @@ targets:
         buildPhase: none
     dependencies:
       - package: LavaSecPackage
-        product: LavaSecCore
+        product: LavaSecKit
+      - package: LavaSecPackage
+        product: LavaSecNetworking
+      - package: LavaSecPackage
+        product: LavaSecDNS
+      - package: LavaSecPackage
+        product: LavaSecFilterPipeline
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: "YES"
@@ -295,7 +336,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: "$(inherited)"
         INFOPLIST_FILE: LavaSecTunnel/Info.plist
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
@@ -335,7 +376,9 @@ targets:
         buildPhase: none
     dependencies:
       - package: LavaSecPackage
-        product: LavaSecCore
+        product: LavaSecKit
+      - package: LavaSecPackage
+        product: LavaSecPresentation
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: "YES"
@@ -345,7 +388,7 @@ targets:
         DEVELOPMENT_TEAM: "$(inherited)"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: LavaSecWidget/Info.plist
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
@@ -379,6 +422,7 @@ targets:
       - path: LavaSecIntents/LavaSecIntentsExtension.swift
       - path: Shared/AppGroup.swift
       - path: Shared/FocusSwitchEnvironment.swift
+      - path: Shared/LavaFilterEntity.swift
       - path: LavaSecIntents/Localizable.xcstrings
       - path: LavaSecIntents/Info.plist
         buildPhase: none
@@ -386,7 +430,9 @@ targets:
         buildPhase: none
     dependencies:
       - package: LavaSecPackage
-        product: LavaSecCore
+        product: LavaSecKit
+      - package: LavaSecPackage
+        product: LavaSecFilterPipeline
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: "YES"
@@ -396,7 +442,7 @@ targets:
         DEVELOPMENT_TEAM: "$(inherited)"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: LavaSecIntents/Info.plist
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/Frameworks"
@@ -438,7 +484,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: "$(inherited)"
         GENERATE_INFOPLIST_FILE: "YES"
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
         MARKETING_VERSION: "$(inherited)"
         PRODUCT_NAME: "$(TARGET_NAME)"
         SWIFT_VERSION: "6.0"

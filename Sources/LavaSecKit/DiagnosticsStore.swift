@@ -1,20 +1,30 @@
 import Foundation
 
-/// Hard cap on how long fine-grained, identity-level local logs (domain history
-/// events, top-domain frequency, network activity) are retained on device.
-/// Aggregate counts, protection uptime, and Lava Guard usage-day streaks are
-/// deliberately exempt — the rule is "details expire, trends don't."
+/// Nominal retention window for fine-grained, identity-level local logs.
+///
+/// Domain-history events and network activity expire by timestamp. Top-domain frequencies use
+/// calendar-day buckets, so the bucket intersecting the cutoff can retain a trailing partial day beyond
+/// this window. Aggregate counts, protection uptime, and Lava Guard usage-day streaks are deliberately
+/// exempt — the rule is "details expire, trends don't."
 public enum LocalLogRetention {
+    /// The nominal number of days for which identity-level diagnostic detail is retained.
     public static let fineGrainedDays = 7
+    /// The fine-grained retention duration in seconds.
     public static var fineGrainedWindow: TimeInterval { TimeInterval(fineGrainedDays) * 86_400 }
 }
 
+/// A locally recorded DNS query and its filtering decision.
 public struct DNSQueryEvent: Identifiable, Hashable, Codable, Sendable {
+    /// The stable identifier of the query event.
     public let id: UUID
+    /// The time at which the query was recorded.
     public let timestamp: Date
+    /// The queried domain; the public initializer normalizes it when possible and otherwise lowercases it.
     public let domain: String
+    /// The filtering decision made for the query.
     public let decision: FilterDecision
 
+    /// Creates a DNS query event, normalizing the supplied domain when possible.
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
@@ -27,17 +37,24 @@ public struct DNSQueryEvent: Identifiable, Hashable, Codable, Sendable {
         self.decision = decision
     }
 
+    /// The event timestamp formatted for local-log display.
     public var timestampLine: String {
         LocalLogTimestampFormatter.string(from: timestamp)
     }
 }
 
+/// Aggregate filtering counts and local-protection uptime for a period.
 public struct DiagnosticsSummary: Equatable, Codable, Sendable {
+    /// The number of allowed queries in the period.
     public let allowedCount: Int
+    /// The number of blocked queries in the period.
     public let blockedCount: Int
+    /// The start of the summarized period.
     public let startedAt: Date
+    /// The accumulated local-protection uptime in seconds.
     public let localProtectionUptime: TimeInterval
 
+    /// Creates a diagnostics summary from counts, start time, and uptime.
     public init(
         allowedCount: Int,
         blockedCount: Int,
@@ -57,6 +74,7 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
         case localProtectionUptime
     }
 
+    /// Decodes a diagnostics summary, defaulting fields omitted by older payloads.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -66,6 +84,7 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
         localProtectionUptime = try container.decodeIfPresent(TimeInterval.self, forKey: .localProtectionUptime) ?? 0
     }
 
+    /// Encodes the diagnostics summary.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
@@ -75,10 +94,12 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
         try container.encode(localProtectionUptime, forKey: .localProtectionUptime)
     }
 
+    /// The combined allowed and blocked query count.
     public var totalCount: Int {
         allowedCount + blockedCount
     }
 
+    /// The fraction of counted queries that were blocked, or zero when empty.
     public var blockRate: Double {
         guard totalCount > 0 else {
             return 0
@@ -86,6 +107,7 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
         return Double(blockedCount) / Double(totalCount)
     }
 
+    /// A compact day, hour, and minute representation of local-protection uptime.
     public var compactLocalProtectionUptimeText: String {
         let totalMinutes = max(0, Int(localProtectionUptime / 60))
         let days = totalMinutes / (24 * 60)
@@ -110,8 +132,11 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
     }
 }
 
+/// A domain and its retained frequency estimate.
 public struct DomainFrequency: Equatable, Codable, Sendable {
+    /// The observed domain.
     public let domain: String
+    /// The retained frequency estimate for the domain.
     public let count: Int
 }
 
@@ -120,17 +145,29 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
     var allowedCount: Int
     var blockedCount: Int
     var localProtectionUptime: TimeInterval
+    // Per-action top-domain frequency for THIS day, counting the full query volume (not the
+    // capped events buffer). Rides on the day bucket so Top Domains follows the same daily
+    // range the digest does — but, unlike the numeric counts above, it is fine-grained
+    // identity-level detail and is dropped once the day ages out of the 7-day window
+    // (`clearDomainDetail`, called from the fine-grained prune). "Details expire, trends
+    // don't" (see `LocalLogRetention`).
+    var allowedDomains: TopDomainCounter
+    var blockedDomains: TopDomainCounter
 
     init(
         dayStartedAt: Date,
         allowedCount: Int,
         blockedCount: Int,
-        localProtectionUptime: TimeInterval = 0
+        localProtectionUptime: TimeInterval = 0,
+        allowedDomains: TopDomainCounter = TopDomainCounter(),
+        blockedDomains: TopDomainCounter = TopDomainCounter()
     ) {
         self.dayStartedAt = dayStartedAt
         self.allowedCount = allowedCount
         self.blockedCount = blockedCount
         self.localProtectionUptime = localProtectionUptime
+        self.allowedDomains = allowedDomains
+        self.blockedDomains = blockedDomains
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -138,6 +175,8 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
         case allowedCount
         case blockedCount
         case localProtectionUptime
+        case allowedDomains
+        case blockedDomains
     }
 
     init(from decoder: Decoder) throws {
@@ -147,6 +186,10 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
         allowedCount = try container.decodeIfPresent(Int.self, forKey: .allowedCount) ?? 0
         blockedCount = try container.decodeIfPresent(Int.self, forKey: .blockedCount) ?? 0
         localProtectionUptime = try container.decodeIfPresent(TimeInterval.self, forKey: .localProtectionUptime) ?? 0
+        // Codable-additive: pre-split day buckets carry no domain frequency and decode to
+        // empty counters, so an upgraded install starts accumulating Top Domains forward.
+        allowedDomains = try container.decodeIfPresent(TopDomainCounter.self, forKey: .allowedDomains) ?? TopDomainCounter()
+        blockedDomains = try container.decodeIfPresent(TopDomainCounter.self, forKey: .blockedDomains) ?? TopDomainCounter()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -156,6 +199,8 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
         try container.encode(allowedCount, forKey: .allowedCount)
         try container.encode(blockedCount, forKey: .blockedCount)
         try container.encode(localProtectionUptime, forKey: .localProtectionUptime)
+        try container.encode(allowedDomains, forKey: .allowedDomains)
+        try container.encode(blockedDomains, forKey: .blockedDomains)
     }
 
     var summary: DiagnosticsSummary {
@@ -176,6 +221,45 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
         }
     }
 
+    mutating func recordDomain(_ domain: String, action: FilterAction) {
+        switch action {
+        case .allow:
+            allowedDomains.record(domain)
+        case .block:
+            blockedDomains.record(domain)
+        }
+    }
+
+    func domainCounts(action: FilterAction) -> [String: Int] {
+        switch action {
+        case .allow:
+            return allowedDomains.counts()
+        case .block:
+            return blockedDomains.counts()
+        }
+    }
+
+    var hasDomainDetail: Bool {
+        !allowedDomains.isEmpty || !blockedDomains.isEmpty
+    }
+
+    /// Drop the per-day domain frequency while leaving the numeric allow/block/uptime totals
+    /// intact — the retention split that keeps aggregate trends but expires identity-level
+    /// detail past the fine-grained window.
+    mutating func clearDomainDetail() {
+        allowedDomains = TopDomainCounter()
+        blockedDomains = TopDomainCounter()
+    }
+
+    /// Zero the numeric aggregates while leaving the per-day domain frequency intact — the
+    /// inverse split, for "Clear filtering counts", which must not wipe Top Domains (that is
+    /// identity-level domain history, governed by clearDomainHistory).
+    mutating func clearNumericCounts() {
+        allowedCount = 0
+        blockedCount = 0
+        localProtectionUptime = 0
+    }
+
     mutating func recordLocalProtectionUptime(_ duration: TimeInterval) {
         localProtectionUptime += max(0, duration)
     }
@@ -185,6 +269,7 @@ private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
     }
 }
 
+/// Retained filtering diagnostics, daily aggregates, and local-protection uptime.
 public struct DiagnosticsStore: Codable, Sendable {
     private let maxEvents: Int
     private var events: [DNSQueryEvent]
@@ -193,6 +278,7 @@ public struct DiagnosticsStore: Codable, Sendable {
     private var localProtectionUptime: TimeInterval
     private var dayCounts: [String: DiagnosticsDayCount]
     private var activeLocalProtectionStartedAt: Date?
+    /// The start of the current running-count period.
     public private(set) var startedAt: Date
 
     /// PST-1 durable applied-markers: the request timestamp of the most recent
@@ -205,6 +291,7 @@ public struct DiagnosticsStore: Codable, Sendable {
     /// (`decodeIfPresent` → nil on existing installs; a stale control timestamp then
     /// re-applies exactly once on the upgrade boundary, then the marker pins it).
     public private(set) var lastAppliedDomainHistoryClearAt: Date?
+    /// The filtering-count clear request most recently applied by this store.
     public private(set) var lastAppliedFilteringCountsClearAt: Date?
 
     /// Set whenever a fine-grained prune actually removes events — on load's
@@ -213,6 +300,7 @@ public struct DiagnosticsStore: Codable, Sendable {
     /// once consumed.
     private var pendingFineGrainedPrunePersist = false
 
+    /// Creates an empty diagnostics store with the requested event capacity.
     public init(maxEvents: Int = 250, startedAt: Date = Date()) {
         self.maxEvents = maxEvents
         self.events = []
@@ -239,6 +327,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         case lastAppliedFilteringCountsClearAt
     }
 
+    /// Decodes a diagnostics store, supplying defaults for older persisted payloads.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -256,6 +345,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         seedCurrentDayCountIfNeeded(calendar: .current)
     }
 
+    /// Encodes the diagnostics store and its retained state.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
@@ -271,10 +361,12 @@ public struct DiagnosticsStore: Codable, Sendable {
         try container.encodeIfPresent(lastAppliedFilteringCountsClearAt, forKey: .lastAppliedFilteringCountsClearAt)
     }
 
+    /// The summary for the day containing the current start time.
     public var summary: DiagnosticsSummary {
         dailySummary(on: startedAt)
     }
 
+    /// Returns the filtering summary for the calendar day containing `date`.
     public func dailySummary(on date: Date, calendar: Calendar = .current, asOf: Date = Date()) -> DiagnosticsSummary {
         let key = Self.dayKey(for: date, calendar: calendar)
         if let dayCount = dayCounts[key] {
@@ -301,6 +393,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         )
     }
 
+    /// Returns an aggregate summary for the inclusive calendar-day range.
     public func rangeSummary(
         from startDate: Date,
         to endDate: Date,
@@ -334,14 +427,17 @@ public struct DiagnosticsStore: Codable, Sendable {
         )
     }
 
+    /// Retained DNS query events in reverse chronological order.
     public var recentEvents: [DNSQueryEvent] {
         events.reversed()
     }
 
+    /// Whether a local-protection uptime interval is currently running.
     public var isLocalProtectionUptimeActive: Bool {
         activeLocalProtectionStartedAt != nil
     }
 
+    /// Whether the store contains filtering counts or local-protection uptime.
     public var hasFilteringCountData: Bool {
         allowedCount > 0
             || blockedCount > 0
@@ -350,6 +446,7 @@ public struct DiagnosticsStore: Codable, Sendable {
             || dayCounts.values.contains { $0.hasFilteringCountData }
     }
 
+    /// Returns day keys whose local-protection uptime meets `minimumUptime`.
     public func localProtectionUsageDayKeys(
         minimumUptime: TimeInterval = LavaGuardProgressPolicy.minimumUsageDayUptime,
         calendar: Calendar = .current,
@@ -369,6 +466,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         return keys
     }
 
+    /// Returns recent events matching an action and optional domain search.
     public func recentEvents(action: FilterAction, searchText: String = "", limit: Int = 100) -> [DNSQueryEvent] {
         let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
@@ -439,6 +537,17 @@ public struct DiagnosticsStore: Codable, Sendable {
             events.removeFirst(events.count - maxEvents)
         }
 
+        // Top Domains counts the full query volume via the per-day domain counter, NOT this
+        // capped events buffer — a heavy user's buffer holds only the last ~250 queries, so
+        // ranking it summed to ~1% of the real block count (the reported discrepancy). Paused
+        // allows aren't real filter matches, so they're excluded from the ranking exactly as
+        // they were when the ranking read the events buffer. Gated with the events buffer on
+        // `keepDomainHistory`: Top Domains reveals specific domains, so it honors the same
+        // domain-history privacy toggle, never `keepFilteringCounts` alone.
+        if decision.reason != .pausedAllow {
+            recordDomainFrequency(domain: domain, action: decision.action, calendar: .current)
+        }
+
         pruneExpiredEvents(now: Date())
         return true
     }
@@ -450,16 +559,34 @@ public struct DiagnosticsStore: Codable, Sendable {
     /// untouched (internal force-off clears carry no control request to dedup against).
     public mutating func clearDomainHistory(clearedAt: Date? = nil) {
         events.removeAll(keepingCapacity: true)
+        // Top Domains is identity-level domain history too, so clearing history must wipe the
+        // per-day domain frequency as well — while leaving the numeric allow/block/uptime
+        // trends (governed by `clearFilteringCounts`) untouched. Snapshot the keys: we mutate
+        // the values in place, never the key set.
+        for key in Array(dayCounts.keys) where dayCounts[key]?.hasDomainDetail == true {
+            dayCounts[key]?.clearDomainDetail()
+        }
         if let clearedAt {
             lastAppliedDomainHistoryClearAt = clearedAt
         }
     }
 
+    /// Clears numeric aggregates, starts a new count period, and retains domain detail.
     public mutating func clearFilteringCounts(startedAt: Date = Date(), calendar: Calendar = .current) {
         allowedCount = 0
         blockedCount = 0
         localProtectionUptime = 0
-        dayCounts.removeAll(keepingCapacity: true)
+        // Clear only the NUMERIC aggregates. Top Domains frequency rides inside `dayCounts` but
+        // is identity-level domain history — it is governed by `clearDomainHistory`, not by
+        // clearing counts — so keep buckets that still carry domain detail (with their numeric
+        // fields zeroed) and drop the rest so empty buckets don't accumulate (PR #327 review).
+        for key in Array(dayCounts.keys) {
+            if dayCounts[key]?.hasDomainDetail == true {
+                dayCounts[key]?.clearNumericCounts()
+            } else {
+                dayCounts.removeValue(forKey: key)
+            }
+        }
         activeLocalProtectionStartedAt = nil
         self.startedAt = startedAt
         // `startedAt` IS the moment this counts window began, i.e. when it was last
@@ -470,6 +597,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         seedCurrentDayCountIfNeeded(calendar: calendar)
     }
 
+    /// Starts an uptime interval unless one is already active.
     public mutating func startLocalProtectionUptime(at date: Date = Date(), calendar: Calendar = .current) {
         resetForCurrentDayIfNeeded(now: date, calendar: calendar)
 
@@ -480,6 +608,7 @@ public struct DiagnosticsStore: Codable, Sendable {
         activeLocalProtectionStartedAt = date
     }
 
+    /// Stops the active uptime interval and records its elapsed duration.
     public mutating func stopLocalProtectionUptime(at date: Date = Date(), calendar: Calendar = .current) {
         guard let activeLocalProtectionStartedAt else {
             return
@@ -538,15 +667,45 @@ public struct DiagnosticsStore: Codable, Sendable {
         let cutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
         let countBefore = events.count
         events.removeAll { $0.timestamp < cutoff }
-        let didRemove = events.count != countBefore
+        var didRemove = events.count != countBefore
+
+        // Top-domain frequency is fine-grained identity-level detail (`LocalLogRetention`):
+        // it must not outlive the 7-day window even though the numeric `dayCounts` it rides
+        // on are durable trends. Drop the domain detail only once the WHOLE day has aged out
+        // (`dayEnd <= cutoff`), NOT at `dayStartedAt < cutoff`: a day bucket is day-granular,
+        // so a still-in-window afternoon (whose rows the events buffer keeps by exact
+        // timestamp) would otherwise be stripped up to ~a day early, making Top Domains
+        // undercount / go empty while Domain History still lists those rows (PR #327 review).
+        // One extra day of aggregate detail on the trailing edge is the price of day
+        // granularity, and it errs toward matching the events buffer rather than starving it.
+        let dayLength: TimeInterval = 86_400
+        let expiredDomainDetailKeys = dayCounts.compactMap { key, day in
+            (day.dayStartedAt.addingTimeInterval(dayLength) <= cutoff && day.hasDomainDetail) ? key : nil
+        }
+        for key in expiredDomainDetailKeys {
+            dayCounts[key]?.clearDomainDetail()
+            didRemove = true
+        }
+
         if didRemove {
             pendingFineGrainedPrunePersist = true
         }
         return didRemove
     }
 
+    /// Returns ranked retained-domain frequency estimates for the requested action.
     public func topDomains(action: FilterAction, limit: Int = 10) -> [DomainFrequency] {
-        rankedDomains(action: action, limit: limit) { _ in true }
+        // Aggregate every retained day's counter — domain detail only survives inside the
+        // fine-grained window (older buckets were cleared by the prune), so this spans the
+        // same ~7-day window the old whole-events-buffer ranking did, but over the full query
+        // volume instead of the last 250 events.
+        var counts: [String: Int] = [:]
+        for day in dayCounts.values {
+            for (domain, count) in day.domainCounts(action: action) {
+                counts[domain, default: 0] += count
+            }
+        }
+        return Self.rankedDomains(from: counts, limit: limit)
     }
 
     /// Top domains restricted to the inclusive day range `[from, to]`. Used by the
@@ -563,41 +722,32 @@ public struct DiagnosticsStore: Codable, Sendable {
         let start = calendar.startOfDay(for: min(startDate, endDate))
         let end = calendar.startOfDay(for: max(startDate, endDate))
         let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let endExclusive = calendar.date(byAdding: .day, value: 1, to: end) else {
-            return topDomains(action: action, limit: limit)
-        }
 
-        return rankedDomains(action: action, limit: limit) { event in
-            guard event.timestamp >= start, event.timestamp < endExclusive else {
-                return false
+        var counts: [String: Int] = [:]
+        var cursor = start
+        while cursor <= end {
+            let key = Self.dayKey(for: cursor, calendar: calendar)
+            if let day = dayCounts[key] {
+                for (domain, count) in day.domainCounts(action: action) {
+                    guard normalizedSearch.isEmpty
+                        || domain.localizedCaseInsensitiveContains(normalizedSearch) else {
+                        continue
+                    }
+                    counts[domain, default: 0] += count
+                }
             }
 
-            guard !normalizedSearch.isEmpty else {
-                return true
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else {
+                break
             }
-
-            return event.domain.localizedCaseInsensitiveContains(normalizedSearch)
+            cursor = nextDay
         }
+
+        return Self.rankedDomains(from: counts, limit: limit)
     }
 
-    private func rankedDomains(
-        action: FilterAction,
-        limit: Int,
-        where isIncluded: (DNSQueryEvent) -> Bool
-    ) -> [DomainFrequency] {
-        var counts: [String: Int] = [:]
-
-        // Paused-allows aren't real filter matches — they're excluded from ranking so a
-        // domain reached only while protection happened to be paused doesn't crowd out
-        // domains the filter actually evaluated and allowed/blocked.
-        for event in events
-        where event.decision.action == action
-            && event.decision.reason != .pausedAllow
-            && isIncluded(event) {
-            counts[event.domain, default: 0] += 1
-        }
-
-        return counts
+    private static func rankedDomains(from counts: [String: Int], limit: Int) -> [DomainFrequency] {
+        counts
             .map { DomainFrequency(domain: $0.key, count: $0.value) }
             .sorted { left, right in
                 if left.count == right.count {
@@ -614,6 +764,22 @@ public struct DiagnosticsStore: Codable, Sendable {
 
         let key = Self.dayKey(for: startedAt, calendar: calendar)
         dayCounts[key]?.record(action)
+    }
+
+    private mutating func recordDomainFrequency(domain: String, action: FilterAction, calendar: Calendar) {
+        // Count the NORMALIZED host, matching the events buffer (`DNSQueryEvent` normalizes on
+        // init) and `DNSEventLog` (which normalizes before interning). `recordDiagnostic`
+        // forwards the raw DNS question, so without this a 0x20-/mixed-case name would split one
+        // host across several Top Domains keys — under-reporting or duplicating (PR #327 review).
+        let normalizedDomain = (try? DomainName.normalize(domain)) ?? domain.lowercased()
+
+        // Attribute the domain to the current day's bucket, matching `recordDayCount`. The
+        // bucket is seeded here in case domain history is on while filtering counts are off,
+        // so the count path never ran.
+        seedCurrentDayCountIfNeeded(calendar: calendar)
+
+        let key = Self.dayKey(for: startedAt, calendar: calendar)
+        dayCounts[key]?.recordDomain(normalizedDomain, action: action)
     }
 
     private mutating func recordLocalProtectionUptime(from startDate: Date, to endDate: Date, calendar: Calendar) {

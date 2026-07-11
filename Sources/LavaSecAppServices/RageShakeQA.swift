@@ -1,12 +1,16 @@
 import Foundation
 import LavaSecKit
 
+/// Screen selected after a recognized rage-shake gesture.
 public enum RageShakeDestination: Equatable, Identifiable, Sendable {
     #if DEBUG || LAVA_QA_TOOLS
+    /// Internal phone-QA tools available in QA-capable builds.
     case phoneQA
     #endif
+    /// User-facing feedback and bug-report flow.
     case bugReport
 
+    /// Stable identifier used for presentation routing.
     public var id: String {
         switch self {
         #if DEBUG || LAVA_QA_TOOLS
@@ -19,15 +23,16 @@ public enum RageShakeDestination: Equatable, Identifiable, Sendable {
     }
 }
 
-public enum RageShakeMode: Equatable, Sendable {
+package enum RageShakeMode: Equatable, Sendable {
     case normalUser
     #if DEBUG || LAVA_QA_TOOLS
     case admin
     #endif
 }
 
+/// Maps the caller's QA entitlement into a rage-shake destination.
 public enum RageShakeRouter {
-    public static func destination(for mode: RageShakeMode) -> RageShakeDestination {
+    package static func destination(for mode: RageShakeMode) -> RageShakeDestination {
         switch mode {
         case .normalUser:
             return .bugReport
@@ -38,6 +43,7 @@ public enum RageShakeRouter {
         }
     }
 
+    /// Returns phone QA only for an allowed QA-capable build; otherwise returns feedback.
     public static func destination(allowsAdminQA: Bool) -> RageShakeDestination {
         #if DEBUG || LAVA_QA_TOOLS
         destination(for: allowsAdminQA ? .admin : .normalUser)
@@ -61,7 +67,9 @@ public enum RageShakeRouter {
     }
 }
 
+/// Guards gesture activation against hidden views, responder capture, and active text input.
 public enum RageShakeActivationPolicy {
+    /// Returns whether the detector may activate for the supplied view and input state.
     public static func shouldActivate(
         isViewInWindow: Bool,
         isDetectorFirstResponder: Bool,
@@ -80,10 +88,13 @@ public enum RageShakeActivationPolicy {
 /// just de-dupes any redundant events. A larger `requiredShakes` remains
 /// available for callers that explicitly want a stricter multi-shake gesture.
 public struct RageShakeIntentTracker: Sendable {
+    /// Number of events required to trigger, clamped to at least one by the initializer.
     public let requiredShakes: Int
+    /// Maximum monotonic-time interval retained between shake events.
     public let window: TimeInterval
     private var recentShakeTimes: [TimeInterval] = []
 
+    /// Creates a tracker with a clamped event threshold and the supplied time window.
     public init(requiredShakes: Int = 1, window: TimeInterval = 1.5) {
         self.requiredShakes = max(1, requiredShakes)
         self.window = window
@@ -104,15 +115,23 @@ public struct RageShakeIntentTracker: Sendable {
 }
 
 #if DEBUG || LAVA_QA_TOOLS
+/// Menu section used to group internal QA actions.
 public enum AdminQAActionSection: String, CaseIterable, Identifiable, Sendable {
+    /// Navigation and user-facing app-flow actions.
     case appFlows
+    /// Filter-rule and hosted-probe actions.
     case filtering
+    /// Resolver and local-privacy actions.
     case resolverAndPrivacy
+    /// Subscription-plan and limit actions.
     case planAndLimits
+    /// Destructive QA-state cleanup actions.
     case cleanup
 
+    /// Stable identifier derived from the raw value.
     public var id: String { rawValue }
 
+    /// Display title for the section.
     public var title: String {
         switch self {
         case .appFlows:
@@ -129,28 +148,47 @@ public enum AdminQAActionSection: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Internal app-state or navigation mutation exposed by the phone-QA menu.
 public enum AdminQAAction: String, CaseIterable, Identifiable, Sendable {
+    /// Reopens the onboarding welcome flow.
     case showWelcome
+    /// Opens the ordinary user feedback flow.
     case showUserBugReport
+    /// Installs the hosted allow, block, exception, and guardrail probes.
     case applyHostedProbes
+    /// Prepares the default-allow probe.
     case testDefaultAllow
+    /// Prepares the allowlist-override probe.
     case testAllowlist
+    /// Prepares the denylist probe.
     case testDenylist
+    /// Prepares the protected threat-guardrail probe.
     case testThreatGuardrail
+    /// Selects the built-in Google DNS resolver.
     case setGoogleDNS
+    /// Selects the built-in Cloudflare DoH resolver.
     case setCloudflareDoH
+    /// Selects the built-in Cloudflare DoT resolver.
     case setCloudflareDoT
+    /// Enables local domain-history recording.
     case enableLocalDomainHistory
+    /// Disables local domain history and clears saved rows.
     case disableLocalDomainHistory
+    /// Clears saved local activity without changing the history setting.
     case clearLocalActivity
+    /// Switches local QA state to paid-plan behavior.
     case setPaidPlan
+    /// Switches local QA state to free-plan behavior.
     case setFreePlan
+    /// Resets probes, plan, resolver, and history QA state.
     case clearQAState
 
+    /// Stable identifier derived from the raw value.
     public var id: String {
         rawValue
     }
 
+    /// Display title for the action.
     public var title: String {
         switch self {
         case .showWelcome:
@@ -188,6 +226,7 @@ public enum AdminQAAction: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Short description of the mutation the action performs.
     public var summary: String {
         switch self {
         case .showWelcome:
@@ -225,6 +264,7 @@ public enum AdminQAAction: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Menu section in which the action is presented.
     public var section: AdminQAActionSection {
         switch self {
         case .showWelcome, .showUserBugReport:
@@ -241,15 +281,21 @@ public enum AdminQAAction: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Internal QA operation applied to the saved VPN configuration profile.
 public enum AdminQAVPNProfileAction: String, CaseIterable, Identifiable, Sendable {
+    /// Saves the VPN profile without starting protection.
     case installProfile
+    /// Stops protection and removes the saved profile.
     case removeProfile
+    /// Removes and then reinstalls the saved profile.
     case resetProfile
 
+    /// Stable identifier derived from the raw value.
     public var id: String {
         rawValue
     }
 
+    /// Display title for the profile operation.
     public var title: String {
         switch self {
         case .installProfile:
@@ -261,6 +307,7 @@ public enum AdminQAVPNProfileAction: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
+    /// Short description of the profile operation.
     public var summary: String {
         switch self {
         case .installProfile:

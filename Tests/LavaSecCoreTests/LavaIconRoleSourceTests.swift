@@ -20,7 +20,8 @@ final class LavaIconRoleSourceTests: XCTestCase {
     func testSharedComponentsAndTabsNameRolesNotSymbolStrings() throws {
         let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("let icon: LavaIconRole?"))
-        XCTAssertTrue(components.contains("Image(systemName: icon.sfSymbolName)"))
+        XCTAssertTrue(components.contains("badge: icon.map { .systemImage($0.sfSymbolName) }"))
+        XCTAssertTrue(components.contains("Image(systemName: systemImage)"))
 
         let root = try readSource(.rootView)
         // The Guard tab still names the ROLE (not a raw glyph string); it now resolves the glyph

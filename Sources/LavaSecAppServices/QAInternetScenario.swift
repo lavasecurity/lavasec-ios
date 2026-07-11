@@ -2,21 +2,36 @@ import Foundation
 import LavaSecKit
 
 #if DEBUG || LAVA_QA_TOOLS
+/// Real-world network condition exercised by a manual internet QA scenario.
 public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Sendable {
+    /// Cellular tower or radio-band handover while protection stays connected.
     case cellularHandover
+    /// Transition from Wi-Fi coverage to cellular data.
     case wifiToCellularSwitch
+    /// Transition from cellular data onto Wi-Fi.
     case cellularToWifiSwitch
+    /// Unstable edge-of-range Wi-Fi that repeatedly becomes unusable.
     case flappingEdgeWifi
+    /// Roaming between access points that share an SSID.
     case sameSSIDRoaming
+    /// Associated Wi-Fi whose upstream internet path is unavailable.
     case wifiInternetBlackhole
+    /// Loss and restoration of every radio through Airplane Mode.
     case airplaneModeRecovery
+    /// Abrupt signal loss and partial recovery in a shielded area.
     case elevatorSignalLoss
+    /// Slow or congested cellular service with low scheduling priority.
     case deprioritizedLowBandwidth
+    /// An iOS-constrained network with Low Data Mode enabled.
     case lowDataModeConstrained
+    /// IPv6-only connectivity using NAT64 and DNS64.
     case ipv6OnlyNAT64
+    /// Reduced-MTU or lossy path that stresses DNS over QUIC.
     case mtuDoQFragmentation
+    /// Wi-Fi rejoin through a captive portal or intercepted DNS path.
     case captivePortalRejoin
 
+    /// Stable kebab-case identifier for the condition.
     public var id: String {
         switch self {
         case .cellularHandover:
@@ -48,6 +63,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         }
     }
 
+    /// Display title for the condition.
     public var title: String {
         switch self {
         case .cellularHandover:
@@ -79,6 +95,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         }
     }
 
+    /// Short description of the network behavior under test.
     public var summary: String {
         switch self {
         case .cellularHandover:
@@ -110,6 +127,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         }
     }
 
+    /// Ordered manual steps for reproducing the condition.
     public var testerSteps: [String] {
         switch self {
         case .cellularHandover:
@@ -206,6 +224,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         }
     }
 
+    /// Expected protection and DNS behavior after completing the steps.
     public var expectedOutcome: String {
         switch self {
         case .cellularHandover:
@@ -238,20 +257,34 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
     }
 }
 
+/// Resolver and fallback configuration applied by an internet QA scenario.
 public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
+    /// Stable identifier for the setup.
     public let id: String
+    /// Display title for the setup.
     public let title: String
+    /// Short explanation of the resolver and fallback combination.
     public let summary: String
+    /// Primary resolver preset identifier.
     public let resolverPresetID: String
+    /// Primary custom-resolver address, when the setup uses one.
     public let customResolverAddress: String?
+    /// Display name for the primary custom resolver.
     public let customResolverName: String?
+    /// Whether individual lookups may fall back to device DNS.
     public let fallbackToDeviceDNS: Bool
+    /// Whether a device-DNS primary may escape through an encrypted fallback resolver.
     public let usesEncryptedDeviceDNSFallback: Bool
+    /// Resolver preset identifier used for encrypted fallback.
     public let fallbackResolverPresetID: String
+    /// Custom encrypted-fallback address, when supplied.
     public let fallbackCustomResolverAddress: String?
+    /// Display name for the custom encrypted fallback.
     public let fallbackCustomResolverName: String?
+    /// Transport label represented by this setup.
     public let transport: DNSResolverTransport
 
+    /// Creates a setup by storing the supplied resolver and fallback fields without validation.
     public init(
         id: String,
         title: String,
@@ -280,6 +313,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         self.transport = transport
     }
 
+    /// Device DNS primary with encrypted fallback disabled.
     public static let deviceNoEncryptedFallback = QAInternetDNSSetup(
         id: "device-no-encrypted-fallback",
         title: "Device DNS",
@@ -290,6 +324,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .deviceDNS
     )
 
+    /// Device DNS primary with Mullvad DoH as the encrypted escape path.
     public static let deviceEncryptedDoHFallback = QAInternetDNSSetup(
         id: "device-encrypted-doh-fallback",
         title: "Device + Encrypted Fallback",
@@ -301,6 +336,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .deviceDNS
     )
 
+    /// Plain Google DNS with per-query device fallback enabled.
     public static let plainWithDeviceFallback = QAInternetDNSSetup(
         id: "plain-with-device-fallback",
         title: "Plain DNS + Device Fallback",
@@ -311,6 +347,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .plainDNS
     )
 
+    /// Plain Google DNS with device fallback disabled.
     public static let plainWithoutDeviceFallback = QAInternetDNSSetup(
         id: "plain-without-device-fallback",
         title: "Plain DNS No Device Fallback",
@@ -321,6 +358,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .plainDNS
     )
 
+    /// Cloudflare DoH with per-query device fallback enabled.
     public static let dohWithDeviceFallback = QAInternetDNSSetup(
         id: "doh-with-device-fallback",
         title: "DoH + Device Fallback",
@@ -331,6 +369,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverHTTPS
     )
 
+    /// Cloudflare DoH with device fallback disabled.
     public static let dohWithoutDeviceFallback = QAInternetDNSSetup(
         id: "doh-without-device-fallback",
         title: "DoH No Device Fallback",
@@ -341,6 +380,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverHTTPS
     )
 
+    /// Cloudflare DoT with device fallback disabled.
     public static let dotWithoutDeviceFallback = QAInternetDNSSetup(
         id: "dot-without-device-fallback",
         title: "DoT No Device Fallback",
@@ -351,6 +391,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverTLS
     )
 
+    /// Cloudflare DoT with per-query device fallback enabled.
     public static let dotWithDeviceFallback = QAInternetDNSSetup(
         id: "dot-with-device-fallback",
         title: "DoT + Device Fallback",
@@ -361,6 +402,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverTLS
     )
 
+    /// Custom AdGuard DoQ endpoint with device fallback disabled.
     public static let customDoQWithoutDeviceFallback = QAInternetDNSSetup(
         id: "custom-doq-without-device-fallback",
         title: "Custom DoQ No Device Fallback",
@@ -373,6 +415,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverQUIC
     )
 
+    /// Custom AdGuard DoQ endpoint with per-query device fallback enabled.
     public static let customDoQWithDeviceFallback = QAInternetDNSSetup(
         id: "custom-doq-with-device-fallback",
         title: "Custom DoQ + Device Fallback",
@@ -385,6 +428,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .dnsOverQUIC
     )
 
+    /// Ordered DNS setups offered by the QA scenario picker.
     public static let allCases: [QAInternetDNSSetup] = [
         .deviceNoEncryptedFallback,
         .deviceEncryptedDoHFallback,
@@ -398,6 +442,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         .customDoQWithDeviceFallback
     ]
 
+    /// Compact fallback description used in scenario metadata.
     public var fallbackLabel: String {
         if usesEncryptedDeviceDNSFallback {
             return "encrypted fallback"
@@ -407,14 +452,21 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Curated filter-load size crossed with network and resolver QA axes.
 public enum QAInternetBlocklistLoad: String, CaseIterable, Identifiable, Sendable {
+    /// No optional blocklists.
     case minimal
+    /// Recommended fresh-install blocklists.
     case recommended
+    /// Recommended lists plus additional large sources.
     case large
+    /// Every curated source for maximum preparation pressure.
     case stress
 
+    /// Stable identifier derived from the raw value.
     public var id: String { rawValue }
 
+    /// Display title for the load size.
     public var title: String {
         switch self {
         case .minimal:
@@ -428,6 +480,7 @@ public enum QAInternetBlocklistLoad: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
+    /// Explanation of the enabled-source profile.
     public var summary: String {
         switch self {
         case .minimal:
@@ -441,6 +494,7 @@ public enum QAInternetBlocklistLoad: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
+    /// Compact size label used in scenario metadata.
     public var abbreviation: String {
         switch self {
         case .minimal:
@@ -454,6 +508,7 @@ public enum QAInternetBlocklistLoad: String, CaseIterable, Identifiable, Sendabl
         }
     }
 
+    /// Curated blocklist identifiers enabled for this load.
     public var enabledBlocklistIDs: Set<String> {
         switch self {
         case .minimal:
@@ -472,11 +527,16 @@ public enum QAInternetBlocklistLoad: String, CaseIterable, Identifiable, Sendabl
     }
 }
 
+/// One combination of network condition, DNS setup, and blocklist load.
 public struct QAInternetScenario: Identifiable, Equatable, Sendable {
+    /// Network condition the tester should reproduce.
     public let networkCondition: QAInternetNetworkCondition
+    /// Resolver and fallback configuration to apply.
     public let dnsSetup: QAInternetDNSSetup
+    /// Blocklist load to prepare.
     public let blocklistLoad: QAInternetBlocklistLoad
 
+    /// Creates a scenario from one value on each QA axis.
     public init(
         networkCondition: QAInternetNetworkCondition,
         dnsSetup: QAInternetDNSSetup,
@@ -487,27 +547,38 @@ public struct QAInternetScenario: Identifiable, Equatable, Sendable {
         self.blocklistLoad = blocklistLoad
     }
 
+    /// Stable composite identifier formed from the three axis identifiers.
     public var id: String {
         "\(networkCondition.id)__\(dnsSetup.id)__\(blocklistLoad.id)"
     }
 
+    /// Composite display title formed from the three axis titles.
     public var title: String {
         "\(networkCondition.title) / \(dnsSetup.title) / \(blocklistLoad.title)"
     }
 
+    /// Compact transport, fallback, and load description.
     public var metadata: String {
         "\(dnsSetup.transport.menuTitle) · \(dnsSetup.fallbackLabel) · \(blocklistLoad.abbreviation)"
     }
 }
 
+/// Nonempty cross-product of network, DNS, and blocklist axes for a QA pass.
 public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
+    /// Stable suite identifier.
     public let id: String
+    /// Display title for the suite.
     public let title: String
+    /// Short description of the suite's testing purpose.
     public let summary: String
+    /// Network-condition axis included in the suite.
     public let networkConditions: [QAInternetNetworkCondition]
+    /// DNS-setup axis included in the suite.
     public let dnsSetups: [QAInternetDNSSetup]
+    /// Blocklist-load axis included in the suite.
     public let blocklistLoads: [QAInternetBlocklistLoad]
 
+    /// Creates a suite and traps if any cross-product axis is empty.
     public init(
         id: String,
         title: String,
@@ -530,10 +601,12 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         self.blocklistLoads = blocklistLoads
     }
 
+    /// Number of scenarios in the complete axis cross-product.
     public var totalCombinationCount: Int {
         networkConditions.count * dnsSetups.count * blocklistLoads.count
     }
 
+    /// Scenario formed from the first value of each nonempty axis.
     public var startingScenario: QAInternetScenario {
         QAInternetScenario(
             networkCondition: networkConditions[0],
@@ -542,10 +615,12 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         )
     }
 
+    /// Compact combination-count label.
     public var metadata: String {
         "\(totalCombinationCount) combos"
     }
 
+    /// Small Wi-Fi/cellular handover suite using normal and heavy filter loads.
     public static let handoverSmoke = QAInternetScenarioSuite(
         id: "handover-smoke",
         title: "Handover Smoke",
@@ -564,6 +639,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         ]
     )
 
+    /// Hard radio-loss recovery suite with several fallback configurations.
     public static let airplaneElevatorRecovery = QAInternetScenarioSuite(
         id: "airplane-elevator-recovery",
         title: "Airplane + Elevator Recovery",
@@ -583,6 +659,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         ]
     )
 
+    /// Congested-cellular suite spanning plain and encrypted resolver transports.
     public static let deprioritizedCellular = QAInternetScenarioSuite(
         id: "deprioritized-cellular",
         title: "Deprioritized Cellular",
@@ -604,6 +681,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         ]
     )
 
+    /// Complete cross-product of every demanding network, DNS, and load option.
     public static let fullNetworkSweep = QAInternetScenarioSuite(
         id: "full-network-sweep",
         title: "Full Network Sweep",
@@ -613,6 +691,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         blocklistLoads: QAInternetBlocklistLoad.allCases
     )
 
+    /// Ordered suites offered by the QA picker.
     public static let allCases: [QAInternetScenarioSuite] = [
         .handoverSmoke,
         .airplaneElevatorRecovery,

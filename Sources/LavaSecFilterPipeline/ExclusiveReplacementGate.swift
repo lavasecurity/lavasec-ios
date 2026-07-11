@@ -36,6 +36,7 @@ public struct ExclusiveReplacementGate: Equatable, Sendable {
     /// non-cover-driver (restore/import) nobody else will dismiss it, so the superseded op must.
     public private(set) var currentOwnerOwnsPreparationCover: Bool
 
+    /// Creates a gate with an initial epoch and preparation-cover ownership state.
     public init(epoch: Int = 0, currentOwnerOwnsPreparationCover: Bool = false) {
         self.epoch = epoch
         self.currentOwnerOwnsPreparationCover = currentOwnerOwnsPreparationCover

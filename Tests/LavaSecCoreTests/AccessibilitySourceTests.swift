@@ -9,18 +9,6 @@ final class AccessibilitySourceTests: XCTestCase {
 
     // MARK: LavaComponents — compact metric/detail blocks read as one VoiceOver element
 
-    func testMetricPillCombinesValueAndLabel() throws {
-        let block = try sourceBlock(
-            in: try readSource(.lavaComponents),
-            startingAt: "struct LavaMetricPill",
-            endingBefore: "struct LavaInfoCard"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityElement(children: .combine)"),
-            "LavaMetricPill must group its value + title into a single VoiceOver element."
-        )
-    }
-
     func testOverviewMetricBlockCombinesValueAndLabel() throws {
         let block = try sourceBlock(
             in: try readSource(.lavaComponents),
@@ -37,7 +25,7 @@ final class AccessibilitySourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.lavaComponents),
             startingAt: "struct LavaDetailRow",
-            endingBefore: "struct LavaMetricPill"
+            endingBefore: "struct LavaInfoCard"
         )
         XCTAssertTrue(
             block.contains(".accessibilityHidden(true)"),
@@ -49,22 +37,22 @@ final class AccessibilitySourceTests: XCTestCase {
         )
     }
 
-    // MARK: LavaNavigationRow — decorative glyphs hidden; the NavigationLink keeps its own label
+    // MARK: Navigation-card label — decorative glyphs hidden; wrappers keep their own controls
 
     func testNavigationRowHidesDecorativeGlyphs() throws {
         let block = try sourceBlock(
             in: try readSource(.lavaComponents),
-            startingAt: "struct LavaNavigationRow",
-            endingBefore: "private struct LavaNavigationRowButtonStyle"
+            startingAt: "struct LavaNavigationCardLabel",
+            endingBefore: "struct LavaNavigationRow"
         )
         let hiddenCount = block.components(separatedBy: ".accessibilityHidden(true)").count - 1
         XCTAssertGreaterThanOrEqual(
             hiddenCount, 2,
-            "LavaNavigationRow must hide both its leading icon badge and its trailing chevron from accessibility."
+            "The shared navigation-card label must hide both its leading badge and trailing accessory from accessibility."
         )
         XCTAssertFalse(
             block.contains(".accessibilityElement(children: .combine)"),
-            "LavaNavigationRow must NOT .combine — it wraps a NavigationLink whose interactive label would be collapsed."
+            "The shared label must NOT .combine — wrappers retain their own interactive controls."
         )
     }
 
@@ -234,7 +222,7 @@ final class AccessibilitySourceTests: XCTestCase {
     // MARK: SettingsView — feedback + navigation rows (WS-S)
 
     func testSettingsFeedbackTopicExposesSelectedTrait() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.bugReportSettingsView)
         XCTAssertTrue(
             source.contains(".accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])"),
             "The bug-report topic row must expose the selected trait (its checkmark/circle glyph is decorative/hidden)."
@@ -243,7 +231,7 @@ final class AccessibilitySourceTests: XCTestCase {
 
     func testSettingsStepProgressHasNonColorCurrentCue() throws {
         let block = try sourceBlock(
-            in: try readSource(.settingsView),
+            in: try readSource(.bugReportSettingsView),
             startingAt: "private struct BugReportStepProgressView",
             endingBefore: "private struct BugReportPreviewSectionCard"
         )
@@ -263,11 +251,9 @@ final class AccessibilitySourceTests: XCTestCase {
             startingAt: "private struct SettingsNavigationRow",
             endingBefore: "private struct SettingsExternalLinkRow"
         )
-        let hidden = block.components(separatedBy: ".accessibilityHidden(true)").count - 1
-        XCTAssertGreaterThanOrEqual(
-            hidden, 2,
-            "SettingsNavigationRow must hide both its leading tile glyph and the trailing chevron from accessibility."
-        )
+        XCTAssertTrue(block.contains("LavaNavigationCardLabel("))
+        XCTAssertFalse(block.contains(".accessibilityHidden(true)"),
+                       "Decorative hiding belongs to the shared label, not the authenticated wrapper.")
     }
 
     // MARK: SecurityController — full-screen security overlays (WS-R)

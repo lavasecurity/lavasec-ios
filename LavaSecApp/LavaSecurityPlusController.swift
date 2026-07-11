@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecFilterPipeline
 import SwiftUI
 
 // The LavaSecurity+ paywall & billing feature, peeled out of AppViewModel (Phase D2,
@@ -350,7 +350,7 @@ final class LavaSecurityPlusController: ObservableObject {
         do {
             try hub.persistPaidPlanFlag(hasLavaSecurityPlus)
         } catch {
-            lavaSecurityPlusMessage = "Could not save plan state: \(error.localizedDescription)"
+            lavaSecurityPlusMessage = "Could not save plan state: %@".lavaLocalizedFormat(error.localizedDescription)
             lavaSecurityPlusMessageIsError = true
         }
     }

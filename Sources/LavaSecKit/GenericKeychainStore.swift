@@ -15,6 +15,7 @@ import Security
 /// independently at each call site, so the three stores cannot drift apart on this
 /// security-sensitive flag.
 public struct GenericKeychainStore<Failure: Error & Sendable>: Sendable {
+    /// The Keychain `kSecAttrService` namespace used for every item in this store.
     public let service: String
     private let unexpectedItemData: Failure
     private let unhandledStatus: @Sendable (OSStatus) -> Failure

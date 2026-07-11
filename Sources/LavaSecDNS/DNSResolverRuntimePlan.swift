@@ -4,29 +4,39 @@ import LavaSecKit
 /// Boxes a nested fallback plan so a `DNSResolverRuntimePlan` (a value type) can
 /// carry another plan as its encrypted fallback without self-containment by value.
 public final class DNSResolverFallbackPlan: Equatable, @unchecked Sendable {
-    public let plan: DNSResolverRuntimePlan
-    public init(_ plan: DNSResolverRuntimePlan) { self.plan = plan }
+    package let plan: DNSResolverRuntimePlan
+    package init(_ plan: DNSResolverRuntimePlan) { self.plan = plan }
+    /// Compares the complete nested plans rather than the reference identity of their boxes.
     public static func == (lhs: DNSResolverFallbackPlan, rhs: DNSResolverFallbackPlan) -> Bool { lhs.plan == rhs.plan }
 }
 
+/// An immutable resolver-routing snapshot captured for one query and safe to pass into tunnel orchestration.
 public struct DNSResolverRuntimePlan: Equatable, Sendable {
+    /// The effective primary transport after applying device-DNS mode and endpoint availability.
     public let transport: DNSResolverTransport
-    public let plainAddresses: [String]
+    package let plainAddresses: [String]
+    /// Ordered DoH endpoints used when the effective transport is DNS over HTTPS.
     public let dohEndpoints: [DNSOverHTTPSEndpoint]
+    /// Ordered DoT endpoints used when the effective transport is DNS over TLS.
     public let dotEndpoints: [DNSOverTLSEndpoint]
+    /// Ordered DoQ endpoints used when the effective transport is DNS over QUIC.
     public let doqEndpoints: [DNSOverQUICEndpoint]
+    /// Stable resolver identity that namespaces cached responses and in-flight coalescing.
     public let cacheIdentifier: String
+    /// Captured device-resolver strings; recognized families are ordered for the network and other strings may remain.
     public let deviceDNSFallbackAddresses: [String]
-    public let shouldFallbackToDeviceDNS: Bool
-    public let usesDeviceDNSFallbackMode: Bool
+    package let shouldFallbackToDeviceDNS: Bool
+    package let usesDeviceDNSFallbackMode: Bool
     // Inverse of shouldFallbackToDeviceDNS: when the *primary* is Device DNS and it
     // is wedged, fall back per-query to an encrypted resolver (Mullvad DoH) so a
     // single bad/stale local resolver doesn't strand the user. Mutually exclusive
     // with shouldFallbackToDeviceDNS (that requires a non-device primary).
+    /// Whether a failed Device-DNS primary may activate `encryptedFallback`, whose route can try multiple endpoints.
     public let shouldFallbackToEncrypted: Bool
     // The per-query encrypted fallback for a Device-DNS primary, as a fully-formed
     // nested plan resolved through the user-selected fallback resolver and its
     // transport (plain / DoH / DoT). Nil when no encrypted fallback applies.
+    /// Fully resolved encrypted fallback route, or `nil` when the query must remain on its primary route.
     public let encryptedFallback: DNSResolverFallbackPlan?
 
     /// Back-compat accessor for readers that only need the DoH endpoints of the
@@ -51,7 +61,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     // resolver is an authoritative verdict (a managed-network block or a DNSSEC
     // failure) that must pass through, not be re-asked on the fallback resolver.
     // No-response failures fall back regardless of this flag.
-    public let treatsResolverRejectionAsFallbackTrigger: Bool
+    package let treatsResolverRejectionAsFallbackTrigger: Bool
 
     /// Fixed encrypted fallback resolver for Device-DNS primary: Mullvad's
     /// non-filtering DoH endpoint (Lava filters locally, so the upstream must not
@@ -64,9 +74,9 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     /// device resolver. (DoT/DoQ consume their bootstrap IPs directly via NWConnection.)
     // Aliased to the Mullvad DoH preset's endpoint so the default encrypted
     // fallback (when no resolver is selected) and this constant can't drift.
-    public static var mullvadEncryptedFallbackEndpoint: DNSOverHTTPSEndpoint { DNSResolverPreset.mullvadDoH.dohEndpoint! }
+    package static var mullvadEncryptedFallbackEndpoint: DNSOverHTTPSEndpoint { DNSResolverPreset.mullvadDoH.dohEndpoint! }
 
-    public init(
+    package init(
         transport: DNSResolverTransport,
         plainAddresses: [String],
         dohEndpoints: [DNSOverHTTPSEndpoint],
@@ -142,6 +152,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         )
     }
 
+    /// Resolves persisted configuration and current network state into the immutable plan used for a query.
     public static func make(
         configuration: AppConfiguration,
         deviceDNSAddresses: [String],
@@ -165,7 +176,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         )
     }
 
-    public static func make(
+    package static func make(
         resolver: DNSResolverPreset,
         fallbackToDeviceDNS: Bool,
         usesEncryptedDeviceDNSFallback: Bool = false,
@@ -302,6 +313,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         )
     }
 
+    /// Groups resolver literals by family, preferring IPv6 on cellular and preserving relative order within each group.
     public static func orderedResolverAddresses(
         _ addresses: [String],
         networkKind: TunnelNetworkKind

@@ -7,6 +7,7 @@ import LavaSecKit
 // H2/H1 natively) and the negotiated protocol is reported on every response so
 // tunnel health and UI surfaces can annotate "DoH3".
 
+/// Thread-safe DNS-over-HTTPS client that owns an ephemeral URLSession and reports negotiated HTTP protocol metadata.
 public final class DoHTransport: @unchecked Sendable {
     private let timeoutSeconds: Int
     private let debugLogger: DNSTransportDebugLogger?
@@ -15,12 +16,14 @@ public final class DoHTransport: @unchecked Sendable {
     private var activeTaskCount = 0
     private var shouldResetWhenIdle = false
 
+    /// Creates an HTTP/3-capable client with request/resource timeouts measured in whole seconds.
     public init(timeoutSeconds: Int, debugLogger: DNSTransportDebugLogger? = nil) {
         self.timeoutSeconds = timeoutSeconds
         self.debugLogger = debugLogger
         self.session = Self.makeSession(timeoutSeconds: timeoutSeconds)
     }
 
+    /// Replaces the shared session immediately and cancels every task still owned by the previous session.
     public func resetSession() {
         let oldSession: URLSession
         sessionLock.lock()
@@ -31,6 +34,7 @@ public final class DoHTransport: @unchecked Sendable {
         oldSession.invalidateAndCancel()
     }
 
+    /// Schedules session replacement after active tasks finish, or replaces it immediately when already idle.
     public func resetSessionWhenIdle() {
         let oldSession: URLSession?
         sessionLock.lock()
@@ -46,11 +50,13 @@ public final class DoHTransport: @unchecked Sendable {
         oldSession?.invalidateAndCancel()
     }
 
+    /// Invalidates the current session and cancels its outstanding requests during tunnel shutdown.
     public func cancel() {
         let sessionToCancel = currentSession()
         sessionToCancel.invalidateAndCancel()
     }
 
+    /// Posts one DNS wire query and asynchronously completes once with validated bytes or a classified transport failure.
     public func resolve(
         _ query: Data,
         endpoint: URL,

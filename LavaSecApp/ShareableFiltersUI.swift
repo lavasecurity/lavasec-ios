@@ -1,5 +1,5 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
 @preconcurrency import AVFoundation
 import CoreImage.CIFilterBuiltins
 import UIKit
@@ -542,31 +542,17 @@ struct ImportOptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(LavaStyle.safeGreen)
-                    .frame(width: 38, height: 38)
-                    .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.iconBadgeCornerRadius))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title.lavaLocalized)
-                        .lavaCardTitleText()
-                        .foregroundStyle(.primary)
-                    Text(subtitle.lavaLocalized)
-                        .lavaRowSubtitleText()
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .lavaSurface(.card)
-            .contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous))
+            LavaNavigationCardLabel(
+                badge: .systemImage(
+                    systemImage,
+                    font: .title3.weight(.semibold)
+                ),
+                badgeSize: 38,
+                rowSpacing: 14,
+                title: title,
+                summary: .localizedUnclamped(subtitle),
+                accessory: .chevron
+            )
         }
         .buttonStyle(.plain)
     }

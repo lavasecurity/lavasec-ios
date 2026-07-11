@@ -1,6 +1,6 @@
 import SwiftUI
 import UIKit
-import LavaSecCore
+import LavaSecAppServices
 
 struct RageShakeDetector: UIViewControllerRepresentable {
     let onShake: () -> Void

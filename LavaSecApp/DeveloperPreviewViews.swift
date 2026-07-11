@@ -1,5 +1,6 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
+import LavaSecPresentation
 import UIKit
 
 #if DEBUG
@@ -160,6 +161,7 @@ struct WebsiteAssetCaptureRootView: View {
         .background(LavaStyle.groupedBackground)
         .preferredColorScheme(.light)
         .environmentObject(viewModel)
+        .environmentObject(viewModel.catalog)
         .environmentObject(viewModel.backup)
         .environmentObject(viewModel.plus)
         .environmentObject(viewModel.account)

@@ -1,6 +1,12 @@
 import XCTest
 
 final class LavaSurfaceSourceTests: XCTestCase {
+    func testUnusedDesignScaffoldsStayRemoved() throws {
+        XCTAssertFalse(try readSource(.lavaScaffold).contains("struct LavaTabScreenContent"))
+        XCTAssertFalse(try readSource(.lavaComponents).contains("struct LavaMetricPill"))
+        XCTAssertFalse(try readSource(.lavaIcon).contains("struct LavaIcon: View"))
+    }
+
     func testSharedSurfaceScaffoldDefinesCardPanelAndSelectionTokens() throws {
         let rootSource = try readSource(.lavaTokens)
         let viewExtensionBlock = try sourceBlock(
@@ -48,13 +54,13 @@ final class LavaSurfaceSourceTests: XCTestCase {
     }
 
     func testSelectionControlsUseSelectionSurfaceToken() throws {
-        let diagnosticsSource = try readSource(.diagnosticsView)
+        let diagnosticsSource = try readSource(.diagnosticsDateControls)
         let endpointButtonBlock = try sourceBlock(
             in: diagnosticsSource,
             startingAt: "private struct ActivityDateEndpointButton",
             endingBefore: "private struct ActivityDateTodayButton"
         )
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.bugReportSettingsView)
         let stepProgressBlock = try sourceBlock(
             in: settingsSource,
             startingAt: "private struct BugReportStepProgressView: View",
@@ -68,7 +74,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
     }
 
     func testDomainHistorySelectionRowsInheritCondensedListSurface() throws {
-        let diagnosticsSource = try readSource(.diagnosticsView)
+        let diagnosticsSource = try readSource(.diagnosticsDomainHistory)
         let historyTypeBlock = try sourceBlock(
             in: diagnosticsSource,
             startingAt: "LavaSectionGroup(\"Show\")",
@@ -87,13 +93,13 @@ final class LavaSurfaceSourceTests: XCTestCase {
     }
 
     func testSearchFieldsUsePanelSurfaceToken() throws {
-        let diagnosticsSource = try readSource(.diagnosticsView)
+        let diagnosticsSource = try readSource(.diagnosticsLocalLogSupport)
         let localLogSearchBlock = try sourceBlock(
             in: diagnosticsSource,
-            startingAt: "private struct LocalLogSearchField: View",
-            endingBefore: "struct NetworkActivityLogView: View"
+            startingAt: "struct LocalLogSearchField: View",
+            endingBefore: "enum DomainHistoryFilter"
         )
-        let filtersSource = try readSource(.filtersView)
+        let filtersSource = try readSource(.blocklistPickerView)
         let blocklistSearchBlock = try sourceBlock(
             in: filtersSource,
             startingAt: "private struct BlocklistSearchField: View",

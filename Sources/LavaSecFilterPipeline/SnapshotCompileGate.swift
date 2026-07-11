@@ -26,6 +26,7 @@ public actor SnapshotCompileGate {
     /// types can chain through one field.
     private var tail: Task<Void, Never>?
 
+    /// Creates an empty compile queue.
     public init() {}
 
     /// Runs `operation` after every previously submitted operation has finished, and returns

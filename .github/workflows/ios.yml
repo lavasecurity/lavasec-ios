@@ -48,7 +48,14 @@ jobs:
     # above). Cheap Linux; the mac jobs `needs:` it. Non-PR events (push/dispatch) and
     # anything that can't be classified fall through to docs_only=false → jobs run fully.
     name: Detect docs-only diff
-    runs-on: ubuntu-latest
+    # Linux runner is per-repo swappable WITHOUT forking this byte-identical file — the same
+    # lever swift-package-tests uses for its macOS runner (IOS_CI_MAC_RUNNER). On the PRIVATE
+    # repo (non-fork events) it defaults to Ubicloud (ubicloud-standard-2) to keep Linux CI off
+    # the shared GitHub Pro minute cap; override with the LINUX_CI_RUNNER var (e.g.
+    # '["ubuntu-latest"]' to fall back). The repo+fork gate keeps the public lane and any fork
+    # PR on free GitHub-hosted ubuntu-latest — see
+    # lavasec-infra/plans/2026-07-08-linux-ci-runner-cost-plan.md.
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
@@ -65,27 +72,23 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # Only PRs can be short-circuited; a push to main always runs fully.
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"; echo "not a PR → run fully"; exit 0
-          fi
-          # --no-renames so a rename decomposes into delete(old)+add(new): renaming a
-          # buildable source INTO docs/ or to a *.md name would otherwise show ONLY the
-          # docs destination (git's default rename detection), read as docs-only, and skip
-          # the build for a tree that actually lost a source file (Codex P2 #232).
-          files=$(git diff --no-renames --name-only "$BASE".."$HEAD" || true)
-          echo "changed files:"; printf '%s\n' "$files"
-          # Fail safe: an empty/undeterminable diff runs fully. docs-only ⇔ EVERY changed
-          # file is under docs/ or ends in .md (README, CONTRIBUTING, etc.).
-          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^(docs/|.*\.md$)'; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"; echo "non-docs changes present → run fully"
-          else
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"; echo "docs-only → macOS jobs short-circuit"
-          fi
+          docs_only="$(ci/detect-docs-only.sh \
+            --event "$EVENT" \
+            --base "$BASE" \
+            --head "$HEAD")"
+          case "$docs_only" in
+            true|false) ;;
+            *) echo "::error::invalid docs-only result; running fully"; docs_only=false ;;
+          esac
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          [ "$docs_only" = true ] && echo "docs-only → macOS jobs short-circuit" || echo "full CI required"
 
   repo-checks:
     name: Repo Checks
-    runs-on: ubuntu-latest
+    # Same per-repo Linux runner swap as the `changes` job above (LINUX_CI_RUNNER; private
+    # non-fork defaults to ubicloud-standard-2, plan cited there). Public/fork stays on
+    # GitHub-hosted ubuntu-latest. Ubicloud provides Docker (SwiftLint container) + Node.
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -105,6 +108,58 @@ jobs:
       - name: Check UI string catalog coverage (no hardcoded user-facing strings outside the catalog)
         run: node scripts/check-string-coverage.mjs
 
+      - name: Test repository guardrail fixtures
+        run: node --test scripts/tests/*.test.mjs
+
+      - name: Check XcodeGen source membership
+        run: node scripts/check-xcodegen-sources.mjs
+
+      - name: Check invariant and comment contracts
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            node scripts/check-comment-contracts.mjs --base "$BASE" --head "$HEAD"
+          else
+            node scripts/check-comment-contracts.mjs
+          fi
+
+      - name: Check missing-doc baseline does not grow
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              base="$PR_BASE"
+              head="$PR_HEAD"
+              ;;
+            push)
+              base="$PUSH_BASE"
+              head="$PUSH_HEAD"
+              ;;
+            *)
+              node scripts/check-missing-docs-baseline.mjs
+              exit 0
+              ;;
+          esac
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::missing usable base revision for missing-doc ratchet"
+            exit 1
+          fi
+          if [ -z "$head" ]; then
+            echo "::error::missing head revision for missing-doc ratchet"
+            exit 1
+          fi
+          node scripts/check-missing-docs-baseline.mjs --base "$base" --head "$head"
+
       - name: SwiftLint (warning-only)
         # Phase C2 lint lane (lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
         # --lenient downgrades every violation to a warning, so findings ANNOTATE the PR but
@@ -123,6 +178,13 @@ jobs:
           # (Codex P1 on lavasec-ios#50 cited main); if this pin is ever bumped to an
           # ENTRYPOINT image, drop the token or the binary name doubles.
           args: swiftlint --lenient --reporter github-actions-logging
+
+      - name: SwiftLint missing-doc regressions (blocking)
+        uses: docker://ghcr.io/realm/swiftlint:0.59.1@sha256:4002261af030eebefc377b8b5e429a3b553023d6b91cd6ea0d874d4cdaa1eaf8
+        with:
+          # Dedicated ratchet: the general invocation above remains warning-only;
+          # this fails only for missing-doc findings absent from the committed baseline.
+          args: swiftlint lint --config .swiftlint-missing-docs.yml --strict --only-rule missing_docs --baseline .swiftlint-missing-docs-baseline.json --reporter github-actions-logging
 
       - name: Merge-up contamination guard
         if: ${{ github.event_name == 'pull_request' }}
@@ -153,10 +215,9 @@ jobs:
             echo "::error::a commit in this PR touches a *.local.xcconfig or QA/ path that must never be public."; fail=1
           fi
 
-          # (b) The internal-only build flag must never be enabled in any commit's tracked source.
-          #     Exclude .github/ so this guard's own source (which names the flag) isn't a hit.
-          if { git log "$range" -p -- . ':(exclude).github/'; git diff "$range" -- . ':(exclude).github/'; } \
-               | grep -E '^\+' | grep -q 'LAVA_QA_TOOLS'; then
+          # (b) The internal-only build flag must never be ENABLED by a new build setting or
+          #     command line. Source condition references and test strings are legitimate.
+          if ! node scripts/check-public-qa-enablement.mjs --base "$BASE" --head "$HEAD"; then
             echo "::error::a commit in this PR enables the internal-only LAVA_QA_TOOLS flag in tracked source."; fail=1
           fi
 
@@ -184,17 +245,17 @@ jobs:
     # (it owns lava-mac-vm-ios-internal). EVERY other repo — the public lavasec-ios AND
     # any OSS fork of either lane — uses GitHub-hosted macos-26: a fork has no access to
     # the VM (a denylist on the public name would strand `someone/lavasec-ios` forks on
-    # the self-hosted default), and public minutes are free anyway. Override the private
-    # runner to a GitHub-hosted label via the IOS_CI_MAC_RUNNER repo var if the VM is
-    # offline (mirrors light-build's fallback). The `if` additionally skips a fork PR
-    # opened against the private repo, so fork code can never execute on the VM.
+    # the self-hosted default), and public minutes are free anyway. A fork PR opened
+    # against the private repo is also routed to macos-26: its semantic package-boundary
+    # check must still run, but untrusted code must never execute on the owned VM.
+    # Override the private trusted runner via IOS_CI_MAC_RUNNER if the VM is offline.
     # `!cancelled()` forces this REQUIRED job to run even if the `changes` prerequisite FAILED
     # (transient checkout/git-diff/outage) instead of being skipped by `needs` — a skipped-after-
     # failed-dependency required check may not block the PR, so a code PR could merge without this
     # macOS check (Codex P1 #232). On a `changes` failure `docs_only` is '' so the step-level guard
-    # runs the suite fully (fail-safe). The fork-guard is preserved (parenthesised under the &&).
-    if: ${{ !cancelled() && (github.repository != 'lavasecurity/lavasec-ios-internal' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) }}
-    runs-on: ${{ github.repository == 'lavasecurity/lavasec-ios-internal' && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
+    # runs the suite fully (fail-safe).
+    if: ${{ !cancelled() }}
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -218,25 +279,25 @@ jobs:
           { echo "SCRATCH=$CACHE/.build"; echo "SPMCACHE=$CACHE/spm"; } >> "$GITHUB_ENV"
           echo "warm cache: $CACHE"
 
+      - name: Check Swift package boundary before build
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        run: python3 scripts/check-swift-package-boundary.py
+
       - name: Test LavaSecCore
         if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: |
           set -euo pipefail
           # Warm per-runner cache ($SCRATCH/$SPMCACHE from the "Prepare warm test cache" step). The
-          # shared flock lets the maintenance sweep GC that cache safely, never mid-build. On
-          # GitHub-hosted runners RUNNER_ENVIRONMENT != "self-hosted", so this runs unwrapped.
-          LOCK="$HOME/.lava-ci/maintenance.lock"; mkdir -p "$(dirname "$LOCK")"
+          # shared lock helper lets the maintenance sweep GC that cache safely, never mid-build. On
+          # GitHub-hosted runners RUNNER_ENVIRONMENT != "self-hosted", it executes directly.
+          # The warning ratchet is intentionally unconditional. A hosted Xcode update can surface
+          # warnings without a source change; fix forward, or temporarily pin Xcode byte-identically
+          # in both repositories rather than weakening either CI lane.
           cmd=(swift test --package-path .
+            -Xswiftc -warnings-as-errors
             --scratch-path "$SCRATCH"
             --cache-path "$SPMCACHE")
-          if [ "${RUNNER_ENVIRONMENT:-}" = self-hosted ]; then
-            FLOCK="$(command -v flock || true)"
-            [ -n "$FLOCK" ] || for c in /opt/homebrew/bin/flock /usr/local/bin/flock; do [ -x "$c" ] && FLOCK="$c" && break; done
-            [ -n "$FLOCK" ] || { echo "::error::flock required on self-hosted runner (brew install flock)"; exit 1; }
-            "$FLOCK" -s "$LOCK" "${cmd[@]}"
-          else
-            "${cmd[@]}"
-          fi
+          ci/run-with-maintenance-lock.sh -- "${cmd[@]}"
 
   ios-simulator-build:
     name: iOS Simulator Build

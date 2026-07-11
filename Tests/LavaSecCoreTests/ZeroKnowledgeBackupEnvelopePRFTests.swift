@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecAppServices
 @testable import LavaSecKit
 
 final class ZeroKnowledgeBackupEnvelopePRFTests: XCTestCase {
@@ -32,6 +33,10 @@ final class ZeroKnowledgeBackupEnvelopePRFTests: XCTestCase {
         let envelope = try makeEnvelope(payload: payload)
 
         XCTAssertEqual(envelope.keySlots.map(\.kind), [.keychain, .assistedRecovery, .passkey])
+        XCTAssertEqual(
+            Set(envelope.keySlots.map(\.kdf)),
+            ["PBKDF2-HMAC-SHA256", "HKDF-SHA256"]
+        )
         let passkeySlot = try XCTUnwrap(envelope.keySlots.first { $0.kind == .passkey })
         XCTAssertEqual(passkeySlot.kdf, "HKDF-SHA256")
         XCTAssertEqual(passkeySlot.credentialID, "credential-id")

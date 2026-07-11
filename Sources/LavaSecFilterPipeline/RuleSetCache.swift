@@ -1,21 +1,17 @@
 import Foundation
 import LavaSecKit
 
-// Persistent cache of PARSED blocklist rules, keyed by the raw payload's full
-// SHA-256, the parse format, and BlocklistParsingRules.rulesVersion. A hit
-// skips reading and hashing up to 45 MB of raw text and the dominant
-// parse + double-normalization pass; entries store post-lavaSecProtectedDomains
-// rule lists, so they are safe to use as-is.
-//
-// versionID is deliberately NOT part of the key: rotating source_url_only
-// sources derive it from a 12-character hash prefix and the built-in fallback
-// catalog uses a constant, so it can stay fixed while content changes.
+/// Persistent cache of parsed blocklist rules keyed by payload hash, parse format,
+/// and parser-rules version.
+///
+/// Entries contain rules after protected-domain filtering. Source version identifiers
+/// are not part of the cache key.
 public struct RuleSetCache: Sendable {
-    public struct Entry: Equatable, Sendable {
-        public let ruleSet: DomainRuleSet
-        public let payloadByteSize: Int
+    package struct Entry: Equatable, Sendable {
+        package let ruleSet: DomainRuleSet
+        package let payloadByteSize: Int
 
-        public init(ruleSet: DomainRuleSet, payloadByteSize: Int) {
+        package init(ruleSet: DomainRuleSet, payloadByteSize: Int) {
             self.ruleSet = ruleSet
             self.payloadByteSize = payloadByteSize
         }
@@ -26,6 +22,7 @@ public struct RuleSetCache: Sendable {
 
     private let directoryURL: URL
 
+    /// Creates a cache under the current parser-version directory.
     public init(cacheDirectoryURL: URL) {
         // rulesVersion in the path orphans the whole previous tree on a parser
         // bump; the header carries it too as defense in depth.
@@ -66,7 +63,7 @@ public struct RuleSetCache: Sendable {
         return !remainder.isEmpty && remainder.allSatisfy(\.isNumber)
     }
 
-    public func load(sourceID: String, contentSHA256: String, parseFormat: BlocklistFormat) -> Entry? {
+    package func load(sourceID: String, contentSHA256: String, parseFormat: BlocklistFormat) -> Entry? {
         let url = entryURL(sourceID: sourceID, contentSHA256: contentSHA256, parseFormat: parseFormat)
         guard let data = try? Data(contentsOf: url) else {
             return nil
@@ -82,7 +79,7 @@ public struct RuleSetCache: Sendable {
     }
 
     // Failures must never fail preparation; callers use try? by convention.
-    public func store(
+    package func store(
         _ ruleSet: DomainRuleSet,
         sourceID: String,
         contentSHA256: String,
@@ -99,13 +96,13 @@ public struct RuleSetCache: Sendable {
         enforceLimits(forSourceID: sourceID)
     }
 
-    public func removeAll(forSourceID sourceID: String) {
+    package func removeAll(forSourceID sourceID: String) {
         try? FileManager.default.removeItem(at: sourceDirectoryURL(sourceID: sourceID))
     }
 
     // Keeps the newest entries per source (current plus one previous, matching
     // the raw payload cache's rollback posture).
-    public func enforceLimits(forSourceID sourceID: String, keepPerSource: Int = 2) {
+    package func enforceLimits(forSourceID sourceID: String, keepPerSource: Int = 2) {
         let directory = sourceDirectoryURL(sourceID: sourceID)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory,

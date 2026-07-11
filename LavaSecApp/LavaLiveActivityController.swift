@@ -1,6 +1,6 @@
 @preconcurrency import ActivityKit
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import UIKit
 
 @MainActor

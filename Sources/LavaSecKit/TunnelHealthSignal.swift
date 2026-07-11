@@ -13,6 +13,7 @@ import Foundation
 /// favor of provider messages — but a foreground app receives them reliably, so
 /// the tunnel→app direction used here is sound.
 public enum TunnelHealthSignal {
+    /// The Darwin notification posted after tunnel-health state changes.
     public static let darwinNotificationName = "com.lavasec.protection.tunnel-health-changed"
 }
 
@@ -20,8 +21,10 @@ public enum TunnelHealthSignal {
 /// Conforms to `ProtectionSignalNotifier` so it can stand in anywhere a notifier
 /// is expected. Posting is thread-safe.
 public struct DarwinProtectionSignalNotifier: ProtectionSignalNotifier {
+    /// Creates a notifier that posts process-wide Darwin notifications.
     public init() {}
 
+    /// Posts the notification identified by `name` when Darwin notifications are available.
     public func postNotification(named name: String) {
         #if canImport(Darwin)
         CFNotificationCenterPostNotification(

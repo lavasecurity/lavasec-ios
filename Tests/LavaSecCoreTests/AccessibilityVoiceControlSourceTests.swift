@@ -33,11 +33,14 @@ final class AccessibilityVoiceControlSourceTests: XCTestCase {
     // MARK: Call sites — long / phrase-like toolbar labels get short spoken commands
 
     func testFiltersToolbarButtonsProvideShortSpokenCommands() throws {
-        let source = try readSource(.filtersView)
-        // The moon "Switch filters with a Focus" button gets the short, localized "Focus filters".
+        let source = try [
+            readSource(.filterLibraryView),
+            readSource(.filterMyListView),
+        ].joined(separator: "\n")
+        // The moon "Switch filters automatically" button gets the short, localized "Auto switch".
         XCTAssertTrue(
-            source.contains("accessibilityInputLabels: [\"Focus filters\".lavaLocalized]"),
-            "The Focus how-to button must expose a short 'Focus filters' Voice Control command."
+            source.contains("accessibilityInputLabels: [\"Auto switch\".lavaLocalized]"),
+            "The auto-switch how-to button must expose a short 'Auto switch' Voice Control command."
         )
         // Three toolbar buttons carry explicit input labels (moon + the two 'Close edit mode' xmarks).
         XCTAssertEqual(

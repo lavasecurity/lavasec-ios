@@ -107,7 +107,7 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
     // MARK: Filters
 
     func testCategoryJumpPillReflows() throws {
-        let source = try readSource(.filtersView)
+        let source = try readSource(.blocklistPickerView)
         // The jump-pill label must remain free of one-line truncation so it grows inside the
         // horizontal scroller at large text.
         let jumpPill = try sourceBlock(
@@ -133,7 +133,7 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
         // chain) would let the row compress in place and never stack — the correct large-text
         // behavior here is the stack, so keep the horizontal fixedSize.
         let valuesBlock = try sourceBlock(
-            in: try readSource(.settingsView),
+            in: try readSource(.upgradeSettingsView),
             startingAt: "private func comparisonValues(free:",
             endingBefore: "private func paidValue"
         )
@@ -170,7 +170,10 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
     // MARK: Diagnostics
 
     func testDiagnosticsDateSitesReflow() throws {
-        let compact = try compactSource(.diagnosticsView)
+        let compact = try [
+            compactSource(.diagnosticsView),
+            compactSource(.diagnosticsDateControls),
+        ].joined()
 
         // The date-range pill is a **toolbar title accessory** (rendered inside a
         // `ToolbarItem(.topBarTrailing)` via `LavaPrimaryTabScreenContent`), so it CANNOT reflow —
@@ -202,16 +205,10 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
                        "The Activity metric row value must not stay clamped to one line.")
     }
 
-    // MARK: LavaComponents metric tiles (Rule 3 safe partial) + banner row
+    // MARK: LavaComponents overview metric tile (Rule 3 safe partial) + banner row
 
     func testCompactMetricTilesGrowAndRelaxLineLimit() throws {
         let compact = try compactSource(.lavaComponents)
-
-        // LavaMetricPill: two-line value + gentle fallback, grows via minHeight.
-        XCTAssertTrue(compact.contains("Text(value).font(.headline).lineLimit(2).minimumScaleFactor(0.75)"),
-                      "LavaMetricPill value must relax to two lines while keeping its fallback.")
-        XCTAssertTrue(compact.contains(".frame(minHeight:54)"),
-                      "LavaMetricPill must grow via minHeight: 54.")
 
         // LavaOverviewMetricBlock numeral + label + tile.
         XCTAssertTrue(compact.contains(".monospacedDigit().lineLimit(2).allowsTightening(true).minimumScaleFactor(0.9)"),
@@ -226,8 +223,6 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
         // The old fixed metric-tile heights must all be gone.
         XCTAssertFalse(compact.contains(".frame(height:52)"),
                        "The 52pt metric numeral height must be a minHeight now.")
-        XCTAssertFalse(compact.contains(".frame(height:54)"),
-                       "The 54pt metric-pill height must be a minHeight now.")
         XCTAssertFalse(compact.contains(".frame(height:74)"),
                        "The 74pt metric-tile height must be a minHeight now.")
 

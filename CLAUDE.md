@@ -1,13 +1,17 @@
 # Working in this repo
 
-DNS-filtering iOS app. Five processes share one SPM core: app (`LavaSecApp/`), packet
-tunnel (`LavaSecTunnel/`), widget, App Intents extension, plus `Sources/LavaSecCore`
-(the only compiled-test target). `Shared/` files are compiled into multiple targets by
-pbxproj membership. The pbxproj is GENERATED: edit `project.yml` and run
-`xcodegen generate`, never the pbxproj itself (`scripts/check-xcodegen-drift.sh`
-catches drift; see CONTRIBUTING.md). Read `README.md` for build/test basics and
-`CONTRIBUTING.md` for ground rules; plans live in the `lavasec-infra` repo under
-`plans/`.
+DNS-filtering iOS app. The app (`LavaSecApp/`), packet tunnel (`LavaSecTunnel/`),
+widget, and App Intents extension consume a layered Swift package. Package code is split
+across `LavaSecKit`, `LavaSecNetworking`, `LavaSecDNS`, `LavaSecFilterPipeline`,
+`LavaSecPresentation`, and `LavaSecAppServices`. `LavaSecCore` is the compatibility
+façade that re-exports all six layers. Production process targets link only their approved
+narrow products, so the tunnel does not link Presentation, AppServices, or the façade.
+Executable package tests live in `Tests/LavaSecCoreTests/`. `Shared/` files are
+compiled into multiple targets by pbxproj membership. The pbxproj is GENERATED: edit
+`project.yml` and run `xcodegen generate`, never the pbxproj itself
+(`scripts/check-xcodegen-drift.sh` catches drift; see CONTRIBUTING.md). Read `README.md`
+for build/test basics and `CONTRIBUTING.md` for ground rules; plans live in the
+`lavasec-infra` repo under `plans/`.
 
 ## Comment conventions
 
@@ -55,7 +59,8 @@ rules:
 
 ## Verification expectations
 
-- `swift test --package-path .` runs the core suite (CI runs it on macOS; the full app
+- `swift test --package-path . -Xswiftc -warnings-as-errors` runs the core suite (CI runs
+  it on macOS; the full app
   compile runs in a separate CI lane — a green `swift test` alone does not prove the app
   target builds).
 - PR descriptions list the exact commands run, RED/GREEN for new tests where applicable,

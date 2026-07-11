@@ -1,6 +1,6 @@
 import ActivityKit
 import Foundation
-import LavaSecCore
+import LavaSecKit
 
 enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     case original

@@ -1,5 +1,5 @@
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
 
 struct LavaCondensedList<Content: View>: View {
     let content: Content
@@ -14,6 +14,34 @@ struct LavaCondensedList<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .lavaSurface(.card)
+    }
+}
+
+/// Placeholder row shown inside a card list whose data collection is empty. ONE scaffold —
+/// the 15pt row-title face on `.primary` plus fixed 16pt insets — so every empty list renders
+/// at the same height as the Filters shelves' empty rows. Screens must not hand-roll their own
+/// placeholder `Text` with per-screen font/padding: that is exactly how the Network Activity
+/// empty row drifted shorter (and grayer) than its siblings.
+/// pinned: TypographyScaleSourceTests.testEmptyListRowIsSharedAndCarriesRowRole
+struct LavaEmptyListRow: View {
+    let title: String
+    var subtitle: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.lavaLocalized)
+                .font(LavaTypography.rowTitle)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let subtitle {
+                Text(subtitle.lavaLocalized)
+                    .lavaRowSubtitleText()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, LavaRowHeight.horizontalInset)
+        .padding(.vertical, 16)
     }
 }
 
@@ -121,7 +149,7 @@ struct LavaCondensedListItem<Leading: View>: View {
                         .lavaRowSubtitleText()
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: LavaSpacing.sm) {
                     if let metadataPrefixStatus {
                         LavaCondensedStatusPill(status: metadataPrefixStatus)
                     }

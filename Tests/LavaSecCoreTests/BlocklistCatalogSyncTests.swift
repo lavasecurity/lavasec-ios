@@ -1,9 +1,29 @@
 import XCTest
 @testable import LavaSecCore
 @testable import LavaSecKit
-@testable import LavaSecDNS
+@testable import LavaSecNetworking
 
 final class BlocklistCatalogSyncTests: XCTestCase {
+    func testCatalogParseFormatRawValuesAndJSONRoundTrip() throws {
+        let formats: [(format: CatalogParseFormat, rawValue: String)] = [
+            (.auto, "auto"),
+            (.plainDomains, "plain_domains"),
+            (.hosts, "hosts"),
+            (.adblock, "adblock"),
+            (.dnsmasq, "dnsmasq"),
+        ]
+
+        for expectation in formats {
+            XCTAssertEqual(expectation.format.rawValue, expectation.rawValue)
+            let encoded = try JSONEncoder().encode(expectation.format)
+            XCTAssertEqual(String(decoding: encoded, as: UTF8.self), "\"\(expectation.rawValue)\"")
+            XCTAssertEqual(
+                try JSONDecoder().decode(CatalogParseFormat.self, from: encoded),
+                expectation.format
+            )
+        }
+    }
+
     func testCatalogDecodesWorkerDocument() throws {
         let json = """
         {
@@ -217,539 +237,759 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testCachedSnapshotCompilerBuildsTunnelSnapshotFromCachedTextFiles() async throws {
-        let source = makeSource(
-            id: "hagezi-multi-pro-mini",
-            sourceHash: "3d439fc6b959423465db4238e7df7ebda7d47a3a9e123ce899faed5e49e4b1eb"
-        )
-        let guardrail = makeSource(
-            id: "phishing-database-active",
-            sourceHash: "77f0f2381a023aa88776d6245456a6451b1b43cd721f4609897a867c8188e879"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260516T044815Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: [guardrail]
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist(
-            "ads.example.com\n",
-            sourceID: source.id,
-            to: cacheURL
-        )
-        try writeLatestBlocklist(
-            "phishing.example.com\n",
-            sourceID: guardrail.id,
-            to: cacheURL
-        )
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let source = makeSource(
+                id: "hagezi-multi-pro-mini",
+                sourceHash: "3d439fc6b959423465db4238e7df7ebda7d47a3a9e123ce899faed5e49e4b1eb"
+            )
+            let guardrail = makeSource(
+                id: "phishing-database-active",
+                sourceHash: "77f0f2381a023aa88776d6245456a6451b1b43cd721f4609897a867c8188e879"
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260516T044815Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: [guardrail]
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(
+                "ads.example.com\n",
+                sourceID: source.id,
+                to: cacheURL
+            )
+            try writeLatestBlocklist(
+                "phishing.example.com\n",
+                sourceID: guardrail.id,
+                to: cacheURL
+            )
 
-        var allowRules = DomainRuleSet()
-        try allowRules.insert(domain: "allowed.example.com")
-        try allowRules.insert(domain: "phishing.example.com")
-        let baseSnapshot = FilterSnapshot(
-            blockRules: DomainRuleSet(),
-            allowRules: allowRules,
-            resolver: .cloudflare
-        )
-        let configuration = AppConfiguration(
-            enabledBlocklistIDs: [source.id],
-            allowedDomains: ["allowed.example.com", "phishing.example.com"],
-            resolverPresetID: DNSResolverPreset.cloudflare.id
-        )
+            var allowRules = DomainRuleSet()
+            try allowRules.insert(domain: "allowed.example.com")
+            try allowRules.insert(domain: "phishing.example.com")
+            let baseSnapshot = FilterSnapshot(
+                blockRules: DomainRuleSet(),
+                allowRules: allowRules,
+                resolver: .cloudflare
+            )
+            let configuration = AppConfiguration(
+                enabledBlocklistIDs: [source.id],
+                allowedDomains: ["allowed.example.com", "phishing.example.com"],
+                resolverPresetID: DNSResolverPreset.cloudflare.id
+            )
 
-        let snapshot = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(baseSnapshot: baseSnapshot, configuration: configuration)
+            let snapshot = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL
+            ).compile(baseSnapshot: baseSnapshot, configuration: configuration)
 
-        XCTAssertEqual(snapshot.decision(for: "ads.example.com").reason, .blocklist)
-        XCTAssertEqual(snapshot.decision(for: "allowed.example.com").reason, .localAllowlist)
-        XCTAssertEqual(snapshot.decision(for: "phishing.example.com").reason, .threatGuardrail)
-        XCTAssertEqual(snapshot.resolver, .cloudflare)
+            XCTAssertEqual(snapshot.decision(for: "ads.example.com").reason, .blocklist)
+            XCTAssertEqual(snapshot.decision(for: "allowed.example.com").reason, .localAllowlist)
+            XCTAssertEqual(snapshot.decision(for: "phishing.example.com").reason, .threatGuardrail)
+            XCTAssertEqual(snapshot.resolver, .cloudflare)
 
-        let tunnelStartupSnapshot = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL,
-            includesGuardrails: false
-        ).compile(baseSnapshot: baseSnapshot, configuration: configuration)
+            let tunnelStartupSnapshot = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL,
+                includesGuardrails: false
+            ).compile(baseSnapshot: baseSnapshot, configuration: configuration)
 
-        XCTAssertEqual(tunnelStartupSnapshot.decision(for: "ads.example.com").reason, .blocklist)
-        XCTAssertEqual(tunnelStartupSnapshot.decision(for: "phishing.example.com").reason, .localAllowlist)
+            XCTAssertEqual(tunnelStartupSnapshot.decision(for: "ads.example.com").reason, .blocklist)
+            XCTAssertEqual(tunnelStartupSnapshot.decision(for: "phishing.example.com").reason, .localAllowlist)
+        }
     }
 
     func testCompilerRetainsArtifactForColdStartFastResume() async throws {
-        let source = makeSource(
-            id: "hagezi-multi-pro-mini",
-            sourceHash: "3d439fc6b959423465db4238e7df7ebda7d47a3a9e123ce899faed5e49e4b1eb"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260516T044815Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist("ads.example.com\n", sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let source = makeSource(
+                id: "hagezi-multi-pro-mini",
+                sourceHash: "3d439fc6b959423465db4238e7df7ebda7d47a3a9e123ce899faed5e49e4b1eb"
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260516T044815Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist("ads.example.com\n", sourceID: source.id, to: cacheURL)
 
-        let baseSnapshot = FilterSnapshot(
-            blockRules: DomainRuleSet(),
-            allowRules: DomainRuleSet(),
-            resolver: .cloudflare
-        )
-        let configuration = AppConfiguration(
-            enabledBlocklistIDs: [source.id],
-            resolverPresetID: DNSResolverPreset.cloudflare.id
-        )
-        let retainedURL = cacheURL
-            .appendingPathComponent("tunnel-compiled-artifact", isDirectory: true)
-            .appendingPathComponent("compact-snapshot")
-
-        let compiled = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(
-            baseSnapshot: baseSnapshot,
-            configuration: configuration,
-            retainedArtifactURL: retainedURL
-        )
-        XCTAssertEqual(compiled.decision(for: "ads.example.com").reason, .blocklist)
-
-        // The artifact survives at the retained path so a FRESH process (a cold start
-        // after a self-reconnect kill) can fast-resume from it instead of recompiling.
-        XCTAssertTrue(FileManager.default.fileExists(atPath: retainedURL.path))
-        // Retention promotes the file OUT of scratch — nothing left for the startup sweep.
-        let scratchRoot = cacheURL.appendingPathComponent("streaming-compile-scratch", isDirectory: true)
-        let scratchEntries = (try? FileManager.default.contentsOfDirectory(
-            at: scratchRoot,
-            includingPropertiesForKeys: nil
-        )) ?? []
-        XCTAssertTrue(scratchEntries.isEmpty, "the retained artifact must be promoted out of scratch")
-
-        // A cold-start-style fresh read reproduces the compiled snapshot: the summary
-        // header gates identity reuse and the decode serves the same decisions.
-        let resumedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
-        let resumedSummary = try CompactFilterSnapshot.readSummary(from: resumedData)
-        XCTAssertTrue(resumedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
-        let resumed = try CompactFilterSnapshot.decode(from: resumedData)
-        XCTAssertEqual(resumed.decision(for: "ads.example.com").reason, .blocklist)
-
-        // A later compile with DIFFERENT inputs atomically replaces the retained file,
-        // so a reader can never adopt the old inputs once the new compile lands.
-        let recompiled = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(
-            baseSnapshot: baseSnapshot,
-            configuration: AppConfiguration(
+            let baseSnapshot = FilterSnapshot(
+                blockRules: DomainRuleSet(),
+                allowRules: DomainRuleSet(),
+                resolver: .cloudflare
+            )
+            let configuration = AppConfiguration(
                 enabledBlocklistIDs: [source.id],
-                blockedDomains: ["manual.example.com"],
                 resolverPresetID: DNSResolverPreset.cloudflare.id
-            ),
-            retainedArtifactURL: retainedURL
-        )
-        let replacedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
-        let replacedSummary = try CompactFilterSnapshot.readSummary(from: replacedData)
-        XCTAssertTrue(replacedSummary.identity.hasSameSnapshotInputs(as: recompiled.identity))
-        XCTAssertFalse(replacedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
+            )
+            let retainedURL = cacheURL
+                .appendingPathComponent("tunnel-compiled-artifact", isDirectory: true)
+                .appendingPathComponent("compact-snapshot")
+
+            let compiled = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL
+            ).compile(
+                baseSnapshot: baseSnapshot,
+                configuration: configuration,
+                retainedArtifactURL: retainedURL
+            )
+            XCTAssertEqual(compiled.decision(for: "ads.example.com").reason, .blocklist)
+
+            // The artifact survives at the retained path so a FRESH process (a cold start
+            // after a self-reconnect kill) can fast-resume from it instead of recompiling.
+            XCTAssertTrue(FileManager.default.fileExists(atPath: retainedURL.path))
+            // Retention promotes the file OUT of scratch — nothing left for the startup sweep.
+            let scratchRoot = cacheURL.appendingPathComponent("streaming-compile-scratch", isDirectory: true)
+            let scratchEntries = (try? FileManager.default.contentsOfDirectory(
+                at: scratchRoot,
+                includingPropertiesForKeys: nil
+            )) ?? []
+            XCTAssertTrue(scratchEntries.isEmpty, "the retained artifact must be promoted out of scratch")
+
+            // A cold-start-style fresh read reproduces the compiled snapshot: the summary
+            // header gates identity reuse and the decode serves the same decisions.
+            let resumedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
+            let resumedSummary = try CompactFilterSnapshot.readSummary(from: resumedData)
+            XCTAssertTrue(resumedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
+            let resumed = try CompactFilterSnapshot.decode(from: resumedData)
+            XCTAssertEqual(resumed.decision(for: "ads.example.com").reason, .blocklist)
+
+            // A later compile with DIFFERENT inputs atomically replaces the retained file,
+            // so a reader can never adopt the old inputs once the new compile lands.
+            let recompiled = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL
+            ).compile(
+                baseSnapshot: baseSnapshot,
+                configuration: AppConfiguration(
+                    enabledBlocklistIDs: [source.id],
+                    blockedDomains: ["manual.example.com"],
+                    resolverPresetID: DNSResolverPreset.cloudflare.id
+                ),
+                retainedArtifactURL: retainedURL
+            )
+            let replacedData = try Data(contentsOf: retainedURL, options: [.mappedIfSafe])
+            let replacedSummary = try CompactFilterSnapshot.readSummary(from: replacedData)
+            XCTAssertTrue(replacedSummary.identity.hasSameSnapshotInputs(as: recompiled.identity))
+            XCTAssertFalse(replacedSummary.identity.hasSameSnapshotInputs(as: compiled.identity))
+        }
     }
 
     func testCachedRawSourceCatalogParsesLocallyForTunnelStartup() async throws {
-        let rawText = """
-        # Raw upstream notice stays in the downloaded artifact.
-        ||ads.example.net^
-        0.0.0.0 tracker.example.com
-        @@||allowed.example.com^
-        """
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "hagezi-multi-light",
-            licenseName: "GPL-3.0",
-            sourceHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .auto
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let rawText = """
+            # Raw upstream notice stays in the downloaded artifact.
+            ||ads.example.net^
+            0.0.0.0 tracker.example.com
+            @@||allowed.example.com^
+            """
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "hagezi-multi-light",
+                licenseName: "GPL-3.0",
+                sourceHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .auto
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
 
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: URL(string: "https://example.com/catalog.json")!,
-            cacheDirectoryURL: cacheURL
-        ).loadCached(enabledSourceIDs: [source.id])
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: URL(string: "https://example.com/catalog.json")!,
+                cacheDirectoryURL: cacheURL
+            ).loadCached(enabledSourceIDs: [source.id])
 
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("ads.example.net"))
-        XCTAssertTrue(ruleSet.contains("tracker.example.com"))
-        XCTAssertFalse(ruleSet.contains("allowed.example.com"))
-        XCTAssertEqual(result.metadataBySourceID[source.id]?.checksumSHA256, rawHash)
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("ads.example.net"))
+            XCTAssertTrue(ruleSet.contains("tracker.example.com"))
+            XCTAssertFalse(ruleSet.contains("allowed.example.com"))
+            XCTAssertEqual(result.metadataBySourceID[source.id]?.checksumSHA256, rawHash)
+        }
     }
 
     func testAppParseRejectsAnOverCapSourceInsteadOfSilentlyTruncating() async throws {
-        // A source with more rules than the per-source cap must surface an over-limit error,
-        // NOT cache + serve a silently truncated set under the source's full identity (which
-        // also masks the overage from the tier/device aggregate gate). The raised 45 MB
-        // intake cap admits larger payloads, so this guard — not the byte gate — is what now
-        // catches an over-cap source on the foreground app parse path.
-        let rawText = (0..<5).map { "d\($0).example.com" }.joined(separator: "\n") + "\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "over-cap",
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // A source with more rules than the per-source cap must surface an over-limit error,
+            // NOT cache + serve a silently truncated set under the source's full identity (which
+            // also masks the overage from the tier/device aggregate gate). The raised 45 MB
+            // intake cap admits larger payloads, so this guard — not the byte gate — is what now
+            // catches an over-cap source on the foreground app parse path.
+            let rawText = (0..<5).map { "d\($0).example.com" }.joined(separator: "\n") + "\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "over-cap",
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
 
-        let cappedBudget = BlocklistParseResourceBudget(
-            maximumBlocklistBytes: 45 * 1024 * 1024,
-            maxRulesPerSource: 3, // below the 5 rules in the source
-            maxConcurrentSources: 1
-        )
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
+            let cappedBudget = BlocklistParseResourceBudget(
+                maximumBlocklistBytes: 45 * 1024 * 1024,
+                maxRulesPerSource: 3, // below the 5 rules in the source
+                maxConcurrentSources: 1
+            )
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    cacheDirectoryURL: cacheURL,
+                    parseBudget: cappedBudget
+                ).loadCached(enabledSourceIDs: [source.id])
+                XCTFail("expected an over-limit error for a source exceeding the per-source cap")
+            } catch let error as BlocklistCatalogSyncError {
+                XCTAssertEqual(error, .blocklistExceedsRuleLimit(sourceID: source.id, ruleLimit: 3))
+            }
+
+            // The throw happens BEFORE the parsed-rules cache store, so nothing truncated was
+            // persisted: re-loading the same cache dir under a cap above the source size parses it
+            // fresh and IN FULL (no false positive, no poisoned cache).
+            let okBudget = BlocklistParseResourceBudget(
+                maximumBlocklistBytes: 45 * 1024 * 1024,
+                maxRulesPerSource: 100,
+                maxConcurrentSources: 1
+            )
+            let okResult = try await BlocklistCatalogSynchronizer(
                 cacheDirectoryURL: cacheURL,
-                parseBudget: cappedBudget
+                parseBudget: okBudget
             ).loadCached(enabledSourceIDs: [source.id])
-            XCTFail("expected an over-limit error for a source exceeding the per-source cap")
-        } catch let error as BlocklistCatalogSyncError {
-            XCTAssertEqual(error, .blocklistExceedsRuleLimit(sourceID: source.id, ruleLimit: 3))
+            let ruleSet = try XCTUnwrap(okResult.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("d0.example.com"))
+            XCTAssertTrue(ruleSet.contains("d4.example.com"))
         }
-
-        // The throw happens BEFORE the parsed-rules cache store, so nothing truncated was
-        // persisted: re-loading the same cache dir under a cap above the source size parses it
-        // fresh and IN FULL (no false positive, no poisoned cache).
-        let okBudget = BlocklistParseResourceBudget(
-            maximumBlocklistBytes: 45 * 1024 * 1024,
-            maxRulesPerSource: 100,
-            maxConcurrentSources: 1
-        )
-        let okResult = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL,
-            parseBudget: okBudget
-        ).loadCached(enabledSourceIDs: [source.id])
-        let ruleSet = try XCTUnwrap(okResult.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("d0.example.com"))
-        XCTAssertTrue(ruleSet.contains("d4.example.com"))
     }
 
     func testAppParseAcceptsAnAtCapSourceWithTrailingFooterLines() async throws {
-        // A source with exactly `maxRulesPerSource` rules followed by footer/comment/blank
-        // lines is IN LIMIT and must load fully — the over-cap guard must trip only when a
-        // real rule is dropped, not on trailing non-rule lines after the last rule.
-        let rawText = "a.example.com\nb.example.com\n# stats: 2 rules\n\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "at-cap-with-footer",
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // A source with exactly `maxRulesPerSource` rules followed by footer/comment/blank
+            // lines is IN LIMIT and must load fully — the over-cap guard must trip only when a
+            // real rule is dropped, not on trailing non-rule lines after the last rule.
+            let rawText = "a.example.com\nb.example.com\n# stats: 2 rules\n\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "at-cap-with-footer",
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
 
-        let atCapBudget = BlocklistParseResourceBudget(
-            maximumBlocklistBytes: 45 * 1024 * 1024,
-            maxRulesPerSource: 2, // exactly the source's rule count
-            maxConcurrentSources: 1
-        )
-        let result = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL,
-            parseBudget: atCapBudget
-        ).loadCached(enabledSourceIDs: [source.id])
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("a.example.com"))
-        XCTAssertTrue(ruleSet.contains("b.example.com"))
+            let atCapBudget = BlocklistParseResourceBudget(
+                maximumBlocklistBytes: 45 * 1024 * 1024,
+                maxRulesPerSource: 2, // exactly the source's rule count
+                maxConcurrentSources: 1
+            )
+            let result = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL,
+                parseBudget: atCapBudget
+            ).loadCached(enabledSourceIDs: [source.id])
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("a.example.com"))
+            XCTAssertTrue(ruleSet.contains("b.example.com"))
+        }
     }
 
     func testAppParseAcceptsAnAtCapSourceWithDuplicateRules() async throws {
-        // The cap is on UNIQUE rules: duplicates don't add new rules, so a source whose unique
-        // count is within the cap must load in full even when its raw line count (with repeats)
-        // exceeds the cap. A raw-count cap would mistake the repeated rule for an overflow.
-        let rawText = "a.example.com\nb.example.com\na.example.com\nb.example.com\na.example.com\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "at-cap-with-dups",
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // The cap is on UNIQUE rules: duplicates don't add new rules, so a source whose unique
+            // count is within the cap must load in full even when its raw line count (with repeats)
+            // exceeds the cap. A raw-count cap would mistake the repeated rule for an overflow.
+            let rawText = "a.example.com\nb.example.com\na.example.com\nb.example.com\na.example.com\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "at-cap-with-dups",
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(rawText, sourceID: source.id, to: cacheURL)
 
-        // 5 raw rules, only 2 unique; cap = 2 → in limit.
-        let atCapBudget = BlocklistParseResourceBudget(
-            maximumBlocklistBytes: 45 * 1024 * 1024,
-            maxRulesPerSource: 2,
-            maxConcurrentSources: 1
-        )
-        let result = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL,
-            parseBudget: atCapBudget
-        ).loadCached(enabledSourceIDs: [source.id])
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertEqual(ruleSet.count, 2)
-        XCTAssertTrue(ruleSet.contains("a.example.com"))
-        XCTAssertTrue(ruleSet.contains("b.example.com"))
+            // 5 raw rules, only 2 unique; cap = 2 → in limit.
+            let atCapBudget = BlocklistParseResourceBudget(
+                maximumBlocklistBytes: 45 * 1024 * 1024,
+                maxRulesPerSource: 2,
+                maxConcurrentSources: 1
+            )
+            let result = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL,
+                parseBudget: atCapBudget
+            ).loadCached(enabledSourceIDs: [source.id])
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertEqual(ruleSet.count, 2)
+            XCTAssertTrue(ruleSet.contains("a.example.com"))
+            XCTAssertTrue(ruleSet.contains("b.example.com"))
+        }
     }
 
     func testSyncFetchesBlocklistFromUpstreamSourceURL() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let rawText = "ads.example.com\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "upstream-only",
-            sourceURL: sourceURL,
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let requestLog = RequestLog()
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let rawText = "ads.example.com\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "upstream-only",
+                sourceURL: sourceURL,
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let requestLog = RequestLog()
 
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                await requestLog.append(url)
-                if url == catalogURL {
-                    return catalogData
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: temporaryDirectory,
+                dataFetcher: { url in
+                    await requestLog.append(url)
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    if url == sourceURL {
+                        return Data(rawText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
                 }
-                if url == sourceURL {
-                    return Data(rawText.utf8)
-                }
+            ).sync(enabledSourceIDs: [source.id])
 
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: [source.id])
-
-        XCTAssertTrue(result.sourceRuleSets[source.id]?.contains("ads.example.com") == true)
-        let requestedURLs = await requestLog.urls
-        XCTAssertEqual(requestedURLs, [catalogURL, sourceURL])
+            XCTAssertTrue(result.sourceRuleSets[source.id]?.contains("ads.example.com") == true)
+            let requestedURLs = await requestLog.urls
+            XCTAssertEqual(requestedURLs, [catalogURL, sourceURL])
+        }
     }
 
     func testBuiltInFallbackCatalogWithoutAcceptedHashesDoesNotFetchSourceURL() async throws {
-        let catalogURL = URL(string: "https://api.example.invalid/v1/catalog")!
-        let source = DefaultCatalog.oisdSmall
-        let requestLog = RequestLog()
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.example.invalid/v1/catalog")!
+            let source = DefaultCatalog.oisdSmall
+            let requestLog = RequestLog()
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                catalogURLs: [catalogURL],
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
-                dataFetcher: { url in
-                    await requestLog.append(url)
-                    throw URLError(.cannotFindHost)
-                }
-            ).sync(enabledSourceIDs: [source.id])
-            XCTFail("Expected missing reviewed hash metadata to stop source-url fallback fetch.")
-        } catch BlocklistCatalogSyncError.noAcceptedSourceHashes(let sourceID) {
-            XCTAssertEqual(sourceID, source.id)
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    catalogURLs: [catalogURL],
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { url in
+                        await requestLog.append(url)
+                        throw URLError(.cannotFindHost)
+                    }
+                ).sync(enabledSourceIDs: [source.id])
+                XCTFail("Expected missing reviewed hash metadata to stop source-url fallback fetch.")
+            } catch BlocklistCatalogSyncError.noAcceptedSourceHashes(let sourceID) {
+                XCTAssertEqual(sourceID, source.id)
+            }
+
+            let requestedURLs = await requestLog.urls
+            XCTAssertEqual(requestedURLs, [catalogURL])
         }
-
-        let requestedURLs = await requestLog.urls
-        XCTAssertEqual(requestedURLs, [catalogURL])
     }
 
     func testBackupRestoredBuiltInSourceURLBlocklistCompilesAndReloadsFromCache() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let source = DefaultCatalog.oisdSmall
-        let rawText = "oisd-ad.example.com\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let reviewedSource = makeSource(
-            id: source.id,
-            sourceURL: source.sourceURL,
-            licenseName: source.licenseName,
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260607T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
-            sources: [reviewedSource],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let backedUpConfiguration = AppConfiguration(
-            protectionEnabled: true,
-            enabledBlocklistIDs: [source.id]
-        )
-        let restoredConfiguration = BackupConfigurationPayload(
-            configuration: backedUpConfiguration
-        ).restoredConfiguration()
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let requestLog = RequestLog()
-
-        let syncResult = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                await requestLog.append(url)
-                if url == catalogURL {
-                    return catalogData
-                }
-                if url == source.sourceURL {
-                    return Data(rawText.utf8)
-                }
-
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: restoredConfiguration.enabledBlocklistIDs)
-
-        XCTAssertTrue(try XCTUnwrap(syncResult.sourceRuleSets[source.id]).contains("oisd-ad.example.com"))
-        let resolvedSource = try XCTUnwrap(syncResult.catalog.sources.first { $0.id == source.id })
-        XCTAssertEqual(resolvedSource.sourceHash, rawHash)
-        XCTAssertEqual(resolvedSource.acceptedSourceHashes.first?.sha256, rawHash)
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let source = DefaultCatalog.oisdSmall
+            let rawText = "oisd-ad.example.com\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let reviewedSource = makeSource(
+                id: source.id,
+                sourceURL: source.sourceURL,
+                licenseName: source.licenseName,
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
             )
-        )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260607T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
+                sources: [reviewedSource],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let backedUpConfiguration = AppConfiguration(
+                protectionEnabled: true,
+                enabledBlocklistIDs: [source.id]
+            )
+            let restoredConfiguration = BackupConfigurationPayload(
+                configuration: backedUpConfiguration
+            ).restoredConfiguration()
+            let cacheURL = temporaryDirectory
+            let requestLog = RequestLog()
 
-        let cachedSnapshot = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(
-            baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
-            configuration: restoredConfiguration
-        )
+            let syncResult = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    await requestLog.append(url)
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    if url == source.sourceURL {
+                        return Data(rawText.utf8)
+                    }
 
-        XCTAssertEqual(cachedSnapshot.decision(for: "oisd-ad.example.com").reason, .blocklist)
-        let requestedURLs = await requestLog.urls
-        XCTAssertEqual(requestedURLs, [catalogURL, source.sourceURL])
+                    throw URLError(.unsupportedURL)
+                }
+            ).sync(enabledSourceIDs: restoredConfiguration.enabledBlocklistIDs)
+
+            XCTAssertTrue(try XCTUnwrap(syncResult.sourceRuleSets[source.id]).contains("oisd-ad.example.com"))
+            let resolvedSource = try XCTUnwrap(syncResult.catalog.sources.first { $0.id == source.id })
+            XCTAssertEqual(resolvedSource.sourceHash, rawHash)
+            XCTAssertEqual(resolvedSource.acceptedSourceHashes.first?.sha256, rawHash)
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+                )
+            )
+
+            let cachedSnapshot = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL
+            ).compile(
+                baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
+                configuration: restoredConfiguration
+            )
+
+            XCTAssertEqual(cachedSnapshot.decision(for: "oisd-ad.example.com").reason, .blocklist)
+            let requestedURLs = await requestLog.urls
+            XCTAssertEqual(requestedURLs, [catalogURL, source.sourceURL])
+        }
     }
 
     func testSourceURLOnlySyncAcceptsRotatedUpstreamAndCachesAcceptedHashForReload() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let previousText = "previous.example.com\n"
-        let rotatedText = "rotated.example.com\n"
-        let previousHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(previousText.utf8))
-        let rotatedHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rotatedText.utf8))
-        let source = makeSource(
-            id: "upstream-only",
-            sourceURL: sourceURL,
-            sourceHash: previousHash,
-            normalizedHash: previousHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let cacheURL = try makeTemporaryCacheDirectory()
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let previousText = "previous.example.com\n"
+            let rotatedText = "rotated.example.com\n"
+            let previousHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(previousText.utf8))
+            let rotatedHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rotatedText.utf8))
+            let source = makeSource(
+                id: "upstream-only",
+                sourceURL: sourceURL,
+                sourceHash: previousHash,
+                normalizedHash: previousHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let cacheURL = temporaryDirectory
 
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                if url == catalogURL {
-                    return catalogData
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    if url == sourceURL {
+                        return Data(rotatedText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
                 }
-                if url == sourceURL {
-                    return Data(rotatedText.utf8)
-                }
+            ).sync(enabledSourceIDs: [source.id])
 
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: [source.id])
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("rotated.example.com"))
+            XCTAssertFalse(ruleSet.contains("previous.example.com"))
 
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("rotated.example.com"))
-        XCTAssertFalse(ruleSet.contains("previous.example.com"))
+            let resolvedSource = try XCTUnwrap(result.catalog.sources.first { $0.id == source.id })
+            XCTAssertEqual(resolvedSource.sourceHash, rotatedHash)
+            XCTAssertEqual(resolvedSource.acceptedSourceHashes.first?.sha256, rotatedHash)
+            XCTAssertTrue(resolvedSource.acceptedSourceHashes.contains { $0.sha256 == previousHash })
+            XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
 
-        let resolvedSource = try XCTUnwrap(result.catalog.sources.first { $0.id == source.id })
-        XCTAssertEqual(resolvedSource.sourceHash, rotatedHash)
-        XCTAssertEqual(resolvedSource.acceptedSourceHashes.first?.sha256, rotatedHash)
-        XCTAssertTrue(resolvedSource.acceptedSourceHashes.contains { $0.sha256 == previousHash })
-        XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
+            let cachedSnapshot = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL
+            ).compile(
+                baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
+                configuration: AppConfiguration(enabledBlocklistIDs: [source.id])
+            )
 
-        let cachedSnapshot = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(
-            baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
-            configuration: AppConfiguration(enabledBlocklistIDs: [source.id])
-        )
-
-        XCTAssertEqual(cachedSnapshot.decision(for: "rotated.example.com").reason, .blocklist)
-        XCTAssertEqual(cachedSnapshot.decision(for: "previous.example.com").reason, .defaultAllow)
+            XCTAssertEqual(cachedSnapshot.decision(for: "rotated.example.com").reason, .blocklist)
+            XCTAssertEqual(cachedSnapshot.decision(for: "previous.example.com").reason, .defaultAllow)
+        }
     }
 
     func testSyncRejectsChangedArtifactBytesWhenNoAcceptedHashMatches() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let rawText = "ads.example.com\n"
-        let source = makeSource(
-            id: "artifact-source",
-            sourceURL: sourceURL,
-            sourceHash: String(repeating: "0", count: 64),
-            normalizedHash: String(repeating: "1", count: 64),
-            redistributionMode: "artifact",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let rawText = "ads.example.com\n"
+            let source = makeSource(
+                id: "artifact-source",
+                sourceURL: sourceURL,
+                sourceHash: String(repeating: "0", count: 64),
+                normalizedHash: String(repeating: "1", count: 64),
+                redistributionMode: "artifact",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    catalogURL: catalogURL,
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { url in
+                        if url == catalogURL {
+                            return catalogData
+                        }
+                        if url == sourceURL {
+                            return Data(rawText.utf8)
+                        }
+
+                        throw URLError(.unsupportedURL)
+                    }
+                ).sync(enabledSourceIDs: [source.id])
+                XCTFail("Expected checksum mismatch for changed artifact bytes.")
+            } catch BlocklistCatalogSyncError.checksumMismatch(let sourceID) {
+                XCTAssertEqual(sourceID, source.id)
+            }
+        }
+    }
+
+    func testSyncUsesCachedLastGoodBlocklistWhenDirectUpstreamFetchFails() async throws {
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let lastGoodText = "ads.example.com\n"
+            let lastGoodHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(lastGoodText.utf8))
+            let source = makeSource(
+                id: "upstream-only",
+                sourceURL: sourceURL,
+                sourceHash: lastGoodHash,
+                normalizedHash: lastGoodHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let cacheURL = temporaryDirectory
+            try writeLatestBlocklist(lastGoodText, sourceID: source.id, to: cacheURL)
+
+            let result = try await BlocklistCatalogSynchronizer(
                 catalogURL: catalogURL,
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    if url == sourceURL {
+                        throw URLError(.notConnectedToInternet)
+                    }
+
+                    throw URLError(.unsupportedURL)
+                }
+            ).sync(enabledSourceIDs: [source.id])
+
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("ads.example.com"))
+            XCTAssertFalse(ruleSet.contains("malware.example.com"))
+            XCTAssertTrue(result.usedCachedSourceIDs.contains(source.id))
+        }
+    }
+
+    func testSyncPrefersCurrentAcceptedUpstreamHashOverOlderAcceptedCache() async throws {
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let oldText = "old.example.com\n"
+            let currentText = "current.example.com\n"
+            let oldHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(oldText.utf8))
+            let currentHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(currentText.utf8))
+            let source = makeSource(
+                id: "upstream-only",
+                sourceURL: sourceURL,
+                sourceHash: currentHash,
+                acceptedSourceHashes: [
+                    CatalogAcceptedSourceHash(sha256: currentHash),
+                    CatalogAcceptedSourceHash(sha256: oldHash)
+                ],
+                normalizedHash: currentHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let cacheURL = temporaryDirectory
+            try writeVersionedBlocklist(oldText, source: source, checksumSHA256: oldHash, to: cacheURL)
+            let requestLog = RequestLog()
+
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    await requestLog.append(url)
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    if url == sourceURL {
+                        return Data(currentText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
+                }
+            ).sync(enabledSourceIDs: [source.id])
+
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("current.example.com"))
+            XCTAssertFalse(ruleSet.contains("old.example.com"))
+            XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
+            let requestedURLs = await requestLog.urls
+            XCTAssertEqual(requestedURLs, [catalogURL, sourceURL])
+        }
+    }
+
+    func testSyncRejectsNonBootstrapCatalogSourcesWithoutAcceptedHashes() async throws {
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let source = makeSource(
+                id: "metadata-only",
+                sourceURL: sourceURL,
+                sourceHash: "",
+                acceptedSourceHashes: [],
+                normalizedHash: "",
+                redistributionMode: "artifact",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T020000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let requestLog = RequestLog()
+
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    catalogURL: catalogURL,
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { url in
+                        await requestLog.append(url)
+                        if url == catalogURL {
+                            return catalogData
+                        }
+
+                        throw URLError(.unsupportedURL)
+                    }
+                ).sync(enabledSourceIDs: [source.id])
+                XCTFail("Expected missing accepted hash metadata to stop source fetch.")
+            } catch BlocklistCatalogSyncError.noAcceptedSourceHashes(let sourceID) {
+                XCTAssertEqual(sourceID, source.id)
+            }
+
+            let requestedURLs = await requestLog.urls
+            XCTAssertEqual(requestedURLs, [catalogURL])
+        }
+    }
+
+    func testDirectSourceParsingSkipsProtectedDomainsBeforeRulesReachSnapshot() async throws {
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
+            let rawText = """
+            api.lavasecurity.app
+            apps.apple.com
+            accounts.google.com
+            ads.example.com
+            """
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(
+                id: "upstream-only",
+                sourceURL: sourceURL,
+                sourceHash: rawHash,
+                normalizedHash: rawHash,
+                redistributionMode: "source_url_only",
+                parseFormat: .plainDomains
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T020000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: temporaryDirectory,
                 dataFetcher: { url in
                     if url == catalogURL {
                         return catalogData
@@ -761,241 +1001,52 @@ final class BlocklistCatalogSyncTests: XCTestCase {
                     throw URLError(.unsupportedURL)
                 }
             ).sync(enabledSourceIDs: [source.id])
-            XCTFail("Expected checksum mismatch for changed artifact bytes.")
-        } catch BlocklistCatalogSyncError.checksumMismatch(let sourceID) {
-            XCTAssertEqual(sourceID, source.id)
+
+            let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(ruleSet.contains("ads.example.com"))
+            XCTAssertFalse(ruleSet.contains("api.lavasecurity.app"))
+            XCTAssertFalse(ruleSet.contains("apps.apple.com"))
+            XCTAssertFalse(ruleSet.contains("accounts.google.com"))
         }
-    }
-
-    func testSyncUsesCachedLastGoodBlocklistWhenDirectUpstreamFetchFails() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let lastGoodText = "ads.example.com\n"
-        let lastGoodHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(lastGoodText.utf8))
-        let source = makeSource(
-            id: "upstream-only",
-            sourceURL: sourceURL,
-            sourceHash: lastGoodHash,
-            normalizedHash: lastGoodHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeLatestBlocklist(lastGoodText, sourceID: source.id, to: cacheURL)
-
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                if url == catalogURL {
-                    return catalogData
-                }
-                if url == sourceURL {
-                    throw URLError(.notConnectedToInternet)
-                }
-
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: [source.id])
-
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("ads.example.com"))
-        XCTAssertFalse(ruleSet.contains("malware.example.com"))
-        XCTAssertTrue(result.usedCachedSourceIDs.contains(source.id))
-    }
-
-    func testSyncPrefersCurrentAcceptedUpstreamHashOverOlderAcceptedCache() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let oldText = "old.example.com\n"
-        let currentText = "current.example.com\n"
-        let oldHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(oldText.utf8))
-        let currentHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(currentText.utf8))
-        let source = makeSource(
-            id: "upstream-only",
-            sourceURL: sourceURL,
-            sourceHash: currentHash,
-            acceptedSourceHashes: [
-                CatalogAcceptedSourceHash(sha256: currentHash),
-                CatalogAcceptedSourceHash(sha256: oldHash)
-            ],
-            normalizedHash: currentHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeVersionedBlocklist(oldText, source: source, checksumSHA256: oldHash, to: cacheURL)
-        let requestLog = RequestLog()
-
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                await requestLog.append(url)
-                if url == catalogURL {
-                    return catalogData
-                }
-                if url == sourceURL {
-                    return Data(currentText.utf8)
-                }
-
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: [source.id])
-
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("current.example.com"))
-        XCTAssertFalse(ruleSet.contains("old.example.com"))
-        XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
-        let requestedURLs = await requestLog.urls
-        XCTAssertEqual(requestedURLs, [catalogURL, sourceURL])
-    }
-
-    func testSyncRejectsNonBootstrapCatalogSourcesWithoutAcceptedHashes() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let source = makeSource(
-            id: "metadata-only",
-            sourceURL: sourceURL,
-            sourceHash: "",
-            acceptedSourceHashes: [],
-            normalizedHash: "",
-            redistributionMode: "artifact",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T020000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let requestLog = RequestLog()
-
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                catalogURL: catalogURL,
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
-                dataFetcher: { url in
-                    await requestLog.append(url)
-                    if url == catalogURL {
-                        return catalogData
-                    }
-
-                    throw URLError(.unsupportedURL)
-                }
-            ).sync(enabledSourceIDs: [source.id])
-            XCTFail("Expected missing accepted hash metadata to stop source fetch.")
-        } catch BlocklistCatalogSyncError.noAcceptedSourceHashes(let sourceID) {
-            XCTAssertEqual(sourceID, source.id)
-        }
-
-        let requestedURLs = await requestLog.urls
-        XCTAssertEqual(requestedURLs, [catalogURL])
-    }
-
-    func testDirectSourceParsingSkipsProtectedDomainsBeforeRulesReachSnapshot() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
-        let rawText = """
-        api.lavasecurity.app
-        apps.apple.com
-        accounts.google.com
-        ads.example.com
-        """
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(
-            id: "upstream-only",
-            sourceURL: sourceURL,
-            sourceHash: rawHash,
-            normalizedHash: rawHash,
-            redistributionMode: "source_url_only",
-            parseFormat: .plainDomains
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T020000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                if url == catalogURL {
-                    return catalogData
-                }
-                if url == sourceURL {
-                    return Data(rawText.utf8)
-                }
-
-                throw URLError(.unsupportedURL)
-            }
-        ).sync(enabledSourceIDs: [source.id])
-
-        let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(ruleSet.contains("ads.example.com"))
-        XCTAssertFalse(ruleSet.contains("api.lavasecurity.app"))
-        XCTAssertFalse(ruleSet.contains("apps.apple.com"))
-        XCTAssertFalse(ruleSet.contains("accounts.google.com"))
     }
 
     func testCachedCatalogFreshnessUsesLatestCatalogModificationDate() throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let latestURL = BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL)
-        try FileManager.default.createDirectory(
-            at: latestURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data("{}".utf8).write(to: latestURL)
-
-        let now = Date(timeIntervalSinceReferenceDate: 1_000)
-        let freshDate = now.addingTimeInterval(-60)
-        try FileManager.default.setAttributes(
-            [.modificationDate: freshDate],
-            ofItemAtPath: latestURL.path
-        )
-
-        let age = try XCTUnwrap(
-            BlocklistCatalogSynchronizer.cachedCatalogAge(in: cacheURL, now: now)
-        )
-        XCTAssertEqual(age, 60, accuracy: 0.1)
-        XCTAssertTrue(
-            BlocklistCatalogSynchronizer.hasFreshCachedCatalog(
-                in: cacheURL,
-                maxAge: 300,
-                now: now
+        try withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            let latestURL = BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL)
+            try FileManager.default.createDirectory(
+                at: latestURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
             )
-        )
-        XCTAssertFalse(
-            BlocklistCatalogSynchronizer.hasFreshCachedCatalog(
-                in: cacheURL,
-                maxAge: 30,
-                now: now
+            try Data("{}".utf8).write(to: latestURL)
+
+            let now = Date(timeIntervalSinceReferenceDate: 1_000)
+            let freshDate = now.addingTimeInterval(-60)
+            try FileManager.default.setAttributes(
+                [.modificationDate: freshDate],
+                ofItemAtPath: latestURL.path
             )
-        )
+
+            let age = try XCTUnwrap(
+                BlocklistCatalogSynchronizer.cachedCatalogAge(in: cacheURL, now: now)
+            )
+            XCTAssertEqual(age, 60, accuracy: 0.1)
+            XCTAssertTrue(
+                BlocklistCatalogSynchronizer.hasFreshCachedCatalog(
+                    in: cacheURL,
+                    maxAge: 300,
+                    now: now
+                )
+            )
+            XCTAssertFalse(
+                BlocklistCatalogSynchronizer.hasFreshCachedCatalog(
+                    in: cacheURL,
+                    maxAge: 30,
+                    now: now
+                )
+            )
+        }
     }
-
 
     func testCatalogFreshnessPolicyKeepsInitialEvaluationWindowFresh() {
         let policy = BlocklistCatalogFreshnessPolicy(maxAge: 7 * 24 * 60 * 60)
@@ -1007,230 +1058,244 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testLowRiskLaunchCacheKeepsActiveAdGuardCatalog() throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let defaultSource = makeSource(
-            id: DefaultCatalog.blockListProjectBasic.id,
-            licenseName: "Unlicense"
-        )
-        let adGuardSource = makeSource(
-            id: "adguard-dns-filter",
-            licenseName: "GPL-3.0"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T122050Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [defaultSource, adGuardSource],
-            guardrails: []
-        )
-        try writeCatalog(catalog, to: cacheURL)
-
-        XCTAssertFalse(
-            BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(
-                in: cacheURL,
-                requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+        try withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            let defaultSource = makeSource(
+                id: DefaultCatalog.blockListProjectBasic.id,
+                licenseName: "Unlicense"
             )
-        )
+            let adGuardSource = makeSource(
+                id: "adguard-dns-filter",
+                licenseName: "GPL-3.0"
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T122050Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [defaultSource, adGuardSource],
+                guardrails: []
+            )
+            try writeCatalog(catalog, to: cacheURL)
+
+            XCTAssertFalse(
+                BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(
+                    in: cacheURL,
+                    requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+                )
+            )
+        }
     }
 
     func testLowRiskLaunchCacheMigrationKeepsActiveAdGuardCatalogAndPayload() throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let defaultSource = makeSource(
-            id: DefaultCatalog.blockListProjectBasic.id,
-            licenseName: "Unlicense"
-        )
-        let adGuardSource = makeSource(
-            id: "adguard-dns-filter",
-            licenseName: "GPL-3.0"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T122050Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [defaultSource, adGuardSource],
-            guardrails: []
-        )
-        try writeCatalog(catalog, to: cacheURL)
-        try writeLatestBlocklist("ads.example.com\n", sourceID: adGuardSource.id, to: cacheURL)
-
-        let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
-            in: cacheURL,
-            requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
-        )
-
-        XCTAssertFalse(changed)
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+        try withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            let defaultSource = makeSource(
+                id: DefaultCatalog.blockListProjectBasic.id,
+                licenseName: "Unlicense"
             )
-        )
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: cacheURL
-                    .appendingPathComponent("blocklists", isDirectory: true)
-                    .appendingPathComponent(adGuardSource.id, isDirectory: true)
-                    .path
+            let adGuardSource = makeSource(
+                id: "adguard-dns-filter",
+                licenseName: "GPL-3.0"
             )
-        )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T122050Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [defaultSource, adGuardSource],
+                guardrails: []
+            )
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist("ads.example.com\n", sourceID: adGuardSource.id, to: cacheURL)
+
+            let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
+                in: cacheURL,
+                requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+            )
+
+            XCTAssertFalse(changed)
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+                )
+            )
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: cacheURL
+                        .appendingPathComponent("blocklists", isDirectory: true)
+                        .appendingPathComponent(adGuardSource.id, isDirectory: true)
+                        .path
+                )
+            )
+        }
     }
 
     func testLowRiskLaunchCacheMigrationInvalidatesCatalogWithLegacyGuardrails() throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let source = makeSource(
-            id: DefaultCatalog.blockListProjectBasic.id,
-            licenseName: "Unlicense"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T122050Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: [makeSource(id: "phishing-database-active", licenseName: "MIT")]
-        )
-        try writeCatalog(catalog, to: cacheURL)
-
-        let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
-            in: cacheURL,
-            requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
-        )
-
-        XCTAssertTrue(changed)
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+        try withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            let source = makeSource(
+                id: DefaultCatalog.blockListProjectBasic.id,
+                licenseName: "Unlicense"
             )
-        )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T122050Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: [makeSource(id: "phishing-database-active", licenseName: "MIT")]
+            )
+            try writeCatalog(catalog, to: cacheURL)
+
+            let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
+                in: cacheURL,
+                requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+            )
+
+            XCTAssertTrue(changed)
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+                )
+            )
+        }
     }
 
     func testLowRiskLaunchCacheMigrationKeepsCurrentCatalog() throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        let source = makeSource(
-            id: DefaultCatalog.blockListProjectBasic.id,
-            licenseName: "Unlicense"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260526T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        try writeCatalog(catalog, to: cacheURL)
-
-        let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
-            in: cacheURL,
-            requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
-        )
-
-        XCTAssertFalse(changed)
-        XCTAssertTrue(
-            FileManager.default.fileExists(
-                atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+        try withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            let source = makeSource(
+                id: DefaultCatalog.blockListProjectBasic.id,
+                licenseName: "Unlicense"
             )
-        )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260526T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            try writeCatalog(catalog, to: cacheURL)
+
+            let changed = BlocklistCatalogSynchronizer.migrateLowRiskLaunchCacheIfNeeded(
+                in: cacheURL,
+                requiredSourceIDs: [DefaultCatalog.blockListProjectBasic.id]
+            )
+
+            XCTAssertFalse(changed)
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: BlocklistCatalogSynchronizer.latestCatalogURL(in: cacheURL).path
+                )
+            )
+        }
     }
 
     func testSyncCustomBlocklistFetchesDirectURLAndCachesLocally() async throws {
-        let sourceURL = URL(string: "https://user.example.com/list.txt")!
-        let source = try CustomBlocklistSource(
-            id: "custom-test",
-            displayName: "My List",
-            rawURL: sourceURL.absoluteString
-        )
-        let rawText = """
-        0.0.0.0 ads.example.com
-        0.0.0.0 api.lavasecurity.app
-        """
-        let requestLog = RequestLog()
-        let cacheURL = try makeTemporaryCacheDirectory()
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let sourceURL = URL(string: "https://user.example.com/list.txt")!
+            let source = try CustomBlocklistSource(
+                id: "custom-test",
+                displayName: "My List",
+                rawURL: sourceURL.absoluteString
+            )
+            let rawText = """
+            0.0.0.0 ads.example.com
+            0.0.0.0 api.lavasecurity.app
+            """
+            let requestLog = RequestLog()
+            let cacheURL = temporaryDirectory
 
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: URL(string: "https://api.lavasecurity.app/v1/catalog")!,
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                await requestLog.append(url)
-                if url == sourceURL {
-                    return Data(rawText.utf8)
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: URL(string: "https://api.lavasecurity.app/v1/catalog")!,
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    await requestLog.append(url)
+                    if url == sourceURL {
+                        return Data(rawText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
                 }
+            ).syncCustomBlocklists([source])
 
-                throw URLError(.unsupportedURL)
-            }
-        ).syncCustomBlocklists([source])
+            XCTAssertTrue(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("ads.example.com"))
+            XCTAssertFalse(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("api.lavasecurity.app"))
+            let requestedURLs = await requestLog.snapshot()
+            XCTAssertEqual(requestedURLs, [sourceURL])
+            XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
+            XCTAssertEqual(
+                result.sourceHashes[source.id],
+                BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            )
 
-        XCTAssertTrue(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("ads.example.com"))
-        XCTAssertFalse(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("api.lavasecurity.app"))
-        let requestedURLs = await requestLog.snapshot()
-        XCTAssertEqual(requestedURLs, [sourceURL])
-        XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
-        XCTAssertEqual(
-            result.sourceHashes[source.id],
-            BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        )
+            let cached = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { _ in throw URLError(.notConnectedToInternet) }
+            ).loadCachedCustomBlocklists([source])
 
-        let cached = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { _ in throw URLError(.notConnectedToInternet) }
-        ).loadCachedCustomBlocklists([source])
-
-        XCTAssertTrue(try XCTUnwrap(cached.sourceRuleSets[source.id]).contains("ads.example.com"))
-        XCTAssertTrue(cached.usedCachedSourceIDs.contains(source.id))
+            XCTAssertTrue(try XCTUnwrap(cached.sourceRuleSets[source.id]).contains("ads.example.com"))
+            XCTAssertTrue(cached.usedCachedSourceIDs.contains(source.id))
+        }
     }
 
     func testSyncCustomBlocklistAcceptsChangedNetworkBytesAndUpdatesHash() async throws {
-        let sourceURL = URL(string: "https://user.example.com/list.txt")!
-        let oldText = "old.example.com\n"
-        let newText = "new.example.com\n"
-        let oldHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(oldText.utf8))
-        let newHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(newText.utf8))
-        let source = try CustomBlocklistSource(
-            id: "custom-changing",
-            displayName: "Changing",
-            rawURL: sourceURL.absoluteString,
-            lastAcceptedHash: oldHash
-        )
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let sourceURL = URL(string: "https://user.example.com/list.txt")!
+            let oldText = "old.example.com\n"
+            let newText = "new.example.com\n"
+            let oldHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(oldText.utf8))
+            let newHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(newText.utf8))
+            let source = try CustomBlocklistSource(
+                id: "custom-changing",
+                displayName: "Changing",
+                rawURL: sourceURL.absoluteString,
+                lastAcceptedHash: oldHash
+            )
 
-        let result = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                if url == sourceURL {
-                    return Data(newText.utf8)
+            let result = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: temporaryDirectory,
+                dataFetcher: { url in
+                    if url == sourceURL {
+                        return Data(newText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
                 }
+            ).syncCustomBlocklists([source])
 
-                throw URLError(.unsupportedURL)
-            }
-        ).syncCustomBlocklists([source])
-
-        let rules = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(rules.contains("new.example.com"))
-        XCTAssertFalse(rules.contains("old.example.com"))
-        XCTAssertEqual(result.sourceHashes[source.id], newHash)
+            let rules = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(rules.contains("new.example.com"))
+            XCTAssertFalse(rules.contains("old.example.com"))
+            XCTAssertEqual(result.sourceHashes[source.id], newHash)
+        }
     }
 
     func testCachedCustomBlocklistRequiresLastAcceptedHashMatch() async throws {
-        // A custom source's lastAcceptedHash is the FREEZE anchor for a downgraded
-        // (cacheOnly) filter — it must fail closed when the only cached content differs,
-        // rather than silently re-hash from latest. (Dropping hash-pinning applies to catalog
-        // COMMUNITY sources, not to this custom-list freeze gate.)
-        let sourceURL = URL(string: "https://user.example.com/list.txt")!
-        let acceptedText = "accepted.example.com\n"
-        let changedText = "changed.example.com\n"
-        let acceptedHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(acceptedText.utf8))
-        let source = try CustomBlocklistSource(
-            id: "custom-hash",
-            displayName: "Hash Checked",
-            rawURL: sourceURL.absoluteString,
-            lastAcceptedHash: acceptedHash
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeLatestCustomBlocklist(changedText, sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // A custom source's lastAcceptedHash is the FREEZE anchor for a downgraded
+            // (cacheOnly) filter — it must fail closed when the only cached content differs,
+            // rather than silently re-hash from latest. (Dropping hash-pinning applies to catalog
+            // COMMUNITY sources, not to this custom-list freeze gate.)
+            let sourceURL = URL(string: "https://user.example.com/list.txt")!
+            let acceptedText = "accepted.example.com\n"
+            let changedText = "changed.example.com\n"
+            let acceptedHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(acceptedText.utf8))
+            let source = try CustomBlocklistSource(
+                id: "custom-hash",
+                displayName: "Hash Checked",
+                rawURL: sourceURL.absoluteString,
+                lastAcceptedHash: acceptedHash
+            )
+            let cacheURL = temporaryDirectory
+            try writeLatestCustomBlocklist(changedText, sourceID: source.id, to: cacheURL)
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                cacheDirectoryURL: cacheURL
-            ).loadCachedCustomBlocklists([source])
-            XCTFail("Expected cached custom list with a mismatched accepted hash to be rejected.")
-        } catch BlocklistCatalogSyncError.checksumMismatch(let sourceID) {
-            XCTAssertEqual(sourceID, source.id)
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    cacheDirectoryURL: cacheURL
+                ).loadCachedCustomBlocklists([source])
+                XCTFail("Expected cached custom list with a mismatched accepted hash to be rejected.")
+            } catch BlocklistCatalogSyncError.checksumMismatch(let sourceID) {
+                XCTAssertEqual(sourceID, source.id)
+            }
         }
     }
 
@@ -1267,37 +1332,39 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testSourceURLOnlyCacheServesRotatedLatestWhenHashNotPinned() async throws {
-        // Refresh-wedge root cause: a community source_url_only list rotated upstream, so its
-        // cached `latest` no longer matches the catalog's (now stale) pinned hash. On the
-        // cache-only path (the tunnel's cold-start in-extension compile) the device must SERVE
-        // that cached content — size/rule caps still apply at parse time — rather than throw
-        // checksumMismatch and clear protection.
-        let pinnedHash = String(repeating: "b", count: 64)
-        let source = makeSource(
-            id: "rotating-community",
-            sourceHash: pinnedHash,
-            normalizedHash: pinnedHash,
-            redistributionMode: "source_url_only"
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260623T000000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(catalog, to: cacheURL)
-        // The cached `latest` is the ROTATED content — its hash is NOT the pinned one, and no
-        // versioned file matches the pin, so the load falls through to the latest payload.
-        try writeLatestBlocklist("rotated.example.com\n", sourceID: source.id, to: cacheURL)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // Refresh-wedge root cause: a community source_url_only list rotated upstream, so its
+            // cached `latest` no longer matches the catalog's (now stale) pinned hash. On the
+            // cache-only path (the tunnel's cold-start in-extension compile) the device must SERVE
+            // that cached content — size/rule caps still apply at parse time — rather than throw
+            // checksumMismatch and clear protection.
+            let pinnedHash = String(repeating: "b", count: 64)
+            let source = makeSource(
+                id: "rotating-community",
+                sourceHash: pinnedHash,
+                normalizedHash: pinnedHash,
+                redistributionMode: "source_url_only"
+            )
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260623T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let cacheURL = temporaryDirectory
+            try writeCatalog(catalog, to: cacheURL)
+            // The cached `latest` is the ROTATED content — its hash is NOT the pinned one, and no
+            // versioned file matches the pin, so the load falls through to the latest payload.
+            try writeLatestBlocklist("rotated.example.com\n", sourceID: source.id, to: cacheURL)
 
-        let result = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL
-        ).loadCached(enabledSourceIDs: [source.id])
+            let result = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL
+            ).loadCached(enabledSourceIDs: [source.id])
 
-        let rules = try XCTUnwrap(result.sourceRuleSets[source.id])
-        XCTAssertTrue(rules.contains("rotated.example.com"))
+            let rules = try XCTUnwrap(result.sourceRuleSets[source.id])
+            XCTAssertTrue(rules.contains("rotated.example.com"))
+        }
     }
 
     func testDecodedGuardrailIsStampedStrictRegardlessOfServerCategory() throws {
@@ -1331,319 +1398,335 @@ final class BlocklistCatalogSyncTests: XCTestCase {
     }
 
     func testRestoredCustomBlocklistFetchesAndCachedCompilerReloadsFromHash() async throws {
-        let sourceURL = URL(string: "https://user.example.com/list.txt")!
-        let rawText = "custom-ad.example.com\n"
-        let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = try CustomBlocklistSource(
-            id: "custom-restore",
-            displayName: "Restore",
-            rawURL: sourceURL.absoluteString
-        )
-        let backedUpConfiguration = AppConfiguration(
-            protectionEnabled: true,
-            enabledBlocklistIDs: [source.id],
-            isPaid: true,
-            customBlocklists: [source]
-        )
-        var restoredConfiguration = BackupConfigurationPayload(
-            configuration: backedUpConfiguration
-        ).restoredConfiguration()
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(
-            BlocklistCatalog(
-                schemaVersion: 2,
-                catalogVersion: "empty",
-                generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
-                sources: [],
-                guardrails: []
-            ),
-            to: cacheURL
-        )
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let sourceURL = URL(string: "https://user.example.com/list.txt")!
+            let rawText = "custom-ad.example.com\n"
+            let rawHash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = try CustomBlocklistSource(
+                id: "custom-restore",
+                displayName: "Restore",
+                rawURL: sourceURL.absoluteString
+            )
+            let backedUpConfiguration = AppConfiguration(
+                protectionEnabled: true,
+                enabledBlocklistIDs: [source.id],
+                isPaid: true,
+                customBlocklists: [source]
+            )
+            var restoredConfiguration = BackupConfigurationPayload(
+                configuration: backedUpConfiguration
+            ).restoredConfiguration()
+            let cacheURL = temporaryDirectory
+            try writeCatalog(
+                BlocklistCatalog(
+                    schemaVersion: 2,
+                    catalogVersion: "empty",
+                    generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
+                    sources: [],
+                    guardrails: []
+                ),
+                to: cacheURL
+            )
 
-        let customResult = try await BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheURL,
-            dataFetcher: { url in
-                if url == sourceURL {
-                    return Data(rawText.utf8)
+            let customResult = try await BlocklistCatalogSynchronizer(
+                cacheDirectoryURL: cacheURL,
+                dataFetcher: { url in
+                    if url == sourceURL {
+                        return Data(rawText.utf8)
+                    }
+
+                    throw URLError(.unsupportedURL)
                 }
+            ).syncCustomBlocklists(restoredConfiguration.customBlocklists)
 
-                throw URLError(.unsupportedURL)
-            }
-        ).syncCustomBlocklists(restoredConfiguration.customBlocklists)
-
-        restoredConfiguration.customBlocklists[0].lastAcceptedHash = try XCTUnwrap(customResult.sourceHashes[source.id])
-        let cachedSnapshot = try await CachedFilterSnapshotCompiler(
-            cacheDirectoryURL: cacheURL
-        ).compile(
-            baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
-            configuration: restoredConfiguration
-        )
-
-        XCTAssertEqual(rawHash, restoredConfiguration.customBlocklists[0].lastAcceptedHash)
-        XCTAssertEqual(cachedSnapshot.decision(for: "custom-ad.example.com").reason, .blocklist)
-    }
-
-    func testCachedSnapshotCompilerFailsForEnabledIDWithoutCatalogOrCustomSource() async throws {
-        let cacheURL = try makeTemporaryCacheDirectory()
-        try writeCatalog(
-            BlocklistCatalog(
-                schemaVersion: 2,
-                catalogVersion: "empty",
-                generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
-                sources: [],
-                guardrails: []
-            ),
-            to: cacheURL
-        )
-        let configuration = AppConfiguration(enabledBlocklistIDs: ["missing-source"])
-
-        do {
-            _ = try await CachedFilterSnapshotCompiler(
+            restoredConfiguration.customBlocklists[0].lastAcceptedHash = try XCTUnwrap(customResult.sourceHashes[source.id])
+            let cachedSnapshot = try await CachedFilterSnapshotCompiler(
                 cacheDirectoryURL: cacheURL
             ).compile(
                 baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
-                configuration: configuration
+                configuration: restoredConfiguration
             )
-            XCTFail("Expected an enabled source without catalog or custom metadata to fail explicitly.")
-        } catch BlocklistCatalogSyncError.missingEnabledBlocklistSource(let sourceID) {
-            XCTAssertEqual(sourceID, "missing-source")
+
+            XCTAssertEqual(rawHash, restoredConfiguration.customBlocklists[0].lastAcceptedHash)
+            XCTAssertEqual(cachedSnapshot.decision(for: "custom-ad.example.com").reason, .blocklist)
+        }
+    }
+
+    func testCachedSnapshotCompilerFailsForEnabledIDWithoutCatalogOrCustomSource() async throws {
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cacheURL = temporaryDirectory
+            try writeCatalog(
+                BlocklistCatalog(
+                    schemaVersion: 2,
+                    catalogVersion: "empty",
+                    generatedAt: Date(timeIntervalSince1970: 1_780_272_000),
+                    sources: [],
+                    guardrails: []
+                ),
+                to: cacheURL
+            )
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["missing-source"])
+
+            do {
+                _ = try await CachedFilterSnapshotCompiler(
+                    cacheDirectoryURL: cacheURL
+                ).compile(
+                    baseSnapshot: FilterSnapshot(blockRules: DomainRuleSet(), allowRules: DomainRuleSet()),
+                    configuration: configuration
+                )
+                XCTFail("Expected an enabled source without catalog or custom metadata to fail explicitly.")
+            } catch BlocklistCatalogSyncError.missingEnabledBlocklistSource(let sourceID) {
+                XCTAssertEqual(sourceID, "missing-source")
+            }
         }
     }
 
     func testCustomBlocklistRejectsOversizedPayloadBeforeParsing() async throws {
-        let sourceURL = URL(string: "https://user.example.com/large.txt")!
-        let source = try CustomBlocklistSource(
-            id: "custom-large",
-            displayName: "Large",
-            rawURL: sourceURL.absoluteString
-        )
-        let oversized = Data(repeating: 0x61, count: BlocklistCatalogSynchronizer.maximumBlocklistBytes + 1)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let sourceURL = URL(string: "https://user.example.com/large.txt")!
+            let source = try CustomBlocklistSource(
+                id: "custom-large",
+                displayName: "Large",
+                rawURL: sourceURL.absoluteString
+            )
+            let oversized = Data(repeating: 0x61, count: BlocklistCatalogSynchronizer.maximumBlocklistBytes + 1)
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
-                dataFetcher: { url in
-                    if url == sourceURL {
-                        return oversized
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { url in
+                        if url == sourceURL {
+                            return oversized
+                        }
+
+                        throw URLError(.unsupportedURL)
                     }
-
-                    throw URLError(.unsupportedURL)
-                }
-            ).syncCustomBlocklists([source])
-            XCTFail("Expected oversized custom source to be rejected.")
-        } catch BlocklistCatalogSyncError.blocklistTooLarge(let sourceID, let byteSize) {
-            XCTAssertEqual(sourceID, source.id)
-            XCTAssertEqual(byteSize, oversized.count)
+                ).syncCustomBlocklists([source])
+                XCTFail("Expected oversized custom source to be rejected.")
+            } catch BlocklistCatalogSyncError.blocklistTooLarge(let sourceID, let byteSize) {
+                XCTAssertEqual(sourceID, source.id)
+                XCTAssertEqual(byteSize, oversized.count)
+            }
         }
     }
 
     func testCustomBlocklistStreamingSizeLimitSurfacesNamedError() async throws {
-        // The streaming layer (`defaultDataFetcher`) aborts an oversized body before it
-        // is fully buffered, throwing `BlocklistDownloadSizeLimitExceeded`. Simulate that
-        // by injecting it: the custom-source path must wrap it as the named
-        // `customBlocklistUnavailable` (not pass through a generic error), so the user
-        // sees which list failed.
-        let sourceURL = URL(string: "https://user.example.com/huge.txt")!
-        let source = try CustomBlocklistSource(
-            id: "custom-huge",
-            displayName: "Huge",
-            rawURL: sourceURL.absoluteString
-        )
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            // The streaming layer (`defaultDataFetcher`) aborts an oversized body before it
+            // is fully buffered, throwing `BlocklistDownloadSizeLimitExceeded`. Simulate that
+            // by injecting it: the custom-source path must wrap it as the named
+            // `customBlocklistUnavailable` (not pass through a generic error), so the user
+            // sees which list failed.
+            let sourceURL = URL(string: "https://user.example.com/huge.txt")!
+            let source = try CustomBlocklistSource(
+                id: "custom-huge",
+                displayName: "Huge",
+                rawURL: sourceURL.absoluteString
+            )
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
-                dataFetcher: { url in
-                    if url == sourceURL {
-                        throw BlocklistDownloadSizeLimitExceeded(
-                            byteSize: BlocklistCatalogSynchronizer.maximumBlocklistBytes + 1,
-                            maximumByteCount: BlocklistCatalogSynchronizer.maximumBlocklistBytes
-                        )
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { url in
+                        if url == sourceURL {
+                            throw BlocklistDownloadSizeLimitExceeded(
+                                byteSize: BlocklistCatalogSynchronizer.maximumBlocklistBytes + 1,
+                                maximumByteCount: BlocklistCatalogSynchronizer.maximumBlocklistBytes
+                            )
+                        }
+
+                        throw URLError(.unsupportedURL)
                     }
-
-                    throw URLError(.unsupportedURL)
-                }
-            ).syncCustomBlocklists([source])
-            XCTFail("Expected the oversized streamed download to be rejected.")
-        } catch BlocklistCatalogSyncError.customBlocklistUnavailable(let displayName, _) {
-            XCTAssertEqual(displayName, "Huge")
+                ).syncCustomBlocklists([source])
+                XCTFail("Expected the oversized streamed download to be rejected.")
+            } catch BlocklistCatalogSyncError.customBlocklistUnavailable(let displayName, _) {
+                XCTAssertEqual(displayName, "Huge")
+            }
         }
     }
 
     func testCustomBlocklistDownloadCancellationPropagatesAsURLError() async throws {
-        let source = try CustomBlocklistSource(
-            id: "custom-cancel",
-            displayName: "Cancelled",
-            rawURL: "https://user.example.com/cancelled.txt"
-        )
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let source = try CustomBlocklistSource(
+                id: "custom-cancel",
+                displayName: "Cancelled",
+                rawURL: "https://user.example.com/cancelled.txt"
+            )
 
-        do {
-            _ = try await BlocklistCatalogSynchronizer(
-                cacheDirectoryURL: makeTemporaryCacheDirectory(),
-                dataFetcher: { _ in throw URLError(.cancelled) }
-            ).syncCustomBlocklists([source])
-            XCTFail("Expected the cancelled download to propagate.")
-        } catch let error as URLError {
-            // A cancelled in-flight download (URLError.cancelled) must pass through as
-            // cancellation, NOT be wrapped as customBlocklistUnavailable.
-            XCTAssertEqual(error.code, .cancelled)
+            do {
+                _ = try await BlocklistCatalogSynchronizer(
+                    cacheDirectoryURL: temporaryDirectory,
+                    dataFetcher: { _ in throw URLError(.cancelled) }
+                ).syncCustomBlocklists([source])
+                XCTFail("Expected the cancelled download to propagate.")
+            } catch let error as URLError {
+                // A cancelled in-flight download (URLError.cancelled) must pass through as
+                // cancellation, NOT be wrapped as customBlocklistUnavailable.
+                XCTAssertEqual(error.code, .cancelled)
+            }
         }
     }
 
     func testParallelSourceCompilationProducesEveryEnabledRuleSet() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let count = 5
-        let specs: [(source: CatalogBlocklistSource, url: URL, data: Data)] = (0..<count).map { index in
-            let sourceURL = URL(string: "https://upstream.example.com/list-\(index).txt")!
-            let rawText = "ads-\(index).example.com\n"
-            let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-            return (
-                makeSource(id: "src-\(index)", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash),
-                sourceURL,
-                Data(rawText.utf8)
-            )
-        }
-        let sources = specs.map(\.source)
-        let dataByURL = Dictionary(uniqueKeysWithValues: specs.map { ($0.url, $0.data) })
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: sources,
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: try makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                if url == catalogURL {
-                    return catalogData
-                }
-                guard let data = dataByURL[url] else {
-                    throw URLError(.unsupportedURL)
-                }
-                return data
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let count = 5
+            let specs: [(source: CatalogBlocklistSource, url: URL, data: Data)] = (0..<count).map { index in
+                let sourceURL = URL(string: "https://upstream.example.com/list-\(index).txt")!
+                let rawText = "ads-\(index).example.com\n"
+                let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+                return (
+                    makeSource(id: "src-\(index)", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash),
+                    sourceURL,
+                    Data(rawText.utf8)
+                )
             }
-        ).sync(enabledSourceIDs: Set(sources.map(\.id)))
-
-        XCTAssertEqual(result.sourceRuleSets.count, count)
-        for index in 0..<count {
-            XCTAssertTrue(
-                result.sourceRuleSets["src-\(index)"]?.contains("ads-\(index).example.com") == true,
-                "Bounded-parallel compile must produce each enabled source's parsed rule set."
+            let sources = specs.map(\.source)
+            let dataByURL = Dictionary(uniqueKeysWithValues: specs.map { ($0.url, $0.data) })
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: sources,
+                guardrails: []
             )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: temporaryDirectory,
+                dataFetcher: { url in
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    guard let data = dataByURL[url] else {
+                        throw URLError(.unsupportedURL)
+                    }
+                    return data
+                }
+            ).sync(enabledSourceIDs: Set(sources.map(\.id)))
+
+            XCTAssertEqual(result.sourceRuleSets.count, count)
+            for index in 0..<count {
+                XCTAssertTrue(
+                    result.sourceRuleSets["src-\(index)"]?.contains("ads-\(index).example.com") == true,
+                    "Bounded-parallel compile must produce each enabled source's parsed rule set."
+                )
+            }
         }
     }
 
     func testParallelSourceCompilationStaysWithinConcurrencyCap() async throws {
-        let cap = BlocklistParseResourceBudget.default.maxConcurrentSources
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let count = cap + 2
-        let specs: [(source: CatalogBlocklistSource, url: URL, data: Data)] = (0..<count).map { index in
-            let sourceURL = URL(string: "https://upstream.example.com/list-\(index).txt")!
-            let rawText = "ads-\(index).example.com\n"
-            let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-            return (
-                makeSource(id: "src-\(index)", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash),
-                sourceURL,
-                Data(rawText.utf8)
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let cap = BlocklistParseResourceBudget.default.maxConcurrentSources
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let count = cap + 2
+            let specs: [(source: CatalogBlocklistSource, url: URL, data: Data)] = (0..<count).map { index in
+                let sourceURL = URL(string: "https://upstream.example.com/list-\(index).txt")!
+                let rawText = "ads-\(index).example.com\n"
+                let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+                return (
+                    makeSource(id: "src-\(index)", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash),
+                    sourceURL,
+                    Data(rawText.utf8)
+                )
+            }
+            let sources = specs.map(\.source)
+            let dataByURL = Dictionary(uniqueKeysWithValues: specs.map { ($0.url, $0.data) })
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: sources,
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let tracker = ConcurrencyTracker()
+            let gate = ArrivalGate(threshold: cap)
+
+            let result = try await BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: temporaryDirectory,
+                dataFetcher: { url in
+                    if url == catalogURL {
+                        return catalogData
+                    }
+                    guard let data = dataByURL[url] else {
+                        throw URLError(.unsupportedURL)
+                    }
+                    await tracker.enter()
+                    // Hold the first `cap` concurrent fetchers together so the peak
+                    // in-flight count is observable; sources beyond the cap pass
+                    // through once the threshold has already been reached.
+                    await gate.arriveAndWait()
+                    await tracker.leave()
+                    return data
+                }
+            ).sync(enabledSourceIDs: Set(sources.map(\.id)))
+
+            XCTAssertEqual(result.sourceRuleSets.count, count)
+            let peak = await tracker.peak
+            XCTAssertEqual(
+                peak,
+                cap,
+                "Bounded parallelism must run exactly the cap concurrently — never more, and more than one (proving it is not serial)."
             )
         }
-        let sources = specs.map(\.source)
-        let dataByURL = Dictionary(uniqueKeysWithValues: specs.map { ($0.url, $0.data) })
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: sources,
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let tracker = ConcurrencyTracker()
-        let gate = ArrivalGate(threshold: cap)
-
-        let result = try await BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: try makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                if url == catalogURL {
-                    return catalogData
-                }
-                guard let data = dataByURL[url] else {
-                    throw URLError(.unsupportedURL)
-                }
-                await tracker.enter()
-                // Hold the first `cap` concurrent fetchers together so the peak
-                // in-flight count is observable; sources beyond the cap pass
-                // through once the threshold has already been reached.
-                await gate.arriveAndWait()
-                await tracker.leave()
-                return data
-            }
-        ).sync(enabledSourceIDs: Set(sources.map(\.id)))
-
-        XCTAssertEqual(result.sourceRuleSets.count, count)
-        let peak = await tracker.peak
-        XCTAssertEqual(
-            peak,
-            cap,
-            "Bounded parallelism must run exactly the cap concurrently — never more, and more than one (proving it is not serial)."
-        )
     }
 
     func testAlreadyCancelledSyncThrowsBeforeFetchingAnySource() async throws {
-        let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
-        let sourceURL = URL(string: "https://upstream.example.com/a.txt")!
-        let rawText = "ads.example.com\n"
-        let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
-        let source = makeSource(id: "src-a", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash)
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2,
-            catalogVersion: "20260525T010000Z",
-            generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
-            sources: [source],
-            guardrails: []
-        )
-        let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-        let requestLog = RequestLog()
-        let taskBox = CancellableSyncTaskBox()
+        try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
+            let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
+            let sourceURL = URL(string: "https://upstream.example.com/a.txt")!
+            let rawText = "ads.example.com\n"
+            let hash = BlocklistCatalogSynchronizer.sha256Hex(of: Data(rawText.utf8))
+            let source = makeSource(id: "src-a", sourceURL: sourceURL, sourceHash: hash, normalizedHash: hash)
+            let catalog = BlocklistCatalog(
+                schemaVersion: 2,
+                catalogVersion: "20260525T010000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_768_386_495),
+                sources: [source],
+                guardrails: []
+            )
+            let catalogData = try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
+            let requestLog = RequestLog()
+            let taskBox = CancellableSyncTaskBox()
 
-        let synchronizer = BlocklistCatalogSynchronizer(
-            catalogURL: catalogURL,
-            cacheDirectoryURL: try makeTemporaryCacheDirectory(),
-            dataFetcher: { url in
-                await requestLog.append(url)
-                if url == catalogURL {
-                    // Cancel before the source loop begins: the first
-                    // checkCancellation must throw before any source is fetched.
-                    await taskBox.cancelWhenReady()
-                    return catalogData
+            let synchronizer = BlocklistCatalogSynchronizer(
+                catalogURL: catalogURL,
+                cacheDirectoryURL: temporaryDirectory,
+                dataFetcher: { url in
+                    await requestLog.append(url)
+                    if url == catalogURL {
+                        // Cancel before the source loop begins: the first
+                        // checkCancellation must throw before any source is fetched.
+                        await taskBox.cancelWhenReady()
+                        return catalogData
+                    }
+
+                    return Data(rawText.utf8)
                 }
+            )
 
-                return Data(rawText.utf8)
+            let task = Task<Void, Error> {
+                _ = try await synchronizer.sync(enabledSourceIDs: [source.id])
             }
-        )
+            await taskBox.register(task)
 
-        let task = Task<Void, Error> {
-            _ = try await synchronizer.sync(enabledSourceIDs: [source.id])
+            do {
+                _ = try await task.value
+                XCTFail("Expected the cancelled sync to throw CancellationError")
+            } catch is CancellationError {
+                // Expected.
+            }
+
+            let requested = await requestLog.snapshot()
+            XCTAssertEqual(
+                requested,
+                [catalogURL],
+                "A cancelled sync must stop at the top of the compile loop, before fetching any source."
+            )
         }
-        await taskBox.register(task)
-
-        do {
-            _ = try await task.value
-            XCTFail("Expected the cancelled sync to throw CancellationError")
-        } catch is CancellationError {
-            // Expected.
-        }
-
-        let requested = await requestLog.snapshot()
-        XCTAssertEqual(
-            requested,
-            [catalogURL],
-            "A cancelled sync must stop at the top of the compile loop, before fetching any source."
-        )
     }
 
     private func makeSource(
@@ -1687,13 +1770,6 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             licenseTextURL: nil,
             noticeURL: nil
         )
-    }
-
-    private func makeTemporaryCacheDirectory() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
     }
 
     private func writeCatalog(_ catalog: BlocklistCatalog, to cacheURL: URL) throws {

@@ -1,6 +1,7 @@
 #if DEBUG || LAVA_QA_TOOLS
 import SwiftUI
-import LavaSecCore
+import LavaSecKit
+import LavaSecAppServices
 import UIKit
 
 struct PhoneQASheetView: View {

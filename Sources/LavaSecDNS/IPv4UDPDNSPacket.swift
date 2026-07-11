@@ -13,16 +13,16 @@ import Foundation
 public struct IPv4UDPDNSPacket: Sendable {
     /// IPv4 source address (4 bytes, network order) — the querying host,
     /// which responses must be addressed back to.
-    public let sourceAddress: Data
+    package let sourceAddress: Data
     /// IPv4 destination address (4 bytes, network order) — the resolver
     /// address the query was captured on the way to.
-    public let destinationAddress: Data
+    package let destinationAddress: Data
     /// UDP source port of the querying socket; responses return to it.
-    public let sourcePort: UInt16
+    package let sourcePort: UInt16
     /// UDP destination port. Always 53 — the parser rejects everything else.
-    public let destinationPort: UInt16
+    package let destinationPort: UInt16
     /// IPv4 identification field of the request, echoed into built responses.
-    public let identifier: UInt16
+    package let identifier: UInt16
     /// The raw DNS message carried by the datagram.
     public let dnsPayload: Data
 

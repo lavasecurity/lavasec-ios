@@ -23,10 +23,13 @@ public protocol SettleWorkScheduling: AnyObject {
     func schedule(after interval: TimeInterval, _ work: @escaping () -> Void) -> SettleWorkToken
 }
 
+/// A cancellable handle for work scheduled during a network-settle interval.
 public protocol SettleWorkToken: AnyObject {
+    /// Prevents the scheduled work from firing when it has not already run.
     func cancel()
 }
 
+/// Coalesces a burst of network changes into one deferred unit of work.
 public final class NetworkSettleCoalescer {
     private let scheduler: SettleWorkScheduling
     private let settleInterval: TimeInterval
@@ -39,6 +42,7 @@ public final class NetworkSettleCoalescer {
     /// cancel. Diagnostics/tests — a value > 1 at fire time means flaps coalesced.
     public private(set) var coalescedRearmCount = 0
 
+    /// Creates a coalescer that asks `scheduler` to run `work` after the quiet interval.
     public init(
         settleInterval: TimeInterval,
         scheduler: SettleWorkScheduling,
@@ -72,6 +76,7 @@ public final class NetworkSettleCoalescer {
         coalescedRearmCount = 0
     }
 
+    /// Whether coalesced work is currently scheduled and has not fired or been cancelled.
     public var hasPendingWork: Bool {
         pendingToken != nil
     }

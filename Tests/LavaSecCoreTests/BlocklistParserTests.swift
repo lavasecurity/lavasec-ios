@@ -1,8 +1,17 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
 @testable import LavaSecKit
 
 final class BlocklistParserTests: XCTestCase {
+    func testFormatRawValuesRemainStableForCacheKeys() {
+        XCTAssertEqual(BlocklistFormat.auto.rawValue, "auto")
+        XCTAssertEqual(BlocklistFormat.plainDomains.rawValue, "plainDomains")
+        XCTAssertEqual(BlocklistFormat.hosts.rawValue, "hosts")
+        XCTAssertEqual(BlocklistFormat.adblock.rawValue, "adblock")
+        XCTAssertEqual(BlocklistFormat.dnsmasq.rawValue, "dnsmasq")
+    }
+
     func testParsesSupportedFormats() {
         let parser = BlocklistParser()
         let result = parser.parse(

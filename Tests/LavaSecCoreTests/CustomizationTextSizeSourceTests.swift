@@ -65,7 +65,7 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil"),
                       "The seed must run only on opt-out and only when no Lava size was ever saved (a saved size wins).")
 
-        let settingsSource = try readSource(.settingsView)
+        let settingsSource = try readSource(.customizationSettingsView)
         XCTAssertTrue(settingsSource.contains("@Environment(\\.dynamicTypeSize) private var systemDynamicTypeSize"),
                       "Customization must read the current system Dynamic Type size.")
         XCTAssertTrue(settingsSource.contains("seedingFrom: LavaTextSize.matching(systemDynamicTypeSize)"),
@@ -75,7 +75,7 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     // MARK: Customization UI + slider gating
 
     func testTextSizeSectionControlsAndGrey() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.customizationSettingsView)
 
         XCTAssertTrue(source.contains("Toggle(\"Match System\", isOn: textSizeMatchesSystemBinding)"),
                       "The Text Size section needs a Match System toggle.")
@@ -97,7 +97,7 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     // MARK: Section order (the reorder)
 
     func testCustomizationSectionOrder() throws {
-        let source = try readSource(.settingsView)
+        let source = try readSource(.customizationSettingsView)
 
         func offset(of marker: String) throws -> Int {
             let range = try XCTUnwrap(source.range(of: marker), "missing section marker: \(marker)")

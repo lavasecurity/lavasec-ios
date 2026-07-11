@@ -1,5 +1,5 @@
 import Foundation
-import LavaSecCore
+import LavaSecKit
 import os
 
 enum LavaSecAppGroup {
@@ -19,6 +19,14 @@ enum LavaSecAppGroup {
     static let tunnelHealthFilename = "tunnel-health.json"
     static let diagnosticsFilename = "diagnostics.json"
     static let diagnosticsControlFilename = "diagnostics-control.json"
+    /// SQLite depth store for Domain History (`DNSEventLog`): tunnel-writes, app-reads-only.
+    /// Separate from `diagnostics.json` — the JSON store keeps the aggregate counts + the
+    /// last-250 events; this holds the full 7-day event stream the scrollable list pages over.
+    static let dnsEventLogFilename = "dns-events.sqlite"
+    /// Epoch-ms floor written by the app when the user clears Domain History; the read path
+    /// hides log rows older than this so a clear takes effect without a cross-process sqlite
+    /// write (the tunnel prunes them physically on its next retention pass).
+    static let dnsEventLogClearedAtKey = "dnsEventLogClearedAtMs"
     static let networkActivityLogFilename = "network-activity-log.json"
     /// OBS R2: the append-only incident ledger — tunnel-writes, app-reads-at-report-time.
     /// Decoupled from the rate-limiter's policy stores (which forget by design); nothing
@@ -94,7 +102,7 @@ enum LavaSecAppGroup {
     static let selfReconnectGapStartedAtDefaultsKey = "tunnel.selfReconnectGapStartedAt"
     static let selfReconnectGapEndedAtDefaultsKey = "tunnel.selfReconnectGapEndedAt"
     static let selfReconnectGapCountDefaultsKey = "tunnel.selfReconnectGapCount"
-    // Aliased to the LavaSecCore stores so the app, tunnel, intents, and the
+    // Aliased to the LavaSecKit stores so the app, tunnel, intents, and the
     // stores can never drift on key strings.
     static let protectionActiveSessionIDDefaultsKey = ProtectionSessionStore.Keys.activeSessionID
     static let protectionTemporaryPauseUntilDefaultsKey = ProtectionPauseStore.Keys.pausedUntil

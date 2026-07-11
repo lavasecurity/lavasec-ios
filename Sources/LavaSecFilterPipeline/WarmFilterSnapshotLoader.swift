@@ -1,9 +1,11 @@
 import Foundation
 import LavaSecKit
 
-/// A prepared filter snapshot that has been loaded + validated for an instant (warm) switch:
-/// the decoded snapshot, the cached catalog it was validated against, and — when a caller
-/// hydrated it — the FULL guardrail rule set for that catalog.
+/// Carries a prepared filter snapshot and optional catalog/guardrail context for a warm switch.
+///
+/// Values returned by ``WarmFilterSnapshotLoader`` loading APIs have passed their warm-reuse
+/// gates. The public initializer performs no validation, so direct callers are responsible for
+/// supplying a coherent combination.
 ///
 /// `snapshot.nonAllowableThreatRules` is only the allowlist-overlap SUBSET, so applying it as
 /// `threatGuardrail` would let `AllowlistValidator` allow a threat domain that isn't currently
@@ -13,10 +15,14 @@ import LavaSecKit
 /// Promoted from a private `AppViewModel` struct (LAV-100 Phase 4) so the foreground switch and the
 /// headless Focus engine share ONE warm-reuse value type and validation core.
 public struct ReusablePreparedFilterSnapshot: Sendable {
+    /// Prepared snapshot carried for reuse; loader-returned instances have passed warm-reuse validation.
     public let preparedSnapshot: PreparedFilterSnapshot
+    /// Catalog context associated with the snapshot, when supplied.
     public let cachedCatalog: BlocklistCatalog?
+    /// Full cached threat guardrail associated with the snapshot, when supplied.
     public let fullThreatGuardrail: DomainRuleSet?
 
+    /// Creates a carrier from caller-supplied values without performing warm-reuse validation.
     public init(
         preparedSnapshot: PreparedFilterSnapshot,
         cachedCatalog: BlocklistCatalog?,
@@ -39,7 +45,7 @@ public enum WarmFilterSnapshotLoader {
     /// the target's `lastCompiledToken` (library), then the sidecar warm-index token (background
     /// warmed, not yet promoted) when it differs. `nil` ⇒ no warm artifact is reusable; the caller
     /// cold-compiles.
-    public static func reusableSnapshotForSwitch(
+    package static func reusableSnapshotForSwitch(
         target: Filter,
         configuration: AppConfiguration,
         containerURL: URL,
@@ -139,13 +145,15 @@ public enum WarmFilterSnapshotLoader {
                 return nil
             }
 
-            // Enforce the SAME tier rule-limit gate the cold compile path applies: the reuse identity
-            // check ignores the tier cap, so without this a Plus user who lapsed could switch back to
-            // an oversized filter (compiled while Plus) via a pointer flip, bypassing the free-tier
-            // limit. A legacy artifact without the field, or one over the limit ⇒ fall back to the cold
-            // compile, which surfaces the paywall.
-            guard let tierBudgetRuleCount = preparedSnapshot.summary.tierBudgetRuleCount,
-                  tierBudgetRuleCount <= configuration.limits.maxFilterRules else {
+            // INV-TIER-1: enforce the SAME tier rule-limit gate the cold compile path applies: the
+            // reuse identity check ignores the tier cap, so without this a Plus user who lapsed could
+            // switch back to an oversized filter (compiled while Plus) via a pointer flip, bypassing
+            // the free-tier limit. A legacy artifact without the field, or one over the limit ⇒ fall
+            // back to the cold compile, which surfaces the paywall.
+            guard FilterRuleBudget.fitsTierBudget(
+                recordedTotal: preparedSnapshot.summary.tierBudgetRuleCount,
+                maxFilterRules: configuration.limits.maxFilterRules
+            ) else {
                 return nil
             }
 
@@ -172,7 +180,7 @@ public enum WarmFilterSnapshotLoader {
     /// just before the flip so a background catalog refresh that moved `latest.json` since the warm
     /// load causes a clean defer rather than a transient latest.json-ahead-of-pointer wedge.
     /// Read-only, off the main actor.
-    public static func stillReusableAgainstCachedCatalog(
+    package static func stillReusableAgainstCachedCatalog(
         _ snapshot: PreparedFilterSnapshot,
         configuration: AppConfiguration,
         cacheURL: URL?,

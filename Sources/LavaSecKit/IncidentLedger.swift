@@ -7,24 +7,40 @@ import Foundation
 // DATA ("last incident 26 minutes ago"), never a widened policy window: nothing in
 // the recovery/cap policy reads this file, ever.
 
+/// A single timestamped incident retained for local diagnostics.
 public struct IncidentLedgerRecord: Codable, Equatable, Sendable {
+    /// The category of incident represented by a ledger record.
     public enum Kind: String, Codable, CaseIterable, Sendable {
+        /// A self-reconnect attempt was committed.
         case selfReconnectCommitted = "self_reconnect_committed"
+        /// A self-reconnect attempt received productive credit.
         case selfReconnectCredited = "self_reconnect_credited"
+        /// A wedged tunnel condition was detected.
         case wedgeDetected = "wedge_detected"
+        /// A previously detected wedge recovered.
         case wedgeRecovered = "wedge_recovered"
+        /// A streak of rejected DNS responses was observed.
         case rejectedResponseStreak = "rejected_response_streak"
+        /// Device-DNS recapture attempts were exhausted.
         case deviceDNSRecaptureExhausted = "device_dns_recapture_exhausted"
+        /// The tunnel entered fail-closed handling.
         case failClosedEntered = "fail_closed_entered"
+        /// The tunnel exited fail-closed handling.
         case failClosedExited = "fail_closed_exited"
     }
 
+    /// The time at which the incident was recorded.
     public let at: Date
+    /// The incident category.
     public let kind: Kind
+    /// An optional reason label; the public initializer drops values that fail sanitization.
     public let reason: String?
+    /// An optional incident duration in milliseconds.
     public let durationMs: Int?
+    /// An optional label describing how recovery was verified.
     public let verifiedBy: String?
 
+    /// Creates an incident record, dropping any reason that fails sanitization.
     public init(
         at: Date,
         kind: Kind,
@@ -64,13 +80,16 @@ public struct IncidentLedgerRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// A local timeline of tunnel incidents.
 public struct IncidentLedger: Codable, Equatable, Sendable {
+    /// The incident records in storage order.
     public private(set) var records: [IncidentLedgerRecord]
     /// Arm mark for the two-phase retention sweep (`sweepExpired`): the clock reading of
     /// the first sweep that observed stale records. Absent in pre-existing files (decodes
     /// nil) and cleared whenever a sweep finds nothing stale.
     public private(set) var expirySweepArmedAt: Date?
 
+    /// The record-count cap enforced after an append.
     public static let maximumRecordCount = 50
     /// Same 7-day window as the other fine-grained local logs.
     public static var retentionWindow: TimeInterval {
@@ -81,6 +100,7 @@ public struct IncidentLedger: Codable, Equatable, Sendable {
     /// on-disk lifetime is the retention window plus this corroboration day.
     public static let expirySweepCorroborationInterval: TimeInterval = 24 * 60 * 60
 
+    /// Creates a ledger from existing records and optional retention-sweep state.
     public init(records: [IncidentLedgerRecord] = [], expirySweepArmedAt: Date? = nil) {
         self.records = records
         self.expirySweepArmedAt = expirySweepArmedAt
@@ -175,6 +195,7 @@ public struct IncidentLedger: Codable, Equatable, Sendable {
 /// plain `load` — the file only ever changes by atomic rename, so a lock-free reader
 /// sees a complete old or new ledger, and (COH-4) the read path owns no write at all.
 public enum IncidentLedgerPersistence {
+    /// Loads a ledger, returning an empty ledger when no valid file is available.
     public static func load(from url: URL) -> IncidentLedger {
         guard let data = try? Data(contentsOf: url),
               let ledger = try? JSONDecoder().decode(IncidentLedger.self, from: data)
@@ -185,6 +206,7 @@ public enum IncidentLedgerPersistence {
         return ledger
     }
 
+    /// Saves the ledger atomically at `url`.
     public static func save(_ ledger: IncidentLedger, to url: URL) throws {
         let directoryURL = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)

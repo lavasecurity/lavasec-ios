@@ -188,6 +188,61 @@ final class CompactFilterSnapshotTests: XCTestCase {
         XCTAssertTrue(summary.coversEnabledBlocklists(in: configuration))
     }
 
+    /// INV-TIER-1 (PR #335 Codex P1): the recorded tier total must survive the compact
+    /// round-trip — header read AND full decode — because the tunnel's serve gates bind
+    /// it and the resident tables cannot reconstruct it (the resident guardrail is only
+    /// the allowlist-overlap subset, so a table sum under-counts the recorded formula by
+    /// the full-guardrail term).
+    func testCompactRoundTripPreservesRecordedTierBudgetRuleCount() throws {
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: catalog),
+            snapshot: configuration.filterSnapshot(),
+            summary: PreparedFilterSnapshotSummary(
+                snapshot: configuration.filterSnapshot(),
+                blocklistRuleCount: 7,
+                blocklistSourceRuleCounts: ["source-a": 7],
+                tierBudgetRuleCount: 508_917
+            )
+        )
+
+        let data = try CompactFilterSnapshot(preparedSnapshot: prepared).encodedData()
+        let decoded = try CompactFilterSnapshot.decode(from: data)
+        let summary = try CompactFilterSnapshot.readSummary(from: data)
+
+        XCTAssertEqual(summary.tierBudgetRuleCount, 508_917)
+        XCTAssertEqual(decoded.summary.tierBudgetRuleCount, 508_917)
+        // The serve gate then rejects it for free (500K) and accepts it for Plus (2M).
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(
+            recordedTotal: summary.tierBudgetRuleCount, maxFilterRules: 500_000
+        ))
+        XCTAssertTrue(FilterRuleBudget.fitsTierBudget(
+            recordedTotal: summary.tierBudgetRuleCount, maxFilterRules: 2_000_000
+        ))
+    }
+
+    /// A writer that never recorded a tier total (legacy artifact) must surface nil —
+    /// which every serve gate fails CLOSED — not a fabricated table sum.
+    func testCompactSummaryTierBudgetIsNilWhenWriterRecordedNone() throws {
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: catalog),
+            snapshot: configuration.filterSnapshot(),
+            summary: PreparedFilterSnapshotSummary(
+                snapshot: configuration.filterSnapshot(),
+                blocklistRuleCount: 7,
+                blocklistSourceRuleCounts: ["source-a": 7]
+            )
+        )
+
+        let data = try CompactFilterSnapshot(preparedSnapshot: prepared).encodedData()
+        XCTAssertNil(try CompactFilterSnapshot.readSummary(from: data).tierBudgetRuleCount)
+        XCTAssertNil(try CompactFilterSnapshot.decode(from: data).summary.tierBudgetRuleCount)
+        XCTAssertFalse(FilterRuleBudget.fitsTierBudget(recordedTotal: nil, maxFilterRules: 2_000_000))
+    }
+
     func testDecodeFromNonZeroStartIndexDataResolvesDecisionsCorrectly() throws {
         // The compact reader returns zero-copy slices over the backing Data so
         // the domain table stays file-backed (mmap) instead of a heap copy. The

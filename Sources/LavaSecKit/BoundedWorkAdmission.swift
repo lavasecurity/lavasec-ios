@@ -18,6 +18,7 @@ import Foundation
 // calls `release()` on the same serial queue to free the slot and hand back the
 // next pending item to start (or nil).
 
+/// A FIFO admission queue that limits concurrently active work without blocking waiting threads.
 public final class BoundedWorkAdmission<Work> {
     /// Maximum number of work items that may be active (running) concurrently.
     public let bound: Int

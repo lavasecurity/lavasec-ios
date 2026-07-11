@@ -1,11 +1,13 @@
 # Phase C2 lint lane (lavasec-infra plans/2026-07-07-ios-modularization-scaffolding-plan.md).
-# WARNING-ONLY: CI invokes swiftlint with --lenient, so findings annotate PRs but never
-# fail a check. Promote individual rules to blocking deliberately, not by default.
+# The general CI invocation stays WARNING-ONLY (`--lenient`) so style findings annotate
+# PRs without blocking. A separate strict missing_docs invocation selects the dedicated
+# `.swiftlint-missing-docs.yml` and committed baseline, so only new undocumented public API
+# fails.
 #
-# missing_docs is enabled ONLY inside the post-split SPM targets via their nested
-# .swiftlint.yml files (Sources/LavaSec{Kit,DNS,FilterPipeline,AppServices}) — matching
-# the CLAUDE.md rule: new public API there carries /// docs; pre-split code is retrofitted
-# opportunistically, never in bulk.
+# The dedicated config scopes the blocking ratchet to exactly the six real package layers.
+# Their nested .swiftlint.yml files keep missing_docs enabled in the general warning-only
+# lane, matching the CLAUDE.md rule: new public API there carries /// docs; pre-split code
+# is retrofitted opportunistically, never in bulk.
 included:
   - Sources
   - Shared
@@ -30,4 +32,4 @@ disabled_rules:
   - cyclomatic_complexity
   - identifier_name
   - trailing_comma
-  - todo   # CLAUDE.md already bans TODO/FIXME outright; repo-checks-adjacent, not style
+  - todo   # scripts/check-comment-contracts.mjs owns deferred-work comment enforcement

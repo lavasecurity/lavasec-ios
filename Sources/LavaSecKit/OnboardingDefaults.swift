@@ -20,6 +20,7 @@ public enum OnboardingProtectionLevel: String, CaseIterable, Sendable {
     public static let recommended: OnboardingProtectionLevel = .balanced
 }
 
+/// Derives each onboarding level's catalog selection and seeded filter.
 public extension OnboardingProtectionLevel {
     /// The blocklist IDs this stop enables, derived from the catalog:
     /// - `.essential`: the `.security`-category subset of the catalog defaults.
@@ -72,6 +73,7 @@ public extension OnboardingProtectionLevel {
     }
 }
 
+/// Builds the default filter library presented during onboarding and reset flows.
 public extension FilterLibrary {
     /// The three default filters — one per protection level (Core / Balanced / Extra), in
     /// cumulative order — with `active` loaded. The single source for the free tier's three
@@ -88,16 +90,22 @@ public extension FilterLibrary {
     }
 }
 
+/// Supplies the recommended fresh-install configuration.
 public extension AppConfiguration {
+    /// Protection defaults used before the user customizes onboarding selections.
     static var lavaRecommendedDefaults: AppConfiguration {
         AppConfiguration(
             protectionEnabled: false,
             enabledBlocklistIDs: DefaultCatalog.recommendedDefaultSourceIDs,
             resolverPresetID: DNSResolverPreset.device.id,
             fallbackToDeviceDNS: true,
-            // Device DNS is the primary resolver; if it wedges, allowed lookups are
-            // carried transiently over Mullvad DoH (the default encrypted fallback)
-            // and then return to the device's own DNS automatically.
+            // Device DNS is the primary resolver; if it stops answering, allowed
+            // lookups are carried over Mullvad DoH (the default encrypted fallback)
+            // and return to the device's own DNS once its recovery probes succeed
+            // again. That return path exists because the captured resolver is never
+            // discarded on masked-read evidence alone (UR-55 / INV-DNS-5); after a
+            // real network change the NEW network's resolver is only learnable at
+            // the next tunnel start (Phase 0 — no in-place read exists).
             usesEncryptedDeviceDNSFallback: true,
             fallbackResolverPresetID: DNSResolverPreset.mullvadDoH.id,
             keepFilteringCounts: true,
@@ -107,14 +115,17 @@ public extension AppConfiguration {
     }
 }
 
-public struct OnboardingDefaultsSummary: Equatable, Sendable {
-    public let blocklistText: String
-    public let resolverText: String
-    public let deviceDNSFallbackText: String
-    public let localLoggingText: String
-    public let accountText: String
+package struct OnboardingDefaultsSummary: Equatable, Sendable {
+    package let blocklistText: String
+    package let resolverText: String
+    package let deviceDNSFallbackText: String
+    package let localLoggingText: String
+    package let accountText: String
 
-    public init(configuration: AppConfiguration, catalog: [BlocklistSource] = DefaultCatalog.curatedSources) {
+    package init(
+        configuration: AppConfiguration,
+        catalog: [BlocklistSource] = DefaultCatalog.curatedSources
+    ) {
         blocklistText = Self.blocklistText(for: configuration.enabledBlocklistIDs, catalog: catalog)
         resolverText = configuration.resolverPreset.displayName
         deviceDNSFallbackText = Self.deviceDNSFallbackText(for: configuration)

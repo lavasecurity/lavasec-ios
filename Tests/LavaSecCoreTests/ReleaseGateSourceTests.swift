@@ -71,15 +71,25 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(rageShakeGate.contains("#else"))
         XCTAssertTrue(rageShakeGate.contains("return false"))
 
-        XCTAssertTrue(rageShakeQA.contains("""
-            #if DEBUG || LAVA_QA_TOOLS
-            case phoneQA
-            #endif
-        """))
-        XCTAssertTrue(rageShakeQA.contains("""
-        #if DEBUG || LAVA_QA_TOOLS
-        public enum AdminQAActionSection
-        """))
+        let destinationBlock = try sourceBlock(
+            in: rageShakeQA,
+            startingAt: "public enum RageShakeDestination",
+            endingBefore: "package enum RageShakeMode"
+        )
+        let phoneQAGate = try sourceBlock(
+            in: destinationBlock,
+            startingAt: "#if DEBUG || LAVA_QA_TOOLS",
+            endingBefore: "#endif"
+        )
+        XCTAssertTrue(phoneQAGate.contains("case phoneQA"))
+
+        let adminGatePrefix = try sourceBlock(
+            in: rageShakeQA,
+            startingAt: "public mutating func registerShake",
+            endingBefore: "public enum AdminQAActionSection"
+        )
+        XCTAssertTrue(adminGatePrefix.contains("#if DEBUG || LAVA_QA_TOOLS"))
+        XCTAssertFalse(adminGatePrefix.contains("#endif"))
         XCTAssertTrue(rageShakeQA.contains("""
         public enum AdminQAVPNProfileAction
         """))

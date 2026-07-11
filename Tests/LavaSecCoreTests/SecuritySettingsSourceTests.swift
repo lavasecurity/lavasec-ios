@@ -19,7 +19,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testBiometricToggleUsesConcreteDeviceBiometryLabelOnly() throws {
         let controller = try readSource(.securityController)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.privacySecuritySettingsView)
         let biometricKindBlock = try sourceBlock(
             in: controller,
             startingAt: "enum SecurityBiometricKind",
@@ -32,7 +32,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         )
         let securitySettingsBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct SecuritySettingsView: View",
+            startingAt: "struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
         )
 
@@ -65,7 +65,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSecuritySettingsPageIsExposedAtSettingsRootBelowPrivacyData() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try [readSource(.settingsView), readSource(.privacySecuritySettingsView)].joined(separator: "\n")
         let rootProtectionBlock = try sourceBlock(
             in: settings,
             startingAt: "LavaSectionGroup(\"Protection Choices\")",
@@ -74,11 +74,11 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let privacyBlock = try sourceBlock(
             in: settings,
             startingAt: "struct PrivacyDataSettingsView: View",
-            endingBefore: "private struct SecuritySettingsView: View"
+            endingBefore: "struct SecuritySettingsView: View"
         )
         let securityBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct SecuritySettingsView: View",
+            startingAt: "struct SecuritySettingsView: View",
             endingBefore: "private struct SecurityPasscodeSetupView"
         )
 
@@ -123,10 +123,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testSecuritySurfaceLabelsUseUpdateLanguage() throws {
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.privacySecuritySettingsView)
         let securityBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct SecuritySettingsView: View",
+            startingAt: "struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
         )
 
@@ -138,10 +138,10 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testDisablingAuthenticationMethodsRequiresSameMethodAuthentication() throws {
         let controller = try readSource(.securityController)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.privacySecuritySettingsView)
         let securityBlock = try sourceBlock(
             in: settings,
-            startingAt: "private struct SecuritySettingsView: View",
+            startingAt: "struct SecuritySettingsView: View",
             endingBefore: "private enum SecurityPasscodeSetupPhase"
         )
 
@@ -158,7 +158,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testPasscodeScreensFillFullScreenAndUseNativeNumberPadFirstResponder() throws {
         let securityController = try readSource(.securityController)
-        let settings = try readSource(.settingsView)
+        let settings = try readSource(.privacySecuritySettingsView)
         let authenticationBlock = try sourceBlock(
             in: securityController,
             startingAt: "struct SecurityPasscodeAuthenticationView: View",
@@ -381,8 +381,11 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testFilterAndDomainHistoryActionsUseFilterEditingSurface() throws {
-        let filters = try readSource(.filtersView)
-        let diagnostics = try readSource(.diagnosticsView)
+        let filters = try [
+            readSource(.filterLibraryView),
+            readSource(.filterMyListView),
+        ].joined(separator: "\n")
+        let diagnostics = try readSource(.diagnosticsDomainHistory)
 
         XCTAssertTrue(filters.contains("security.requireAuthentication(for: .filterEditing"))
         XCTAssertTrue(diagnostics.contains("security.requireFreshAuthentication(for: .filterEditing"))
@@ -393,8 +396,8 @@ final class SecuritySettingsSourceTests: XCTestCase {
     func testRepeatSensitiveActionsRequireFreshAuthentication() throws {
         let controller = try readSource(.securityController)
         let root = try readSource(.guardView)
-        let filters = try readSource(.filtersView)
-        let diagnostics = try readSource(.diagnosticsView)
+        let filters = try readSource(.filterMyListView)
+        let diagnostics = try readSource(.diagnosticsDomainHistory)
 
         XCTAssertTrue(controller.contains("func requireFreshAuthentication(for surface: SecurityProtectedSurface, reason: String) async -> Bool"))
         XCTAssertTrue(root.contains("reason: \"Change Lava protection\""))
