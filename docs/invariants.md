@@ -95,6 +95,29 @@ callbacks, so stopped providers cannot create or accept new smoke evidence.
   `PacketTunnelDNSRuntimeSourceTests.testResolverHealthContextWritersRouteDistinctEventsWithExactFencing` /
   `PacketTunnelDNSRuntimeSourceTests.testResolverHealthReducerOwnedWritersHaveNoProviderBypasses`.
 
+### INV-DNS-5 — Captured device resolvers are never discarded on masked-read evidence alone
+While the tunnel owns device DNS, the in-process resolver read is masked in steady state
+(Phase 0, lavasec-infra plans/2026-06-21-network-handoff-device-dns-recapture-plan.md), so
+an empty capture — including a fully-exhausted capture-retry window — carries NO evidence
+of a resolver-changing handoff. The captured address list may only shrink on affirmative
+evidence: a non-empty recapture that replaces it, or a configuration/lifecycle reset. A
+preserved-but-suspect primary is judged by wire evidence, split by owner: probe outcomes
+feed the health/wedge chain (recovery cadences, rejection trigger) but never the live
+backoff map (`PacketTunnelDNSRuntimeSourceTests.testSmokeProbesDoNotMutateLiveResolverBackoff`
+— a false-negative probe must not bench a working primary), while the first organic
+failures bench the address via `recordUpstreamResult`, with the per-query encrypted
+fallback carrying every no-response query under INV-DNS-1. Service yields to the fallback
+on real failure and RETURNS when probes succeed again. Field origin: UR-55 (app 1.2.1 dropped a
+working router resolver on a stable Wi-Fi at wake-exhaustion; the empty list blinded the
+recovery probes, stranding the user on the encrypted fallback until restart). Fix plan:
+lavasec-infra plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-plan.md.
+- Home: `LavaSecTunnel/PacketTunnelProvider.swift` — `runDeviceDNSCaptureRetry` exhaustion
+  branch; `Sources/LavaSecKit/DeviceDNSFallbackPolicy.swift` — `exhaustionVerificationDecision`.
+- Enforced: `PacketTunnelDNSRuntimeSourceTests.testDeviceDNSCaptureExhaustionPreservesResolversAndVerifiesByProbe`
+  (no address mutation after the exhaustion gate; probe wiring + observability), and
+  `DeviceDNSFallbackPolicyTests` exhaustion-verification gating tests (probe-by-default and
+  the two equivalent-evidence skips with their boundaries).
+
 ## Memory (NE jetsam ceiling ~50 MB)
 
 ### INV-MEM-1 — One compile peak at a time (legacy: CON-3)

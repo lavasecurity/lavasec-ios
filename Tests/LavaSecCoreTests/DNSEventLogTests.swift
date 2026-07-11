@@ -228,4 +228,53 @@ final class DNSEventLogTests: XCTestCase {
         XCTAssertEqual(entry.decision.reason, .threatGuardrail)
         XCTAssertEqual(entry.domain, "malware.example.com")
     }
+
+    /// The async local-log export drains this store off the main actor (#340 follow-up), so a
+    /// "clear logs" action from any screen could prune it mid-drain. A dedicated reader that pins
+    /// a `beginSnapshot()` read transaction must keep seeing every row it started with even when
+    /// another connection deletes them all, so the saved archive can't be truncated by a
+    /// concurrent clear. Requires a file-backed WAL database (two connections over one file).
+    func testExportSnapshotIsImmuneToConcurrentPrune() throws {
+        try withTemporaryDirectory { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+
+            // Writer seeds 200 events across both actions.
+            let writer = try DNSEventLog(url: url, readOnly: false)
+            for index in 0..<200 {
+                try writer.append(
+                    domain: "row-\(index).example",
+                    decision: index.isMultiple(of: 2) ? allow : block,
+                    timestamp: at(1_000_000 + Double(index))
+                )
+            }
+
+            // Dedicated export reader pins a snapshot. Crucially the prune below happens BEFORE
+            // the reader's first page, so this also proves beginSnapshot() pins immediately (a
+            // deferred BEGIN would only pin at the first read, after the prune).
+            let reader = try DNSEventLog(url: url, readOnly: true)
+            reader.beginSnapshot()
+
+            // A concurrent clear physically prunes EVERY row via the writer before the first read.
+            let deleted = try writer.prune(before: at(2_000_000))
+            XCTAssertEqual(deleted, 200)
+
+            // The snapshot reader must still stream all 200 rows — immune to the prune.
+            var collected: [DNSEventLog.Entry] = []
+            var cursor: DNSEventLog.Cursor?
+            while true {
+                let page = reader.pageAllActions(before: cursor, since: nil, limit: 50)
+                if page.isEmpty { break }
+                collected.append(contentsOf: page)
+                guard page.count == 50, let next = page.last?.cursor else { break }
+                cursor = next
+            }
+            reader.endSnapshot()
+
+            XCTAssertEqual(collected.count, 200, "export snapshot dropped rows to a concurrent prune")
+            XCTAssertEqual(Set(collected.map(\.domain)).count, 200)
+
+            // After the snapshot ends, a fresh read reflects the prune (no stale snapshot leak).
+            XCTAssertTrue(reader.pageAllActions(before: nil, since: nil, limit: 50).isEmpty)
+        }
+    }
 }

@@ -99,7 +99,7 @@ final class LocalLogExportArchiveTests: XCTestCase {
 
         let archive = try LocalLogExportArchive.make(
             diagnostics: diagnostics,
-            domainHistoryEvents: depthHistory,
+            domainHistory: .events(depthHistory),
             networkActivityLog: NetworkActivityLog(entries: []),
             lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
             lavaGuardUnlocks: LavaGuardAchievementLedger(),
@@ -111,6 +111,62 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("depth-allowed.example"))
         XCTAssertTrue(archiveText.contains("depth-blocked.example"))
         XCTAssertFalse(archiveText.contains("ring-only.example"))
+    }
+
+    /// A multi-page streaming source must be fully drained and produce byte-identical archive
+    /// bytes to the same rows supplied as one materialized array — the streaming export must not
+    /// drop, reorder, or duplicate rows at page boundaries (#340 review: full history is streamed
+    /// off the main actor rather than materialized).
+    func testStreamingDomainHistorySourceMatchesMaterializedArray() throws {
+        let generatedAt = Self.date(year: 2026, month: 6, day: 18, hour: 14, minute: 12)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let diagnostics = DiagnosticsStore()
+
+        // Rows spanning several pages, including one whose domain needs CSV quoting, so the
+        // streamed encoding is exercised past a page boundary.
+        let events: [DNSQueryEvent] = (0..<2_500).map { index in
+            DNSQueryEvent(
+                timestamp: generatedAt.addingTimeInterval(-Double(index)),
+                domain: index == 1_500 ? "quote,\"needed\".example" : "row-\(index).example",
+                decision: index.isMultiple(of: 2)
+                    ? .defaultAllow
+                    : FilterDecision(action: .block, reason: .blocklist)
+            )
+        }
+
+        // A stateful paged producer yielding 1,000-row batches, empty when drained.
+        final class Pager: @unchecked Sendable {
+            private var remaining: ArraySlice<DNSQueryEvent>
+            init(_ events: [DNSQueryEvent]) { remaining = events[...] }
+            func next() -> [DNSQueryEvent] {
+                guard !remaining.isEmpty else { return [] }
+                let page = remaining.prefix(1_000)
+                remaining = remaining.dropFirst(1_000)
+                return Array(page)
+            }
+        }
+        let pager = Pager(events)
+
+        let streamed = try LocalLogExportArchive.make(
+            diagnostics: diagnostics,
+            domainHistory: DomainHistoryExportSource { pager.next() },
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            generatedAt: generatedAt,
+            calendar: calendar
+        ).data
+        let materialized = try LocalLogExportArchive.make(
+            diagnostics: diagnostics,
+            domainHistory: .events(events),
+            networkActivityLog: NetworkActivityLog(entries: []),
+            lavaGuardProgress: LavaGuardProgress(qualifiedUsageDayKeys: [], usageByDayKey: [:]),
+            lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            generatedAt: generatedAt,
+            calendar: calendar
+        ).data
+        XCTAssertEqual(streamed, materialized)
     }
 
     func testArchiveIncludesRedactedDeviceDebugLogWhenProvided() throws {

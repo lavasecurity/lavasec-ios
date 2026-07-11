@@ -404,4 +404,118 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
             previous = interval
         }
     }
+
+    // MARK: - UR-55 exhaustion verification probe gating
+
+    func testExhaustionVerificationProbesWithNoEquivalentEvidence() {
+        // The UR-55 replay's entry condition: no fresh accepted evidence, no chronic
+        // streak — the preserved primary must be probed, never inferred stale.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: 0,
+                lastWireSmokeProbeAt: nil,
+                now: Date(timeIntervalSince1970: 1_000)
+            ),
+            .probe
+        )
+    }
+
+    func testExhaustionVerificationSkipsOnFreshAcceptedPrimaryEvidence() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let interval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+
+        // Acceptance-checked primary evidence within one routine interval is fresher
+        // proof than a probe (NRG-3a mirror), inclusive at the boundary.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: now.addingTimeInterval(-interval),
+                consecutiveSmokeProbeFailures: 0,
+                lastWireSmokeProbeAt: nil,
+                now: now
+            ),
+            .skipFreshPrimaryEvidence,
+            "age == interval is still equivalent evidence (NRG-3a: age <= interval)"
+        )
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: now.addingTimeInterval(-(interval + 0.1)),
+                consecutiveSmokeProbeFailures: 0,
+                lastWireSmokeProbeAt: nil,
+                now: now
+            ),
+            .probe,
+            "evidence older than the routine interval no longer substitutes for a probe"
+        )
+        // Future-dated evidence (clock set backwards after the stamp) must not skip —
+        // a negative age would otherwise satisfy the upper bound indefinitely.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: now.addingTimeInterval(5),
+                consecutiveSmokeProbeFailures: 0,
+                lastWireSmokeProbeAt: nil,
+                now: now
+            ),
+            .probe
+        )
+    }
+
+    func testExhaustionVerificationHonoursChronicFailureBackoffSpacing() {
+        let now = Date(timeIntervalSince1970: 50_000)
+        let activation = DeviceDNSFallbackPolicy.smokeProbeBackoffActivationFailureCount
+        let requiredInterval = DeviceDNSFallbackPolicy.routineSmokeProbeInterval(
+            afterConsecutiveFailures: activation
+        )
+
+        // Below the activation streak the gate does not exist (transient blips probe).
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: activation - 1,
+                lastWireSmokeProbeAt: now.addingTimeInterval(-1),
+                now: now
+            ),
+            .probe
+        )
+        // At the activation streak, a wire probe inside the adaptive spacing is pure
+        // radio drain (UR-48 rc9: 533 failed probes) — skip until the spacing elapses.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: activation,
+                lastWireSmokeProbeAt: now.addingTimeInterval(-(requiredInterval - 0.1)),
+                now: now
+            ),
+            .skipChronicFailureBackoff
+        )
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: activation,
+                lastWireSmokeProbeAt: now.addingTimeInterval(-requiredInterval),
+                now: now
+            ),
+            .probe,
+            "the spacing boundary probes (routine-tick mirror: sinceLastWireProbe < requiredInterval skips)"
+        )
+        // No prior wire probe recorded, or a future-dated stamp: probe normally.
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: activation,
+                lastWireSmokeProbeAt: nil,
+                now: now
+            ),
+            .probe
+        )
+        XCTAssertEqual(
+            DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                lastAcceptedPrimaryEvidenceAt: nil,
+                consecutiveSmokeProbeFailures: activation,
+                lastWireSmokeProbeAt: now.addingTimeInterval(10),
+                now: now
+            ),
+            .probe
+        )
+    }
 }

@@ -164,6 +164,75 @@ public enum DeviceDNSFallbackPolicy {
         return age < 0 || age >= deviceDNSCaptureRetryExhaustionCooldown
     }
 
+    // UR-55 (plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-plan.md): a masked
+    // capture-retry exhaustion is NOT evidence of a resolver-changing handoff. While the
+    // tunnel owns device DNS the in-process resolver read is masked in STEADY STATE
+    // (Phase 0, plans/2026-06-21-network-handoff-device-dns-recapture-plan.md), so on
+    // such a network EVERY armed cycle exhausts — including wake-armed cycles on a
+    // perfectly stable Wi-Fi. 1.2.1 inferred a handoff from exhaustion and dropped the
+    // captured (still working) resolver whenever an encrypted fallback would catch the
+    // queries; the empty list then blinded the recovery probes, stranding the user on
+    // the fallback until the next tunnel start. The rule now: preserved addresses are
+    // never discarded on masked-read evidence alone — a wire probe of the preserved
+    // primary is the discriminator. Probe outcomes feed the health/wedge chain
+    // (recovery cadences, rejection trigger) but never the live backoff map (smoke
+    // probes must not bench a working primary on a false negative); the per-address
+    // bench comes from the first organic failures, with the per-query encrypted
+    // fallback carrying every no-response query — so service yields on real failure
+    // and returns when probes succeed again.
+
+    /// Whether the exhaustion-time verification probe should hit the wire, or which
+    /// equivalent-evidence rule makes it redundant. The raw value is the
+    /// `device-dns-capture-retry-exhausted` log detail.
+    public enum ExhaustionVerificationDecision: String, Equatable, Sendable {
+        /// No equivalent evidence — probe the preserved primary now.
+        case probe
+        /// Acceptance-checked primary evidence younger than one routine probe interval
+        /// already proves the resolver serves; a probe adds radio, not information
+        /// (mirrors the routine tick's NRG-3a skip).
+        case skipFreshPrimaryEvidence = "skipped-fresh-primary-evidence"
+        /// The failure streak is past the chronic-backoff activation and the adaptive
+        /// spacing since the last wire probe has not elapsed; on a chronically-failing
+        /// network re-confirming the failure per exhaustion is pure radio drain — the
+        /// wedge/recovery cadence owns re-checks (mirrors the routine tick's UR-48
+        /// backoff; the UR-48 rc9 log's 533 failed wire probes are the drain class
+        /// this guards against).
+        case skipChronicFailureBackoff = "skipped-chronic-failure-backoff"
+    }
+
+    /// Decides the exhaustion-time verification probe from the same evidence the
+    /// routine-tick gates consult. Boundary semantics deliberately mirror those gates:
+    /// fresh evidence skips while `0 <= age <= routineSmokeProbeInterval`; chronic
+    /// spacing skips while `0 <= sinceLastWireProbe < requiredInterval`. Negative ages
+    /// (wall clock set backwards past a stamp) probe normally rather than trusting a
+    /// future stamp.
+    public static func exhaustionVerificationDecision(
+        lastAcceptedPrimaryEvidenceAt: Date?,
+        consecutiveSmokeProbeFailures: Int,
+        lastWireSmokeProbeAt: Date?,
+        now: Date
+    ) -> ExhaustionVerificationDecision {
+        if let lastAcceptedPrimaryEvidenceAt {
+            let evidenceAge = now.timeIntervalSince(lastAcceptedPrimaryEvidenceAt)
+            if evidenceAge >= 0, evidenceAge <= routineSmokeProbeInterval {
+                return .skipFreshPrimaryEvidence
+            }
+        }
+
+        if consecutiveSmokeProbeFailures >= smokeProbeBackoffActivationFailureCount,
+           let lastWireSmokeProbeAt {
+            let sinceLastWireProbe = now.timeIntervalSince(lastWireSmokeProbeAt)
+            let requiredInterval = routineSmokeProbeInterval(
+                afterConsecutiveFailures: consecutiveSmokeProbeFailures
+            )
+            if sinceLastWireProbe >= 0, sinceLastWireProbe < requiredInterval {
+                return .skipChronicFailureBackoff
+            }
+        }
+
+        return .probe
+    }
+
     // A sleep/wake-thrashing device (UR-48 rc9 follow-up log: 303 wakes in ~9.7 h,
     // median gaps of seconds) pays a full resolver teardown on EVERY wake — ~292
     // fresh DoH TLS handshakes + 270 encrypted-fallback context resets in that log,

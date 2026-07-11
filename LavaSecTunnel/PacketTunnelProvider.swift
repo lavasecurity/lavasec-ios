@@ -246,11 +246,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private static let resolverRecoveryProbeTimeoutSeconds = 4
     // Probe reasons that run while the user may be wedged, where fast detection
     // matters; everything else (periodic-health-check, startTunnel,
-    // configuration-changed) keeps the routine timeout.
+    // configuration-changed) keeps the routine timeout. The exhaustion
+    // verification belongs here (UR-55, PR #342 review): after a REAL handoff it
+    // is the first wire check that can classify the preserved Device-DNS primary
+    // as dead, and the routine 8s would delay the fallback/wedge evidence the
+    // exhaustion branch exists to apply promptly. On the stable-network side of
+    // UR-55 the probe answers in milliseconds, so the short timeout costs nothing.
     private static let recoveryContextProbeReasons: Set<String> = [
         "network-settled",
         "resolver-wedge-recovery",
-        "device-dns-fallback-recovery"
+        "device-dns-fallback-recovery",
+        "device-dns-exhaustion-verification"
     ]
     // The short recovery timeout is only SAFE for the fast, UDP-based device/plain
     // primary path with no fallback branch to cut short:
@@ -3115,8 +3121,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // fresh addresses and reset the runtime so live queries use them. Only runs
     // when the active config actually depends on Device DNS (primary or fallback)
     // and the path is satisfied; superseded on the next handoff/wake/lifecycle
-    // reset. A fully-masked network exhausts the cap and falls through to the
-    // wedge-recovery probe + on-demand-gated self-reconnect, which are unchanged.
+    // reset. A fully-masked network exhausts the cap; exhaustion PRESERVES the
+    // captured addresses (UR-55 / INV-DNS-5 — masked reads carry no handoff
+    // evidence) and fires a policy-gated verification probe of the preserved
+    // primary, leaving the wedge-recovery probe + on-demand-gated self-reconnect
+    // as the backstops, which are unchanged.
     // MARK: - Device-DNS capture retry
 
     private func scheduleDeviceDNSCaptureRetryIfNeeded(reason: String) {
@@ -3235,64 +3244,64 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             }
 
             guard cycle.shouldContinue(capturedNonEmpty: false) else {
-                // Capture stayed masked across the whole window — this is a genuine
-                // resolver-changing handoff, not a transient mask. The previous network's
-                // resolvers are now unreachable; keeping them serves a dead address, so
-                // every query burns a multi-second timeout — the "slow guide" limp the
-                // field log showed (~90s to wedge-recovery).
+                // Capture stayed masked across the whole window. That is NOT evidence of
+                // a resolver-changing handoff: the in-process read is masked in STEADY
+                // STATE while the tunnel owns device DNS (Phase 0, lavasec-infra
+                // plans/2026-06-21-network-handoff-device-dns-recapture-plan.md — zero
+                // real-resolver reads in the tunnel-up window), so on such a network
+                // EVERY armed cycle exhausts, including wake-armed cycles on a perfectly
+                // stable Wi-Fi. 1.2.1 inferred a handoff here and dropped the captured
+                // addresses whenever an encrypted fallback would catch the queries; on a
+                // stable network that discarded a WORKING resolver and stranded the user
+                // on the fallback until the next tunnel start, because the empty list
+                // also blinded the recovery probes (UR-55).
                 //
-                // Whether dropping them to empty is an IMPROVEMENT depends on whether
-                // anything catches the queries afterward. Empty device DNS makes
-                // resolveDeviceDNS return a fast structured `deviceDNSUnavailable`:
-                //   * WITH a per-query encrypted fallback configured (the alt guide):
-                //     dropping is strictly better — every organic query routes straight to
-                //     the encrypted fallback (resolveUpstream: shouldFallbackToEncrypted +
-                //     no usable primary answer) instead of waiting on the dead primary
-                //     first. So drop.
-                //   * NO encrypted fallback (Device-DNS-ONLY): `deviceDNSUnavailable` is
-                //     deliberately NOT in restartFailureReasons (it is the cold-start
-                //     "wait for capture" state), so dropping would leave the no-fallback
-                //     masked handoff fail-closed WITHOUT escalating — removing the
-                //     slow-but-real restart recovery the stale resolver's restart-worthy
-                //     timeout/send-failed still drives (PR #110). So PRESERVE the
-                //     stale resolver here and let the existing self-reconnect recovery fire.
-                //     The prompt, controlled re-capture for this no-fallback case is Track 4
-                //     (the gated cold-restart hooked in below) — the preserved stale resolver is
-                //     the backstop if that restart is throttled/declined (its restart-worthy
-                //     timeouts still drive the slow wedge path).
-                // `currentResolverRuntimeConfiguration()` builds with allowsQueryFallback,
-                // so `encryptedFallback != nil` is exactly the organic-query routing
-                // condition, and it is independent of whether the addresses are empty.
+                // UR-55 rule (plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-
+                // plan.md): the captured addresses are never mutated at exhaustion
+                // (INV-DNS-5). The discriminator is a wire probe of the preserved
+                // primary — success keeps it in service; failure lands wedge/health
+                // evidence (recovery cadences + the rejection trigger). The probe
+                // deliberately does NOT write the live backoff map: a false-negative
+                // probe benching a WORKING primary is the same weak-evidence failure
+                // class this branch exists to remove.
+                // pinned: PacketTunnelDNSRuntimeSourceTests.testSmokeProbesDoNotMutateLiveResolverBackoff
+                // The bench instead comes from the FIRST organic failures via
+                // recordUpstreamResult: after a real handoff each preserved address
+                // costs one fallback-carried query the dead-primary wait (~1s UDP,
+                // +2s TCP on timeout) before ResolverBackoffPolicy benches it on that
+                // single failure (30s, refreshed by later failures) and subsequent
+                // queries take the fast `backed-off` skip. That bounded first-query
+                // cost — the user stays online throughout; the per-query encrypted
+                // fallback answers under INV-DNS-1's fail-closed/LKG rules — is the
+                // price of reversibility versus the old drop's instant-but-stranding
+                // `deviceDNSUnavailable` (PR #342 review). The covered-primary-
+                // recapture loop keeps re-probing so traffic RETURNS the moment the
+                // resolver answers again, and the next unmasked capture (tunnel start)
+                // adopts a genuinely-new network's resolver. The probe is policy-gated
+                // so equivalent evidence — fresh accepted-primary proof (NRG-3a mirror)
+                // or an already-confirmed chronic failure streak inside its backoff
+                // spacing (UR-48 rc9 drain class) — skips the radio wake.
+                // pinned: PacketTunnelDNSRuntimeSourceTests.testDeviceDNSCaptureExhaustionPreservesResolversAndVerifiesByProbe
                 let routesToEncryptedFallback = currentResolverRuntimeConfiguration().encryptedFallback != nil
-                let previousAddresses = deviceDNSResolverAddresses
-                deviceDNSResolverAddresses = DeviceDNSFallbackPolicy.refreshedResolverAddresses(
-                    current: deviceDNSResolverAddresses,
-                    captured: [],
-                    preserveOnEmptyCapture: !routesToEncryptedFallback
-                )
-                let droppedStale = deviceDNSResolverAddresses != previousAddresses
                 cycle.noteExhausted()
+
+                let schedulingView = currentResolverHealthSchedulingView()
+                let verification = DeviceDNSFallbackPolicy.exhaustionVerificationDecision(
+                    lastAcceptedPrimaryEvidenceAt: schedulingView.lastAcceptedPrimaryEvidenceAt,
+                    consecutiveSmokeProbeFailures: schedulingView.consecutiveSmokeProbeFailureCount,
+                    lastWireSmokeProbeAt: lastWireSmokeProbeAt,
+                    now: Date()
+                )
                 LavaSecDeviceDebugLog.append(component: "tunnel", event: "device-dns-capture-retry-exhausted", details: [
                     "reason": reason,
                     "attempts": "\(cycle.attemptsMade)",
                     "routesToEncryptedFallback": "\(routesToEncryptedFallback)",
-                    "droppedStale": "\(droppedStale)"
+                    "verification": verification.rawValue
                 ])
                 Self.recordIncident(.deviceDNSRecaptureExhausted, reason: reason)
 
-                // Make the drop take effect on in-flight + future queries (the cached
-                // runtime still points at the stale resolver otherwise), then fire a
-                // confirming probe so the policy sees the unavailable primary now rather
-                // than on the next routine cadence. Mirrors the recapture path above.
-                if droppedStale {
-                    let resolverIdentifier = currentResolverRuntimeConfiguration().cacheIdentifier
-                    let pendingResponses = collectPendingResponsesAndResetResolverRuntime(
-                        identifier: resolverIdentifier,
-                        reason: "device-dns-stale-dropped-on-exhaustion",
-                        force: true
-                    )
-                    writeServerFailures(for: pendingResponses, reason: "device-dns-stale-dropped-on-exhaustion")
-                    scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-stale-dropped-on-exhaustion")
+                if verification == .probe {
+                    scheduleResolverSmokeProbeIfNeeded(reason: "device-dns-exhaustion-verification")
                 }
 
                 // Track 4 — no-fallback handoff: cold restart is the ONLY thing that re-captures
@@ -3301,6 +3310,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 // inside (own ceiling + on-demand + Track-1 path guard); declines arm the
                 // in-place wedge probe. The fallback case (routesToEncryptedFallback) must NOT
                 // restart — Option-A keeps serving over the encrypted path (Track 3).
+                // `currentResolverRuntimeConfiguration()` builds with allowsQueryFallback,
+                // so `encryptedFallback != nil` is exactly the organic-query routing condition.
                 if !routesToEncryptedFallback {
                     promptDeviceDNSRecaptureRestartIfPolicyAllows(now: Date())
                 }

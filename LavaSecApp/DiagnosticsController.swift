@@ -1031,28 +1031,39 @@ final class DiagnosticsController: ObservableObject {
         ).map(Self.domainHistoryEvent)
     }
 
-    /// Full retained Domain History for the explicit local export. Page through the all-action
-    /// SQLite reader so each query remains bounded; the returned array is materialized only in
-    /// the app process while it builds the user-requested archive, never in the Network Extension
-    /// (INV-MEM-1). When the depth store has not been created yet, preserve the upgraded-install
-    /// fallback to the JSON ring used by the on-screen list.
-    func domainHistoryEventsForExport(at now: Date) -> [DNSQueryEvent] {
-        guard let log = domainHistoryLog() else {
-            return diagnostics.recentEvents
+    /// A streaming source of the full retained Domain History for the explicit local export.
+    /// Returns a page-at-a-time source over the all-action SQLite reader instead of a resident
+    /// array: `LocalLogExportArchive` drains it off the main actor while building the archive, so
+    /// neither the full history nor the CSV is ever materialized on the main thread — a
+    /// high-volume export previously spiked foreground memory (jetsam) and blocked the main
+    /// thread for seconds (watchdog/UI hang) because the bounded reads were re-accumulated and
+    /// the CSV+ZIP were built synchronously on `@MainActor` (#340 review). Each read stays bounded
+    /// (INV-MEM-1-adjacent — an app-side OOM on export is still a jetsam). When the depth store
+    /// has not been created yet, preserve the upgraded-install fallback to the JSON ring used by
+    /// the on-screen list.
+    /// - pinned: DNSEventLogWiringSourceTests.testLocalLogExportReadsTheDepthStore
+    func domainHistoryExportSource(at now: Date) -> DomainHistoryExportSource {
+        // Open a DEDICATED read-only connection for the export and pin a consistent snapshot on
+        // it (see DomainHistoryExportPager): a clear from ANY screen prunes dns-events.sqlite,
+        // and the drain now runs off the main actor, so without the snapshot a mid-drain clear
+        // could truncate the archive. The shared list reader is deliberately not reused — holding
+        // a read transaction on it would serialize the on-screen list's reads. Falls back to the
+        // JSON ring when the depth store has not been created yet.
+        guard let url = dnsEventLogURL,
+              FileManager.default.fileExists(atPath: url.path),
+              let snapshotLog = try? DNSEventLog(url: url, readOnly: true) else {
+            return .events(diagnostics.recentEvents)
         }
 
-        let batchSize = 1_000
         let since = domainHistorySince(now: now)
-        var cursor: DNSEventLog.Cursor?
-        var events: [DNSQueryEvent] = []
-        while true {
-            let page = log.pageAllActions(before: cursor, since: since, limit: batchSize)
-            events.append(contentsOf: page.map(Self.domainHistoryEvent))
-            guard page.count == batchSize, let nextCursor = page.last?.cursor else {
-                return events
-            }
-            cursor = nextCursor
-        }
+        // Pin the read snapshot NOW, synchronously on the main actor, before this returns and the
+        // caller yields to the detached archive build. Pinning lazily on the pager's first page
+        // would leave a window where a clear from another screen (Domain History / Top Domains)
+        // prunes the store before the snapshot opened, truncating the export even though `since`
+        // was captured here (Codex review, PR #341). The pager releases it on completion / deinit.
+        snapshotLog.beginSnapshot()
+        let pager = DomainHistoryExportPager(log: snapshotLog, since: since)
+        return DomainHistoryExportSource { pager.nextPage() }
     }
 
     private func domainHistorySince(now: Date) -> Int64? {
@@ -1067,7 +1078,9 @@ final class DiagnosticsController: ObservableObject {
         return floorMs > 0 ? Int64(floorMs) : nil
     }
 
-    private static func domainHistoryEvent(_ entry: DNSEventLog.Entry) -> DNSQueryEvent {
+    // nonisolated: a pure Entry → DNSQueryEvent mapper with no hub state, so the off-main export
+    // pager (#340 review) can map pages without hopping to the main actor.
+    nonisolated fileprivate static func domainHistoryEvent(_ entry: DNSEventLog.Entry) -> DNSQueryEvent {
         DNSQueryEvent(
             id: stableEventID(forRowID: entry.id),
             timestamp: entry.timestamp,
@@ -1078,7 +1091,7 @@ final class DiagnosticsController: ObservableObject {
 
     /// Deterministic UUID from the sqlite rowid so SwiftUI list identity is stable across
     /// reloads — a fresh `UUID()` per read would thrash the diff (reset scroll and animations).
-    private static func stableEventID(forRowID rowID: Int64) -> UUID {
+    nonisolated private static func stableEventID(forRowID rowID: Int64) -> UUID {
         let bytes = withUnsafeBytes(of: UInt64(bitPattern: rowID).bigEndian) { Array($0) }
         return UUID(uuid: (
             0, 0, 0, 0, 0, 0, 0, 0,
@@ -1101,5 +1114,49 @@ final class DiagnosticsController: ObservableObject {
         }
 
         return try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+}
+
+/// Single-consumer cursor pager over a DEDICATED read-only snapshot of the depth store, drained
+/// sequentially by the export build on one background task. `@unchecked Sendable`: only that task
+/// reads it, and `DNSEventLog` is itself queue-confined. Yields one 1,000-row page per call so the
+/// full retained history is never resident during export (#340 review). The consistent WAL read
+/// snapshot is pinned by the caller (`domainHistoryExportSource`) before the drain begins, so a
+/// concurrent clear/prune from any screen cannot drop rows mid-drain and truncate the archive
+/// (#340 follow-up); the pager releases it on the last page or on deinit. Empty page signals the
+/// history is exhausted.
+private final class DomainHistoryExportPager: @unchecked Sendable {
+    private let log: DNSEventLog
+    private let since: Int64?
+    private let batchSize = 1_000
+    private var cursor: DNSEventLog.Cursor?
+    private var finished = false
+
+    init(log: DNSEventLog, since: Int64?) {
+        self.log = log
+        self.since = since
+    }
+
+    func nextPage() -> [DNSQueryEvent] {
+        if finished { return [] }
+        let page = log.pageAllActions(before: cursor, since: since, limit: batchSize)
+        if page.count == batchSize, let nextCursor = page.last?.cursor {
+            cursor = nextCursor
+        } else {
+            finish()
+        }
+        return page.map(DiagnosticsController.domainHistoryEvent)
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        log.endSnapshot()
+    }
+
+    deinit {
+        // Abandoned drain (the source was dropped before exhaustion): release the snapshot the
+        // caller pinned. Closing the dedicated connection would also roll it back, but be explicit.
+        finish()
     }
 }

@@ -4952,21 +4952,36 @@ final class AppViewModel: ObservableObject {
     // hub-side by design (bridge-width judgement): it SNAPSHOTS wide hub state and
     // calls back into the controller for the pieces the controller owns.
 
-    func makeLocalLogExportArchive(generatedAt: Date = Date()) throws -> LocalLogExportArchive {
+    func makeLocalLogExportArchive(generatedAt: Date = Date()) async throws -> LocalLogExportArchive {
         reports.refreshDiagnostics()
         refreshNetworkActivityLog(force: true)
         synchronizeLavaGuardProgress(currentStatus: vpnStatus)
 
-        return try LocalLogExportArchive.make(
-            diagnostics: reports.diagnostics,
-            domainHistoryEvents: reports.domainHistoryEventsForExport(at: generatedAt),
-            networkActivityLog: networkActivityLog,
-            lavaGuardProgress: lavaGuardProgress,
-            lavaGuardUnlocks: configuration.lavaGuardUnlocks,
-            deviceDebugLog: reports.loadDeviceDebugLogEntriesForExport(),
-            metadata: makeLocalLogExportMetadata(),
-            generatedAt: generatedAt
-        )
+        // Snapshot the Sendable inputs on the main actor, then build the archive OFF it. The
+        // Domain History streams page-by-page from the queue-confined DNSEventLog inside the
+        // detached task, so a high-volume export neither freezes the UI (the CSV+ZIP encode ran
+        // synchronously on @MainActor) nor materializes the full retained history on the main
+        // thread (#340 review; the previous export accumulated every page into one array).
+        let diagnostics = reports.diagnostics
+        let domainHistory = reports.domainHistoryExportSource(at: generatedAt)
+        let networkActivityLog = networkActivityLog
+        let lavaGuardProgress = lavaGuardProgress
+        let lavaGuardUnlocks = configuration.lavaGuardUnlocks
+        let deviceDebugLog = reports.loadDeviceDebugLogEntriesForExport()
+        let metadata = makeLocalLogExportMetadata()
+
+        return try await Task.detached(priority: .userInitiated) {
+            try LocalLogExportArchive.make(
+                diagnostics: diagnostics,
+                domainHistory: domainHistory,
+                networkActivityLog: networkActivityLog,
+                lavaGuardProgress: lavaGuardProgress,
+                lavaGuardUnlocks: lavaGuardUnlocks,
+                deviceDebugLog: deviceDebugLog,
+                metadata: metadata,
+                generatedAt: generatedAt
+            )
+        }.value
     }
 
     // Build/environment provenance for the export manifest, from the same

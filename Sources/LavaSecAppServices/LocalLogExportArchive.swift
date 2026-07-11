@@ -60,6 +60,55 @@ public struct LocalLogExportMetadata: Equatable, Sendable {
     }
 }
 
+/// A pull-based source of Domain History rows for the export, drained one bounded page at a
+/// time so the full retained 7-day history is never resident at once. Materializing the whole
+/// history (array → CSV rows → CSV `Data` → ZIP `Data` all live) risked a foreground jetsam and
+/// a main-thread hang for high-volume users (#340 review); the export now streams each page
+/// straight into the CSV off the main actor. `nextPage` returns successive pages and an empty
+/// array once the history is exhausted. `Sendable` so the archive build can run off the caller's
+/// actor.
+public struct DomainHistoryExportSource: Sendable {
+    private let nextPage: @Sendable () -> [DNSQueryEvent]
+
+    public init(nextPage: @escaping @Sendable () -> [DNSQueryEvent]) {
+        self.nextPage = nextPage
+    }
+
+    /// One-shot source over an already-materialized array — used by tests and by the
+    /// diagnostics-ring fallback for upgraded installs whose SQLite depth store predates
+    /// the first tunnel run.
+    public static func events(_ events: [DNSQueryEvent]) -> DomainHistoryExportSource {
+        let box = SingleUseEventPage(events)
+        return DomainHistoryExportSource { box.take() }
+    }
+
+    /// Drains every page in order. The source is single-consumer, so this is called exactly
+    /// once by the archive build.
+    fileprivate func drain(_ body: ([DNSQueryEvent]) -> Void) {
+        while true {
+            let page = nextPage()
+            if page.isEmpty { return }
+            body(page)
+        }
+    }
+}
+
+/// Single-consumer box that yields its events exactly once. `@unchecked Sendable`: the archive
+/// build drains the source sequentially from one task, so the unsynchronized clear is safe.
+private final class SingleUseEventPage: @unchecked Sendable {
+    private var pending: [DNSQueryEvent]?
+
+    init(_ events: [DNSQueryEvent]) {
+        pending = events.isEmpty ? nil : events
+    }
+
+    func take() -> [DNSQueryEvent] {
+        let page = pending ?? []
+        pending = nil
+        return page
+    }
+}
+
 /// In-memory ZIP export containing local diagnostics files.
 public struct LocalLogExportArchive: Equatable, Sendable {
     /// Suggested timestamped filename for the ZIP export.
@@ -69,11 +118,13 @@ public struct LocalLogExportArchive: Equatable, Sendable {
 
     /// Builds a stored ZIP archive from current diagnostics, activity, progress, and metadata.
     /// Debug-log and Domain History entries are archived as supplied; callers choose any required
-    /// retention filtering first. `domainHistoryEvents` defaults to the diagnostics ring for source
-    /// compatibility, while the app supplies its full SQLite-backed retained history.
+    /// retention filtering first. `domainHistory` is drained one bounded page at a time so a large
+    /// retained history never becomes resident here; it defaults to the diagnostics ring for source
+    /// compatibility, while the app supplies its full SQLite-backed retained history as a streaming
+    /// source. Runs no main-actor work, so callers build the archive off the main thread.
     public static func make(
         diagnostics: DiagnosticsStore,
-        domainHistoryEvents: [DNSQueryEvent]? = nil,
+        domainHistory: DomainHistoryExportSource? = nil,
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
@@ -85,7 +136,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         let timestamp = ExportTimestamp(generatedAt: generatedAt, calendar: calendar)
         let files = makeFiles(
             diagnostics: diagnostics,
-            domainHistoryEvents: domainHistoryEvents ?? diagnostics.recentEvents,
+            domainHistory: domainHistory ?? .events(diagnostics.recentEvents),
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: lavaGuardUnlocks,
@@ -104,7 +155,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
 
     private static func makeFiles(
         diagnostics: DiagnosticsStore,
-        domainHistoryEvents: [DNSQueryEvent],
+        domainHistory: DomainHistoryExportSource,
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
@@ -122,7 +173,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             ),
             (
                 "domain-history-\(timestamp.filename).csv",
-                domainHistoryCSV(domainHistoryEvents)
+                domainHistoryCSV(domainHistory)
             ),
             (
                 "network-activity-\(timestamp.filename).csv",
@@ -195,17 +246,22 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         return csvData(rows)
     }
 
-    private static func domainHistoryCSV(_ events: [DNSQueryEvent]) -> Data {
-        let rows = [["timestamp", "domain", "action", "reason"]]
-            + events.map { event in
-                [
+    private static func domainHistoryCSV(_ source: DomainHistoryExportSource) -> Data {
+        // Stream page → CSV bytes so the full retained history never materializes here. This is
+        // byte-identical to encoding one `[header] + rows` array through `csvData` (each row
+        // joined by ",", rows joined by "\n", trailing "\n"), just without the resident array.
+        var data = csvRowData(["timestamp", "domain", "action", "reason"])
+        source.drain { page in
+            for event in page {
+                data.append(csvRowData([
                     isoString(from: event.timestamp),
                     event.domain,
                     event.decision.action.rawValue,
                     event.decision.reason.rawValue
-                ]
+                ]))
             }
-        return csvData(rows)
+        }
+        return data
     }
 
     private static func networkActivityCSV(_ log: NetworkActivityLog) -> Data {
@@ -287,6 +343,12 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             .map { row in row.map(csvEscaped).joined(separator: ",") }
             .joined(separator: "\n") + "\n"
         return Data(text.utf8)
+    }
+
+    /// One CSV record (fields escaped, comma-separated, newline-terminated). Appending these in
+    /// sequence yields the same bytes as `csvData([...])` while letting the caller stream rows.
+    private static func csvRowData(_ row: [String]) -> Data {
+        Data((row.map(csvEscaped).joined(separator: ",") + "\n").utf8)
     }
 
     private static func csvEscaped(_ value: String) -> String {

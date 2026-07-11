@@ -90,13 +90,26 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         let controller = try readSource(.diagnosticsController)
         let depthExport = try sourceBlock(
             in: controller,
-            startingAt: "func domainHistoryEventsForExport(at now: Date) -> [DNSQueryEvent]",
+            startingAt: "func domainHistoryExportSource(at now: Date) -> DomainHistoryExportSource",
             endingBefore: "private func domainHistorySince(now: Date)"
         )
-        XCTAssertTrue(depthExport.contains("guard let log = domainHistoryLog() else"))
-        XCTAssertTrue(depthExport.contains("return diagnostics.recentEvents"))
+        // Export must read a DEDICATED connection so it can hold a consistent snapshot without
+        // serializing the shared list reader (#340 follow-up).
+        XCTAssertTrue(depthExport.contains("try? DNSEventLog(url: url, readOnly: true)"))
+        XCTAssertTrue(depthExport.contains("return .events(diagnostics.recentEvents)"))
         XCTAssertTrue(depthExport.contains("let since = domainHistorySince(now: now)"))
-        XCTAssertTrue(depthExport.contains("log.pageAllActions(before: cursor, since: since, limit: batchSize)"))
+        // Export must remain STREAMING: it hands back a page-at-a-time source, never a resident
+        // array (#340 review — a full-history export must not spike foreground memory).
+        XCTAssertTrue(depthExport.contains("DomainHistoryExportPager(log: snapshotLog, since: since)"))
+        XCTAssertTrue(depthExport.contains("return DomainHistoryExportSource { pager.nextPage() }"))
+        XCTAssertFalse(depthExport.contains("var events: [DNSQueryEvent] = []"))
+        XCTAssertTrue(controller.contains("log.pageAllActions(before: cursor, since: since, limit: batchSize)"))
+        // The snapshot must be pinned EAGERLY when the source is created (on the main actor,
+        // before the caller yields to the detached drain), not lazily on the first page — else a
+        // clear in that gap truncates the export. Immunity itself is proven by
+        // DNSEventLogTests.testExportSnapshotIsImmuneToConcurrentPrune.
+        XCTAssertTrue(depthExport.contains("snapshotLog.beginSnapshot()"))
+        XCTAssertTrue(controller.contains("log.endSnapshot()"))
 
         let viewModel = try readSource(.appViewModel)
         let export = try sourceBlock(
@@ -104,6 +117,32 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
             startingAt: "func makeLocalLogExportArchive(",
             endingBefore: "private func makeLocalLogExportMetadata("
         )
-        XCTAssertTrue(export.contains("domainHistoryEvents: reports.domainHistoryEventsForExport(at: generatedAt)"))
+        XCTAssertTrue(export.contains("reports.domainHistoryExportSource(at: generatedAt)"))
+        // Export must remain OFF the main actor: the CSV+ZIP encode is hopped to a detached task
+        // so a large export cannot block the main thread (#340 review — watchdog/UI hang).
+        XCTAssertTrue(export.contains("async throws -> LocalLogExportArchive"))
+        XCTAssertTrue(export.contains("Task.detached(priority: .userInitiated)"))
+        XCTAssertTrue(export.contains("domainHistory: domainHistory"))
+    }
+
+    /// Concurrent clears can no longer truncate the archive (the export reads a pinned snapshot),
+    /// so the view guard's only remaining job is to stop a second overlapping export from racing
+    /// the shared exporter state. The export button must mark the export in flight and disable
+    /// itself until the archive bytes are built (#340 follow-up — Codex review of PR #341).
+    func testLocalLogExportGuardsOverlappingExports() throws {
+        let view = try readSource(.privacySecuritySettingsView)
+        XCTAssertTrue(view.contains("@State private var isExportingLocalLogs = false"))
+
+        let export = try sourceBlock(
+            in: view,
+            startingAt: "private func exportLocalLogs()",
+            endingBefore: "private func handleLocalLogExportCompletion("
+        )
+        // The flag is raised synchronously and guarded BEFORE authentication, so a double-tap
+        // during the auth prompt can't queue a second overlapping export.
+        XCTAssertTrue(export.contains("guard !isExportingLocalLogs else { return }"))
+        XCTAssertTrue(export.contains("isExportingLocalLogs = true"))
+        XCTAssertTrue(export.contains("defer { isExportingLocalLogs = false }"))
+        XCTAssertTrue(view.contains(".disabled(isExportingLocalLogs)"))
     }
 }

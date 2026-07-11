@@ -34,6 +34,12 @@ struct PrivacyDataSettingsView: View {
     @State private var localLogExportFilename = "lava-local-logs.zip"
     @State private var isPresentingLocalLogExporter = false
     @State private var localLogExportErrorMessage: String?
+    // True while an export is draining off the main actor. Concurrent CLEARS can no longer
+    // truncate the archive — the export reads a pinned SQLite snapshot (see
+    // DiagnosticsController.domainHistoryExportSource) — so this flag exists only to stop a second
+    // overlapping export from racing the shared `localLogExportDocument`/exporter state below.
+    // pinned: DNSEventLogWiringSourceTests.testLocalLogExportGuardsOverlappingExports
+    @State private var isExportingLocalLogs = false
 
     var body: some View {
         SettingsSubpageContent(
@@ -72,6 +78,9 @@ struct PrivacyDataSettingsView: View {
                             .lavaControlRowCard()
                     }
                     .buttonStyle(.plain)
+                    // Prevent a second overlapping export from clobbering the in-flight one's
+                    // exporter state; concurrent clears are handled by the snapshot, not here.
+                    .disabled(isExportingLocalLogs)
 
                     if let localLogExportErrorMessage {
                         Text(localLogExportErrorMessage)
@@ -286,9 +295,20 @@ struct PrivacyDataSettingsView: View {
     }
 
     private func exportLocalLogs() {
-        performAppSettingsMutation(reason: "Export local logs") {
+        // Raise the flag SYNCHRONOUSLY (before authentication) so the export button disables
+        // immediately and a second tap during the auth prompt can't queue an overlapping export
+        // (Codex review, PR #341). The guard is belt-and-suspenders; the defer always clears the
+        // flag, including when authentication is cancelled. Auth is inlined here (rather than via
+        // performAppSettingsMutation) so the flag spans the whole auth+build, not just the build.
+        guard !isExportingLocalLogs else { return }
+        isExportingLocalLogs = true
+        Task { @MainActor in
+            defer { isExportingLocalLogs = false }
+            guard await security.requireAuthentication(for: .appSettings, reason: "Export local logs") else {
+                return
+            }
             do {
-                let archive = try viewModel.makeLocalLogExportArchive()
+                let archive = try await viewModel.makeLocalLogExportArchive()
                 localLogExportFilename = archive.filename
                 localLogExportDocument = LocalLogExportDocument(data: archive.data)
                 localLogExportErrorMessage = nil

@@ -78,6 +78,7 @@ public final class DNSEventLog: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "app.lavasec.dns-event-log")
     private var db: OpaquePointer?
+    private var inSnapshot = false
 
     /// Opens (creating the schema if needed) the log at `url`. Pass `readOnly: true` for the
     /// app-side reader; the tunnel opens the sole read-write writer.
@@ -303,6 +304,48 @@ public final class DNSEventLog: @unchecked Sendable {
             )
             return Self.mergeNewest(allowed, blocked, limit: pageLimit)
         }) ?? []
+    }
+
+    /// Pins a consistent WAL read snapshot for the duration of an export. Every `pageAllActions`
+    /// call made between `beginSnapshot()` and `endSnapshot()` sees the log exactly as of the
+    /// first read, so a concurrent prune/clear — another process, or an app "clear logs" action
+    /// from any screen — cannot drop rows between pages and truncate the export. The old
+    /// synchronous export was immune only because it blocked the main thread end to end; this
+    /// restores that guarantee for the async, streamed export (#340 follow-up).
+    ///
+    /// Use a DEDICATED read-only instance: an open read transaction holds the WAL from
+    /// checkpoint-truncation and serializes any other read on the same connection, so the app
+    /// opens a throwaway reader per export rather than reusing the shared list reader. Balanced
+    /// with `endSnapshot()`; abandoning the reader is safe because `sqlite3_close_v2` on deinit
+    /// rolls back any still-open transaction.
+    /// - pinned: DNSEventLogTests.testExportSnapshotIsImmuneToConcurrentPrune
+    public func beginSnapshot() {
+        queue.sync {
+            guard !inSnapshot else { return }
+            // A plain (deferred) BEGIN does NOT pin the WAL snapshot until the transaction's first
+            // read, which would leave a window where a clear between beginSnapshot() and the first
+            // export page prunes rows the export meant to capture (Codex review, PR #341). Force an
+            // immediate read of the schema so the read snapshot is fixed as of this call and every
+            // later page shares it until endSnapshot(). A read-only connection can hold a read txn.
+            do {
+                try exec("BEGIN;")
+                let statement = try prepare("SELECT 1 FROM sqlite_schema LIMIT 1;")
+                defer { sqlite3_finalize(statement) }
+                _ = sqlite3_step(statement)
+                inSnapshot = true
+            } catch {
+                try? exec("ROLLBACK;")
+            }
+        }
+    }
+
+    /// Ends the read snapshot opened by `beginSnapshot()`. Idempotent.
+    public func endSnapshot() {
+        queue.sync {
+            guard inSnapshot else { return }
+            try? exec("COMMIT;")
+            inSnapshot = false
+        }
     }
 
     /// Total number of stored events (all actions). Best-effort: returns 0 on error.

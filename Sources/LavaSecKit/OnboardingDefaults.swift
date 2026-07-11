@@ -99,9 +99,13 @@ public extension AppConfiguration {
             enabledBlocklistIDs: DefaultCatalog.recommendedDefaultSourceIDs,
             resolverPresetID: DNSResolverPreset.device.id,
             fallbackToDeviceDNS: true,
-            // Device DNS is the primary resolver; if it wedges, allowed lookups are
-            // carried transiently over Mullvad DoH (the default encrypted fallback)
-            // and then return to the device's own DNS automatically.
+            // Device DNS is the primary resolver; if it stops answering, allowed
+            // lookups are carried over Mullvad DoH (the default encrypted fallback)
+            // and return to the device's own DNS once its recovery probes succeed
+            // again. That return path exists because the captured resolver is never
+            // discarded on masked-read evidence alone (UR-55 / INV-DNS-5); after a
+            // real network change the NEW network's resolver is only learnable at
+            // the next tunnel start (Phase 0 — no in-place read exists).
             usesEncryptedDeviceDNSFallback: true,
             fallbackResolverPresetID: DNSResolverPreset.mullvadDoH.id,
             keepFilteringCounts: true,

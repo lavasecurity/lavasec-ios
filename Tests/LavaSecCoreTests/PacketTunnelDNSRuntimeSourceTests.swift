@@ -302,7 +302,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("deviceDNSResolverAddresses"))
     }
 
-    func testDeviceDNSCaptureExhaustionDropsStaleResolverOnlyWhenEncryptedFallbackCatchesIt() throws {
+    func testDeviceDNSCaptureExhaustionPreservesResolversAndVerifiesByProbe() throws {
         let source = try readSource(.packetTunnelProvider)
         let retryBlock = try sourceBlock(
             in: source,
@@ -310,61 +310,68 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func cancelDeviceDNSCaptureRetry"
         )
 
-        // On capture-retry EXHAUSTION (a genuine resolver-changing handoff, not a
-        // transient mask) the tunnel stops serving the previous network's now-
-        // unreachable resolvers — but ONLY when a per-query encrypted fallback will
-        // catch the queries. Phase 0 hygiene (lavasec-infra#57).
+        // UR-55 (plans/2026-07-11-ur-55-device-dns-fallback-under-tunnel-plan.md):
+        // a masked exhaustion carries ZERO handoff evidence — steady-state masking makes
+        // every armed cycle exhaust on a chronically-masked stable network. Exhaustion
+        // must stay observable but must never mutate the captured addresses; the
+        // discriminator is a wire probe of the preserved primary, whose outcome flows
+        // through the ordinary smoke-evidence chain (INV-DNS-5).
         XCTAssertTrue(
             retryBlock.contains("event: \"device-dns-capture-retry-exhausted\""),
             "Exhaustion must still be observable in the device log."
         )
 
-        // The drop is gated on the encrypted fallback actually being the catcher. With
-        // NO fallback (Device-DNS-only), `device-dns-unavailable` is not restart-worthy
-        // (cold-start state), so dropping would strand the no-fallback handoff WITHOUT
-        // escalation (PR #110) — preserve the stale resolver there and let the
-        // existing restart-worthy recovery fire (Track 4 is the prompt fix, separate).
-        XCTAssertTrue(
-            retryBlock.contains("currentResolverRuntimeConfiguration().encryptedFallback != nil"),
-            "The exhaustion drop must be gated on whether an encrypted fallback will catch the queries."
-        )
-        XCTAssertTrue(
-            retryBlock.contains("preserveOnEmptyCapture: !routesToEncryptedFallback"),
-            "Drop the stale resolver only when the encrypted fallback catches it; otherwise preserve it (no-fallback keeps its restart-worthy recovery)."
-        )
-
-        // The drop must be gated behind the retry-exhaustion check (only when truly
-        // exhausted, never on a routine empty read mid-retry).
-        // (Phase E2: the policy call moved inside DeviceDNSCaptureRetryCycle; the
-        // provider consults it through the cycle's shouldContinue — since actors
-        // slice 2 via the isolated `cycle` inside the region's assumeIsolated block.)
+        // The exhaustion branch is everything after the cycle's continuation gate.
         let gateRange = try XCTUnwrap(
             retryBlock.range(of: "cycle.shouldContinue(capturedNonEmpty: false)"),
             "Expected the cycle's retry-continuation gate in runDeviceDNSCaptureRetry."
         )
-        let dropRange = try XCTUnwrap(
-            retryBlock.range(of: "preserveOnEmptyCapture: !routesToEncryptedFallback"),
-            "Expected the fallback-gated stale-drop in the exhaustion branch."
+        let exhaustionBlock = String(retryBlock[gateRange.upperBound...])
+
+        // The 1.2.1 regression shape: `preserveOnEmptyCapture: !routesToEncryptedFallback`
+        // dropped a working resolver on chronically-masked stable networks and the empty
+        // list blinded the recovery probes (nothing left to probe). No address-list
+        // mutation of ANY kind is allowed at exhaustion anymore.
+        XCTAssertFalse(
+            exhaustionBlock.contains("preserveOnEmptyCapture: !routesToEncryptedFallback"),
+            "The fallback-gated exhaustion drop is the UR-55 regression — it must not return."
         )
-        XCTAssertTrue(
-            gateRange.lowerBound < dropRange.lowerBound,
-            "The stale-drop must come after (inside) the retry-exhaustion gate."
+        XCTAssertFalse(
+            exhaustionBlock.contains("preserveOnEmptyCapture: false"),
+            "Exhaustion must never discard the captured addresses on masked-read evidence alone (INV-DNS-5)."
+        )
+        XCTAssertFalse(
+            exhaustionBlock.contains("DeviceDNSFallbackPolicy.refreshedResolverAddresses"),
+            "Exhaustion must not touch the captured address list at all — preservation is unconditional."
+        )
+        XCTAssertFalse(
+            exhaustionBlock.contains("collectPendingResponsesAndResetResolverRuntime("),
+            "No runtime reset at exhaustion: the addresses did not change, so live queries keep their runtime."
         )
 
-        // When a drop does happen, it must take effect on the live runtime and nudge a
-        // confirming probe so queries route to the fallback at once, mirroring recapture.
+        // The verdict comes from the wire, policy-gated so equivalent evidence
+        // (fresh accepted-primary proof, or an already-confirmed chronic failure
+        // streak within its backoff spacing) does not burn radio per exhaustion.
         XCTAssertTrue(
-            retryBlock.contains("reason: \"device-dns-stale-dropped-on-exhaustion\""),
-            "The drop+reset must be tagged distinctly for field logs."
+            exhaustionBlock.contains("DeviceDNSFallbackPolicy.exhaustionVerificationDecision("),
+            "The verification probe must be gated by the pure policy decision (executable-tested)."
         )
         XCTAssertTrue(
-            retryBlock.contains("collectPendingResponsesAndResetResolverRuntime("),
-            "Dropping the stale resolver must reset the runtime so live queries fail fast."
+            exhaustionBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"device-dns-exhaustion-verification\")"),
+            "The preserved primary must be verified by the standing smoke-probe machinery, not inferred stale."
         )
         XCTAssertTrue(
-            retryBlock.contains("scheduleResolverSmokeProbeIfNeeded(reason: \"device-dns-stale-dropped-on-exhaustion\")"),
-            "A confirming probe must run so the policy sees the unavailable primary now."
+            exhaustionBlock.contains("\"verification\": verification.rawValue"),
+            "The probe-vs-skip decision must be observable in the exhaustion log line."
         )
+
+        // Canary for the negative pins above: they key on these identifiers — if a
+        // rename removes one from the pinned source they pass vacuously. Fail here
+        // instead, then re-anchor both sides to the new name.
+        XCTAssertTrue(retryBlock.contains("DeviceDNSFallbackPolicy.refreshedResolverAddresses"),
+                      "per-attempt refresh should still use the shared empty-capture policy")
+        XCTAssertTrue(source.contains("collectPendingResponsesAndResetResolverRuntime("))
+        XCTAssertTrue(source.contains("preserveOnEmptyCapture"))
     }
 
     func testWakeCaptureRetryHonoursExhaustionCooldownOnChronicallyMaskedNetwork() throws {
@@ -4613,7 +4620,16 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "private static let recoveryContextProbeReasons",
             endingBefore: "private static func smokeProbeTimeoutSeconds"
         )
-        for reason in ["network-settled", "resolver-wedge-recovery", "device-dns-fallback-recovery"] {
+        // "device-dns-exhaustion-verification" rides the same tight timeout (UR-55):
+        // post-handoff it is the first wire check that can classify the preserved
+        // Device-DNS primary as dead; the selector's existing guards keep the short
+        // cut away from encrypted primaries and fallback-capable probes.
+        for reason in [
+            "network-settled",
+            "resolver-wedge-recovery",
+            "device-dns-fallback-recovery",
+            "device-dns-exhaustion-verification"
+        ] {
             XCTAssertTrue(reasonsBlock.contains("\"\(reason)\""), "recovery-context reasons should include \(reason)")
         }
     }
