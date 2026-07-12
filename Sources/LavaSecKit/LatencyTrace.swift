@@ -339,15 +339,15 @@ internal enum LatencyDetailRedactor {
             }
 
             let keyContainsSensitiveContent = shouldRedactValue(key)
-            let outputKey: String
+            let outputKeyName: String
             if keyContainsSensitiveContent {
                 redactedKeyCount += 1
-                outputKey = "redactedDetail\(redactedKeyCount)"
+                outputKeyName = "redactedDetail\(redactedKeyCount)"
             } else {
-                outputKey = key
+                outputKeyName = key
             }
 
-            redactedDetails[outputKey] = shouldRedactKey(key) || keyContainsSensitiveContent || shouldRedactValue(value)
+            redactedDetails[outputKeyName] = shouldRedactKey(key) || keyContainsSensitiveContent || shouldRedactValue(value)
                 ? redactedValue
                 : value
         }

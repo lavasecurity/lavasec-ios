@@ -1205,13 +1205,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "let defaults",
             endingBefore: "if notification.kind.isProblem {"
         )
-        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         let problemBranch = try sourceBlock(
             in: source,
             startingAt: "if notification.kind.isProblem {",
             endingBefore: "private static func removeSupersededProtectionNotifications"
         )
-        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         // No recovery-acknowledgement delivery path remains in recordDelivery.
         XCTAssertFalse(recordBlock.contains(".reconnected"))
     }
@@ -1230,7 +1230,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "let requestIdentifiers = identifiers.map {"
         )
         XCTAssertTrue(
-            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
         )
     }
@@ -1350,7 +1350,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "// Use the pre-clear"
         )
         XCTAssertTrue(
-            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "Coverage with no outstanding banner must lift the duplicate-guard id (tunnel consumer)."
         )
     }
@@ -3720,7 +3720,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func readPackets()"
         )
 
-        XCTAssertTrue(source.contains("LavaSecAppGroup.latencyOperationIDOptionKey"))
+        XCTAssertTrue(source.contains("LavaSecAppGroup.latencyOperationIDOptionKeyName"))
         XCTAssertTrue(source.contains("private static func latencyOperationID(from options: [String: NSObject]?) -> LatencyOperationID?"))
         XCTAssertTrue(latencyHelperBlock.contains("LatencyDebugLogEventSink(operationKind: operationKind)"))
         XCTAssertTrue(latencyHelperBlock.contains("LavaSecDeviceDebugLog.append(component: \"tunnel\""))
@@ -4651,20 +4651,20 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
     }
 
     /// The app reads the self-reconnect timeline for a bug report's incident summary (LAV-94 B)
-    /// from `LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey`, while the tunnel WRITES it under
-    /// its own private `selfReconnectAttemptsDefaultsKey`. Both are the same magic string — lock the
+    /// from `LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKeyName`, while the tunnel WRITES it under
+    /// its own private `selfReconnectAttemptsDefaultsKeyName`. Both are the same magic string — lock the
     /// two literals together (cross-file) so a future rename on one side can't silently strand the
     /// app's read of a key the tunnel no longer writes.
     func testSelfReconnectAttemptTimesDefaultsKeyMatchesSharedConstant() throws {
-        let key = "tunnel.selfReconnectAttemptTimes"
+        let sharedKeyValue = "tunnel.selfReconnectAttemptTimes"
         let tunnelSource = try readSource(.packetTunnelProvider)
         let sharedSource = try readSource(.appGroup)
         XCTAssertTrue(
-            tunnelSource.contains("selfReconnectAttemptsDefaultsKey = \"\(key)\""),
+            tunnelSource.contains("selfReconnectAttemptsDefaultsKeyName = \"\(sharedKeyValue)\""),
             "Tunnel must persist the self-reconnect timeline under the shared key literal."
         )
         XCTAssertTrue(
-            sharedSource.contains("selfReconnectAttemptTimesDefaultsKey = \"\(key)\""),
+            sharedSource.contains("selfReconnectAttemptTimesDefaultsKeyName = \"\(sharedKeyValue)\""),
             "The shared app-group constant the app reads must equal the tunnel's persisted key."
         )
     }
@@ -4935,12 +4935,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "private func clearSelfReconnectGapMarkers()",
             endingBefore: "private func"
         )
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapStartedAtDefaultsKey"))
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapEndedAtDefaultsKey"))
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapCountDefaultsKey"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapStartedAtDefaultsKeyName"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapEndedAtDefaultsKeyName"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapCountDefaultsKeyName"))
         // The operational cooldown store and tunnel-health are deliberately NOT wiped (frozen
         // recovery control flow); the gap-marker clear must not touch the attempt-times key.
-        XCTAssertFalse(gapClearBlock.contains("selfReconnectAttemptTimesDefaultsKey"))
+        XCTAssertFalse(gapClearBlock.contains("selfReconnectAttemptTimesDefaultsKeyName"))
     }
 
     func testRefreshDiagnosticsDefersPruneWriteBackWhileTunnelOwnsFile() throws {
@@ -5054,11 +5054,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // The persisted end is the floored value, NOT a raw `now` — so the reader never sees a
         // stale `ended <= started`.
         XCTAssertTrue(
-            closeBlock.contains("defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)"),
+            closeBlock.contains("defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)"),
             "The close must persist the floored end, never an unconditional now stamp (COH-2)."
         )
         XCTAssertFalse(
-            closeBlock.contains("defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)"),
+            closeBlock.contains("defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)"),
             "The close must not stamp a raw now for the gap end (COH-2)."
         )
         // The anomaly is observable in the device log so a floored close is diagnosable.

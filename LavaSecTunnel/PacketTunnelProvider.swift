@@ -478,12 +478,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // physically delete rows within one cadence (~30s) instead of leaving them
             // hidden-but-stored until they age out — the clear UI promises they leave the phone,
             // and the read path already hides them immediately via the same floor (PR #327
-            // review). Cheap (indexed DELETE), mostly a no-op — the orphan sweep inside
-            // prune only runs on a pass that actually deleted events (UR-53) — and off
-            // the DNS path.
+            // review). Cheap: the aging DELETE walks idx_event_action_ts per action (a bare
+            // ts predicate full-scanned the whole table every pass — UR-53 follow-up,
+            // 2026-07-12), mostly a no-op — the orphan sweep inside prune only runs on a pass
+            // that actually deleted events (#339) — and off the DNS path.
             if let dnsEventLog = self.dnsEventLog {
                 let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
-                let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
+                let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName)
                 let cutoff = clearFloorMs > 0
                     ? max(retentionCutoff, Date(timeIntervalSince1970: Double(clearFloorMs) / 1000))
                     : retentionCutoff
@@ -585,7 +586,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // cooldown the suppression line uses so a flapping handoff can't storm the log.
     private var lastSelfReconnectPathSkipLogAt: Date?
     private static let selfReconnectSuppressionLogInterval: TimeInterval = 60
-    private static let selfReconnectAttemptsDefaultsKey = "tunnel.selfReconnectAttemptTimes"
+    private static let selfReconnectAttemptsDefaultsKeyName = "tunnel.selfReconnectAttemptTimes"
     // Restart-survivable marker for the productive-recovery credit (Track 4): the wall
     // time of the last committed self-reconnect, persisted just before the cancel kills
     // the process and read on the next launch. If the relaunched tunnel reaches a
@@ -593,7 +594,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // to this launch is credited back (pruned from the shared attempt store) so a genuine
     // network switch nets ~0 against the cap; a restart that never recovers keeps its
     // attempt and accrues toward the cap (a true loop is bounded, a productive one isn't).
-    private static let lastSelfReconnectAtDefaultsKey = "tunnel.lastSelfReconnectAt"
+    private static let lastSelfReconnectAtDefaultsKeyName = "tunnel.lastSelfReconnectAt"
     private static let selfReconnectCreditWindow: TimeInterval = 120
     // Nudges the foreground app to pull fresh health (over the provider-message
     // channel) when the connectivity-relevant state changes, so the Dynamic
@@ -775,6 +776,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let completion = TunnelCompletion(handler: completionHandler)
         dnsStateQueue.async { [weak self] in
             self?.resolverSleepBeganAt = Date()
+            // Drain the event log's buffered best-effort appends before iOS can suspend the
+            // process: batched appends (UR-53 follow-up) hold up to a flush window in memory,
+            // and a jetsam while suspended would silently drop that tail from Domain History.
+            // One bounded transaction, mirroring the stop-path drain (PR #327 review).
+            self?.dnsEventLog?.flush()
             completion.complete()
         }
     }
@@ -1253,7 +1259,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private static func latencyOperationID(from options: [String: NSObject]?) -> LatencyOperationID? {
-        guard let rawValue = options?[LavaSecAppGroup.latencyOperationIDOptionKey] as? String,
+        guard let rawValue = options?[LavaSecAppGroup.latencyOperationIDOptionKeyName] as? String,
               !rawValue.isEmpty
         else {
             return nil
@@ -2834,6 +2840,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         #if DEBUG || LAVA_QA_TOOLS
         EnergyCounters.shared.bump(.focusPollTick)   // NRG focus-poll lever: count the 60 s wakes
         EnergySignpost.event("focus-poll-tick")      // NRG Phase 2: mark the poll wake for Instruments
+        if let dnsEventLog {
+            // NRG SQLite lever (UR-53 follow-up): pull the depth store's write-path window
+            // (flushes/rows/prunes/WAL frames) into the counters on the same existing tick —
+            // no new timer, no per-event logging.
+            EnergyCounters.shared.recordSQLiteWindow(dnsEventLog.writeInstrumentationSnapshotAndReset())
+        }
         EnergyCounters.shared.flushIfDue()           // NRG: flush the per-window counter summary (piggybacks this tick)
         #endif
         applyDiagnosticsControlIfNeeded(force: false)
@@ -4808,12 +4820,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             health: health,
             now: now
         )
-        let key = "\(assessment.severity.diagnosticLabel)|\(String(describing: assessment.primaryAction))"
-        guard key != lastSignaledConnectivityKey else {
+        let connectivitySignalKeyValue = "\(assessment.severity.diagnosticLabel)|\(String(describing: assessment.primaryAction))"
+        guard connectivitySignalKeyValue != lastSignaledConnectivityKey else {
             return
         }
 
-        lastSignaledConnectivityKey = key
+        lastSignaledConnectivityKey = connectivitySignalKeyValue
         connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName)
     }
 
@@ -4856,7 +4868,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // exact-id duplicate guard so a later lapse back to a real problem with the same
             // truncated-second event id isn't suppressed by notification(for:)'s id guard
             // (the outstanding-problem case clears it via clearResolvedProblemNotifications).
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)
         }
 
         // Customization → Notifications: the "Connection updates" toggle gates only the CREATION of new
@@ -4895,10 +4907,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             content.body = notification.body
             content.interruptionLevel = .passive
             content.userInfo = [
-                LavaSecAppGroup.protectionNotificationRouteUserInfoKey:
+                LavaSecAppGroup.protectionNotificationRouteUserInfoKeyName:
                     LavaSecAppGroup.protectionNotificationGuardRouteValue,
-                LavaSecAppGroup.protectionNotificationKindUserInfoKey: notification.kind.rawValue,
-                LavaSecAppGroup.protectionNotificationIDUserInfoKey: notification.identifier
+                LavaSecAppGroup.protectionNotificationKindUserInfoKeyName: notification.kind.rawValue,
+                LavaSecAppGroup.protectionNotificationIDUserInfoKeyName: notification.identifier
             ]
 
             let request = UNNotificationRequest(
@@ -4925,18 +4937,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         defaults: UserDefaults
     ) -> ProtectionConnectivityNotificationHistory {
         let unresolvedProblemKind = defaults.string(
-            forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey
+            forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName
         ).flatMap(ProtectionConnectivityNotificationKind.init(rawValue:))
 
         return ProtectionConnectivityNotificationHistory(
             lastDeliveredNotificationID: defaults.string(
-                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName
             ),
             lastDeliveredAt: defaults.object(
-                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey
+                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName
             ) as? Date,
             unresolvedProblemNotificationID: defaults.string(
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName
             ),
             unresolvedProblemKind: unresolvedProblemKind
         )
@@ -4947,7 +4959,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         defaults.set(
             notification.identifier,
-            forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
+            forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName
         )
 
         // Only actionable problem banners are delivered now, and they advance the
@@ -4955,14 +4967,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // timestamp. (A self-recovery clears the outstanding markers silently via
         // the resolved-problem clear, so there's no delivered acknowledgement here.)
         if notification.kind.isProblem {
-            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
+            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName)
             defaults.set(
                 notification.identifier,
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName
             )
             defaults.set(
                 notification.kind.rawValue,
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName
             )
         }
     }
@@ -4988,13 +5000,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         defaults: UserDefaults,
         notificationCenter: UNUserNotificationCenter
     ) {
-        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName)
+        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName)
         // Back-date the delivery cooldown ONLY for the encrypted-fallback silent supersede
         // (cooldownAnchor non-nil); a real `.healthy` recovery passes nil and keeps its
         // anti-flap cooldown intact.
         if let cooldownAnchor {
-            defaults.set(cooldownAnchor, forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
+            defaults.set(cooldownAnchor, forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName)
             // Also lift the exact-id duplicate guard. The silent supersede removed the
             // reconnect banner from the OS, so if coverage lapses before a new smoke probe
             // shifts the event id, the recurring `reconnect-needed:<event>` candidate must be
@@ -5002,7 +5014,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // guard suppress the actionable banner until some later probe changes the id,
             // defeating the back-dated cooldown. The cooldown anchor stays the sole gate, so
             // a flapping wedge is still bounded to one banner per `reFlapGraceInterval`.
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)
         }
 
         let requestIdentifiers = identifiers.map {
@@ -5354,24 +5366,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // self-reconnect rather than risking a cancel with no automatic recovery.
     private static func isOnDemandConfirmedEnabled() -> Bool {
         LavaSecAppGroup.sharedDefaults.bool(
-            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKeyName
         )
     }
 
     private static func loadSelfReconnectAttemptTimes() -> [Date] {
-        let raw = LavaSecAppGroup.sharedDefaults.array(forKey: selfReconnectAttemptsDefaultsKey) as? [Double] ?? []
+        let raw = LavaSecAppGroup.sharedDefaults.array(forKey: selfReconnectAttemptsDefaultsKeyName) as? [Double] ?? []
         return raw.map(Date.init(timeIntervalSince1970:))
     }
 
     private static func saveSelfReconnectAttemptTimes(_ times: [Date]) {
         LavaSecAppGroup.sharedDefaults.set(
             times.map(\.timeIntervalSince1970),
-            forKey: selfReconnectAttemptsDefaultsKey
+            forKey: selfReconnectAttemptsDefaultsKeyName
         )
     }
 
     private static func loadLastSelfReconnectAt() -> Date? {
-        let raw = LavaSecAppGroup.sharedDefaults.double(forKey: lastSelfReconnectAtDefaultsKey)
+        let raw = LavaSecAppGroup.sharedDefaults.double(forKey: lastSelfReconnectAtDefaultsKeyName)
         return raw > 0 ? Date(timeIntervalSince1970: raw) : nil
     }
 
@@ -5385,11 +5397,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private static func saveLastSelfReconnectAt(_ date: Date) {
-        LavaSecAppGroup.sharedDefaults.set(date.timeIntervalSince1970, forKey: lastSelfReconnectAtDefaultsKey)
+        LavaSecAppGroup.sharedDefaults.set(date.timeIntervalSince1970, forKey: lastSelfReconnectAtDefaultsKeyName)
     }
 
     private static func clearLastSelfReconnectAt() {
-        LavaSecAppGroup.sharedDefaults.removeObject(forKey: lastSelfReconnectAtDefaultsKey)
+        LavaSecAppGroup.sharedDefaults.removeObject(forKey: lastSelfReconnectAtDefaultsKeyName)
     }
 
     // CON-1: INCIDENT-LEDGER IO runs on this dedicated SERIAL queue, never dnsStateQueue —
@@ -5498,11 +5510,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // outage). This order's worst interleave is the conservative one — the previous gap
         // briefly reads as still open. Readers additionally ignore any end that is not
         // AFTER the start they loaded, covering an extension killed between the writes.
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
-        defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)
+        defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKeyName)
         defaults.set(
-            defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey) + 1,
-            forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey
+            defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKeyName) + 1,
+            forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKeyName
         )
     }
 
@@ -5514,12 +5526,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // residual).
     private static func closeDanglingSelfReconnectGapIfNeeded(now: Date = Date()) {
         let defaults = LavaSecAppGroup.sharedDefaults
-        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
+        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKeyName)
         // A gap is genuinely closed only when its end is AFTER its start: an end at or
         // before the start is a stale leftover from the PREVIOUS gap (the extension can die
         // between the open's two writes), and skipping on it would leave the new gap
         // unclosed forever. Overwrite it with the honest close instead.
-        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
+        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)
         guard startedAtRaw > 0, endedAtRaw <= startedAtRaw else {
             return
         }
@@ -5533,7 +5545,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let nowRaw = now.timeIntervalSince1970
         let clockWentBackward = nowRaw <= startedAtRaw
         let endedRaw = clockWentBackward ? startedAtRaw + 1 : nowRaw
-        defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
+        defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)
         let gapMilliseconds = max(0, Int(((endedRaw - startedAtRaw) * 1_000).rounded()))
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "self-reconnect-gap-closed", details: [
             "gapMs": "\(gapMilliseconds)",
@@ -6417,7 +6429,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     defaults: defaults
                 ),
                 shieldStyle: GuardianShieldStyle(
-                    rawValue: defaults.string(forKey: LavaSecAppGroup.customizationLavaGuardLookDefaultsKey) ?? ""
+                    rawValue: defaults.string(forKey: LavaSecAppGroup.customizationLavaGuardLookDefaultsKeyName) ?? ""
                 ) ?? .original,
                 pauseMinutes: LiveActivityPausePreference.minutes(
                     from: ProtectionUserDefaultsStorage(defaults: defaults)

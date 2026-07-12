@@ -37,14 +37,14 @@ public struct PendingFilterSwitchRequest: Codable, Equatable, Sendable {
 
 /// Single-key store for the pending Focus switch over the shared app-group defaults.
 public enum PendingFilterSwitchStore {
-    package static let defaultsKey = "lavasec.focus.pendingFilterSwitch"
+    package static let defaultsKeyName = "lavasec.focus.pendingFilterSwitch"
     /// Timestamp of the last FOREGROUND-initiated filter switch. `switchToFilter` stamps the instant it
     /// was INITIATED (captured at entry, before its async prepare), not when it completed — so a slow cold
     /// switch can't backdate-clear a Focus request that fired while it was preparing. The foreground
     /// reconcile drops a pending Focus request whose `requestedAt` is at-or-before this, so a deliberate
     /// manual switch INITIATED after the Focus request always wins — a stale marker never reverts the
     /// user's newer explicit choice.
-    package static let lastForegroundSwitchAtDefaultsKey = "lavasec.focus.lastForegroundSwitchAt"
+    package static let lastForegroundSwitchAtDefaultsKeyName = "lavasec.focus.lastForegroundSwitchAt"
 
     /// Record (overwriting any prior unreconciled request — the newest Focus change wins). Returns whether
     /// the marker was durably written: a `false` return means the encode failed (theoretically impossible
@@ -60,14 +60,14 @@ public enum PendingFilterSwitchStore {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             guard let data = try? encoder.encode(request) else { return false }
-            defaults.set(data, forKey: defaultsKey)
+            defaults.set(data, forKey: defaultsKeyName)
             return true
         }
     }
 
     /// Returns the pending Focus request, or `nil` when no valid record exists.
     public static func current(in defaults: UserDefaults) -> PendingFilterSwitchRequest? {
-        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
+        guard let data = defaults.data(forKey: defaultsKeyName) else { return nil }
         return try? JSONDecoder().decode(PendingFilterSwitchRequest.self, from: data)
     }
 
@@ -88,21 +88,21 @@ public enum PendingFilterSwitchStore {
     public static func clearIfMatches(_ request: PendingFilterSwitchRequest, in defaults: UserDefaults, lockURL: URL? = nil) -> Bool {
         FilterPublishLock.withExclusiveLock(at: lockURL) {
             guard current(in: defaults) == request else { return false }
-            defaults.removeObject(forKey: defaultsKey)
+            defaults.removeObject(forKey: defaultsKeyName)
             return true
         }
     }
 
     /// Stamp the time of a foreground-initiated switch (call from `switchToFilter`'s commit).
     public static func recordForegroundSwitch(at now: Date, in defaults: UserDefaults) {
-        defaults.set(now.timeIntervalSinceReferenceDate, forKey: lastForegroundSwitchAtDefaultsKey)
+        defaults.set(now.timeIntervalSinceReferenceDate, forKey: lastForegroundSwitchAtDefaultsKeyName)
     }
 
     /// The last foreground-initiated switch time, or nil if none recorded. Presence-checked (not a 0.0
     /// sentinel) so the reference date itself reads back correctly.
     public static func lastForegroundSwitch(in defaults: UserDefaults) -> Date? {
-        guard defaults.object(forKey: lastForegroundSwitchAtDefaultsKey) != nil else { return nil }
-        return Date(timeIntervalSinceReferenceDate: defaults.double(forKey: lastForegroundSwitchAtDefaultsKey))
+        guard defaults.object(forKey: lastForegroundSwitchAtDefaultsKeyName) != nil else { return nil }
+        return Date(timeIntervalSinceReferenceDate: defaults.double(forKey: lastForegroundSwitchAtDefaultsKeyName))
     }
 }
 
@@ -154,18 +154,18 @@ public struct FocusSwitchDiagnosticRecord: Codable, Equatable, Sendable {
 /// the engine on every `performSwitch` (always-on, NOT QA-gated, so it exists in Release), read by the
 /// bug-report builder.
 public enum FocusSwitchDiagnostics {
-    package static let defaultsKey = "lavasec.focus.lastSwitchDiagnostic"
+    package static let defaultsKeyName = "lavasec.focus.lastSwitchDiagnostic"
 
     package static func record(_ record: FocusSwitchDiagnosticRecord, in defaults: UserDefaults) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(record) else { return }
-        defaults.set(data, forKey: defaultsKey)
+        defaults.set(data, forKey: defaultsKeyName)
     }
 
     /// Returns the last valid Focus-switch diagnostic record, when present.
     public static func last(in defaults: UserDefaults) -> FocusSwitchDiagnosticRecord? {
-        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
+        guard let data = defaults.data(forKey: defaultsKeyName) else { return nil }
         return try? JSONDecoder().decode(FocusSwitchDiagnosticRecord.self, from: data)
     }
 }

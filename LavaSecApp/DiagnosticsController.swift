@@ -417,7 +417,7 @@ final class DiagnosticsController: ObservableObject {
         let floorMs = DNSEventLog.clearFloorMilliseconds(for: clearedAt)
         LavaSecAppGroup.sharedDefaults.set(
             Int(floorMs),
-            forKey: LavaSecAppGroup.dnsEventLogClearedAtKey
+            forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName
         )
         guard let dnsEventLogURL,
               FileManager.default.fileExists(atPath: dnsEventLogURL.path),
@@ -683,7 +683,7 @@ final class DiagnosticsController: ObservableObject {
     /// written here — the tunnel owns the key, the app only reads it.
     private func loadSelfReconnectAttemptTimes() -> [Date] {
         let raw = LavaSecAppGroup.sharedDefaults.array(
-            forKey: LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey
+            forKey: LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKeyName
         ) as? [Double] ?? []
         return raw.map(Date.init(timeIntervalSince1970:))
     }
@@ -754,9 +754,9 @@ final class DiagnosticsController: ObservableObject {
     /// reason). Those hold no resolver endpoints or domains, so they are not a privacy leak.
     private func clearSelfReconnectGapMarkers() {
         let defaults = LavaSecAppGroup.sharedDefaults
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKeyName)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)
+        defaults.removeObject(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKeyName)
     }
 
     /// Read-only view of the tunnel's durable self-reconnect gap markers (LAV-92/93): the
@@ -765,11 +765,11 @@ final class DiagnosticsController: ObservableObject {
     /// tunnel only; the app just reads.
     private func loadSelfReconnectGapRecord() -> SelfReconnectGapRecord? {
         let defaults = LavaSecAppGroup.sharedDefaults
-        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKey)
+        let startedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapStartedAtDefaultsKeyName)
         guard startedAtRaw > 0 else {
             return nil
         }
-        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)
+        let endedAtRaw = defaults.double(forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)
         return SelfReconnectGapRecord(
             startedAt: Date(timeIntervalSince1970: startedAtRaw),
             // Accept an end only if it is AFTER the start read alongside it: the tunnel's
@@ -777,7 +777,7 @@ final class DiagnosticsController: ObservableObject {
             // extension killed mid-open) can pair a new start with the PREVIOUS gap's end —
             // a bogus "closed" gap that would mask a still-open outage. Stale end = open.
             endedAt: endedAtRaw > startedAtRaw ? Date(timeIntervalSince1970: endedAtRaw) : nil,
-            cumulativeCount: defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKey)
+            cumulativeCount: defaults.integer(forKey: LavaSecAppGroup.selfReconnectGapCountDefaultsKeyName)
         )
     }
 
@@ -1079,7 +1079,7 @@ final class DiagnosticsController: ObservableObject {
         // physical prune hasn't run, so stale rows are still on disk — filtering here keeps both
         // the list and export aligned with the "kept on this iPhone for 7 days" promise regardless
         // of tunnel state (the tunnel + app-clear paths handle physical deletion). PR #327 review.
-        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKey)
+        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName)
         let retentionFloorMs = Int((now.timeIntervalSince1970 - LocalLogRetention.fineGrainedWindow) * 1_000)
         let floorMs = max(clearFloorMs, retentionFloorMs)
         return floorMs > 0 ? Int64(floorMs) : nil

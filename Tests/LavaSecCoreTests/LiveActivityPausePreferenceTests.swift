@@ -30,7 +30,7 @@ final class LiveActivityPausePreferenceTests: XCTestCase {
 
         LiveActivityPausePreference.setMinutes(20, in: store)
         XCTAssertEqual(LiveActivityPausePreference.minutes(from: store), 20)
-        XCTAssertEqual(store.integer(forKey: LiveActivityPausePreference.defaultsKey), 20)
+        XCTAssertEqual(store.integer(forKey: LiveActivityPausePreference.defaultsKeyName), 20)
 
         // An out-of-range write can never widen the off-protection window.
         LiveActivityPausePreference.setMinutes(45, in: store)
@@ -43,7 +43,7 @@ final class LiveActivityPausePreferenceTests: XCTestCase {
     func testMinutesClampsAStaleOutOfRangeStoredValueOnRead() {
         let store = FakeProtectionKeyValueStore()
         // A value written by some other path that bypassed setMinutes.
-        store.set(99, forKey: LiveActivityPausePreference.defaultsKey)
+        store.set(99, forKey: LiveActivityPausePreference.defaultsKeyName)
         XCTAssertEqual(LiveActivityPausePreference.minutes(from: store), 30)
     }
 

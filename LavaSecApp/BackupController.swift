@@ -122,7 +122,7 @@ final class BackupController: ObservableObject {
     private var registeredBackupPasskey: RegisteredBackupPasskey?
     private let backupSyncService: (any BackupSyncServicing)?
     private var automaticBackupTask: Task<Void, Never>?
-    private let automaticBackupEnabledDefaultsKey = "lavasec.encryptedBackup.automaticBackupEnabled"
+    private let automaticBackupEnabledDefaultsKeyName = "lavasec.encryptedBackup.automaticBackupEnabled"
     private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000
 
     // The hub outlives this controller (AppViewModel owns it strongly), so an unowned
@@ -164,7 +164,7 @@ final class BackupController: ObservableObject {
         }
 
         isAutomaticBackupEnabled = isEnabled
-        UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKey)
+        UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKeyName)
 
         if !isEnabled {
             automaticBackupTask?.cancel()
@@ -173,7 +173,7 @@ final class BackupController: ObservableObject {
     }
 
     func loadAutomaticBackupPreference() {
-        isAutomaticBackupEnabled = UserDefaults.standard.object(forKey: automaticBackupEnabledDefaultsKey) as? Bool ?? false
+        isAutomaticBackupEnabled = UserDefaults.standard.object(forKey: automaticBackupEnabledDefaultsKeyName) as? Bool ?? false
     }
 
     // MARK: - Encrypted backups

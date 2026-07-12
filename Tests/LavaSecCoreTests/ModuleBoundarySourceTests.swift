@@ -788,7 +788,7 @@ final class ModuleBoundarySourceTests: XCTestCase {
         """
         XCTAssertThrowsError(try localPackageProducts(for: "LavaSec", in: duplicateProduct))
 
-        let unconsumedKey = """
+        let unconsumedKeyFixture = """
         targets:
           LavaSec:
             dependencies:
@@ -796,7 +796,7 @@ final class ModuleBoundarySourceTests: XCTestCase {
                 product: LavaSecKit
                 unexpected: true
         """
-        XCTAssertThrowsError(try localPackageProducts(for: "LavaSec", in: unconsumedKey))
+        XCTAssertThrowsError(try localPackageProducts(for: "LavaSec", in: unconsumedKeyFixture))
     }
 
     func testProjectParserRejectsUnsupportedEscapesThatCouldHideLocalPackage() {

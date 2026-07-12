@@ -34,7 +34,7 @@ enum BackgroundCatalogRefresh {
     /// the live tunnel read is exactly the unproven scenario behind LAV-90 Phase 1's
     /// still-open on-device mmap-survives-GC gate. Flip this on-device to enable the first
     /// internal validation run; promote to default-on only after that gate passes.
-    static let optInDefaultsKey = "backgroundCatalogRefreshEnabled"
+    static let optInDefaultsKeyName = "backgroundCatalogRefreshEnabled"
 
     /// Must run before the app finishes launching (called from the app delegate). Always
     /// registers (iOS requires a handler for every permitted identifier); scheduling is
@@ -51,9 +51,9 @@ enum BackgroundCatalogRefresh {
     }
 
     /// Best-effort submit of the next run (~daily). Safe to call repeatedly. No-op unless
-    /// the opt-in flag is set (see `optInDefaultsKey`).
+    /// the opt-in flag is set (see `optInDefaultsKeyName`).
     static func scheduleNext() {
-        guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey) else { return }
+        guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else { return }
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
@@ -75,7 +75,7 @@ enum BackgroundCatalogRefresh {
             // `scheduleNext()` stops resubmitting once it is turned off, but iOS can still
             // deliver a request that was already pending when the flag flipped — so re-read
             // it here and do NO work (complete cleanly) if it was disabled after scheduling.
-            guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey) else {
+            guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else {
                 completion.complete(success: true)
                 return
             }
@@ -230,7 +230,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 
     private static func isLavaGuardNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
-        userInfo[LavaSecAppGroup.protectionNotificationRouteUserInfoKey] as? String
+        userInfo[LavaSecAppGroup.protectionNotificationRouteUserInfoKeyName] as? String
             == LavaSecAppGroup.protectionNotificationGuardRouteValue
     }
 }

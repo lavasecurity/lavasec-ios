@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+#if DEBUG || LAVA_QA_TOOLS
+import os
+#endif
 
 // SQLITE_TRANSIENT tells sqlite to COPY a bound blob/text during the bind call, so a Swift
 // String temporary is safe to pass; sqlite doesn't retain the pointer past the call. The C
@@ -80,19 +83,146 @@ public final class DNSEventLog: @unchecked Sendable {
     private var db: OpaquePointer?
     private var inSnapshot = false
 
+    /// Hot-path statements compiled once per connection and rebound per use. Re-preparing the
+    /// intern+insert trio on every appended event was measurable CPU on the writer queue
+    /// (UR-53 follow-up, 2026-07-12: ~12% of the per-event cost on a real 52.8K-event device
+    /// stream). Queue-confined like `db`; finalized in `deinit` before the connection closes.
+    private var cachedStatements: [String: OpaquePointer] = [:]
+
+    /// Best-effort appends accumulate here (queue-confined) and commit as ONE transaction per
+    /// flush window instead of one per event — see `appendBestEffort`.
+    private var pendingBestEffort: [DNSQueryEvent] = []
+    private var bestEffortFlushScheduled = false
+    private let bestEffortFlushInterval: TimeInterval
+    private let bestEffortFlushRowCap: Int
+
+    #if DEBUG || LAVA_QA_TOOLS
+    // QA-only write-path instrumentation (energy doc H3.2 shape, re-specced to the batched
+    // writer from the UR-53 follow-up). Counters are queue-confined like `db`; the tunnel
+    // pulls-and-resets one snapshot per 60 s Focus tick and feeds it to `EnergyCounters`.
+    // Strictly compiled out of the App Store Release build (Principle 1 of the energy doc).
+    private var qaFlushes = 0
+    private var qaFlushedRows = 0
+    private var qaFlushRetries = 0
+    private var qaPrunePasses = 0
+    private var qaPrunedRows = 0
+    private var qaOrphanSweeps = 0
+    private var qaWALFramesTotal: Int64 = 0
+    private var qaWALLastFrames: Int32 = 0
+    private static let qaSignpostLog = OSLog(subsystem: "app.lavasecurity.nrg", category: .pointsOfInterest)
+
+    /// One pulled-and-reset window of write-path activity, for QA energy attribution.
+    public struct WriteInstrumentationSnapshot: Sendable {
+        /// Committed best-effort batch flushes in the window.
+        public let flushes: Int
+        /// Rows committed via those flushes.
+        public let flushedRows: Int
+        /// Failed flushes whose batch was retained for retry.
+        public let flushRetries: Int
+        /// Prune passes run in the window.
+        public let prunePasses: Int
+        /// Events deleted by those passes.
+        public let prunedRows: Int
+        /// Orphan-domain sweeps actually taken (post-#339 gate).
+        public let orphanSweeps: Int
+        /// WAL frames appended by every commit in the window. Frames × the 4 KB page size
+        /// approximates the store's flash-write volume — the metric behind the UR-53
+        /// follow-up's 175x write-amplification finding.
+        public let walFramesWritten: Int64
+    }
+
+    /// Returns the write-path activity since the last call and resets the window.
+    public func writeInstrumentationSnapshotAndReset() -> WriteInstrumentationSnapshot {
+        queue.sync {
+            let snapshot = WriteInstrumentationSnapshot(
+                flushes: qaFlushes,
+                flushedRows: qaFlushedRows,
+                flushRetries: qaFlushRetries,
+                prunePasses: qaPrunePasses,
+                prunedRows: qaPrunedRows,
+                orphanSweeps: qaOrphanSweeps,
+                walFramesWritten: qaWALFramesTotal
+            )
+            qaFlushes = 0
+            qaFlushedRows = 0
+            qaFlushRetries = 0
+            qaPrunePasses = 0
+            qaPrunedRows = 0
+            qaOrphanSweeps = 0
+            qaWALFramesTotal = 0
+            return snapshot
+        }
+    }
+
+    /// Counts WAL frames appended per commit via `sqlite3_wal_hook`. The hook fires on the
+    /// committing thread (this instance's serial queue), so the counters stay queue-confined.
+    /// `frames` is the WAL's TOTAL frame count after the commit, so the per-commit delta is
+    /// measured against the last observed total; a drop means a checkpoint reset the WAL and
+    /// the new total IS the delta.
+    private func installQAWALHook() {
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        sqlite3_wal_hook(db, { context, _, _, frames in
+            guard let context else {
+                return SQLITE_OK
+            }
+            let log = Unmanaged<DNSEventLog>.fromOpaque(context).takeUnretainedValue()
+            let delta = frames >= log.qaWALLastFrames ? frames - log.qaWALLastFrames : frames
+            log.qaWALFramesTotal += Int64(delta)
+            log.qaWALLastFrames = frames
+            return SQLITE_OK
+        }, context)
+    }
+    #endif
+
     /// Opens (creating the schema if needed) the log at `url`. Pass `readOnly: true` for the
     /// app-side reader; the tunnel opens the sole read-write writer.
-    public init(url: URL, readOnly: Bool = false) throws {
+    /// - Parameters:
+    ///   - bestEffortFlushInterval: Upper bound, in seconds, on how long a buffered
+    ///     `appendBestEffort` event waits before its batch commits. Overridable for tests.
+    ///   - bestEffortFlushRowCap: Buffered-event count that forces an immediate batch commit.
+    ///     Overridable for tests.
+    public init(
+        url: URL,
+        readOnly: Bool = false,
+        bestEffortFlushInterval: TimeInterval = DNSEventLog.defaultBestEffortFlushInterval,
+        bestEffortFlushRowCap: Int = DNSEventLog.defaultBestEffortFlushRowCap
+    ) throws {
+        self.bestEffortFlushInterval = bestEffortFlushInterval
+        self.bestEffortFlushRowCap = max(1, bestEffortFlushRowCap)
         try openDatabase(path: url.path, readOnly: readOnly)
     }
 
     /// In-memory database for tests.
-    public init(inMemory: Bool) throws {
+    public init(
+        inMemory: Bool,
+        bestEffortFlushInterval: TimeInterval = DNSEventLog.defaultBestEffortFlushInterval,
+        bestEffortFlushRowCap: Int = DNSEventLog.defaultBestEffortFlushRowCap
+    ) throws {
+        self.bestEffortFlushInterval = bestEffortFlushInterval
+        self.bestEffortFlushRowCap = max(1, bestEffortFlushRowCap)
         try openDatabase(path: ":memory:", readOnly: false)
     }
 
+    /// Default flush window for buffered best-effort appends. Seconds-wide on purpose: a ~1 s
+    /// tick would leave the commit rate essentially unchanged under steady browsing (the UR-53
+    /// plan's M4.1 sizing note); 10 s at the measured browsing rate (~1.6 events/s) amortizes
+    /// each commit over ~16 events while Domain History stays within one refresh of live.
+    public static let defaultBestEffortFlushInterval: TimeInterval = 10
+    /// Default buffered-row cap forcing an immediate flush; also bounds what a jetsam while
+    /// suspended can drop (the stop and sleep paths drain the buffer first). ~256 events is
+    /// well under a megabyte of resident state (INV-MEM-1).
+    public static let defaultBestEffortFlushRowCap = 256
+
     deinit {
+        for statement in cachedStatements.values {
+            sqlite3_finalize(statement)
+        }
         if let db {
+            #if DEBUG || LAVA_QA_TOOLS
+            // The WAL hook holds an unretained self; clear it before the connection closes so
+            // no late commit can call back into a deallocating instance.
+            sqlite3_wal_hook(db, nil, nil)
+            #endif
             sqlite3_close_v2(db)
         }
     }
@@ -124,6 +254,12 @@ public final class DNSEventLog: @unchecked Sendable {
         try exec("PRAGMA busy_timeout=2000;")
         try exec("PRAGMA cache_size=-256;")
 
+        #if DEBUG || LAVA_QA_TOOLS
+        if !readOnly {
+            installQAWALHook()
+        }
+        #endif
+
         if !readOnly {
             try exec("CREATE TABLE IF NOT EXISTS domain(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);")
             try exec("""
@@ -152,8 +288,10 @@ public final class DNSEventLog: @unchecked Sendable {
         }
     }
 
-    /// Batch append in a single transaction — the tunnel accumulates events off the DNS path
-    /// and flushes them together so each commit's fsync is amortized over many rows.
+    /// Batch append in a single transaction, so the commit's WAL frame writes are amortized
+    /// over many rows (with WAL + `synchronous=NORMAL` there is no per-commit fsync; the
+    /// per-commit cost is re-appending the touched B-tree pages to the WAL). This is the
+    /// commit shape the buffered `appendBestEffort` path flushes through.
     public func append(_ events: [DNSQueryEvent]) throws {
         guard !events.isEmpty else {
             return
@@ -169,16 +307,89 @@ public final class DNSEventLog: @unchecked Sendable {
 
     /// Fire-and-forget append for the DNS record path: hops to the log's own serial queue so
     /// the caller's queue (the tunnel's `dnsStateQueue`) never blocks on sqlite, and swallows
-    /// errors — a log failure must never affect filtering (INV-DNS-1, fail-closed). Transactional
-    /// for the same intern+insert atomicity as `append(domain:decision:timestamp:)`.
+    /// errors — a log failure must never affect filtering (INV-DNS-1, fail-closed).
+    ///
+    /// Events BUFFER on the queue and commit as one transaction per flush window
+    /// (`bestEffortFlushInterval` seconds, or `bestEffortFlushRowCap` rows, whichever first)
+    /// instead of one transaction per event. A per-event `BEGIN IMMEDIATE`…`COMMIT` re-appends
+    /// the same hot B-tree pages to the WAL on every commit: replaying a real 3.4-day device
+    /// stream (52.8K events) measured ~175x flash write amplification (460 MB of WAL frames
+    /// for 2.6 MB of stored rows) and ~14x the CPU of the batched shape (UR-53 follow-up,
+    /// 2026-07-12). Durability bound: a jetsam drops at most the buffered tail — the tunnel
+    /// drains the buffer via `flush()` on stop (PR #327 review) and on sleep, so the exposed
+    /// window is the awake flush interval. Events keep their decision-time stamps, so a
+    /// buffered pre-clear event still lands on the correct side of the clear floor.
+    /// A failed flush retains its batch for the next attempt, capped at 8x the row cap
+    /// (oldest dropped first) so a persistently failing store cannot grow resident state
+    /// (INV-MEM-1).
+    /// - pinned: DNSEventLogTests.testBestEffortAppendsBufferUntilFlushAndCommitTogether
     public func appendBestEffort(domain: String, decision: FilterDecision, timestamp: Date) {
         queue.async { [weak self] in
             guard let self else {
                 return
             }
-            try? self.inTransaction {
-                try self.insert(domain: domain, decision: decision, timestamp: timestamp)
+            self.pendingBestEffort.append(
+                DNSQueryEvent(timestamp: timestamp, domain: domain, decision: decision)
+            )
+            if self.pendingBestEffort.count >= self.bestEffortFlushRowCap {
+                self.flushPendingBestEffortOnQueue()
+            } else {
+                self.scheduleBestEffortFlushOnQueue()
             }
+        }
+    }
+
+    /// Arms the one pending flush tick, `bestEffortFlushInterval` from now. Must be called on
+    /// `queue`. At most one tick is in flight; a tick that finds an empty buffer (drained by a
+    /// row-cap flush or an explicit `flush()`) is a no-op.
+    private func scheduleBestEffortFlushOnQueue() {
+        guard !bestEffortFlushScheduled else {
+            return
+        }
+        bestEffortFlushScheduled = true
+        queue.asyncAfter(deadline: .now() + bestEffortFlushInterval) { [weak self] in
+            guard let self else {
+                return
+            }
+            self.bestEffortFlushScheduled = false
+            self.flushPendingBestEffortOnQueue()
+        }
+    }
+
+    /// Commits every buffered best-effort event in one transaction. Must be called on `queue`.
+    /// On failure the batch is retained (bounded) and retried on the next tick — a transient
+    /// `SQLITE_BUSY` from the app's clear-prune writer must not silently drop a whole window
+    /// of Domain History when riding it out costs one more flush interval.
+    private func flushPendingBestEffortOnQueue() {
+        guard !pendingBestEffort.isEmpty else {
+            return
+        }
+        let batch = pendingBestEffort
+        pendingBestEffort.removeAll(keepingCapacity: true)
+        do {
+            try inTransaction {
+                for event in batch {
+                    try insert(domain: event.domain, decision: event.decision, timestamp: event.timestamp)
+                }
+            }
+            #if DEBUG || LAVA_QA_TOOLS
+            qaFlushes += 1
+            qaFlushedRows += batch.count
+            // Low-frequency POI (at most one per flush window) so an Instruments run can
+            // correlate the store's commits with CPU/IO on the timeline — never per event
+            // (the energy doc's observer-effect rule).
+            os_signpost(.event, log: Self.qaSignpostLog, name: "sqlite-flush")
+            #endif
+        } catch {
+            #if DEBUG || LAVA_QA_TOOLS
+            qaFlushRetries += 1
+            #endif
+            pendingBestEffort.insert(contentsOf: batch, at: 0)
+            let retainedCap = bestEffortFlushRowCap * 8
+            if pendingBestEffort.count > retainedCap {
+                pendingBestEffort.removeFirst(pendingBestEffort.count - retainedCap)
+            }
+            scheduleBestEffortFlushOnQueue()
         }
     }
 
@@ -197,13 +408,16 @@ public final class DNSEventLog: @unchecked Sendable {
         }
     }
 
-    /// Block until every previously enqueued `appendBestEffort` has been applied. The tunnel
-    /// calls this during stop cleanup so a suspended NE process can't drop the newest decisions
-    /// that were still queued on the log's serial queue — they are force-flushed to the JSON
-    /// diagnostics on stop, and the app reads Domain History from SQLite, so an un-drained
-    /// append would make those rows vanish from the list (PR #327 review).
+    /// Block until every previously enqueued `appendBestEffort` has been applied — both the
+    /// serial-queue backlog AND the buffered batch commit. The tunnel calls this during stop
+    /// cleanup (PR #327 review) and on sleep so a suspended-then-jetsammed NE process can't
+    /// drop the newest decisions: the JSON diagnostics are force-flushed on stop, and the app
+    /// reads Domain History from SQLite, so an un-drained append would make those rows vanish
+    /// from the list.
     public func flush() {
-        queue.sync {}
+        queue.sync {
+            flushPendingBestEffortOnQueue()
+        }
     }
 
     /// One-time migration seed: copy the JSON events buffer into the log the first time the
@@ -215,41 +429,58 @@ public final class DNSEventLog: @unchecked Sendable {
         try append(events)
     }
 
+    private static let insertEventSQL = "INSERT INTO dns_event(ts, domain_id, action, reason) VALUES(?, ?, ?, ?);"
+    private static let internInsertSQL = "INSERT OR IGNORE INTO domain(name) VALUES(?);"
+    private static let internSelectSQL = "SELECT id FROM domain WHERE name = ?;"
+
+    /// Returns the compiled statement for `sql`, preparing it on first use and reset+cleared
+    /// on every reuse. Must be called on `queue`. Only the fixed append-path statements go
+    /// through here; ad-hoc reads keep prepare/finalize so the cache stays a bounded trio.
+    private func cachedStatement(_ sql: String) throws -> OpaquePointer {
+        if let statement = cachedStatements[sql] {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            return statement
+        }
+        let statement = try prepare(sql)
+        cachedStatements[sql] = statement
+        return statement
+    }
+
     private func insert(domain: String, decision: FilterDecision, timestamp: Date) throws {
         // Store the same normalized form the events buffer does (`DNSQueryEvent`), so interning
         // dedups correctly and the case-insensitive LIKE search matches reliably.
         let normalized = (try? DomainName.normalize(domain)) ?? domain.lowercased()
         let domainID = try internDomain(normalized)
-        let sql = "INSERT INTO dns_event(ts, domain_id, action, reason) VALUES(?, ?, ?, ?);"
-        let statement = try prepare(sql)
-        defer { sqlite3_finalize(statement) }
+        let statement = try cachedStatement(Self.insertEventSQL)
         sqlite3_bind_int64(statement, 1, Self.milliseconds(from: timestamp))
         sqlite3_bind_int64(statement, 2, domainID)
         sqlite3_bind_int(statement, 3, decision.action.logValue)
         sqlite3_bind_text(statement, 4, decision.reason.rawValue, -1, sqliteTransient)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw LogError.sql(sql, sqlite3_errcode(db))
+            throw LogError.sql(Self.insertEventSQL, sqlite3_errcode(db))
         }
+        sqlite3_reset(statement)
     }
 
     private func internDomain(_ name: String) throws -> Int64 {
-        let insertSQL = "INSERT OR IGNORE INTO domain(name) VALUES(?);"
-        let insertStatement = try prepare(insertSQL)
+        let insertStatement = try cachedStatement(Self.internInsertSQL)
         sqlite3_bind_text(insertStatement, 1, name, -1, sqliteTransient)
         let insertRC = sqlite3_step(insertStatement)
-        sqlite3_finalize(insertStatement)
+        sqlite3_reset(insertStatement)
         guard insertRC == SQLITE_DONE else {
-            throw LogError.sql(insertSQL, insertRC)
+            throw LogError.sql(Self.internInsertSQL, insertRC)
         }
 
-        let selectSQL = "SELECT id FROM domain WHERE name = ?;"
-        let selectStatement = try prepare(selectSQL)
-        defer { sqlite3_finalize(selectStatement) }
+        let selectStatement = try cachedStatement(Self.internSelectSQL)
         sqlite3_bind_text(selectStatement, 1, name, -1, sqliteTransient)
         guard sqlite3_step(selectStatement) == SQLITE_ROW else {
-            throw LogError.sql(selectSQL, sqlite3_errcode(db))
+            sqlite3_reset(selectStatement)
+            throw LogError.sql(Self.internSelectSQL, sqlite3_errcode(db))
         }
-        return sqlite3_column_int64(selectStatement, 0)
+        let domainID = sqlite3_column_int64(selectStatement, 0)
+        sqlite3_reset(selectStatement)
+        return domainID
     }
 
     // MARK: - Read
@@ -302,6 +533,19 @@ public final class DNSEventLog: @unchecked Sendable {
                 since: since,
                 limit: pageLimit
             )
+            // Completeness of the two-stream export drain — why advancing the SHARED cursor past
+            // this truncating merge never drops a row, and why the "Do not advance the export
+            // cursor past unfetched rows" flag on lavasec-ios#51 is a false positive: each stream
+            // is fetched `before: cursor`, merged newest-first, then truncated to `pageLimit`. The
+            // caller advances the shared `(ts, rowid)` cursor to the OLDEST EMITTED row only. Any
+            // row that was fetched-but-truncated here (or not fetched yet at all) is strictly older
+            // than that oldest emitted row, so the next page's `before: cursor` re-fetch from BOTH
+            // streams re-includes it — nothing is skipped, and because the re-fetch is strictly `<`
+            // the cursor, nothing is re-emitted either. A PER-stream cursor would instead strand the
+            // truncated rows of whichever stream the merge favored; the shared cursor is what makes
+            // the drain complete.
+            // pinned: DNSEventLogTests.testAllActionExportRecoversEveryRowUnderAnAllowHeavySkew
+            // pinned: DNSEventLogTests.testAllActionExportRecoversEveryRowUnderMaximalTiedTimestampInterleave
             return Self.mergeNewest(allowed, blocked, limit: pageLimit)
         }) ?? []
     }
@@ -429,6 +673,11 @@ public final class DNSEventLog: @unchecked Sendable {
         return sql
     }
 
+    /// Merges two already-newest-first streams into the newest `limit` rows across both, ordered
+    /// `(ts DESC, rowid DESC)`. Because each input holds the newest `limit` rows of its action, the
+    /// result is exactly the newest `limit` rows over both actions before the cursor — see the
+    /// completeness note at the call site in `pageAllActions` for why the shared-cursor drain built
+    /// on this truncation loses no rows across pages.
     private static func mergeNewest(_ left: [Entry], _ right: [Entry], limit: Int) -> [Entry] {
         var merged: [Entry] = []
         merged.reserveCapacity(min(limit, left.count + right.count))
@@ -491,11 +740,19 @@ public final class DNSEventLog: @unchecked Sendable {
     /// Drop events older than `cutoff` and any domain rows they leave orphaned. Mirrors the
     /// 7-day fine-grained window enforced on the JSON store, applied here on disk.
     ///
+    /// The aging DELETE runs once per `FilterAction` so `WHERE action = ? AND ts < ?` walks
+    /// `idx_event_action_ts` — the store's only index, which a bare `ts < ?` predicate cannot
+    /// use, turning every ~30 s pass into a full `dns_event` scan that grows with the log
+    /// (UR-53 follow-up, 2026-07-12: ~5 ms/no-op pass at a filled 7-day window vs ~free
+    /// indexed; the plan's assumed `idx_event_ts` never shipped, and an extra index would tax
+    /// every append).
+    /// - pinned: DNSEventLogTests.testPruneAgingDeleteWalksTheActionTimestampIndex
+    ///
     /// The orphan sweep — the expensive half, re-deriving the live domain set with a full
     /// `dns_event` scan — only runs when this pass actually deleted events. The tunnel prunes
     /// on its ~30 s debounced diagnostics cadence, whose call site promises "mostly a no-op";
     /// an unconditional sweep there is a steady tunnel-resident scan that grows with the log
-    /// (UR-53). A pass that deleted nothing cannot orphan a domain, and both statements share
+    /// (UR-53). A pass that deleted nothing cannot orphan a domain, and all statements share
     /// one transaction so a torn pass can't strand orphans for a later no-op pass to skip.
     /// Returns the number of events deleted.
     @discardableResult
@@ -503,24 +760,40 @@ public final class DNSEventLog: @unchecked Sendable {
         try queue.sync {
             var deleted = 0
             try inTransaction {
-                let deleteSQL = "DELETE FROM dns_event WHERE ts < ?;"
-                let statement = try prepare(deleteSQL)
-                sqlite3_bind_int64(statement, 1, Self.milliseconds(from: cutoff))
-                let rc = sqlite3_step(statement)
-                sqlite3_finalize(statement)
-                guard rc == SQLITE_DONE else {
-                    throw LogError.sql(deleteSQL, rc)
+                let statement = try prepare(Self.pruneEventsSQL)
+                defer { sqlite3_finalize(statement) }
+                for action in FilterAction.allCases {
+                    sqlite3_bind_int(statement, 1, action.logValue)
+                    sqlite3_bind_int64(statement, 2, Self.milliseconds(from: cutoff))
+                    let rc = sqlite3_step(statement)
+                    guard rc == SQLITE_DONE else {
+                        throw LogError.sql(Self.pruneEventsSQL, rc)
+                    }
+                    deleted += Int(sqlite3_changes(db))
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
                 }
-                deleted = Int(sqlite3_changes(db))
                 guard deleted > 0 else {
                     return
                 }
                 // Keep the intern table from growing unbounded across the window.
                 try exec("DELETE FROM domain WHERE id NOT IN (SELECT DISTINCT domain_id FROM dns_event);")
+                #if DEBUG || LAVA_QA_TOOLS
+                qaOrphanSweeps += 1
+                #endif
             }
+            #if DEBUG || LAVA_QA_TOOLS
+            qaPrunePasses += 1
+            qaPrunedRows += deleted
+            #endif
             return deleted
         }
     }
+
+    /// The per-action aging DELETE. Kept internal so tests can run `EXPLAIN QUERY PLAN`
+    /// against the exact production statement and prevent an accidental return to the
+    /// full-table scan (mirroring the `pageSQL` pin).
+    static let pruneEventsSQL = "DELETE FROM dns_event WHERE action = ? AND ts < ?;"
 
     // MARK: - sqlite helpers
 

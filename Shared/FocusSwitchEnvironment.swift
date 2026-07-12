@@ -95,7 +95,7 @@ enum FocusSwitchEnvironment {
     /// handles) so a tap opens the app; Filters-specific navigation on tap is a polish follow-up.
     private static func notifySwitchOutcome(committed: Bool, filterName: String) async {
         let defaults = LavaSecAppGroup.sharedDefaults
-        guard !defaults.bool(forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey) else { return }
+        guard !defaults.bool(forKey: LavaSecAppGroup.appForegroundActiveDefaultsKeyName) else { return }
 
         let category: LavaNotificationCategory = committed ? .filterChanged : .filterCouldNotApply
         // Localized in LavaSecKit (Bundle.module) so it resolves in the extension's bundle too. The pinned
@@ -108,7 +108,7 @@ enum FocusSwitchEnvironment {
             languageCode: languageCode
         )
         let userInfo = [
-            LavaSecAppGroup.protectionNotificationRouteUserInfoKey:
+            LavaSecAppGroup.protectionNotificationRouteUserInfoKeyName:
                 LavaSecAppGroup.protectionNotificationGuardRouteValue
         ]
         // One rolling banner per category (stable id ⇒ a newer switch replaces the prior banner rather

@@ -256,7 +256,11 @@ jobs:
     # runs the suite fully (fail-safe).
     if: ${{ !cancelled() }}
     runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
-    timeout-minutes: 15
+    # 30, not this lane's natural ~5: VM jobs hold only the SHARED maintenance lock, so a
+    # co-scheduled production release archive core-starves this REQUIRED lane instead of
+    # queueing it (same failure shape that cancelled PR #347's compile at its timeout —
+    # run 29174328997). Headroom makes rare co-scheduling slow-but-green, not a false red.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7

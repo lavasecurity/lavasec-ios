@@ -17,7 +17,7 @@ import SwiftUI
 // (`playProtectionOnSucceededHapticIfNeeded` / `playProtectionStartFailedHaptic`) and
 // their `awaitsProtectionOnHaptic` arm stay hub-side — they are driven entirely by the
 // hub's VPN-status observation, and the ONLY customization coupling is the shared
-// `ProtectionHapticFeedback.preferenceDefaultsKey` this controller's toggle writes and
+// `ProtectionHapticFeedback.preferenceDefaultsKeyName` this controller's toggle writes and
 // the enum's `play` choke point reads, so no bridge member is needed for playback.
 
 // LavaAppearancePreference / LavaTextSize / LavaGuardAvailability moved here verbatim
@@ -200,13 +200,13 @@ final class CustomizationController: ObservableObject {
     @Published private(set) var notifiesFilterCouldNotApply = true
     @Published private(set) var notifiesConnectivity = true
 
-    private let appearancePreferenceDefaultsKey = "lavasec.customization.appearance"
-    private let textSizeMatchesSystemDefaultsKey = "lavasec.customization.textSizeMatchesSystem"
-    private let textSizeDefaultsKey = "lavasec.customization.textSize"
-    private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKey
-    private let updatesAppIconWithLavaGuardDefaultsKey = "lavasec.customization.updatesAppIconWithLavaGuard"
-    private let usesLiveActivitiesDefaultsKey = "lavasec.customization.liveActivities"
-    private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey
+    private let appearancePreferenceDefaultsKeyName = "lavasec.customization.appearance"
+    private let textSizeMatchesSystemDefaultsKeyName = "lavasec.customization.textSizeMatchesSystem"
+    private let textSizeDefaultsKeyName = "lavasec.customization.textSize"
+    private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKeyName
+    private let updatesAppIconWithLavaGuardDefaultsKeyName = "lavasec.customization.updatesAppIconWithLavaGuard"
+    private let usesLiveActivitiesDefaultsKeyName = "lavasec.customization.liveActivities"
+    private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKeyName
     // Same stores the hub keeps for ITS preference reads/writes — both resolve to the
     // process-wide singletons (UserDefaults.standard / the shared app-group suite), so
     // the moved bodies persist to the exact pre-peel locations.
@@ -251,7 +251,7 @@ final class CustomizationController: ObservableObject {
         }
 
         appearancePreference = preference
-        defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKey)
+        defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKeyName)
     }
 
     /// The Dynamic Type size to force app-wide, or `nil` to follow the system (the default).
@@ -270,13 +270,13 @@ final class CustomizationController: ObservableObject {
             return
         }
 
-        if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil {
+        if !matchesSystem, defaults.object(forKey: textSizeDefaultsKeyName) == nil {
             textSize = systemTextSize
-            defaults.set(systemTextSize.rawValue, forKey: textSizeDefaultsKey)
+            defaults.set(systemTextSize.rawValue, forKey: textSizeDefaultsKeyName)
         }
 
         textSizeMatchesSystem = matchesSystem
-        defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKey)
+        defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKeyName)
     }
 
     func setTextSize(_ size: LavaTextSize) {
@@ -285,7 +285,7 @@ final class CustomizationController: ObservableObject {
         }
 
         textSize = size
-        defaults.set(size.rawValue, forKey: textSizeDefaultsKey)
+        defaults.set(size.rawValue, forKey: textSizeDefaultsKeyName)
     }
 
     func setLavaGuardLook(_ look: GuardianShieldStyle) {
@@ -360,7 +360,7 @@ final class CustomizationController: ObservableObject {
         }
 
         updatesAppIconWithLavaGuard = isEnabled
-        defaults.set(isEnabled, forKey: updatesAppIconWithLavaGuardDefaultsKey)
+        defaults.set(isEnabled, forKey: updatesAppIconWithLavaGuardDefaultsKeyName)
         syncAppIcon(to: lavaGuardLook)
     }
 
@@ -398,7 +398,7 @@ final class CustomizationController: ObservableObject {
         }
 
         usesLiveActivities = canEnableLiveActivities
-        defaults.set(canEnableLiveActivities, forKey: usesLiveActivitiesDefaultsKey)
+        defaults.set(canEnableLiveActivities, forKey: usesLiveActivitiesDefaultsKeyName)
         hub.reconcileLiveActivity()
     }
 
@@ -446,20 +446,20 @@ final class CustomizationController: ObservableObject {
     // backfill, syncAppIcon, the Live-Activities capability clamp) still never run on the
     // HEADLESS background-refresh instances.
     func loadCustomizationPreferences() {
-        if let rawValue = defaults.string(forKey: appearancePreferenceDefaultsKey),
+        if let rawValue = defaults.string(forKey: appearancePreferenceDefaultsKeyName),
            let preference = LavaAppearancePreference(rawValue: rawValue) {
             appearancePreference = preference
         } else {
             appearancePreference = .system
         }
 
-        if defaults.object(forKey: textSizeMatchesSystemDefaultsKey) != nil {
-            textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKey)
+        if defaults.object(forKey: textSizeMatchesSystemDefaultsKeyName) != nil {
+            textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKeyName)
         } else {
             textSizeMatchesSystem = true
         }
 
-        if let rawValue = defaults.string(forKey: textSizeDefaultsKey),
+        if let rawValue = defaults.string(forKey: textSizeDefaultsKeyName),
            let size = LavaTextSize(rawValue: rawValue) {
             textSize = size
         } else {
@@ -476,15 +476,15 @@ final class CustomizationController: ObservableObject {
             persistLavaGuardLook(.original)
         }
 
-        updatesAppIconWithLavaGuard = defaults.object(forKey: updatesAppIconWithLavaGuardDefaultsKey) as? Bool ?? true
+        updatesAppIconWithLavaGuard = defaults.object(forKey: updatesAppIconWithLavaGuardDefaultsKeyName) as? Bool ?? true
         if !updatesAppIconWithLavaGuard {
             syncAppIcon(to: lavaGuardLook)
         }
 
-        let persistedUsesLiveActivities = defaults.object(forKey: usesLiveActivitiesDefaultsKey) as? Bool ?? false
+        let persistedUsesLiveActivities = defaults.object(forKey: usesLiveActivitiesDefaultsKeyName) as? Bool ?? false
         usesLiveActivities = canOfferLiveActivities && persistedUsesLiveActivities
         if !canOfferLiveActivities {
-            defaults.set(false, forKey: usesLiveActivitiesDefaultsKey)
+            defaults.set(false, forKey: usesLiveActivitiesDefaultsKeyName)
         }
 
         liveActivityPauseMinutes = LiveActivityPausePreference.minutes(
