@@ -97,6 +97,7 @@
 		D825944D3FAA6FC68E8FB399 /* AccountBackupSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003EEF4DAC7A68FBB632BC98 /* AccountBackupSettingsView.swift */; };
 		DA2E25FE345E0B8A01769120 /* RageShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76DE535F94487F5B86BAC2FA /* RageShakeDetector.swift */; };
 		DAE8C1A933296EBA9A20AB30 /* BackupPasskeyCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A559FA7CC5717E4982BC8E8 /* BackupPasskeyCoordinator.swift */; };
+		DB6EC1CCD2BB58AD30F61F33 /* MediaCaptureDriverUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26170BE295C57F597504A730 /* MediaCaptureDriverUITests.swift */; };
 		DE9A19E85E9871691DBAB29A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D0CDE044D25F392A285CBD9D /* Assets.xcassets */; };
 		E04A583EC4B603B19C177AFC /* LavaStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FBAC7417B668F766E37473 /* LavaStrings.swift */; };
 		E0C3FE8BE802449EF1FA52C1 /* SecuritySettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E9F0B4AFAD1CC6D1D6A6A4 /* SecuritySettingsUITests.swift */; };
@@ -106,7 +107,6 @@
 		E86FD4DE8D4841746C71EC47 /* FocusFilterIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150D66A5AB4B36C3E1F8B767 /* FocusFilterIntent.swift */; };
 		E89003FA2B27549418951567 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A6669E00C12ACE0BA2022 /* RootView.swift */; };
 		E8C1893F76E8D625E7914D17 /* CoreFlowDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A123CA5B7F4D795C388BBB /* CoreFlowDeviceTests.swift */; };
-		C0DEC002A001B001C001D001 /* MediaCaptureDriverUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEC001A001B001C001D001 /* MediaCaptureDriverUITests.swift */; };
 		E9DACA83819725B7E45779CA /* LavaScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0307F06FDA899480972F17 /* LavaScaffold.swift */; };
 		EBDDD7A37787F4DEF1A8C1D7 /* LavaSecAppServices in Frameworks */ = {isa = PBXBuildFile; productRef = ACA065F4092590C43163A768 /* LavaSecAppServices */; };
 		EC85EE16323936B221FB42D3 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */; };
@@ -196,6 +196,7 @@
 		1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaActivityAttributes.swift; sourceTree = "<group>"; };
 		19CD120514A7635C3C39F392 /* DiagnosticsNetworkActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsNetworkActivity.swift; sourceTree = "<group>"; };
 		1B1A6669E00C12ACE0BA2022 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		26170BE295C57F597504A730 /* MediaCaptureDriverUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaCaptureDriverUITests.swift; sourceTree = "<group>"; };
 		2698AE790B2EC125F392D467 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaLiveActivityIntents.swift; sourceTree = "<group>"; };
 		340CE07273C61B71A486EFDB /* CatalogController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogController.swift; sourceTree = "<group>"; };
@@ -215,6 +216,7 @@
 		59F9CE3CCAF50868EA2A1E4E /* UpgradeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpgradeSettingsView.swift; sourceTree = "<group>"; };
 		5A559FA7CC5717E4982BC8E8 /* BackupPasskeyCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupPasskeyCoordinator.swift; sourceTree = "<group>"; };
 		5A84157BEB21136149A018EC /* AppIconObsidian.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconObsidian.icon; sourceTree = "<group>"; };
+		5D57EC7EA7802382965E5499 /* media-capture-fixture */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "media-capture-fixture"; path = .; sourceTree = SOURCE_ROOT; };
 		5DE5788769192F41A62C8FBB /* ProtectionConnectivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionConnectivityPresentation.swift; sourceTree = "<group>"; };
 		5FC4E06343769194B51B6F66 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		60FBAC7417B668F766E37473 /* LavaStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LavaStrings.swift; sourceTree = "<group>"; };
@@ -240,7 +242,6 @@
 		834B784D68C7737F32E2702F /* LegalVersionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalVersionSettingsView.swift; sourceTree = "<group>"; };
 		8597EB5045B101155CB6F3BC /* SettingsCommon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCommon.swift; sourceTree = "<group>"; };
 		87586B94D5F1BDE576E914A6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		880F2026E7F9614F41528C94 /* kit-split */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "kit-split"; path = .; sourceTree = SOURCE_ROOT; };
 		88AAE86D675ACF8EC7A62E7C /* FilterMyListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterMyListView.swift; sourceTree = "<group>"; };
 		89EE9460526FFD0F581A5C2A /* LavaSecApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecApp.entitlements; sourceTree = "<group>"; };
 		8B97ADBDACBB780512623EA0 /* FilterLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterLibraryView.swift; sourceTree = "<group>"; };
@@ -248,7 +249,6 @@
 		942481FBD1187F268A1B17B6 /* LavaSecTunnel.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = LavaSecTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		9758F66E43B8E6F2E892B5E3 /* AppIconCherryQuartz.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIconCherryQuartz.icon; sourceTree = "<group>"; };
 		989ABE7F8DA88E49932EFB5C /* DeveloperPreviewViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperPreviewViews.swift; sourceTree = "<group>"; };
-		C0DEC001A001B001C001D001 /* MediaCaptureDriverUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaCaptureDriverUITests.swift; sourceTree = "<group>"; };
 		9BB298B6CD215B94D98BEC40 /* AccountController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountController.swift; sourceTree = "<group>"; };
 		9D2E7D6B281C23F85D208C16 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
 		9EC13D86F9F6D8EB12B844D9 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
@@ -402,7 +402,7 @@
 		5216389391CED1E31BACF991 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				880F2026E7F9614F41528C94 /* kit-split */,
+				5D57EC7EA7802382965E5499 /* media-capture-fixture */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -427,8 +427,8 @@
 			isa = PBXGroup;
 			children = (
 				42A123CA5B7F4D795C388BBB /* CoreFlowDeviceTests.swift */,
+				26170BE295C57F597504A730 /* MediaCaptureDriverUITests.swift */,
 				15E9F0B4AFAD1CC6D1D6A6A4 /* SecuritySettingsUITests.swift */,
-				C0DEC001A001B001C001D001 /* MediaCaptureDriverUITests.swift */,
 			);
 			path = LavaSecUITests;
 			sourceTree = "<group>";
@@ -795,8 +795,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				E8C1893F76E8D625E7914D17 /* CoreFlowDeviceTests.swift in Sources */,
+				DB6EC1CCD2BB58AD30F61F33 /* MediaCaptureDriverUITests.swift in Sources */,
 				E0C3FE8BE802449EF1FA52C1 /* SecuritySettingsUITests.swift in Sources */,
-				C0DEC002A001B001C001D001 /* MediaCaptureDriverUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

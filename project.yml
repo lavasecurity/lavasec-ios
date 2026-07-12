@@ -473,6 +473,7 @@ targets:
     sources:
       - path: LavaSecUITests/SecuritySettingsUITests.swift
       - path: LavaSecUITests/CoreFlowDeviceTests.swift
+      - path: LavaSecUITests/MediaCaptureDriverUITests.swift
     dependencies:
       - target: LavaSec
         embed: false
