@@ -8,7 +8,7 @@ final class ProtectionPresentationBoundaryTests: XCTestCase {
     func testConnectivityCopyDoesNotOriginateInCore() throws {
         let policy = try readSource(.protectionConnectivityPolicy)
         for copy in ["Network Lost", "DNS Slow", "Reconnect Needed",
-                     "Filtering happens locally", "Connection changed, refreshing"] {
+                     "Filtering happens locally", "A DNS check failed"] {
             XCTAssertFalse(policy.contains(copy), "User copy '\(copy)' still in the core policy")
         }
         XCTAssertFalse(policy.contains("let title: String"))

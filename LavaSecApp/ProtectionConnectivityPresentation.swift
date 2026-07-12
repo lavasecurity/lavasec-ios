@@ -28,7 +28,11 @@ enum ProtectionConnectivityPresentation {
         case .healthy:
             return "Filtering happens locally on this phone"
         case .recovering:
-            return "Connection changed, refreshing DNS protection"
+            // `.recovering` always carries real failure evidence (the policy's honesty
+            // floor is its only producer), so the copy names the failed check — not the
+            // former "Connection changed…", which also fronted the zero-evidence settle
+            // wait that now reads `.healthy`/"Protected".
+            return "A DNS check failed. Lava is retrying."
         case .usingDeviceDNSFallback:
             return "Filtering is on with Device DNS fallback because the selected DNS resolver is unavailable"
         case .usingEncryptedFallback:
