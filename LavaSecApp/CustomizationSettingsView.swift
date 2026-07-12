@@ -119,7 +119,7 @@ struct CustomizationSettingsView: View {
                         .font(.headline)
                         .tint(LavaStyle.safeGreen)
                         .lavaControlRowCard()
-                    Text("Tells you when a Focus switches your filter while Lava is closed or in the background.".lavaLocalized)
+                    Text("Tells you when a Focus, Shortcut, or automation switches your filter while Lava is closed or in the background.".lavaLocalized)
                         .lavaQuietNoteText()
 
                     Toggle("Filter couldn't switch", isOn: notificationBinding(for: .filterCouldNotApply))

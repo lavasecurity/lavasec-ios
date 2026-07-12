@@ -196,6 +196,16 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
         BackgroundCatalogRefresh.scheduleNext()
     }
 
+    func applicationWillTerminate(_ application: UIApplication) {
+        // A force-quit from the app switcher of a still-running (just-visible) app can skip the scene
+        // .background transition (the switcher peek is .inactive) but does deliver willTerminate —
+        // clear the shared foreground flag here so closed-app switch banners aren't suppressed until
+        // the next launch clear (LavaSecApp.init) or the poster's maxTrustedAge age-out. Best-effort:
+        // a hard crash/jetsam delivers nothing, which is exactly what the age-out covers (Codex
+        // review #361).
+        LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
+    }
+
     func applicationDidBecomeActive(_ application: UIApplication) {
         privacyShield.hide(from: application)
     }
@@ -242,6 +252,17 @@ struct LavaSecApp: App {
     @StateObject private var security = SecurityController()
 
     init() {
+        // Clear the shared "app is foregrounded" flag at process start. A previous app process that
+        // died while VISIBLE — a crash, a watchdog/jetsam kill, or a force-quit from the app switcher
+        // (killed from .inactive, so RootView's .background clear never ran) — leaves the flag stuck
+        // TRUE, which suppresses every closed-app filter-switch banner. Process start is by definition
+        // not scene-active (this also runs for a background App-Intent launch), so false is always
+        // correct here; RootView re-asserts true when UI actually appears. Two companions close the
+        // no-relaunch gap (Codex review #361): applicationWillTerminate clears on a force-quit that
+        // skips .background, and the poster ages out an assert older than
+        // LavaAppForegroundPublication.maxTrustedAge — a crashed app can't clear anything, and the
+        // Focus EXTENSION (possibly the next process to run) must never clear the flag itself.
+        LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
         // Register / refresh the "Switch Filter" App Shortcut at launch so a fresh install surfaces
         // it in Shortcuts & Siri and its filter parameter reflects the current library (Codex #325).
         // updateAppShortcutParameters re-reads the entity query, which loads the on-disk filter

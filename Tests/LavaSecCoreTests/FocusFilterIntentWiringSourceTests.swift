@@ -245,10 +245,14 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     }
 
     /// perform() must drive the SHARED engine (no duplicated switch logic), return a dialog
-    /// (`ProvidesDialog`), and post NO notification of its own — this caller suppresses the engine banner
-    /// (`.systemOwnedDialog`) because the system delivers its dialog/thrown error in every context, and a
-    /// banner on top would double-notify a backgrounded Siri/Shortcuts run (Codex #325).
-    func testSwitchPerformDrivesSharedEngineAndReturnsDialogWithoutASecondNotification() throws {
+    /// (`ProvidesDialog`), and hand-roll NO notification of its own. This caller's feedback is split
+    /// (`.systemOwnedDialog`): the system delivers the dialog/thrown error in every context, so FAILURES
+    /// post no banner (Shortcuts also reports a failed silent automation itself — a banner would always
+    /// double-report, Codex #325), while a COMMITTED switch posts the engine hook's closed/backgrounded-
+    /// only banner — the only success signal a SILENT automation gets — under the SAME `filterChanged`
+    /// category as the Focus path (one user-visible event, one "Filter changes" toggle — founder
+    /// 2026-07-12).
+    func testSwitchPerformDrivesSharedEngineAndReturnsDialogWithCommittedOnlyEngineBanner() throws {
         let source = try readSource(.switchFilterShortcut)
         let perform = try sourceBlock(
             in: source,
@@ -257,11 +261,10 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         )
 
         // Same shared FilterPipeline engine any in-app or Focus caller uses — the single gated boundary.
-        // `.systemOwnedDialog`: the system delivers this caller's dialog/error in every context, so the
-        // engine's closed-app banner is suppressed — keeping it would double-notify a backgrounded
-        // Siri/Shortcuts run (Codex #325).
+        // `.systemOwnedDialog`: the system owns this caller's dialog/error feedback; the engine hook adds
+        // only the committed-switch automation banner (asserted against the env factory below).
         XCTAssertTrue(perform.contains("feedback: .systemOwnedDialog"),
-                      "The Shortcuts intent must suppress the engine banner (.systemOwnedDialog) — the system owns its feedback.")
+                      "The Shortcuts intent must pass .systemOwnedDialog — the system owns its dialog/error feedback.")
         XCTAssertTrue(perform.contains("await FocusSwitchEnvironment.performSwitch("),
                       "perform() must drive the shared engine via FocusSwitchEnvironment.performSwitch.")
         // Returns a dialog (ProvidesDialog), mapping each engine outcome; `.disallowed` — the switch did
@@ -283,13 +286,58 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             XCTAssertFalse(perform.contains(leak),
                            "perform() must not re-implement switch internals (\(leak)) — that is the engine's job.")
         }
-        // NO notification from this intent: with the engine banner suppressed (.systemOwnedDialog), the
-        // system-delivered dialog/error is the ONLY feedback — hand-rolling a notification here would
-        // reintroduce the double-notify this caller's feedback mode exists to prevent (Codex #325).
+        // NO hand-rolled notification in the intent: the committed-switch banner is the ENGINE hook's job
+        // (FocusSwitchEnvironment wires it for this caller), which keeps it foreground-gated,
+        // category-gated, and identical to the Focus path's posting — a second post here would diverge
+        // and double-notify (Codex #325 lineage).
         for notifyAPI in ["LavaEventNotificationPoster", "notifySwitchOutcome", "UNUserNotificationCenter"] {
             XCTAssertFalse(perform.contains(notifyAPI),
-                           "perform() must NOT post a notification (\(notifyAPI)) — the system-delivered dialog/error is the feedback.")
+                           "perform() must NOT post a notification (\(notifyAPI)) — the engine hook owns the banner.")
         }
+
+        // The env factory must wire the committed-only banner for this caller: failures stay
+        // system-owned (the thrown error reaches Siri, the Shortcuts app, and Shortcuts' silent-automation
+        // failure notification), successes post under the SAME filterChanged category as the Focus path —
+        // one user-visible event, one "Filter changes" toggle (founder 2026-07-12).
+        let envFactory = try readSource(.focusSwitchEnvironment)
+        let dialogArm = try sourceBlock(
+            in: envFactory,
+            startingAt: "case .systemOwnedDialog:",
+            endingBefore: "return HeadlessFocusFilterSwitchEngine.Environment("
+        )
+        XCTAssertTrue(dialogArm.contains("guard committed else { return }"),
+                      "The .systemOwnedDialog notify hook must drop failures — they are system-owned for this caller.")
+        XCTAssertTrue(dialogArm.contains("postSwitchBanner(category: .filterChanged, committed: true, filterName: filterName)"),
+                      "A committed automation switch must post under the shared filterChanged category (one toggle).")
+    }
+
+    /// The stale-foreground-flag mitigations (Codex review #361) are cross-process wiring the compiler
+    /// can't see: the app publishes/clears the shared flag through the stamped LavaSecKit API (process
+    /// start, willTerminate, scene transitions), and the shared banner poster reads it back ONLY through
+    /// the age-bounded kit read — the Focus extension can be the next process to run after a crash and
+    /// must never clear the flag itself (a Focus switch can fire while the app is foregrounded). The
+    /// age-out policy itself has executable tests in LavaEventNotificationsTests.
+    func testForegroundFlagIsPublishedStampedAndReadWithAgeBound() throws {
+        let app = try readSource(.lavaSecApp)
+        XCTAssertTrue(app.contains("LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)"),
+                      "The app must clear the shared foreground flag through the kit API.")
+        let terminateBlock = try sourceBlock(
+            in: app,
+            startingAt: "func applicationWillTerminate(_ application: UIApplication) {",
+            endingBefore: "\n    }"
+        )
+        XCTAssertTrue(terminateBlock.contains("LavaAppForegroundPublication.publish(false"),
+                      "willTerminate must clear the flag — a switcher force-quit can skip the scene .background clear.")
+
+        let model = try readSource(.appViewModel)
+        XCTAssertTrue(model.contains("LavaAppForegroundPublication.publish(active, to: defaults)"),
+                      "Scene-transition publishes must go through the stamped kit API (the stamp is what the age-out reads).")
+
+        let envFactory = try readSource(.focusSwitchEnvironment)
+        XCTAssertTrue(envFactory.contains("guard !LavaAppForegroundPublication.isForegroundActive(in: defaults) else { return }"),
+                      "The banner poster must read the flag ONLY through the age-bounded kit API, never the raw Bool.")
+        XCTAssertFalse(envFactory.contains("lavasec.app.foregroundActive"),
+                       "The poster must not hardcode the raw flag key — the kit owns the literal and pairs it with the stamp.")
     }
 
     /// An AppShortcutsProvider must exist so Siri/the Shortcuts gallery surface the action, and EVERY

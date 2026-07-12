@@ -3,11 +3,12 @@ import UserNotifications
 
 /// User-facing local-notification categories, each surfaced as its own toggle in
 /// Customization → Notifications. The toggles live in the shared app-group defaults so EVERY process
-/// that can post — the app, the App Intents extension (Focus switches), and the Network Extension
-/// tunnel (connectivity) — reads the same on/off switch.
+/// that can post — the app (which also runs the background-launched Shortcuts/automation Switch Filter
+/// intent), the App Intents extension (Focus switches), and the Network Extension tunnel
+/// (connectivity) — reads the same on/off switch.
 ///
 /// `connectivity` deliberately gates the PRE-EXISTING reconnect/DNS notifications
-/// (`ProtectionConnectivityNotificationPolicy`); the other three are simple event notifications posted
+/// (`ProtectionConnectivityNotificationPolicy`); the other two are simple event notifications posted
 /// through `LavaEventNotificationPoster` (no cooldown/supersession policy — they are discrete events).
 ///
 /// All notification copy (these event bodies AND the connectivity titles/messages) is localized across the
@@ -16,8 +17,15 @@ import UserNotifications
 /// processes — which do NOT inherit the app's iOS per-app language override — still render in the SAME
 /// language as the app UI rather than falling back to the system language.
 public enum LavaNotificationCategory: String, CaseIterable, Sendable {
-    /// "Switched to <Filter>" — a Focus auto-switch changed the active filter. Posted ONLY when the app
-    /// is closed/backgrounded (the foreground app shows the change in-UI, so a banner would be redundant).
+    /// "Switched to <Filter>" — a Focus auto-switch OR the Shortcuts "Switch Filter" action (a
+    /// Siri/Shortcuts run or an automation) changed the active filter. ONE toggle for both triggers —
+    /// to the user they are the same event ("my filter changed in the background"), and a split row
+    /// proved too subtle to explain (founder 2026-07-12). For an interactive Siri/Shortcuts run this
+    /// banner duplicates the system-delivered dialog (the Codex #325 concern) — accepted deliberately:
+    /// the banner is passive (silent, Notification Center only), and this toggle is the opt-out.
+    /// Posted ONLY when the app is closed/backgrounded (the foreground app shows the change in-UI),
+    /// and for the Shortcuts caller only on COMMITTED switches — a failed switch throws, and Shortcuts
+    /// surfaces that itself (including its failure notification for silent automations).
     case filterChanged = "filter-changed"
     /// "Couldn't switch to <Filter>" — a Focus switch was refused (e.g. auth-to-edit on, target gone).
     case filterCouldNotApply = "filter-could-not-apply"
@@ -40,6 +48,64 @@ public enum LavaNotificationPreferences {
     /// Persists whether a notification category is enabled in the supplied shared defaults store.
     public static func setEnabled(_ enabled: Bool, for category: LavaNotificationCategory, in defaults: UserDefaults) {
         defaults.set(enabled, forKey: category.enabledDefaultsKey)
+    }
+}
+
+/// Cross-process publication of "the app's UI is in the foreground RIGHT NOW", read by the headless
+/// switch banner posters (the Focus App Intents extension and the background-launched Shortcuts intent)
+/// to suppress their closed/backgrounded-only banners while the app is visible — a foreground app shows
+/// the switch in its own UI, so a banner would be redundant.
+///
+/// The app publishes the flag on scene transitions, stamping a wall-clock time on every foreground
+/// assert. The reader honors the flag only within `maxTrustedAge`: the app clears it on scene
+/// .background, at process start, and on willTerminate — but a hard crash or jetsam of a VISIBLE app
+/// delivers none of those, and the next process to run can be the Focus EXTENSION (which must NOT clear
+/// the flag: a Focus switch can legitimately fire while the app is foregrounded). Without the age-out, a
+/// crash-stuck flag would suppress every closed-app banner until the app is next opened and backgrounded;
+/// with it, suppression is capped at `maxTrustedAge` (Codex review lavasec-ios-internal#361). A wrong
+/// read in either direction costs one cosmetic banner — shown redundantly or suppressed once — never a
+/// switch.
+public enum LavaAppForegroundPublication {
+    /// App-group key for the Bool flag (the pre-existing key, kept for stored-state compatibility).
+    public static let flagDefaultsKeyName = "lavasec.app.foregroundActive"
+    /// App-group key for the wall-clock stamp (`timeIntervalSince1970`) of the last foreground assert.
+    public static let stampDefaultsKeyName = "lavasec.app.foregroundActive.stampedAt"
+    /// How long a foreground assert stays trustworthy without a re-assert. Deliberately a SHORT lease
+    /// with NO heartbeat: a crash right after an assert leaves a FRESH stamp, so this lease is exactly
+    /// how long banners stay suppressed after a crash-while-visible (Codex review #361) — while a
+    /// heartbeat would reintroduce the periodic foreground writes this codebase deliberately removed
+    /// (the unread foreground-activity heartbeat; ui-battery-footprint-reduction plan, removal pinned in
+    /// FocusFilterSwitchWiringSourceTests). The publisher re-stamps only on scene .active, which fires
+    /// on every unlock, app switch back, and shade/Control-Center peek — so a real foreground session
+    /// rarely goes this long without a re-stamp, and each wrong read on either side of the lease costs
+    /// one PASSIVE banner: suppressed (a switch inside the post-crash window) or redundant (a switch
+    /// during an unbroken >15-min foreground session, where the user is watching the change in-UI).
+    public static let maxTrustedAge: TimeInterval = 15 * 60
+
+    /// Publisher side (the app process): set the flag, stamping the assert time on `active == true` and
+    /// dropping the stamp on `active == false` (a cleared flag needs no age).
+    public static func publish(_ active: Bool, to defaults: UserDefaults, at now: Date = Date()) {
+        defaults.set(active, forKey: flagDefaultsKeyName)
+        if active {
+            defaults.set(now.timeIntervalSince1970, forKey: stampDefaultsKeyName)
+        } else {
+            defaults.removeObject(forKey: stampDefaultsKeyName)
+        }
+    }
+
+    /// Reader side (any process): the flag counts as foreground only when it is true AND carries a stamp
+    /// within `[0, maxTrustedAge)` of `now`. A true flag WITHOUT a stamp is treated as stale — only a
+    /// pre-stamp app version's leftover write can produce it, and suppressing on it would recreate the
+    /// stuck-flag failure this type exists to prevent.
+    public static func isForegroundActive(in defaults: UserDefaults, at now: Date = Date()) -> Bool {
+        guard defaults.bool(forKey: flagDefaultsKeyName) else { return false }
+        guard let stamped = defaults.object(forKey: stampDefaultsKeyName) as? Double else { return false }
+        let age = now.timeIntervalSince1970 - stamped
+        // A FUTURE stamp (the device clock was corrected backward since the assert) is rejected, not
+        // trusted: combined with a crash-stuck flag it would stretch the suppression cap until wall
+        // time catches up (Codex review #361). Failing toward "not foreground" costs at most the
+        // tolerated redundant passive banner and self-heals on the next scene .active re-stamp.
+        return age >= 0 && age < maxTrustedAge
     }
 }
 

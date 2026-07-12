@@ -62,10 +62,12 @@ public enum HeadlessFocusFilterSwitchEngine {
         internal let log: @Sendable (_ event: String, _ details: [String: String]) -> Void
         /// Post a user-facing notification for a switch OUTCOME — `committed == true` ⇒ "Switched to
         /// <name>"; `committed == false` ⇒ "Couldn't switch to <name>" (a refused switch, e.g. auth-to-edit).
-        /// The closure (provided by `FocusSwitchEnvironment`) gates on the category toggle + closed/
-        /// backgrounded-only + permission, then posts. Default no-op (tests / the in-app caller, which has
-        /// nothing to notify — the user sees the switch in-UI). Takes the resolved filter NAME (the engine
-        /// has the library) so the closure needs no library access.
+        /// The closure (provided by `FocusSwitchEnvironment`) gates on the caller's category toggle +
+        /// closed/backgrounded-only + permission, then posts; the Shortcuts/automation caller's closure
+        /// additionally DROPS `committed == false` (its thrown error is that caller's failure feedback —
+        /// see `FocusSwitchEnvironment.OutcomeFeedback`). Default no-op (tests / the in-app caller, which
+        /// has nothing to notify — the user sees the switch in-UI). Takes the resolved filter NAME (the
+        /// engine has the library) so the closure needs no library access.
         internal let notifySwitchOutcome: @Sendable (_ committed: Bool, _ filterName: String) async -> Void
 
         /// Creates an environment from the shared files, locks, defaults, and callback seams.
@@ -187,7 +189,9 @@ public enum HeadlessFocusFilterSwitchEngine {
         guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults) else {
             // The switch is refused while filter editing is auth-locked — tell the user the auto-switch
             // they expected did NOT happen (only when we can name the target; an unknown id is an edge we
-            // stay silent on). The closure gates on the toggle + closed/backgrounded + permission.
+            // stay silent on). The closure gates on the toggle + closed/backgrounded + permission; the
+            // Shortcuts/automation caller's closure drops this refusal (its thrown error is that caller's
+            // failure feedback — see FocusSwitchEnvironment.OutcomeFeedback).
             if let name = library0.filter(id: id)?.name {
                 await env.notifySwitchOutcome(false, name)
             }
@@ -322,10 +326,12 @@ public enum HeadlessFocusFilterSwitchEngine {
             // (Under Phase 3 commits were inactive-only, so the next foreground activation reconciled; the
             // state-agnostic path needs the explicit wake.)
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            // Tell the user the Focus auto-switch landed — "Switched to <name>" — but only when the app is
+            // Tell the user the headless switch landed — "Switched to <name>" — but only when the app is
             // closed/backgrounded (the closure's gate); a foreground app shows the change in-UI, so a banner
             // would be redundant. This is the mitigation for iOS's suspended-app extension-launch latency: a
-            // late background switch still surfaces. Gated on the filterChanged toggle + permission inside.
+            // late background switch still surfaces. Gated inside on permission + the shared
+            // filterChanged toggle (both the Focus extension and the Shortcuts/automation intent post
+            // committed switches under that one category — founder 2026-07-12).
             await env.notifySwitchOutcome(true, target.name)
             return SwitchDecision(.committed, "committed")
         } catch is CatalogMovedError {

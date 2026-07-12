@@ -24,10 +24,15 @@ enum FocusSwitchEnvironment {
         /// iOS can defer its launch ~5–7 min for a suspended app — so the engine's closed-app banner
         /// is the user's only signal (and the deferral mitigation). Foreground suppression unchanged.
         case closedAppBanner
-        /// The SYSTEM owns feedback for this caller (the Shortcuts/Siri intent): Siri speaks the
-        /// returned dialog, the Shortcuts app displays it, and a THROWN error is surfaced by Shortcuts
-        /// itself — including its failure notification for silent automations. The engine banner would
-        /// double-notify every one of those, so the notify hook stays the engine's default no-op.
+        /// The SYSTEM owns this caller's dialog/error feedback (the Shortcuts/Siri intent): Siri speaks
+        /// the returned dialog, the Shortcuts app displays it, and a THROWN error is surfaced by
+        /// Shortcuts itself — including its failure notification for silent automations — so FAILURES
+        /// post no engine banner (it would always double-report, Codex #325). A COMMITTED switch DOES
+        /// post the closed/backgrounded-only banner, under the SAME `filterChanged` category/toggle as
+        /// the Focus path (one user-visible event, one row — founder 2026-07-12): a SILENT automation
+        /// displays no dialog, so that banner is the run's only success signal. An interactive run can
+        /// get dialog + banner together — accepted deliberately (the banner is passive, and the "Filter
+        /// changes" toggle is the opt-out), superseding the earlier always-suppress stance.
         case systemOwnedDialog
     }
 
@@ -50,13 +55,24 @@ enum FocusSwitchEnvironment {
     /// `nil` when the App Group container is unavailable (the engine caller then reports `.disallowed`).
     static func make(feedback: OutcomeFeedback) -> HeadlessFocusFilterSwitchEngine.Environment? {
         guard let containerURL = LavaSecAppGroup.containerURL else { return nil }
-        // The banner hook is wired ONLY for the `.closedAppBanner` caller (Focus extension); a
-        // `.systemOwnedDialog` caller keeps the engine's default no-op notify — the system delivers
-        // that caller's dialog/error, and a banner on top would double-notify (Codex #325).
-        // (Explicitly typed: the two closure literals don't unify under ternary inference.)
+        // The banner hook differs per caller. `.closedAppBanner` (Focus extension) has no feedback
+        // channel of its own, so it banners BOTH outcomes ("Switched to" / "Couldn't switch to").
+        // `.systemOwnedDialog` (the Shortcuts/Siri intent) posts ONLY a committed switch — failures stay
+        // system-owned there (the thrown error reaches Siri, the Shortcuts app, AND Shortcuts'
+        // silent-automation failure notification, so a failure banner would always double-report —
+        // Codex #325). Both callers' committed banners share the ONE `filterChanged` category/toggle:
+        // to the user they are the same event, and a separate automation row proved too subtle to
+        // explain (founder 2026-07-12; the interactive-run dialog+banner redundancy is accepted — the
+        // banner is passive, and the toggle is the opt-out).
+        // (Explicitly typed: the closure literals don't unify under ternary/switch inference.)
         let notify: @Sendable (Bool, String) async -> Void = switch feedback {
-        case .closedAppBanner: { await notifySwitchOutcome(committed: $0, filterName: $1) }
-        case .systemOwnedDialog: { _, _ in }
+        case .closedAppBanner:
+            { await notifySwitchOutcome(committed: $0, filterName: $1) }
+        case .systemOwnedDialog:
+            { committed, filterName in
+                guard committed else { return }
+                await postSwitchBanner(category: .filterChanged, committed: true, filterName: filterName)
+            }
         }
         return HeadlessFocusFilterSwitchEngine.Environment(
             containerURL: containerURL,
@@ -81,23 +97,42 @@ enum FocusSwitchEnvironment {
     }
 
     /// Post the user-facing "Switched to <name>" / "Couldn't switch to <name>" notification for a headless
-    /// Focus switch — the `.closedAppBanner` caller only (see `OutcomeFeedback`), and CLOSED/BACKGROUNDED
-    /// ONLY. A foreground app shows the switch in its UI, so we skip the
-    /// banner when the app-group foreground flag says the app is active; when it is closed/backgrounded
-    /// (flag false/absent) the banner is the user's only signal — the mitigation for iOS deferring the
-    /// extension launch for a suspended app. Category toggle + notification permission are enforced inside
-    /// `LavaEventNotificationPoster`.
-    ///
-    /// AWAITED (not a detached Task): the engine awaits this, which the extension's `perform()` awaits, so the
-    /// App Intents extension is kept alive until the banner is actually posted — a fire-and-forget Task could
-    /// let `perform()` return and the extension suspend before `add()` runs, losing the banner in exactly the
-    /// closed-app case this serves (Codex P2). The tap route is `guard` (the one the notification delegate
-    /// handles) so a tap opens the app; Filters-specific navigation on tap is a polish follow-up.
+    /// Focus switch — the `.closedAppBanner` caller (see `OutcomeFeedback`). Maps the outcome to the Focus
+    /// category pair; the shared `postSwitchBanner` applies the closed/backgrounded gate.
     private static func notifySwitchOutcome(committed: Bool, filterName: String) async {
-        let defaults = LavaSecAppGroup.sharedDefaults
-        guard !defaults.bool(forKey: LavaSecAppGroup.appForegroundActiveDefaultsKeyName) else { return }
+        await postSwitchBanner(
+            category: committed ? .filterChanged : .filterCouldNotApply,
+            committed: committed,
+            filterName: filterName
+        )
+    }
 
-        let category: LavaNotificationCategory = committed ? .filterChanged : .filterCouldNotApply
+    /// Shared banner post for BOTH headless switch callers (the Focus extension's outcome pair and the
+    /// Shortcuts intent's committed-only automation banner), CLOSED/BACKGROUNDED ONLY. A foreground app
+    /// shows the switch in its UI, so we skip the banner when the app-group foreground flag says the app
+    /// is active; when it is closed/backgrounded (flag false/absent) the banner is the user's only signal
+    /// — the mitigation for iOS deferring the Focus extension's launch for a suspended app, and the only
+    /// success signal a silent automation gets. Category toggle + notification permission are enforced
+    /// inside `LavaEventNotificationPoster`.
+    ///
+    /// AWAITED (not a detached Task): the engine awaits this, which the caller's `perform()` awaits, so the
+    /// posting process (extension or background-launched app) is kept alive until the banner is actually
+    /// posted — a fire-and-forget Task could let `perform()` return and the process suspend before `add()`
+    /// runs, losing the banner in exactly the closed-app case this serves (Codex P2). The tap route is
+    /// `guard` (the one the notification delegate handles) so a tap opens the app; Filters-specific
+    /// navigation on tap is a polish follow-up.
+    private static func postSwitchBanner(
+        category: LavaNotificationCategory,
+        committed: Bool,
+        filterName: String
+    ) async {
+        let defaults = LavaSecAppGroup.sharedDefaults
+        // Age-bounded read (LavaSecKit): a crash/jetsam of a visible app can leave the raw flag stuck
+        // true with no app process left to clear it, and THIS reader may next run in the Focus extension
+        // — which must not clear the flag itself (a Focus switch can fire while the app is genuinely
+        // foregrounded). The kit API stops trusting a stale assert on its own (Codex review #361).
+        guard !LavaAppForegroundPublication.isForegroundActive(in: defaults) else { return }
+
         // Localized in LavaSecKit (Bundle.module) so it resolves in the extension's bundle too. The pinned
         // app language (published by the app on foreground) makes the extension render in the SAME language
         // as the app UI — the extension process does not inherit the app's iOS per-app language override.
