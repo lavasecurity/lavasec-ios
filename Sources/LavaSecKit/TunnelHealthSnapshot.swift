@@ -140,7 +140,16 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// The time of the most recent failed upstream resolution.
     public var lastUpstreamFailureAt: Date?
     /// The duration, in milliseconds, of the most recently timed upstream operation.
+    /// Set for failures/timeouts too, so this is a raw "what just happened" value — the
+    /// user-facing "Last DNS response" row uses `lastUpstreamSuccessDurationMilliseconds`.
     public var lastUpstreamDurationMilliseconds: Int?
+    /// The round-trip duration, in milliseconds, of the most recent *successful* upstream
+    /// resolution. Distinct from `lastUpstreamDurationMilliseconds` so the "Last DNS
+    /// response" row never reports a timeout's duration as a response (LAV-119).
+    public var lastUpstreamSuccessDurationMilliseconds: Int?
+    /// Session-cumulative histogram of upstream round-trip durations, backing the Nerd
+    /// Stats p50/p90/p95 rows (plans/2026-07-11-nerd-stats-dns-latency-plan.md).
+    public var upstreamLatencyHistogram: DNSLatencyHistogram
     /// The number of upstream responses classified as slow.
     public var slowUpstreamResponseCount: Int
     /// The current streak of upstream responses classified as slow.
@@ -213,6 +222,8 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lastEncryptedFallbackSuccessAt
         case lastUpstreamFailureAt
         case lastUpstreamDurationMilliseconds
+        case lastUpstreamSuccessDurationMilliseconds
+        case upstreamLatencyHistogram
         case slowUpstreamResponseCount
         case consecutiveSlowUpstreamResponseCount
         case lastSlowUpstreamResponseAt
@@ -273,6 +284,8 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         lastEncryptedFallbackSuccessAt: Date? = nil,
         lastUpstreamFailureAt: Date? = nil,
         lastUpstreamDurationMilliseconds: Int? = nil,
+        lastUpstreamSuccessDurationMilliseconds: Int? = nil,
+        upstreamLatencyHistogram: DNSLatencyHistogram = DNSLatencyHistogram(),
         slowUpstreamResponseCount: Int = 0,
         consecutiveSlowUpstreamResponseCount: Int = 0,
         lastSlowUpstreamResponseAt: Date? = nil,
@@ -330,6 +343,8 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lastEncryptedFallbackSuccessAt = lastEncryptedFallbackSuccessAt
         self.lastUpstreamFailureAt = lastUpstreamFailureAt
         self.lastUpstreamDurationMilliseconds = lastUpstreamDurationMilliseconds
+        self.lastUpstreamSuccessDurationMilliseconds = lastUpstreamSuccessDurationMilliseconds
+        self.upstreamLatencyHistogram = upstreamLatencyHistogram
         self.slowUpstreamResponseCount = slowUpstreamResponseCount
         self.consecutiveSlowUpstreamResponseCount = consecutiveSlowUpstreamResponseCount
         self.lastSlowUpstreamResponseAt = lastSlowUpstreamResponseAt
@@ -472,6 +487,14 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             Int.self,
             forKey: .lastUpstreamDurationMilliseconds
         )
+        self.lastUpstreamSuccessDurationMilliseconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lastUpstreamSuccessDurationMilliseconds
+        )
+        self.upstreamLatencyHistogram = try container.decodeIfPresent(
+            DNSLatencyHistogram.self,
+            forKey: .upstreamLatencyHistogram
+        ) ?? DNSLatencyHistogram()
         self.slowUpstreamResponseCount = try container.decodeIfPresent(
             Int.self,
             forKey: .slowUpstreamResponseCount

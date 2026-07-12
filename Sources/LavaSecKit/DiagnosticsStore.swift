@@ -107,28 +107,56 @@ public struct DiagnosticsSummary: Equatable, Codable, Sendable {
         return Double(blockedCount) / Double(totalCount)
     }
 
-    /// A compact day, hour, and minute representation of local-protection uptime.
+    /// A compact day, hour, and minute representation of local-protection uptime,
+    /// localized for the current locale.
     public var compactLocalProtectionUptimeText: String {
-        let totalMinutes = max(0, Int(localProtectionUptime / 60))
+        Self.compactUptimeText(seconds: localProtectionUptime)
+    }
+
+    /// Renders a duration (in seconds) as a compact "days / hours / minutes" string,
+    /// keeping the two largest units. The unit words come from Foundation for `locale`
+    /// rather than hardcoded ASCII suffixes, so this reads "3h 25m" in English and
+    /// localized units elsewhere (e.g. zh-Hant "23時59分") instead of leaking "23h59m"
+    /// into every locale — UR-58.
+    ///
+    /// Components are floored (seconds stripped, and the dropped unit's remainder
+    /// discarded) and the formatted duration is rebuilt from exactly the units shown, so
+    /// Foundation never rounds a near-boundary value UP to the next unit — 23:59:59 stays
+    /// "23h 59m" (not "1d") and 1d 23h 30m stays "1d 23h" (not "2d"), matching the
+    /// pre-localization component math and never overstating the usage metric. `locale` is
+    /// injectable for deterministic tests.
+    static func compactUptimeText(seconds: TimeInterval, locale: Locale = .autoupdatingCurrent) -> String {
+        let totalMinutes = max(0, Int(seconds / 60))
         let days = totalMinutes / (24 * 60)
 
+        let allowedUnits: Set<Duration.UnitsFormatStyle.Unit>
+        let displaySeconds: Int
         if days > 0 {
+            // Two largest units: days + whole hours, dropping residual minutes.
             let hours = (totalMinutes % (24 * 60)) / 60
-            if hours > 0 {
-                return "\(days)d \(hours)h"
-            }
-            return "\(days)d"
+            allowedUnits = [.days, .hours]
+            displaySeconds = days * 86_400 + hours * 3_600
+        } else {
+            let hours = totalMinutes / 60
+            let minutes = totalMinutes % 60
+            allowedUnits = [.hours, .minutes]
+            displaySeconds = hours * 3_600 + minutes * 60
         }
 
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours > 0, minutes > 0 {
-            return "\(hours)h \(minutes)m"
+        // Rebuilt from only the units shown, so there is no residual for the formatter to
+        // round; it purely supplies the localized unit words.
+        let style = Duration.UnitsFormatStyle(
+            allowedUnits: allowedUnits,
+            width: .narrow,
+            zeroValueUnits: .hide
+        ).locale(locale)
+        let text = Duration.seconds(displaySeconds).formatted(style)
+        if !text.isEmpty {
+            return text
         }
-        if hours > 0 {
-            return "\(hours)h"
-        }
-        return "\(minutes)m"
+        // A zero duration renders empty under `.hide`; fall back to a localized "0m".
+        let zeroStyle = Duration.UnitsFormatStyle(allowedUnits: [.minutes], width: .narrow).locale(locale)
+        return Duration.seconds(0).formatted(zeroStyle)
     }
 }
 

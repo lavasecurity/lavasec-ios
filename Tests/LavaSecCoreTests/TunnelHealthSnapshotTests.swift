@@ -181,6 +181,37 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.lastSlowUpstreamResponseAt, now)
     }
 
+    func testHealthRoundTripPreservesLatencyHistogramAndSuccessDuration() throws {
+        var histogram = DNSLatencyHistogram()
+        histogram.record(durationMilliseconds: 30)
+        histogram.record(durationMilliseconds: 5_000)
+        let snapshot = TunnelHealthSnapshot(
+            lastUpstreamSuccessDurationMilliseconds: 42,
+            upstreamLatencyHistogram: histogram
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.upstreamLatencyHistogram, histogram)
+        XCTAssertEqual(decoded.upstreamLatencyHistogram.sampleCount, 2)
+        XCTAssertEqual(decoded.lastUpstreamSuccessDurationMilliseconds, 42)
+    }
+
+    func testDecodingOldHealthDefaultsLatencyHistogramToEmpty() throws {
+        // A payload predating the histogram field decodes to an empty histogram.
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(TunnelHealthSnapshot())) as? [String: Any]
+        )
+        object.removeValue(forKey: "upstreamLatencyHistogram")
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.upstreamLatencyHistogram, DNSLatencyHistogram())
+        XCTAssertEqual(decoded.upstreamLatencyHistogram.sampleCount, 0)
+    }
+
     func testHealthRoundTripPreservesNetworkSettingsFailureFields() throws {
         let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
         let snapshot = TunnelHealthSnapshot(

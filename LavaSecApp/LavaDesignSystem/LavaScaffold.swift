@@ -652,7 +652,7 @@ struct LavaToolbarIconButton: View {
         .frame(width: LavaToolbarMetrics.buttonSize, height: LavaToolbarMetrics.buttonSize)
         .contentShape(Circle())
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel.lavaLocalized)
     }
 }
 
@@ -700,12 +700,12 @@ struct NativeToolbarIconButton: View {
             )
             .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
         }
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel.lavaLocalized)
         // Aliases FIRST, then the label: `.accessibilityInputLabels` replaces the default set, and
         // Voice Control's "Show Names" overlay surfaces the FIRST entry — so a short alias becomes
         // the displayed/primary command while the original "tap <label>" still matches via the
         // appended label. Empty aliases → just the label, identical to the system default.
-        .accessibilityInputLabels(accessibilityInputLabels + [accessibilityLabel])
+        .accessibilityInputLabels(accessibilityInputLabels + [accessibilityLabel.lavaLocalized])
     }
 }
 

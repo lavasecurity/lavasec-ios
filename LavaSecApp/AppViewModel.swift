@@ -1790,17 +1790,20 @@ final class AppViewModel: ObservableObject {
     }
 
     var tunnelNetworkText: String {
+        // Nerd Stats display value (UR-56 localization sweep). "Wi-Fi" is a proper
+        // noun and stays verbatim; the other kinds route through the catalog.
+        // The English-stable variant used for logs is TunnelNetworkKind.displayName.
         switch tunnelHealth.networkKind {
         case .unknown:
-            "Unknown"
+            "Unknown".lavaLocalized
         case .wifi:
             "Wi-Fi"
         case .cellular:
-            "Cellular"
+            "Cellular".lavaLocalized
         case .wired:
-            "Wired"
+            "Wired".lavaLocalized
         case .other:
-            "Other"
+            "Other".lavaLocalized
         }
     }
 
@@ -1809,7 +1812,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var tunnelNetworkPathText: String {
-        tunnelHealth.networkPathIsSatisfied ? "Available" : "Lost"
+        tunnelHealth.networkPathIsSatisfied ? "Available".lavaLocalized : "Lost".lavaLocalized
     }
 
     var tunnelResolverRuntimeResetText: String {
@@ -1822,7 +1825,7 @@ final class AppViewModel: ObservableObject {
 
     var tunnelLastResolverRuntimeResetText: String {
         guard let resetAt = tunnelHealth.lastResolverRuntimeResetAt else {
-            return "None yet"
+            return "None yet".lavaLocalized
         }
 
         let reason = tunnelHealth.lastResolverRuntimeResetReason ?? "unknown"
@@ -1839,7 +1842,7 @@ final class AppViewModel: ObservableObject {
 
     private func formattedTunnelHealthDate(_ date: Date?) -> String {
         guard let date else {
-            return "None yet"
+            return "None yet".lavaLocalized
         }
 
         return date.formatted(date: .omitted, time: .shortened)
@@ -3757,7 +3760,12 @@ final class AppViewModel: ObservableObject {
     }
 
     var tunnelDeviceDNSFallbackText: String {
-        "\(tunnelHealth.deviceDNSFallbackActivationCount) activations · \(tunnelHealth.deviceDNSFallbackSuccessCount)/\(tunnelHealth.deviceDNSFallbackAttemptCount) query fallbacks"
+        // Nerd Stats display value (UR-56 localization sweep): localized format key so
+        // the "activations"/"query fallbacks" words don't leak English into other locales.
+        "%1$@ activations · %2$@ query fallbacks".lavaLocalizedFormat(
+            tunnelHealth.deviceDNSFallbackActivationCount.formatted(),
+            "\(tunnelHealth.deviceDNSFallbackSuccessCount)/\(tunnelHealth.deviceDNSFallbackAttemptCount)"
+        )
     }
 
     var tunnelDNSSmokeProbeText: String {
@@ -3766,10 +3774,48 @@ final class AppViewModel: ObservableObject {
 
     var tunnelDoHProtocolText: String {
         guard let version = tunnelHealth.lastDoHHTTPVersion else {
-            return "None yet"
+            return "None yet".lavaLocalized
         }
 
         return "\(DoHHTTPVersion.dohAnnotation(negotiatedHTTPVersion: version)) (\(version))"
+    }
+
+    /// Nerd Stats "Last DNS response" value: the round-trip time of the most recent
+    /// *successful* resolution (LAV-119; plans/2026-07-11-nerd-stats-dns-latency-plan.md).
+    /// DNS RTT, not ICMP ping. Uses the success-only duration, not the raw
+    /// `lastUpstreamDurationMilliseconds`, so a timeout is never shown as a "response".
+    var tunnelLastUpstreamLatencyText: String {
+        guard let milliseconds = tunnelHealth.lastUpstreamSuccessDurationMilliseconds else {
+            return "None yet".lavaLocalized
+        }
+        return "\(milliseconds.formatted()) ms"
+    }
+
+    /// Nerd Stats "DNS response time" value: session-cumulative p50/p90/p95 upstream
+    /// latency plus the sample count, read off the fixed-bucket histogram (LAV-119). The
+    /// value is locale-neutral (numbers + ms/s units), so it needs no translated string.
+    var tunnelLatencyPercentileText: String {
+        let histogram = tunnelHealth.upstreamLatencyHistogram
+        guard histogram.sampleCount > 0,
+            let p50 = histogram.percentile(0.50),
+            let p90 = histogram.percentile(0.90),
+            let p95 = histogram.percentile(0.95)
+        else {
+            return "None yet".lavaLocalized
+        }
+
+        func text(_ estimate: DNSLatencyHistogram.Estimate) -> String {
+            switch estimate {
+            case .atMost(let milliseconds):
+                return "≤ \(milliseconds) ms"
+            case .greaterThan(let milliseconds):
+                let seconds = (Double(milliseconds) / 1_000)
+                    .formatted(.number.precision(.fractionLength(0...1)))
+                return "> \(seconds) s"
+            }
+        }
+
+        return "p50 \(text(p50)) · p90 \(text(p90)) · p95 \(text(p95)) (n=\(histogram.sampleCount.formatted()))"
     }
 
     var tunnelHealthUpdatedText: String {

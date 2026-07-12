@@ -50,6 +50,8 @@ struct ResolverTunnelSessionEvidence: Equatable, Sendable {
     var lastUpstreamSuccessAt: Date?
     var lastPrimaryUpstreamSuccessAt: Date?
     var lastUpstreamDurationMilliseconds: Int?
+    var lastUpstreamSuccessDurationMilliseconds: Int?
+    var upstreamLatencyHistogram = DNSLatencyHistogram()
     var slowUpstreamResponseCount = 0
     var consecutiveSlowUpstreamResponseCount = 0
     var lastSlowUpstreamResponseAt: Date?
@@ -379,6 +381,9 @@ struct ResolverHealthSnapshotProjection: Equatable, Sendable {
         snapshot.lastPrimaryUpstreamSuccessAt = state.session.lastPrimaryUpstreamSuccessAt
         snapshot.lastUpstreamDurationMilliseconds =
             state.session.lastUpstreamDurationMilliseconds
+        snapshot.lastUpstreamSuccessDurationMilliseconds =
+            state.session.lastUpstreamSuccessDurationMilliseconds
+        snapshot.upstreamLatencyHistogram = state.session.upstreamLatencyHistogram
         snapshot.slowUpstreamResponseCount = state.session.slowUpstreamResponseCount
         snapshot.consecutiveSlowUpstreamResponseCount =
             state.session.consecutiveSlowUpstreamResponseCount

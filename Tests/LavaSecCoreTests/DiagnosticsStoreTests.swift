@@ -554,25 +554,53 @@ final class DiagnosticsStoreTests: XCTestCase {
     }
 
     func testDiagnosticsSummaryCompactsProtectionUptimeBelowOneDay() {
-        let summary = DiagnosticsSummary(
-            allowedCount: 0,
-            blockedCount: 0,
-            startedAt: Date(),
-            localProtectionUptime: (3 * 3_600) + (25 * 60)
+        // Narrow width keeps the English rendering tight and unchanged (UR-58).
+        XCTAssertEqual(
+            DiagnosticsSummary.compactUptimeText(
+                seconds: (3 * 3_600) + (25 * 60),
+                locale: Locale(identifier: "en_US")
+            ),
+            "3h 25m"
         )
-
-        XCTAssertEqual(summary.compactLocalProtectionUptimeText, "3h 25m")
     }
 
     func testDiagnosticsSummaryCompactsProtectionUptimeAtOneDayOrMore() {
-        let summary = DiagnosticsSummary(
-            allowedCount: 0,
-            blockedCount: 0,
-            startedAt: Date(),
-            localProtectionUptime: (27 * 3_600) + (25 * 60)
+        // Two-largest-unit cap: 27h25m renders as days+hours, dropping minutes (UR-58).
+        XCTAssertEqual(
+            DiagnosticsSummary.compactUptimeText(
+                seconds: (27 * 3_600) + (25 * 60),
+                locale: Locale(identifier: "en_US")
+            ),
+            "1d 3h"
         )
+    }
 
-        XCTAssertEqual(summary.compactLocalProtectionUptimeText, "1d 3h")
+    func testDiagnosticsSummaryLocalizesProtectionUptimeUnits() {
+        // UR-58: non-English locales render localized unit glyphs, never the English
+        // "h"/"m" suffixes that used to leak into every locale (e.g. zh-TW "23h59m").
+        let localized = DiagnosticsSummary.compactUptimeText(
+            seconds: (23 * 3_600) + (59 * 60),
+            locale: Locale(identifier: "zh-Hant")
+        )
+        XCTAssertTrue(localized.contains("分"))
+        XCTAssertFalse(localized.contains("h"))
+        XCTAssertFalse(localized.contains("m"))
+    }
+
+    func testDiagnosticsSummaryFloorsUptimeAndNeverRoundsUpAcrossUnitBoundaries() {
+        // Regression for the localized formatter rounding UP near unit boundaries (Codex
+        // review on #359): floor to completed units, never overstate the usage metric.
+        let en = Locale(identifier: "en_US")
+        // 23:59:59 must stay "23h 59m", not round up to "1d".
+        XCTAssertEqual(DiagnosticsSummary.compactUptimeText(seconds: (24 * 3_600) - 1, locale: en), "23h 59m")
+        // 1d 23h 30m must stay "1d 23h" (dropped minutes are discarded, not rounded into hours).
+        XCTAssertEqual(
+            DiagnosticsSummary.compactUptimeText(seconds: 86_400 + (23 * 3_600) + (30 * 60), locale: en),
+            "1d 23h"
+        )
+        // Sub-minute floors to "0m"; 1m30s floors to "1m" (never rounds to "2m").
+        XCTAssertEqual(DiagnosticsSummary.compactUptimeText(seconds: 59, locale: en), "0m")
+        XCTAssertEqual(DiagnosticsSummary.compactUptimeText(seconds: 90, locale: en), "1m")
     }
 
     func testDiagnosticsPersistenceReturnsEmptyStoreForMissingOrCorruptFile() throws {

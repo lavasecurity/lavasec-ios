@@ -300,6 +300,57 @@ final class ResolverHealthOrganicEvidenceTests: XCTestCase {
         )
     }
 
+    func testResolvedQueryFoldsDurationIntoLatencyHistogram() {
+        let transition = ResolverHealthReducer.reduce(
+            state: ResolverHealthEvidenceState(),
+            event: .organicUpstreamCompleted(
+                evidence(
+                    result: result(
+                        response: acceptedAnswer(),
+                        outcome: .success,
+                        durationMilliseconds: 30 // (25,50] -> bucket 2
+                    )
+                )
+            ),
+            projectingOnto: providerBase()
+        )
+        let histogram = transition.state.session.upstreamLatencyHistogram
+        XCTAssertEqual(histogram.sampleCount, 1)
+        XCTAssertEqual(histogram.bucketCounts[2], 1)
+        // The successful resolution is also recorded as the last response duration.
+        XCTAssertEqual(transition.state.session.lastUpstreamSuccessDurationMilliseconds, 30)
+    }
+
+    func testTimedOutUpstreamDoesNotRecordLatencyOrSuccessDuration() {
+        let transition = ResolverHealthReducer.reduce(
+            state: ResolverHealthEvidenceState(),
+            event: .organicUpstreamCompleted(
+                evidence(result: result(response: nil, outcome: .timeout, durationMilliseconds: 5_000))
+            ),
+            projectingOnto: providerBase()
+        )
+        // Failures never reach reduceResolved: they must not skew the distribution, and a
+        // timeout's duration must never masquerade as a "Last DNS response" (Codex, #360).
+        XCTAssertEqual(transition.state.session.upstreamLatencyHistogram.sampleCount, 0)
+        XCTAssertNil(transition.state.session.lastUpstreamSuccessDurationMilliseconds)
+        XCTAssertEqual(transition.state.session.lastUpstreamDurationMilliseconds, 5_000)
+    }
+
+    func testResolvedQueryWithoutDurationRecordsNoLatencySample() {
+        let transition = ResolverHealthReducer.reduce(
+            state: ResolverHealthEvidenceState(),
+            event: .organicUpstreamCompleted(
+                evidence(
+                    result: result(response: acceptedAnswer(), outcome: .success, durationMilliseconds: nil)
+                )
+            ),
+            projectingOnto: providerBase()
+        )
+        XCTAssertEqual(transition.state.session.upstreamSuccessCount, 1)
+        XCTAssertEqual(transition.state.session.upstreamLatencyHistogram.sampleCount, 0)
+        XCTAssertNil(transition.state.session.lastUpstreamSuccessDurationMilliseconds)
+    }
+
     func testConfiguredPrimaryResponseQualityUsesThreeDistinctEvidenceBars() {
         let cases = [
             PrimaryResponseCase(

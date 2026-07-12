@@ -273,7 +273,7 @@ enum ResolverOrganicEvidenceReducer {
             }
         }
 
-        applySlowResponseMetrics(evidence, to: &state)
+        applyLatencyMetrics(evidence, to: &state)
         if !isDeviceDNSQueryFallback, evidence.transport != .deviceDNS {
             state.episode.deviceDNSFallbackEvidenceCount = 0
         }
@@ -383,10 +383,21 @@ enum ResolverOrganicEvidenceReducer {
         return endedFallbackLogEpisode
     }
 
-    private static func applySlowResponseMetrics(
+    private static func applyLatencyMetrics(
         _ evidence: ResolverOrganicUpstreamEvidence,
         to state: inout ResolverHealthEvidenceState
     ) {
+        // Fold resolved-query round-trip latency into the session histogram AND record it
+        // as the last *successful* response duration for the Nerd Stats rows
+        // (plans/2026-07-11-nerd-stats-dns-latency-plan.md). Only resolved queries reach
+        // here (reduceResolved), matching the slow-response metrics below — total failures
+        // stay in the failure counters and never skew the distribution or the "Last DNS
+        // response" row. `lastUpstreamDurationMilliseconds` (set for failures too, earlier)
+        // is a separate raw "what just happened" readout and is unaffected.
+        if let durationMilliseconds = evidence.durationMilliseconds {
+            state.session.upstreamLatencyHistogram.record(durationMilliseconds: durationMilliseconds)
+            state.session.lastUpstreamSuccessDurationMilliseconds = durationMilliseconds
+        }
         if let durationMilliseconds = evidence.durationMilliseconds,
             durationMilliseconds >= slowUpstreamResponseThresholdMilliseconds
         {
