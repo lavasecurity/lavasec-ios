@@ -8320,15 +8320,21 @@ final class AppViewModel: ObservableObject {
         Task { await reconcileWarmNonActiveFilters() }
     }
 
-    /// Publish a lightweight "the app is in the foreground RIGHT NOW" flag to the shared app-group defaults,
-    /// read by the App Intents extension to gate the Focus-switch notification to closed/backgrounded only
-    /// (a foreground app shows the switch in-UI, so a banner would be redundant). Set true on scene .active
-    /// / onAppear, false on .background. NOT the removed `AppForegroundActivityState` switch-defer machinery
-    /// — this has no stale window and never affects a switch; a wrong read just shows/suppresses one banner.
+    /// Publish a lightweight "the app is in the foreground RIGHT NOW" flag to the shared app-group defaults
+    /// (`LavaAppForegroundPublication`), read by the headless switch banner posters (the Focus extension AND
+    /// the Shortcuts/automation intent) to gate their notifications to closed/backgrounded only (a
+    /// foreground app shows the switch in-UI, so a banner would be redundant). Set true on scene .active /
+    /// onAppear, false on .background — and cleared at process start (`LavaSecApp.init`) and on
+    /// willTerminate, because a crash or a force-quit from the app switcher while visible skips the
+    /// .background clear; the poster additionally stops trusting an assert older than
+    /// `LavaAppForegroundPublication.maxTrustedAge`, since after a hard crash the next process to run can be
+    /// the Focus EXTENSION, which can't safely clear the flag (Codex review #361). NOT the removed
+    /// `AppForegroundActivityState` switch-defer machinery — this never affects a switch; a wrong read just
+    /// shows/suppresses one banner.
     func setAppForegroundActive(_ active: Bool) {
         guard !isHeadless else { return }
         let defaults = LavaSecAppGroup.sharedDefaults
-        defaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKeyName)
+        LavaAppForegroundPublication.publish(active, to: defaults)
         if active {
             // Pin the language the app UI is CURRENTLY resolved to (honoring any iOS per-app language
             // override) so the App Intents extension and NE tunnel — separate processes that don't inherit

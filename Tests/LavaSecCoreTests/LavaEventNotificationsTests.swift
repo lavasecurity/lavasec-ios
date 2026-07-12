@@ -38,6 +38,53 @@ final class LavaEventNotificationsTests: XCTestCase {
                       "Disabling one category must not disable another.")
     }
 
+    func testForegroundPublicationTrustsOnlyFreshAsserts() {
+        let defaults = makeDefaults()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertFalse(LavaAppForegroundPublication.isForegroundActive(in: defaults, at: t0),
+                       "Absent flag ⇒ not foreground.")
+
+        LavaAppForegroundPublication.publish(true, to: defaults, at: t0)
+        XCTAssertTrue(LavaAppForegroundPublication.isForegroundActive(in: defaults, at: t0))
+        XCTAssertTrue(LavaAppForegroundPublication.isForegroundActive(
+            in: defaults,
+            at: t0.addingTimeInterval(LavaAppForegroundPublication.maxTrustedAge - 1)
+        ))
+
+        // The age-out: a crash/jetsam of a visible app clears nothing, and the next process to run can
+        // be the Focus extension (which must not clear the flag itself) — a stale assert must stop
+        // suppressing banners on its own (Codex review #361).
+        XCTAssertFalse(LavaAppForegroundPublication.isForegroundActive(
+            in: defaults,
+            at: t0.addingTimeInterval(LavaAppForegroundPublication.maxTrustedAge)
+        ))
+
+        LavaAppForegroundPublication.publish(false, to: defaults, at: t0)
+        XCTAssertFalse(LavaAppForegroundPublication.isForegroundActive(in: defaults, at: t0))
+        XCTAssertNil(defaults.object(forKey: LavaAppForegroundPublication.stampDefaultsKeyName),
+                     "Clearing the flag must drop the stamp (a cleared flag needs no age).")
+    }
+
+    func testForegroundStampFromTheFutureIsNotTrusted() {
+        // A backward clock correction after an assert leaves a FUTURE stamp. Trusting its negative age
+        // would stretch the post-crash suppression cap until wall time catches up, so it must read as
+        // NOT foreground — self-healing on the next scene .active re-stamp (Codex review #361).
+        let defaults = makeDefaults()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        LavaAppForegroundPublication.publish(true, to: defaults, at: t0)
+        XCTAssertFalse(LavaAppForegroundPublication.isForegroundActive(in: defaults, at: t0.addingTimeInterval(-1)))
+        XCTAssertTrue(LavaAppForegroundPublication.isForegroundActive(in: defaults, at: t0),
+                      "Zero age (assert instant) must still be trusted.")
+    }
+
+    func testForegroundFlagWithoutStampIsNotTrusted() {
+        // A pre-stamp app version's leftover write is a bare true flag. Trusting it would recreate the
+        // stuck-flag suppression the stamp exists to prevent, so it must read as NOT foreground.
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: LavaAppForegroundPublication.flagDefaultsKeyName)
+        XCTAssertFalse(LavaAppForegroundPublication.isForegroundActive(in: defaults))
+    }
+
     func testFilterSwitchBodyIsLocalizedAndInterpolatesName() {
         // Resolves against the package's Bundle.module catalog (the en .lproj) and interpolates the filter
         // name. Also proves the SwiftPM resource bundle is found (a missing bundle would return the key).

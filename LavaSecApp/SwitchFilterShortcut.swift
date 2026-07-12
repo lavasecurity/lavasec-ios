@@ -26,10 +26,14 @@ import Foundation
 // FocusSwitchDiagnostics ALL come from the shared LavaSecFilterPipeline headless engine reached through
 // `FocusSwitchEnvironment.performSwitch` (LAV-100 Phase 4 lineage; the same `Shared/` factory the
 // extension uses). The ONE deliberate divergence from the Focus path is feedback: this caller passes
-// `.systemOwnedDialog`, so the engine's closed-app banner stays OFF — the system (Siri/Shortcuts) delivers
-// this intent's dialog and errors in every context, and the banner would double-notify (Codex #325; see
-// `FocusSwitchEnvironment.OutcomeFeedback`). This intent is a thin front-end that maps the engine's
-// outcome to a spoken/printed dialog — it adds NO switch logic of its own.
+// `.systemOwnedDialog` — the system (Siri/Shortcuts) delivers this intent's dialog and errors in every
+// context, so FAILURES post no engine banner (Shortcuts surfaces the thrown error itself, including its
+// failure notification for silent automations; a banner would double-report — Codex #325). A COMMITTED
+// switch posts the engine hook's closed/backgrounded-only banner under the SAME `filterChanged`
+// category/toggle as the Focus path (one user-visible event, one "Filter changes" row — founder
+// 2026-07-12): a silent automation displays no dialog, so that banner is its only success signal (see
+// `FocusSwitchEnvironment.OutcomeFeedback`). This intent stays a thin front-end that maps the engine's
+// outcome to a spoken/printed dialog — it adds NO switch logic and NO notification posting of its own.
 //
 // A headless intent cannot prompt for authentication, so when the auth-to-edit gate is on the engine
 // returns `.disallowed` and we report a "open Lava" dialog — a safe no-op, never a partial or
@@ -76,14 +80,16 @@ struct SwitchFilterIntent: AppIntent {
         // Drive the SAME shared engine any in-app or Focus caller uses — the single gated boundary. We do
         // NOT re-run the gate, the CAS, the flock, or the diagnostics here; `performSwitch` owns all of it.
         //
-        // `.systemOwnedDialog`: the SYSTEM delivers this intent's feedback in every context — Siri speaks
-        // the returned dialog, the Shortcuts app displays it, and the thrown `.disallowed` error below is
-        // surfaced by Shortcuts itself (including its failure notification when a silent automation errors)
-        // — so the engine's closed-app banner is suppressed for this caller; keeping it would double-notify
-        // a backgrounded Siri/Shortcuts run (Codex #325). A committed switch from a SILENT automation is
-        // deliberately silent: the user authored the automation, and Shortcuts' own "Notify When Run"
-        // toggle is the platform affordance for run receipts. The Focus extension keeps the banner — that
-        // path has no dialog and lives with the deferred-launch gap (see `OutcomeFeedback`).
+        // `.systemOwnedDialog`: the SYSTEM delivers this intent's dialog and errors in every context —
+        // Siri speaks the returned dialog, the Shortcuts app displays it, and the thrown `.disallowed`
+        // error below is surfaced by Shortcuts itself (including its failure notification when a silent
+        // automation errors) — so FAILURES post no engine banner for this caller (it would always
+        // double-report — Codex #325). A COMMITTED switch posts the engine hook's closed/backgrounded-only
+        // banner under the SAME `filterChanged` category as the Focus path (one "Filter changes" toggle —
+        // founder 2026-07-12): a silent automation displays no dialog, so that banner is its only success
+        // signal — superseding the earlier always-silent stance that pointed users at Shortcuts' "Notify
+        // When Run". The Focus extension additionally banners refusals ("Couldn't switch") — that path has
+        // no dialog and lives with the deferred-launch gap (see `OutcomeFeedback`).
         let outcome = await FocusSwitchEnvironment.performSwitch(
             toFilterID: filter.id,
             feedback: .systemOwnedDialog

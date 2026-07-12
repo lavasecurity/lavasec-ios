@@ -53757,68 +53757,68 @@
         }
       }
     },
-    "Tells you when a Focus switches your filter while Lava is closed or in the background.": {
-      "comment": "Customization → Notifications: helper text for the Filter changes toggle.",
+    "Tells you when a Focus, Shortcut, or automation switches your filter while Lava is closed or in the background.": {
+      "comment": "Customization → Notifications: helper text for the Filter changes toggle (covers Focus, Shortcut, and automation switches).",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tells you when a Focus switches your filter while Lava is closed or in the background."
+            "value": "Tells you when a Focus, Shortcut, or automation switches your filter while Lava is closed or in the background."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava が終了中またはバックグラウンドのときに、集中モードがフィルターを切り替えたことをお知らせします。"
+            "value": "Lava が終了中またはバックグラウンドのときに、集中モードやショートカット、オートメーションがフィルターを切り替えたことをお知らせします。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當「專注模式」在 Lava 關閉或於背景執行時切換你的篩選器，便通知你。"
+            "value": "當「專注模式」、「捷徑」或自動化在 Lava 關閉或於背景執行時切換你的篩選器，便通知你。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当“专注模式”在 Lava 关闭或处于后台时切换你的筛选器，会通知你。"
+            "value": "当“专注模式”、“快捷指令”或自动化在 Lava 关闭或处于后台时切换你的筛选器，会通知你。"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Informiert dich, wenn ein Fokus deinen Filter wechselt, während Lava geschlossen ist oder im Hintergrund läuft."
+            "value": "Informiert dich, wenn ein Fokus, ein Kurzbefehl oder eine Automation deinen Filter wechselt, während Lava geschlossen ist oder im Hintergrund läuft."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vous prévient lorsqu'un mode de concentration change votre filtre alors que Lava est fermée ou en arrière-plan."
+            "value": "Vous prévient lorsqu'un mode de concentration, un raccourci ou une automatisation change votre filtre alors que Lava est fermée ou en arrière-plan."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Te avisa cuando un modo de concentración cambia tu filtro mientras Lava está cerrada o en segundo plano."
+            "value": "Te avisa cuando un modo de concentración, un atajo o una automatización cambia tu filtro mientras Lava está cerrada o en segundo plano."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lava가 종료되었거나 백그라운드에 있을 때 집중 모드가 필터를 전환하면 알려줘요."
+            "value": "Lava가 종료되었거나 백그라운드에 있을 때 집중 모드, 단축어 또는 자동화가 필터를 전환하면 알려줘요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avisa quando um Foco troca o seu filtro enquanto a Lava está fechada ou em segundo plano."
+            "value": "Avisa quando um Foco, um atalho ou uma automação troca o seu filtro enquanto a Lava está fechada ou em segundo plano."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ti avvisa quando una Full Immersion cambia il filtro mentre Lava è chiusa o in background."
+            "value": "Ti avvisa quando una Full Immersion, un comando rapido o un'automazione cambia il filtro mentre Lava è chiusa o in background."
           }
         }
       }

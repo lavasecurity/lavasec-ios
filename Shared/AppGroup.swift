@@ -60,12 +60,9 @@ enum LavaSecAppGroup {
     /// paused-resumed) posted via `LavaEventNotificationPoster`. Distinct from the connectivity prefix so
     /// the two families never collide or supersede each other.
     static let eventNotificationRequestIdentifierPrefix = "com.lavasec.event."
-    /// Best-effort "the app is in the foreground RIGHT NOW" flag (Bool), written by the app on scene-phase
-    /// transitions and read by the App Intents extension to gate the filter-switch notification to
-    /// closed/backgrounded only (the foreground app shows the switch in-UI, so a banner would be redundant).
-    /// Distinct from the REMOVED `AppForegroundActivityState` switch-defer machinery (no stale window, no
-    /// effect on the switch itself) — a wrong read at worst shows/suppresses one cosmetic notification.
-    static let appForegroundActiveDefaultsKeyName = "lavasec.app.foregroundActive"
+    // The "app is in the foreground RIGHT NOW" flag moved to LavaSecKit's
+    // `LavaAppForegroundPublication` (same stored key), which pairs it with a wall-clock stamp so the
+    // banner posters can age out a crash-stuck assert (Codex review #361).
     static let protectionNotificationKindUserInfoKeyName = "lavaNotificationKind"
     static let protectionNotificationIDUserInfoKeyName = "lavaNotificationID"
     static let protectionLastDeliveredNotificationIDDefaultsKeyName = "lavasec.protection.lastDeliveredNotificationID"

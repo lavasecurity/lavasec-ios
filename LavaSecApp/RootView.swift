@@ -199,8 +199,9 @@ struct RootView: View {
             viewModel.reconcileLiveActivity()
             // Foreground launch starts at .active, but onChange(of:scenePhase) doesn't fire for the initial
             // value — apply any pending Focus switch + warm the non-active filters here too. Also publish the
-            // lightweight foreground flag so the extension suppresses the (closed/backgrounded-only) Focus-
-            // switch notification while the app is visible (a banner would be redundant with the in-UI change).
+            // lightweight foreground flag so the headless posters (Focus extension + automation intent)
+            // suppress their (closed/backgrounded-only) switch notifications while the app is visible
+            // (a banner would be redundant with the in-UI change).
             viewModel.setAppForegroundActive(true)
             viewModel.warmNonActiveFiltersOnAppForeground()
             Task { await viewModel.reconcilePendingFilterSwitch() }
@@ -230,9 +231,12 @@ struct RootView: View {
                 security.showAppUnlockPrivacyMaskIfNeeded()
             case .background:
                 security.lockForBackgroundIfNeeded()
-                // Clear the foreground flag so a Focus switch while suspended/closed posts its notification
-                // (the only signal then). Cleared on .background, not transient .inactive (notification
-                // center / app switcher peeks), so an in-app peek doesn't flip it.
+                // Clear the foreground flag so a Focus or automation switch while suspended/closed posts
+                // its notification (the only signal then). Cleared on .background, not transient .inactive
+                // (notification center / app switcher peeks), so an in-app peek doesn't flip it. The
+                // crash/force-quit-while-visible path that never reaches .background is covered by the
+                // process-start + willTerminate clears (LavaSecApp) and the poster's
+                // LavaAppForegroundPublication.maxTrustedAge age-out (Codex review #361).
                 viewModel.setAppForegroundActive(false)
             @unknown default:
                 security.resetForegroundSession()
