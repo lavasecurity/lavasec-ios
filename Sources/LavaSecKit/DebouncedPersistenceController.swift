@@ -21,9 +21,11 @@ import Foundation
 ///   - ``flush(force:)`` with `force == true` cancels any pending debounce and
 ///     writes immediately, bypassing the dirty and interval gates.
 ///   - `lastWriteAt` always advances once a flush is due, but the dirty flag is
-///     cleared only when the `write` closure reports success (`true`). This
-///     matches the original "no app-group container / encode failed → stay dirty,
-///     retry next interval" behavior.
+///     cleared only when the `write` closure reports success (`true`). A failed
+///     write also re-arms the debounce itself, so "stay dirty, retry next
+///     interval" holds even when the owner goes idle and nothing calls
+///     ``markDirty()`` again (the scheduled tick consumed its token before the
+///     write ran; PR #351 round 8).
 ///
 /// Not `Sendable`: it is confined to its owner's serial queue (the tunnel's
 /// `dnsStateQueue`), exactly like the inline state it replaces — no internal
@@ -95,6 +97,19 @@ public final class DebouncedPersistenceController {
         if write(current) {
             isDirty = false
             writeCount += 1
+        } else {
+            // A failed write must re-arm its own retry: the scheduled tick that led here
+            // already consumed its pending token, so without re-scheduling the retry only
+            // happens on the next markDirty() — an IDLE owner never retries, silently
+            // degrading the documented "stay dirty, retry next interval" to "stay dirty,
+            // maybe retry someday" (Codex P2, PR #351 round 8; the tunnel's clear-floor
+            // prune relies on this retry to remove pre-clear rows a contended pass left
+            // committed-but-unpruned). A failed FORCED write marks dirty for the same
+            // reason — unpersisted state is dirty state regardless of which gate the
+            // write came through. `lastWriteAt` advanced above, so the retry lands one
+            // full writeInterval out — no tight loop.
+            isDirty = true
+            scheduleIfNeeded()
         }
     }
 

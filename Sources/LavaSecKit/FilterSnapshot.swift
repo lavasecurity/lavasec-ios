@@ -1,6 +1,6 @@
 import Foundation
 
-public enum FilterAction: String, Codable, Sendable {
+public enum FilterAction: String, Codable, Sendable, CaseIterable {
     case allow
     case block
 }

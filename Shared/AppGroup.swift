@@ -26,7 +26,7 @@ enum LavaSecAppGroup {
     /// Epoch-ms floor written by the app when the user clears Domain History; the read path
     /// hides log rows older than this so a clear takes effect without a cross-process sqlite
     /// write (the tunnel prunes them physically on its next retention pass).
-    static let dnsEventLogClearedAtKey = "dnsEventLogClearedAtMs"
+    static let dnsEventLogClearedAtKeyName = "dnsEventLogClearedAtMs"
     static let networkActivityLogFilename = "network-activity-log.json"
     /// OBS R2: the append-only incident ledger — tunnel-writes, app-reads-at-report-time.
     /// Decoupled from the rate-limiter's policy stores (which forget by design); nothing
@@ -54,7 +54,7 @@ enum LavaSecAppGroup {
     /// sibling (not any of the config/command locks) so log rotation never blocks — or is
     /// blocked by — a filter publish or a protection command.
     static let vpnDebugLogRotationLockFilename = vpnDebugLogFilename + ".rotate.lock"
-    static let protectionNotificationRouteUserInfoKey = "lavaRoute"
+    static let protectionNotificationRouteUserInfoKeyName = "lavaRoute"
     static let protectionNotificationGuardRouteValue = "guard"
     static let protectionNotificationRequestIdentifierPrefix = "com.lavasec.protection."
     /// Request-identifier prefix for the simple EVENT notifications (filter switched / couldn't apply /
@@ -66,32 +66,32 @@ enum LavaSecAppGroup {
     /// closed/backgrounded only (the foreground app shows the switch in-UI, so a banner would be redundant).
     /// Distinct from the REMOVED `AppForegroundActivityState` switch-defer machinery (no stale window, no
     /// effect on the switch itself) — a wrong read at worst shows/suppresses one cosmetic notification.
-    static let appForegroundActiveDefaultsKey = "lavasec.app.foregroundActive"
-    static let protectionNotificationKindUserInfoKey = "lavaNotificationKind"
-    static let protectionNotificationIDUserInfoKey = "lavaNotificationID"
-    static let protectionLastDeliveredNotificationIDDefaultsKey = "lavasec.protection.lastDeliveredNotificationID"
-    static let protectionLastDeliveredNotificationAtDefaultsKey = "lavasec.protection.lastDeliveredNotificationAt"
-    static let protectionUnresolvedProblemNotificationIDDefaultsKey = "lavasec.protection.unresolvedProblemNotificationID"
-    static let protectionUnresolvedProblemNotificationKindDefaultsKey = "lavasec.protection.unresolvedProblemNotificationKind"
-    static let protectionNotificationKindSchemaVersionDefaultsKey = "lavasec.protection.notificationKindSchemaVersion"
+    static let appForegroundActiveDefaultsKeyName = "lavasec.app.foregroundActive"
+    static let protectionNotificationKindUserInfoKeyName = "lavaNotificationKind"
+    static let protectionNotificationIDUserInfoKeyName = "lavaNotificationID"
+    static let protectionLastDeliveredNotificationIDDefaultsKeyName = "lavasec.protection.lastDeliveredNotificationID"
+    static let protectionLastDeliveredNotificationAtDefaultsKeyName = "lavasec.protection.lastDeliveredNotificationAt"
+    static let protectionUnresolvedProblemNotificationIDDefaultsKeyName = "lavasec.protection.unresolvedProblemNotificationID"
+    static let protectionUnresolvedProblemNotificationKindDefaultsKeyName = "lavasec.protection.unresolvedProblemNotificationKind"
+    static let protectionNotificationKindSchemaVersionDefaultsKeyName = "lavasec.protection.notificationKindSchemaVersion"
     // Written by the app only after `saveToPreferences` confirms Connect-On-Demand
     // is armed/disarmed, and read by the tunnel to gate self-reconnect: a self-
     // cancel only recovers if on-demand will bring the tunnel back, and the app
     // persists `protectionEnabled = true` even when arming on-demand fails.
-    static let protectionOnDemandConfirmedEnabledDefaultsKey = "lavasec.protection.onDemandConfirmedEnabled"
+    static let protectionOnDemandConfirmedEnabledDefaultsKeyName = "lavasec.protection.onDemandConfirmedEnabled"
     // Deadline (Double, timeIntervalSinceReferenceDate) marking a Dynamic Island
     // Restart as in progress. Written by the Restart command, read by the app's
     // status reconcile so it reports `.restarting` (instead of clobbering the
     // transient with `.on`/end via the status notifications the restart emits) and
     // so a second concurrent Restart tap is rejected. Stored as a deadline so a
     // killed background intent window auto-clears it.
-    static let protectionRestartInFlightUntilDefaultsKey = "lavasec.protection.restartInFlightUntil"
+    static let protectionRestartInFlightUntilDefaultsKeyName = "lavasec.protection.restartInFlightUntil"
     // The tunnel persists its recent self-reconnect attempt timestamps ([Double] epoch seconds)
     // here for the cooldown/cap policy. Shared so the app can READ the self-reconnect timeline for
     // a bug report's incident summary (LAV-94 B) without touching the tunnel's frozen recovery
-    // path. The tunnel's own `selfReconnectAttemptsDefaultsKey` literal is locked to this value by
+    // path. The tunnel's own `selfReconnectAttemptsDefaultsKeyName` literal is locked to this value by
     // a source test (PacketTunnelDNSRuntimeSourceTests) so the two can never drift.
-    static let selfReconnectAttemptTimesDefaultsKey = "tunnel.selfReconnectAttemptTimes"
+    static let selfReconnectAttemptTimesDefaultsKeyName = "tunnel.selfReconnectAttemptTimes"
     // Durable self-reconnect GAP evidence (LAV-92/93 observability). The attempt store above
     // forgets BY DESIGN (productive credit deletes the recovered attempt; the report prunes to
     // the 600 s policy window), so these carry the field-visible record instead: GapStartedAt
@@ -99,9 +99,9 @@ enum LavaSecAppGroup {
     // serving again — the honest Guard-off window, however long the relaunch took); GapCount
     // is the cumulative committed-teardown count. Written by the tunnel only (epoch seconds /
     // integer); the app READS them into the bug report's incident summary.
-    static let selfReconnectGapStartedAtDefaultsKey = "tunnel.selfReconnectGapStartedAt"
-    static let selfReconnectGapEndedAtDefaultsKey = "tunnel.selfReconnectGapEndedAt"
-    static let selfReconnectGapCountDefaultsKey = "tunnel.selfReconnectGapCount"
+    static let selfReconnectGapStartedAtDefaultsKeyName = "tunnel.selfReconnectGapStartedAt"
+    static let selfReconnectGapEndedAtDefaultsKeyName = "tunnel.selfReconnectGapEndedAt"
+    static let selfReconnectGapCountDefaultsKeyName = "tunnel.selfReconnectGapCount"
     // Aliased to the LavaSecKit stores so the app, tunnel, intents, and the
     // stores can never drift on key strings.
     static let protectionActiveSessionIDDefaultsKey = ProtectionSessionStore.Keys.activeSessionID
@@ -134,8 +134,8 @@ enum LavaSecAppGroup {
     static let filterArtifactPublishLockFilename = "filter-artifact-publish.lock"
     static let filterArtifactsDirectoryName = "filter-artifacts"
     static let filterArtifactPointerFilename = "current.json"
-    static let customizationLavaGuardLookDefaultsKey = "lavasec.customization.lavaGuardLook"
-    static let latencyOperationIDOptionKey = "lavasec.latency.operationID"
+    static let customizationLavaGuardLookDefaultsKeyName = "lavasec.customization.lavaGuardLook"
+    static let latencyOperationIDOptionKeyName = "lavasec.latency.operationID"
 
     static var containerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
@@ -159,8 +159,8 @@ enum LavaSecAppGroup {
         ProtectionConnectivityNotificationStore.migrateLegacyKindSchemaIfNeeded(
             in: defaults,
             keys: ProtectionConnectivityNotificationStore.DefaultsKeys(
-                schemaVersion: protectionNotificationKindSchemaVersionDefaultsKey,
-                unresolvedProblemKind: protectionUnresolvedProblemNotificationKindDefaultsKey
+                schemaVersion: protectionNotificationKindSchemaVersionDefaultsKeyName,
+                unresolvedProblemKind: protectionUnresolvedProblemNotificationKindDefaultsKeyName
             )
         )
     }
@@ -415,6 +415,16 @@ enum EnergyCounter: String, CaseIterable {
     case smokeProbeWire   // smoke-probe lever: probes that hit the wire (radio)
     case smokeProbeSkip   // smoke-probe lever: probes suppressed by NRG-3a evidence
     case focusPollTick    // focus-poll lever: 60 s config-poll wakes
+    // SQLite depth-store write path (UR-53 follow-up; energy doc H3.2 re-specced to the
+    // batched writer). Fed from DNSEventLog's pulled-per-tick instrumentation snapshot.
+    case sqliteFlush      // committed best-effort batch flushes
+    case sqliteFlushRows  // rows committed via those flushes
+    case sqliteFlushRetry // failed flushes retained for retry (SQLITE_BUSY riding, etc.)
+    case sqlitePrunePass  // prune passes on the ~30 s diagnostics cadence
+    case sqlitePruneRows  // events aged out by those passes
+    case sqliteSweepRun   // orphan-domain sweeps actually taken (post-#339 gate)
+    // Field thermal signal for UR-53-class "device feels warm" reports.
+    case thermalTransition // ProcessInfo.thermalStateDidChange notifications observed
 }
 
 final class EnergyCounters: @unchecked Sendable {
@@ -424,6 +434,9 @@ final class EnergyCounters: @unchecked Sendable {
     private var isActive = false
     private var counts: [EnergyCounter: Int] = [:]
     private var doqHandshakeMsSum = 0
+    private var sqliteWALFrames: Int64 = 0
+    private var lastCPUTimeMs = 0.0
+    private var thermalObserver: (any NSObjectProtocol)?
     private var windowStartedAt = Date()
     private var lastFlushAt = Date()
     private static let flushInterval: TimeInterval = 60
@@ -444,9 +457,70 @@ final class EnergyCounters: @unchecked Sendable {
         isActive = true
         counts = [:]
         doqHandshakeMsSum = 0
+        sqliteWALFrames = 0
+        // CPU baseline: rusage is process-cumulative, so the first window's delta must
+        // start at activation, not at zero, or it would inherit pre-activation CPU.
+        lastCPUTimeMs = Self.processCPUTimeMs()
         windowStartedAt = now
         lastFlushAt = now
+        // Count thermal-state transitions for the window (field signal for UR-53-class
+        // "device feels warm" reports). Re-registering per activation keeps one observer
+        // per (re)started tunnel session; the closure only bumps under the lock.
+        // ORDER is the fix for the re-activation double-count, and it must be
+        // remove-BEFORE-add: NotificationCenter fixes a post's delivery set at post time,
+        // so a transition posted while both observers are registered merely BLOCKS both
+        // callbacks on this lock and then bumps twice after unlock — holding the lock
+        // across the swap serializes the bumps without deduplicating them (Codex P3,
+        // PR #351 round 6, correcting the atomicity framing from the earlier rounds).
+        // With remove-first there is never an instant with two observers; the residual is
+        // an at-most-one UNDERcount for a transition landing in the remove→add gap of a
+        // startTunnel activation — the right side to err on for a QA rate counter.
+        if let previousObserver = thermalObserver {
+            NotificationCenter.default.removeObserver(previousObserver)
+        }
+        thermalObserver = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.bump(.thermalTransition)
+        }
         lock.unlock()
+    }
+
+    // Feed one pulled DNSEventLog write-path window (the tunnel pulls a snapshot per 60 s
+    // Focus tick). Counts and the WAL-frame gauge land under ONE lock so a concurrent flush
+    // can't split a window across two summary lines.
+    func recordSQLiteWindow(_ snapshot: DNSEventLog.WriteInstrumentationSnapshot) {
+        lock.lock()
+        if isActive {
+            counts[.sqliteFlush, default: 0] += snapshot.flushes
+            counts[.sqliteFlushRows, default: 0] += snapshot.flushedRows
+            counts[.sqliteFlushRetry, default: 0] += snapshot.flushRetries
+            counts[.sqlitePrunePass, default: 0] += snapshot.prunePasses
+            counts[.sqlitePruneRows, default: 0] += snapshot.prunedRows
+            counts[.sqliteSweepRun, default: 0] += snapshot.orphanSweeps
+            sqliteWALFrames += snapshot.walFramesWritten
+        }
+        lock.unlock()
+    }
+
+    private static func processCPUTimeMs() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        let user = Double(usage.ru_utime.tv_sec) * 1000 + Double(usage.ru_utime.tv_usec) / 1000
+        let system = Double(usage.ru_stime.tv_sec) * 1000 + Double(usage.ru_stime.tv_usec) / 1000
+        return user + system
+    }
+
+    private static func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 
     // Atomic increment only — never touches the log (the debug-log lever must not be
@@ -480,8 +554,17 @@ final class EnergyCounters: @unchecked Sendable {
         let elapsed = max(1, now.timeIntervalSince(windowStartedAt))
         let snapshot = counts
         let handshakeMsSum = doqHandshakeMsSum
+        let walFrames = sqliteWALFrames
+        // Process CPU (user+system) consumed inside this window. The tunnel is the only
+        // process that flushes, so this is the DNS-serving process's compute footprint —
+        // the field-side stand-in for the wired Activity Monitor attribution the UR-53
+        // follow-up ran (no public per-process API beyond rusage exists on iOS).
+        let cpuNowMs = Self.processCPUTimeMs()
+        let cpuDeltaMs = max(0, cpuNowMs - lastCPUTimeMs)
+        lastCPUTimeMs = cpuNowMs
         counts = [:]
         doqHandshakeMsSum = 0
+        sqliteWALFrames = 0
         windowStartedAt = now
         lastFlushAt = now
         lock.unlock()
@@ -496,6 +579,14 @@ final class EnergyCounters: @unchecked Sendable {
         if handshakes > 0 {
             details["doqHandshakeAvgMs"] = "\(handshakeMsSum / handshakes)"
         }
+        // Gauges (not per-minute counters): the store's flash-write volume for the window
+        // (WAL frames × 4 KB page), the process CPU spent, and the device thermal state at
+        // flush time. Counts + durations only — never a queried domain (the
+        // LavaSecDeviceDebugLog privacy audit).
+        details["sqliteWalKB"] = "\(walFrames * 4)"
+        details["cpuMs"] = String(format: "%.0f", cpuDeltaMs)
+        details["cpuMsPerMin"] = String(format: "%.1f", cpuDeltaMs / elapsed * 60)
+        details["thermalState"] = Self.thermalStateLabel(ProcessInfo.processInfo.thermalState)
         LavaSecDeviceDebugLog.append(component: "nrg", event: "nrg-counters", details: details)
         EnergySignpost.event("nrg-window")   // mark each counter window on the Instruments timeline
     }

@@ -36,13 +36,13 @@ final class AppViewModelSourceTests: XCTestCase {
             startingAt: "defaults.set(",
             endingBefore: "if notification.kind.isProblem {"
         )
-        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         let problemBranch = try sourceBlock(
             in: source,
             startingAt: "if notification.kind.isProblem {",
             endingBefore: "private func removeSupersededNotifications("
         )
-        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         // No recovery-acknowledgement delivery path remains in recordDelivery.
         XCTAssertFalse(recordBlock.contains(".reconnected"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
@@ -65,7 +65,7 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "let requestIdentifiers = identifiers.map {"
         )
         XCTAssertTrue(
-            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
         )
     }
@@ -86,7 +86,7 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "// Use the pre-clear"
         )
         XCTAssertTrue(
-            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "Coverage with no outstanding banner must lift the duplicate-guard id so a lapsed reconnect can re-post."
         )
     }
@@ -258,7 +258,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(enableBlock.contains("makeLatencyTrace(operationID: operationID, operationKind: \"turnOn\")"))
         XCTAssertTrue(enableBlock.contains("trace.beginSpan(\"action.turnOn\""))
         XCTAssertTrue(enableBlock.contains("startVPNTunnel(options: ["))
-        XCTAssertTrue(enableBlock.contains("LavaSecAppGroup.latencyOperationIDOptionKey: operationID.rawValue as NSString"))
+        XCTAssertTrue(enableBlock.contains("LavaSecAppGroup.latencyOperationIDOptionKeyName: operationID.rawValue as NSString"))
         XCTAssertTrue(enableBlock.contains("span.end(details: [\"status\": actionStatus"))
 
         XCTAssertTrue(disableBlock.contains("operationID: LatencyOperationID = .make()"))
@@ -636,7 +636,7 @@ final class AppViewModelSourceTests: XCTestCase {
         // The toggle setter lives on CustomizationController since the Phase D5 peel;
         // the ProtectionHapticFeedback choke point (and the protection-outcome play
         // path) deliberately stays hub-side — the two meet only at the shared
-        // preferenceDefaultsKey.
+        // preferenceDefaultsKeyName.
         let customizationSource = try readSource(.customizationController)
         let setterBlock = try sourceBlock(
             in: customizationSource,
@@ -647,12 +647,12 @@ final class AppViewModelSourceTests: XCTestCase {
         // The single choke point reads the toggle so disabling it silences protection,
         // guardian-tap, and every outcome haptic at once. Default-on preserves the
         // prior always-on behavior for a missing key.
-        XCTAssertTrue(hapticBlock.contains("static let preferenceDefaultsKey = \"lavasec.customization.lavaHaptics\""))
+        XCTAssertTrue(hapticBlock.contains("static let preferenceDefaultsKeyName = \"lavasec.customization.lavaHaptics\""))
         XCTAssertTrue(hapticBlock.contains("static var isEnabled: Bool"))
-        XCTAssertTrue(hapticBlock.contains("UserDefaults.standard.object(forKey: preferenceDefaultsKey) as? Bool ?? true"))
+        XCTAssertTrue(hapticBlock.contains("UserDefaults.standard.object(forKey: preferenceDefaultsKeyName) as? Bool ?? true"))
         XCTAssertTrue(hapticBlock.contains("guard isEnabled else {"))
         // The controller's toggle writes the SAME key the choke point reads.
-        XCTAssertTrue(customizationSource.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKey"))
+        XCTAssertTrue(customizationSource.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKeyName"))
 
         // New outcome cases reuse the four physical feedback patterns.
         XCTAssertTrue(hapticBlock.contains("case actionSucceeded"))

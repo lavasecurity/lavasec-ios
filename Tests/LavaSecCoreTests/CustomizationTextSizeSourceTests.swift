@@ -50,9 +50,9 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
                       "Match System must default to true (follow the system).")
         XCTAssertTrue(source.contains("static let systemDefault: LavaTextSize = .large"),
                       "The override default must equal the system default, so turning Match System off doesn't jump the size.")
-        XCTAssertTrue(source.contains("defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKey)"),
+        XCTAssertTrue(source.contains("defaults.set(matchesSystem, forKey: textSizeMatchesSystemDefaultsKeyName)"),
                       "The Match System toggle must be persisted.")
-        XCTAssertTrue(source.contains("defaults.set(size.rawValue, forKey: textSizeDefaultsKey)"),
+        XCTAssertTrue(source.contains("defaults.set(size.rawValue, forKey: textSizeDefaultsKeyName)"),
                       "The chosen text size must be persisted.")
     }
 
@@ -62,7 +62,7 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
         let controllerSource = try readSource(.customizationController)
         XCTAssertTrue(controllerSource.contains("static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize"),
                       "There must be a system-size → LavaTextSize mapping to seed from.")
-        XCTAssertTrue(controllerSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKey) == nil"),
+        XCTAssertTrue(controllerSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKeyName) == nil"),
                       "The seed must run only on opt-out and only when no Lava size was ever saved (a saved size wins).")
 
         let settingsSource = try readSource(.customizationSettingsView)

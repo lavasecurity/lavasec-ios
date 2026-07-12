@@ -27,7 +27,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         // scheduleNext must early-return unless the app-group opt-in flag is set.
         let scheduleBlock = try sourceBlock(in: app, startingAt: "static func scheduleNext() {", endingBefore: "static func handle(")
         XCTAssertTrue(
-            scheduleBlock.contains("guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey)"),
+            scheduleBlock.contains("guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName)"),
             "Background scheduling must be gated behind the off-by-default opt-in flag."
         )
         // Exactly-once completion + cancellation-on-expiration discipline preserved.
@@ -122,7 +122,7 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         // or running the headless model — the flag is the off-switch for the unproven
         // background publisher.
         let guardIdx = try XCTUnwrap(
-            handle.range(of: "guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKey) else {")?.lowerBound,
+            handle.range(of: "guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else {")?.lowerBound,
             "handle() must re-read the opt-in flag inside the work task."
         )
         let modelIdx = try XCTUnwrap(handle.range(of: "AppViewModel(loadVPNState: false, headless: true)")?.lowerBound)

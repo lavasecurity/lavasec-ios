@@ -210,14 +210,14 @@ enum LavaProtectionCommandService {
     private static func claimRestartInFlight(window: TimeInterval, now: Date) -> Date? {
         (try? LavaProtectionCommandFileLock.withExclusiveLock { () -> Date? in
             let defaults = LavaSecAppGroup.sharedDefaults
-            let existing = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey)
+            let existing = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName)
             guard existing <= now.timeIntervalSinceReferenceDate else {
                 return nil
             }
             let deadline = now.addingTimeInterval(window)
             defaults.set(
                 deadline.timeIntervalSinceReferenceDate,
-                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey
+                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
             )
             return deadline
         }) ?? nil
@@ -232,12 +232,12 @@ enum LavaProtectionCommandService {
     private static func clearRestartInFlight(claimedDeadline: Date) -> Bool {
         (try? LavaProtectionCommandFileLock.withExclusiveLock { () -> Bool in
             let defaults = LavaSecAppGroup.sharedDefaults
-            let stored = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey)
+            let stored = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName)
             guard stored == claimedDeadline.timeIntervalSinceReferenceDate else {
                 return false
             }
             defaults.removeObject(
-                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey
+                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
             )
             return true
         }) ?? false
@@ -591,7 +591,7 @@ enum LavaProtectionCommandService {
     }
 
     private static func persistedShieldStyle(defaults: UserDefaults) -> GuardianShieldStyle {
-        guard let rawValue = defaults.string(forKey: LavaSecAppGroup.customizationLavaGuardLookDefaultsKey),
+        guard let rawValue = defaults.string(forKey: LavaSecAppGroup.customizationLavaGuardLookDefaultsKeyName),
               let shieldStyle = GuardianShieldStyle(rawValue: rawValue)
         else {
             return .original

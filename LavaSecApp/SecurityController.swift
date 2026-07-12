@@ -129,7 +129,7 @@ final class SecurityController: ObservableObject {
     private var isAuthenticatingAppUnlock = false
     private var isBiometricAuthenticationInProgress = false
 
-    private let biometricEnabledDefaultsKey = "securityBiometricEnabled"
+    private let biometricEnabledDefaultsKeyName = "securityBiometricEnabled"
     init(
         defaults: UserDefaults = LavaSecAppGroup.sharedDefaults,
         keychainStore: SecurityPasscodeKeychainStore = SecurityPasscodeKeychainStore()
@@ -140,13 +140,13 @@ final class SecurityController: ObservableObject {
         #if DEBUG
         if ProcessInfo.processInfo.environment["LAVA_UI_TEST_RESET_SECURITY"] == "1" {
             try? keychainStore.delete()
-            defaults.removeObject(forKey: biometricEnabledDefaultsKey)
-            defaults.removeObject(forKey: SecurityProtectedSurfaceStorage.defaultsKey)
+            defaults.removeObject(forKey: biometricEnabledDefaultsKeyName)
+            defaults.removeObject(forKey: SecurityProtectedSurfaceStorage.defaultsKeyName)
         }
         #endif
 
         isPasscodeEnabled = (try? keychainStore.load()) != nil
-        isBiometricEnabled = defaults.bool(forKey: biometricEnabledDefaultsKey) && isPasscodeEnabled
+        isBiometricEnabled = defaults.bool(forKey: biometricEnabledDefaultsKeyName) && isPasscodeEnabled
         protectedSurfaces = SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults)
         refreshBiometricKind()
 
@@ -248,7 +248,7 @@ final class SecurityController: ObservableObject {
     func setBiometricEnabled(_ isEnabled: Bool) async {
         guard isPasscodeEnabled else {
             isBiometricEnabled = false
-            defaults.set(false, forKey: biometricEnabledDefaultsKey)
+            defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
             return
         }
 
@@ -256,7 +256,7 @@ final class SecurityController: ObservableObject {
             refreshBiometricKind()
             guard faceIDUsageDescriptionIsPresent else {
                 isBiometricEnabled = false
-                defaults.set(false, forKey: biometricEnabledDefaultsKey)
+                defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
                 statusMessage = "%@ is not available in this build".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
                 return
             }
@@ -268,7 +268,7 @@ final class SecurityController: ObservableObject {
         }
 
         isBiometricEnabled = isEnabled
-        defaults.set(isEnabled, forKey: biometricEnabledDefaultsKey)
+        defaults.set(isEnabled, forKey: biometricEnabledDefaultsKeyName)
         statusMessage = nil
     }
 
@@ -445,7 +445,7 @@ final class SecurityController: ObservableObject {
 
         guard canEvaluate else {
             isBiometricEnabled = false
-            defaults.set(false, forKey: biometricEnabledDefaultsKey)
+            defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
             return
         }
     }
@@ -454,7 +454,7 @@ final class SecurityController: ObservableObject {
         refreshBiometricKind()
         guard faceIDUsageDescriptionIsPresent else {
             isBiometricEnabled = false
-            defaults.set(false, forKey: biometricEnabledDefaultsKey)
+            defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
             return await requestPasscode(surface: surface, reason: reason)
         }
 
@@ -519,7 +519,7 @@ final class SecurityController: ObservableObject {
     private func clearSecurityPreferencesAfterPasscodeRemoval() {
         isBiometricEnabled = false
         protectedSurfaces = []
-        defaults.set(false, forKey: biometricEnabledDefaultsKey)
+        defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
         SecurityProtectedSurfaceStorage.saveProtectedSurfaces([], to: defaults)
     }
 }

@@ -41,7 +41,7 @@ final class FocusFilterSwitchCoordinationTests: XCTestCase {
     func testFocusSwitchDiagnosticDecodesLegacyRecordWithoutReasonKey() throws {
         let defaults = makeDefaults()
         let legacyJSON = #"{"at":4242,"outcome":"committed","targetFilterID":"filter-extra"}"#
-        defaults.set(Data(legacyJSON.utf8), forKey: FocusSwitchDiagnostics.defaultsKey)
+        defaults.set(Data(legacyJSON.utf8), forKey: FocusSwitchDiagnostics.defaultsKeyName)
 
         let decoded = try XCTUnwrap(
             FocusSwitchDiagnostics.last(in: defaults),

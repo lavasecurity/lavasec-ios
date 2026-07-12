@@ -237,6 +237,63 @@ final class DebouncedPersistenceControllerTests: XCTestCase {
         XCTAssertEqual(controller.writeCount, 1)
     }
 
+    /// A failed scheduled write must re-arm its own retry: the tick that led to the write
+    /// already consumed its token, so without self-re-arming the retry would only happen on
+    /// the next markDirty() — an IDLE owner never retries, degrading "stay dirty, retry next
+    /// interval" to "retry only if something else changes". The tunnel's clear-floor prune
+    /// relies on this retry to remove pre-clear rows a contended pass left
+    /// committed-but-unpruned (Codex P2, PR #351 round 8).
+    func testFailedScheduledWriteReArmsItsOwnRetryWithoutAnotherMarkDirty() {
+        let scheduler = ManualSettleWorkScheduler()
+        let clock = Clock(t0)
+        var writeShouldSucceed = false
+        var attempts = 0
+        let controller = makeController(scheduler: scheduler, clock: clock) { _ in
+            attempts += 1
+            return writeShouldSucceed
+        }
+
+        controller.markDirty()
+        scheduler.fire()
+        XCTAssertEqual(attempts, 1)
+        XCTAssertTrue(controller.isDirty)
+        XCTAssertTrue(controller.hasPendingFlush, "The failed write must have scheduled its own retry.")
+
+        // NO further markDirty: the re-armed tick alone must retry once the interval passes.
+        writeShouldSucceed = true
+        clock.value = t0.addingTimeInterval(interval)
+        scheduler.fire()
+        XCTAssertEqual(attempts, 2, "The self-armed retry must re-run the write with no external nudge.")
+        XCTAssertFalse(controller.isDirty)
+        XCTAssertEqual(controller.writeCount, 1)
+    }
+
+    /// A failed FORCED write marks dirty and arms the retry too — unpersisted state is dirty
+    /// state regardless of which gate the write came through (the stop path force-flushes a
+    /// pass whose prune half can fail under a clear-contended lock; PR #351 round 8).
+    func testFailedForcedWriteMarksDirtyAndArmsRetry() {
+        let scheduler = ManualSettleWorkScheduler()
+        let clock = Clock(t0)
+        var writeShouldSucceed = false
+        var attempts = 0
+        let controller = makeController(scheduler: scheduler, clock: clock) { _ in
+            attempts += 1
+            return writeShouldSucceed
+        }
+
+        // Clean controller: nothing marked dirty before the force.
+        controller.flush(force: true)
+        XCTAssertEqual(attempts, 1)
+        XCTAssertTrue(controller.isDirty, "A failed forced write left unpersisted state — that is dirty state.")
+        XCTAssertTrue(controller.hasPendingFlush)
+
+        writeShouldSucceed = true
+        clock.value = t0.addingTimeInterval(interval)
+        scheduler.fire()
+        XCTAssertEqual(attempts, 2)
+        XCTAssertFalse(controller.isDirty)
+    }
+
     func testWriteReceivesTheAuthoritativeFlushTimestamp() {
         let scheduler = ManualSettleWorkScheduler()
         let clock = Clock(t0)

@@ -172,7 +172,7 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
     }
 
     func testResealingPayloadUpdatesContentsButKeepsEveryUnlockPath() throws {
-        let deviceSecret = "device-secret-32-byte-random-value"
+        let sampleDeviceSecretValue = "device-secret-32-byte-random-value"
         let phrase = "mavi nopa rytu seko hula pemi davo ciny"
         let serverRecoveryShare = "server-share-32-byte-random-value"
 
@@ -182,7 +182,7 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
         )
         let envelope = try ZeroKnowledgeBackupEnvelope.makePasswordlessForTesting(
             payload: original,
-            deviceSecret: deviceSecret,
+            deviceSecret: sampleDeviceSecretValue,
             serverRecoveryShare: serverRecoveryShare,
             recoveryPhrase: phrase
         )
@@ -195,16 +195,16 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
                 activeFilterID: "f2"
             )
         )
-        let resealed = try envelope.resealingPayload(updated, deviceSecret: deviceSecret)
+        let resealed = try envelope.resealingPayload(updated, deviceSecret: sampleDeviceSecretValue)
 
         // Key slots are byte-identical, so EVERY existing unlock path still works — and now
         // decrypts the updated payload (the new filter survives a restore).
         XCTAssertEqual(resealed.keySlots, envelope.keySlots)
-        XCTAssertEqual(try resealed.decryptWithKeychainSecret(deviceSecret), updated)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(sampleDeviceSecretValue), updated)
         XCTAssertEqual(try resealed.decryptWithAssistedRecoveryPhrase(phrase), updated)
-        XCTAssertEqual(try resealed.decryptWithKeychainSecret(deviceSecret).restoredFilterLibrary()?.filters.count, 2)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(sampleDeviceSecretValue).restoredFilterLibrary()?.filters.count, 2)
         // The original envelope is untouched (value semantics).
-        XCTAssertEqual(try envelope.decryptWithKeychainSecret(deviceSecret), original)
+        XCTAssertEqual(try envelope.decryptWithKeychainSecret(sampleDeviceSecretValue), original)
     }
 
     func testRekeyingDeviceSlotLetsANewDeviceReSeal() throws {
@@ -223,9 +223,9 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
 
         // A new-device restore via recovery phrase: re-key the device slot with THIS device's
         // own secret (the old device secret isn't available here).
-        let newDeviceSecret = "new-device-secret-value"
+        let sampleNewDeviceSecretValue = "new-device-secret-value"
         let rekeyed = try envelope.rekeyingDeviceSlot(
-            newDeviceSecret: newDeviceSecret,
+            newDeviceSecret: sampleNewDeviceSecretValue,
             unlockingAssistedRecoveryPhrase: phrase
         )
 
@@ -233,7 +233,7 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
         // phrase still works; the OLD device secret no longer unlocks the re-keyed slot — so a
         // later re-seal on the new device can recover the payload key via its own secret.
         XCTAssertEqual(rekeyed.keySlots.map(\.kind), envelope.keySlots.map(\.kind))
-        XCTAssertEqual(try rekeyed.decryptWithKeychainSecret(newDeviceSecret), payload)
+        XCTAssertEqual(try rekeyed.decryptWithKeychainSecret(sampleNewDeviceSecretValue), payload)
         XCTAssertEqual(try rekeyed.decryptWithAssistedRecoveryPhrase(phrase), payload)
         XCTAssertThrowsError(try rekeyed.decryptWithKeychainSecret("old-device-secret-value"))
 
@@ -245,8 +245,8 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
                 activeFilterID: "f2"
             )
         )
-        let resealed = try rekeyed.resealingPayload(updated, deviceSecret: newDeviceSecret)
-        XCTAssertEqual(try resealed.decryptWithKeychainSecret(newDeviceSecret), updated)
+        let resealed = try rekeyed.resealingPayload(updated, deviceSecret: sampleNewDeviceSecretValue)
+        XCTAssertEqual(try resealed.decryptWithKeychainSecret(sampleNewDeviceSecretValue), updated)
     }
 
     func testPasswordlessEnvelopeCanIncludeServerGatedPasskeySlot() throws {

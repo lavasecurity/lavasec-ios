@@ -10,10 +10,13 @@ public enum SecurityProtectedSurface: String, CaseIterable, Codable, Sendable {
 }
 
 public enum SecurityProtectedSurfaceStorage {
-    public static let defaultsKey = "securityProtectedSurfaces"
+    /// The UserDefaults key persisting the set of surfaces gated behind app authentication.
+    public static let defaultsKeyName = "securityProtectedSurfaces"
+    /// Compatibility alias for existing consumers of the public package product.
+    public static let defaultsKey = defaultsKeyName
 
     public static func loadProtectedSurfaces(from defaults: UserDefaults) -> Set<SecurityProtectedSurface> {
-        let values = defaults.stringArray(forKey: defaultsKey) ?? []
+        let values = defaults.stringArray(forKey: defaultsKeyName) ?? []
         return Set(values.compactMap(SecurityProtectedSurface.init(rawValue:)))
     }
 
@@ -22,7 +25,7 @@ public enum SecurityProtectedSurfaceStorage {
         to defaults: UserDefaults
     ) {
         let values = surfaces.map(\.rawValue).sorted()
-        defaults.set(values, forKey: defaultsKey)
+        defaults.set(values, forKey: defaultsKeyName)
     }
 
     public static func isProtected(

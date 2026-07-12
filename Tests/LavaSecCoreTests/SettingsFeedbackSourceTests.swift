@@ -749,7 +749,7 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("private let automaticBackupDelay: UInt64 = 30 * 60 * 1_000_000_000"))
         XCTAssertTrue(appSource.contains("backup.scheduleAutomaticBackupAfterConfigurationChange()"))
         XCTAssertTrue(source.contains("try? await Task.sleep(nanoseconds: automaticBackupDelay)"))
-        XCTAssertTrue(preferenceBlock.contains("UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKey)"))
+        XCTAssertTrue(preferenceBlock.contains("UserDefaults.standard.set(isEnabled, forKey: automaticBackupEnabledDefaultsKeyName)"))
         XCTAssertFalse(preferenceBlock.contains("scheduleAutomaticBackupAfterConfigurationChange()"))
         // The marker is recorded through the version-checked store helper
         // (BackupEnvelopeStore.recordUploadIfCurrent — executable in BackupEnvelopeStoreTests

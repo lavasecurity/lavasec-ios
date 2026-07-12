@@ -102,7 +102,7 @@ private final class ProtectionUserNotificationController {
             // exact-id duplicate guard so a later lapse back to a real problem with the same
             // truncated-second event id isn't suppressed by notification(for:)'s id guard
             // (the outstanding-problem case clears it via clearResolvedProblemNotifications).
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)
         }
 
         // Use the pre-clear `history`: clearResolvedProblemNotifications wipes the
@@ -146,10 +146,10 @@ private final class ProtectionUserNotificationController {
             content.body = notification.body
             content.interruptionLevel = .passive
             content.userInfo = [
-                LavaSecAppGroup.protectionNotificationRouteUserInfoKey:
+                LavaSecAppGroup.protectionNotificationRouteUserInfoKeyName:
                     LavaSecAppGroup.protectionNotificationGuardRouteValue,
-                LavaSecAppGroup.protectionNotificationKindUserInfoKey: notification.kind.rawValue,
-                LavaSecAppGroup.protectionNotificationIDUserInfoKey: notification.identifier
+                LavaSecAppGroup.protectionNotificationKindUserInfoKeyName: notification.kind.rawValue,
+                LavaSecAppGroup.protectionNotificationIDUserInfoKeyName: notification.identifier
             ]
 
             let request = UNNotificationRequest(
@@ -189,18 +189,18 @@ private final class ProtectionUserNotificationController {
 
     private var notificationHistory: ProtectionConnectivityNotificationHistory {
         let unresolvedProblemKind = defaults.string(
-            forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey
+            forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName
         ).flatMap(ProtectionConnectivityNotificationKind.init(rawValue:))
 
         return ProtectionConnectivityNotificationHistory(
             lastDeliveredNotificationID: defaults.string(
-                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName
             ),
             lastDeliveredAt: defaults.object(
-                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey
+                forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName
             ) as? Date,
             unresolvedProblemNotificationID: defaults.string(
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName
             ),
             unresolvedProblemKind: unresolvedProblemKind
         )
@@ -209,7 +209,7 @@ private final class ProtectionUserNotificationController {
     private func recordDelivery(of notification: ProtectionConnectivityNotification) {
         defaults.set(
             notification.identifier,
-            forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey
+            forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName
         )
 
         // Only actionable problem banners are delivered now, and they advance the
@@ -218,14 +218,14 @@ private final class ProtectionUserNotificationController {
         // `clearResolvedProblemNotifications`, so there's no delivered
         // acknowledgement to handle here.)
         if notification.kind.isProblem {
-            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
+            defaults.set(Date(), forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName)
             defaults.set(
                 notification.identifier,
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName
             )
             defaults.set(
                 notification.kind.rawValue,
-                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey
+                forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName
             )
         }
     }
@@ -243,13 +243,13 @@ private final class ProtectionUserNotificationController {
     }
 
     private func clearResolvedProblemNotifications(_ identifiers: [String], cooldownAnchor: Date?) {
-        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKey)
-        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKey)
+        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationIDDefaultsKeyName)
+        defaults.removeObject(forKey: LavaSecAppGroup.protectionUnresolvedProblemNotificationKindDefaultsKeyName)
         // Back-date the delivery cooldown ONLY for the encrypted-fallback silent supersede
         // (cooldownAnchor non-nil); a real `.healthy` recovery passes nil and keeps its
         // anti-flap cooldown intact.
         if let cooldownAnchor {
-            defaults.set(cooldownAnchor, forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKey)
+            defaults.set(cooldownAnchor, forKey: LavaSecAppGroup.protectionLastDeliveredNotificationAtDefaultsKeyName)
             // Also lift the exact-id duplicate guard. The silent supersede removed the
             // reconnect banner from the OS, so if coverage lapses before a new smoke probe
             // shifts the event id, the recurring `reconnect-needed:<event>` candidate must be
@@ -257,7 +257,7 @@ private final class ProtectionUserNotificationController {
             // guard suppress the actionable banner until some later probe changes the id,
             // defeating the back-dated cooldown. The cooldown anchor stays the sole gate, so
             // a flapping wedge is still bounded to one banner per `reFlapGraceInterval`.
-            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)
+            defaults.removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)
         }
 
         let requestIdentifiers = identifiers.map {
@@ -486,10 +486,10 @@ enum ProtectionHapticFeedback {
     /// Source of truth for the "Lava Haptics" Customization toggle. Lava haptics
     /// default on, so a missing key reads as enabled and preserves the prior
     /// always-on behavior. AppViewModel writes this key; `play` reads it.
-    static let preferenceDefaultsKey = "lavasec.customization.lavaHaptics"
+    static let preferenceDefaultsKeyName = "lavasec.customization.lavaHaptics"
 
     static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: preferenceDefaultsKey) as? Bool ?? true
+        UserDefaults.standard.object(forKey: preferenceDefaultsKeyName) as? Bool ?? true
     }
 
     @MainActor static func play(_ feedback: ProtectionHapticFeedback) {
@@ -803,7 +803,7 @@ final class AppViewModel: ObservableObject {
     private let activeProtectionSessionIDDefaultsKey = LavaSecAppGroup.protectionActiveSessionIDDefaultsKey
     // The customization-preference defaults keys moved to CustomizationController with
     // their setters (Phase D5); only the progress key stays with the hub-owned accrual.
-    private let lavaGuardProgressDefaultsKey = "lavasec.customization.lavaGuardProgress"
+    private let lavaGuardProgressDefaultsKeyName = "lavasec.customization.lavaGuardProgress"
     private let defaults = UserDefaults.standard
     private let appGroupDefaults = LavaSecAppGroup.sharedDefaults
     // Single source of truth for session and pause state, shared with the
@@ -3957,7 +3957,7 @@ final class AppViewModel: ObservableObject {
     // command's own push would, keeping the two push paths consistent.
     private var restartInFlightDeadline: Date? {
         let raw = appGroupDefaults.double(
-            forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKey
+            forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
         )
         guard raw > Date().timeIntervalSinceReferenceDate else {
             return nil
@@ -6609,7 +6609,7 @@ final class AppViewModel: ObservableObject {
                 #endif
 
                 try manager.connection.startVPNTunnel(options: [
-                    LavaSecAppGroup.latencyOperationIDOptionKey: operationID.rawValue as NSString
+                    LavaSecAppGroup.latencyOperationIDOptionKeyName: operationID.rawValue as NSString
                 ])
                 if logUserAction {
                     appendAppNetworkActivity(.turnProtectionOn)
@@ -7035,7 +7035,7 @@ final class AppViewModel: ObservableObject {
     private static func setOnDemandConfirmedEnabled(_ enabled: Bool) {
         LavaSecAppGroup.sharedDefaults.set(
             enabled,
-            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKeyName
         )
     }
 
@@ -7045,7 +7045,7 @@ final class AppViewModel: ObservableObject {
     /// "Reconnecting" rather than the fully-off "Turn On" surface.
     private static func isOnDemandConfirmedEnabled() -> Bool {
         LavaSecAppGroup.sharedDefaults.bool(
-            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKeyName
         )
     }
 
@@ -7058,7 +7058,7 @@ final class AppViewModel: ObservableObject {
     /// pre-clear during an in-flight arming save).
     private static func seedOnDemandConfirmedIfAbsent(from manager: NETunnelProviderManager) {
         guard LavaSecAppGroup.sharedDefaults.object(
-            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKey
+            forKey: LavaSecAppGroup.protectionOnDemandConfirmedEnabledDefaultsKeyName
         ) == nil else {
             return
         }
@@ -8282,7 +8282,7 @@ final class AppViewModel: ObservableObject {
     func setAppForegroundActive(_ active: Bool) {
         guard !isHeadless else { return }
         let defaults = LavaSecAppGroup.sharedDefaults
-        defaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKey)
+        defaults.set(active, forKey: LavaSecAppGroup.appForegroundActiveDefaultsKeyName)
         if active {
             // Pin the language the app UI is CURRENTLY resolved to (honoring any iOS per-app language
             // override) so the App Intents extension and NE tunnel — separate processes that don't inherit
@@ -8790,7 +8790,7 @@ final class AppViewModel: ObservableObject {
     // CustomizationController (Phase D5 peel) with the preference cluster they load/write.
 
     private func loadLavaGuardProgress() {
-        guard let data = defaults.data(forKey: lavaGuardProgressDefaultsKey),
+        guard let data = defaults.data(forKey: lavaGuardProgressDefaultsKeyName),
               let progress = try? JSONDecoder().decode(LavaGuardProgress.self, from: data)
         else {
             lavaGuardProgress = LavaGuardProgress()
@@ -8805,7 +8805,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        defaults.set(data, forKey: lavaGuardProgressDefaultsKey)
+        defaults.set(data, forKey: lavaGuardProgressDefaultsKeyName)
     }
 
     private func loadTemporaryProtectionPause() {

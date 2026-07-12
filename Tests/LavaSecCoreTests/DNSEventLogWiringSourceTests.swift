@@ -10,7 +10,7 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
     func testAppGroupDeclaresTheDepthStoreFileAndClearFloor() throws {
         let source = try readSource(.appGroup)
         XCTAssertTrue(source.contains("static let dnsEventLogFilename = \"dns-events.sqlite\""))
-        XCTAssertTrue(source.contains("static let dnsEventLogClearedAtKey = \"dnsEventLogClearedAtMs\""))
+        XCTAssertTrue(source.contains("static let dnsEventLogClearedAtKeyName = \"dnsEventLogClearedAtMs\""))
     }
 
     func testTunnelIsTheSoleWriter() throws {
@@ -32,12 +32,43 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         // Prunes below BOTH the 7-day window AND the app's clear floor, so a user clear
         // physically deletes rows within a cadence instead of leaving them stored (PR #327).
         XCTAssertTrue(source.contains("let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)"))
-        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKey"))
-        XCTAssertTrue(source.contains("try? dnsEventLog.prune(before: cutoff)"))
+        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName"))
+        XCTAssertTrue(source.contains("try dnsEventLog.prune(before: cutoff)"))
 
         // Stop cleanup drains queued fire-and-forget appends so a suspended NE process doesn't
-        // drop the newest decisions from the SQLite-backed list (PR #327 review).
-        XCTAssertTrue(source.contains("self.dnsEventLog?.flush()"))
+        // drop the newest decisions from the SQLite-backed list (PR #327 review) — via the
+        // drain-AND-prune primitive, so a successful terminal drain of a pre-clear batch
+        // carries the prune with it (PR #351 round 4).
+        XCTAssertTrue(source.contains("self.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        // sleep() drains the buffered append batch too: with batched best-effort appends
+        // (UR-53 follow-up) a jetsam while suspended would otherwise drop up to a flush
+        // window of Domain History. Same coupled primitive, but RETAIN mode — sleep is a
+        // suspension, not termination, so a contended batch must survive an ordinary
+        // resume (lavasec-ios#54 sync review).
+        XCTAssertTrue(source.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: false)"))
+
+        // QA energy coverage (UR-53 follow-up): the tunnel pulls the store's write-path
+        // window into the energy counters on the EXISTING 60 s Focus tick — no new timer.
+        XCTAssertTrue(source.contains("EnergyCounters.shared.recordSQLiteWindow(dnsEventLog.writeInstrumentationSnapshotAndReset())"))
+    }
+
+    /// The QA energy counters must carry the depth-store write-path and thermal/CPU coverage
+    /// added by the UR-53 follow-up, and stay inside the DEBUG/LAVA_QA_TOOLS gate (energy doc
+    /// Principle 1 — nothing ships in the App Store Release build).
+    func testEnergyCountersCoverTheDepthStoreWritePathAndThermalCPU() throws {
+        let source = try readSource(.appGroup)
+        XCTAssertTrue(source.contains("case sqliteFlush"))
+        XCTAssertTrue(source.contains("case sqliteFlushRetry"))
+        XCTAssertTrue(source.contains("case sqlitePrunePass"))
+        XCTAssertTrue(source.contains("case thermalTransition"))
+        XCTAssertTrue(source.contains("func recordSQLiteWindow(_ snapshot: DNSEventLog.WriteInstrumentationSnapshot)"))
+        XCTAssertTrue(source.contains("details[\"sqliteWalKB\"]"))
+        XCTAssertTrue(source.contains("details[\"cpuMs\"]"))
+        XCTAssertTrue(source.contains("details[\"thermalState\"]"))
+        // The whole instrumentation block stays QA-gated.
+        let gateIndex = try XCTUnwrap(source.range(of: "#if DEBUG || LAVA_QA_TOOLS\nenum EnergyCounter"))
+        let flushIndex = try XCTUnwrap(source.range(of: "func recordSQLiteWindow"))
+        XCTAssertLessThan(gateIndex.lowerBound, flushIndex.lowerBound)
     }
 
     func testAppReadsTheDepthStoreReadOnlyWithTheClearFloor() throws {
@@ -46,7 +77,7 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("func domainHistoryEvents(action: FilterAction, searchText: String, limit: Int) -> [DNSQueryEvent]"))
         XCTAssertTrue(source.contains("try? DNSEventLog(url: dnsEventLogURL, readOnly: true)"))
         // Clear is a shared-defaults floor: written on clear, applied on read.
-        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKey"))
+        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName"))
         // The read floors at BOTH the clear timestamp AND the 7-day retention cutoff, so a
         // tunnel stopped >7 days can't surface stale rows in Domain History (PR #327 review).
         XCTAssertTrue(source.contains("LocalLogRetention.fineGrainedWindow"))
@@ -63,7 +94,7 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         // The clear helper both advances the floor AND physically prunes, so an offline clear
         // (tunnel stopped, its periodic prune never runs) still removes rows from disk.
         XCTAssertTrue(source.contains("private func clearDNSEventLogHistory(at clearedAt: Date)"))
-        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKey"))
+        XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName"))
         // The stored floor AND the prune must use the +1ms clear boundary so a decision recorded
         // in the clear's exact millisecond is both hidden and pruned (lavasec-ios#51 Codex review;
         // behaviour pinned by DNSEventLogTests.testClearFloorExcludesSameMillisecondEvents).

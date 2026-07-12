@@ -54,7 +54,9 @@ public enum LavaNotificationPreferences {
 /// resolution — which is already correct inside the app process, so only the extension/tunnel need the pin.
 public enum LavaNotificationLanguage {
     /// App-group defaults key holding the app's resolved LavaSecCore localization code (e.g. `"zh-Hans"`).
-    public static let defaultsKey = "lavasec.notifications.appLanguageCode"
+    public static let defaultsKeyName = "lavasec.notifications.appLanguageCode"
+    /// Compatibility alias for existing consumers of the public package product.
+    public static let defaultsKey = defaultsKeyName
 
     /// The LavaSecCore localization the app is CURRENTLY resolving to. Computed against `Bundle.module`'s own
     /// localizations so it is always one this package can actually load; when read from the app process it
@@ -68,15 +70,15 @@ public enum LavaNotificationLanguage {
     /// A `nil`/empty code clears the pin (posters fall back to ambient resolution).
     public static func publish(_ code: String?, to defaults: UserDefaults) {
         if let code, !code.isEmpty {
-            defaults.set(code, forKey: defaultsKey)
+            defaults.set(code, forKey: defaultsKeyName)
         } else {
-            defaults.removeObject(forKey: defaultsKey)
+            defaults.removeObject(forKey: defaultsKeyName)
         }
     }
 
     /// The pinned localization code, or `nil` when unset/empty.
     public static func pinnedCode(in defaults: UserDefaults) -> String? {
-        guard let code = defaults.string(forKey: defaultsKey), !code.isEmpty else { return nil }
+        guard let code = defaults.string(forKey: defaultsKeyName), !code.isEmpty else { return nil }
         return code
     }
 }

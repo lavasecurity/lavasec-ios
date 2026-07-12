@@ -30,6 +30,95 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("diagnosticsPersistence.flush(force: force)"))
     }
 
+    /// A buffered best-effort DNS event append isn't in the SQLite table yet, so any drain
+    /// that commits it WITHOUT a coupled same-pass prune can resurrect pre-clear rows —
+    /// through the debounced write (prune-before-flush), through a contention-skipped prune
+    /// whose closure still reported success (cancelling the dirty retry), or through the
+    /// stop/sleep paths' bare terminal flush landing the retained batch with no later pass
+    /// ever running (P1 chain: lavasec-ios#54 promotion review + PR #351 rounds 2-4). One
+    /// primitive — `drainAndPruneDNSEventLog` — owns the coupling; these pins lock its
+    /// internal order, its use at ALL three drain sites, and ban any bare flush that would
+    /// bypass it.
+    /// - pinned: DNSEventLogTests.testFlushingBeforePruneRemovesABufferedPreClearEvent
+    /// - pinned: DNSEventLogTests.testPruningBeforeFlushLeavesABufferedPreClearEventToBeResurrectedLater
+    /// - pinned: DNSEventLogTests.testFlushReportsFailureWhenTheBatchCommitCannotAcquireTheWriteLock
+    func testDiagnosticsPersistenceFlushesBufferedDNSEventsBeforePruning() throws {
+        let source = try readSource(.packetTunnelProvider)
+
+        // The primitive itself: prune only ever runs AFTER a successful drain (guard shape).
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func drainAndPruneDNSEventLog(",
+            endingBefore: "// MARK: - Configuration & device-DNS state accessors"
+        )
+        let drainGuardRange = try XCTUnwrap(helperBlock.range(of: "guard drained else"))
+        let pruneRange = try XCTUnwrap(helperBlock.range(of: "try dnsEventLog.prune(before: cutoff)"))
+        XCTAssertLessThan(
+            drainGuardRange.lowerBound,
+            pruneRange.lowerBound,
+            "the buffer must drain successfully before the prune runs, or a buffered pre-clear event can be reinserted after the clear"
+        )
+        // The prune's OWN failure must surface in the return value too: a `try?` here reports
+        // a pass complete with pre-clear rows freshly committed and unpruned, clearing the
+        // dirty flag that guarantees the retry (PR #351 round 5).
+        XCTAssertFalse(
+            helperBlock.contains("try? dnsEventLog.prune"),
+            "a swallowed prune failure after a successful drain silently completes an incomplete pass"
+        )
+
+        // The debounced write closure routes through the primitive and folds its result into
+        // the closure's return value — a skipped prune must keep the controller dirty so the
+        // pass is guaranteed to re-run (PR #351 round 3).
+        let writeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private lazy var diagnosticsPersistence = DebouncedPersistenceController(",
+            endingBefore: "private let dohResolver = DoHTransport("
+        )
+        XCTAssertTrue(writeBlock.contains("let dnsEventLogPruneCompleted = self.drainAndPruneDNSEventLog(now: now, discardOnFailure: false)"))
+        // The JSON save's success folds in too: a false return is what arms the controller's
+        // self-scheduled retry, so a swallowed save failure would clear the dirty flag with
+        // the diagnostics unpersisted (OCR P1, lavasec-ios#54 sync review).
+        XCTAssertTrue(writeBlock.contains("return dnsEventLogPruneCompleted && diagnosticsSaved"))
+        // Scan CODE lines only — a comment legitimately discussing `return true` must not
+        // trip the ban (OCR P3, lavasec-ios#54 sync review).
+        let writeBlockCodeLines = writeBlock
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        XCTAssertFalse(writeBlockCodeLines.contains("return true"), "the closure must not unconditionally report success once a prune can be skipped")
+
+        // The terminal-vs-suspension asymmetry is deliberate and pinned: STOP passes
+        // discardOnFailure: true (process exit is certain; a retained batch's armed retry
+        // could commit pre-clear rows after the skipped prune with no later pass — PR #351
+        // rounds 4 and 7). SLEEP passes false — it is a suspension, not termination, and
+        // dropping on an ordinary resume would permanently lose real history; retention is
+        // privacy-safe there because the controller's self-re-armed pass prunes post-wake
+        // and a jetsam kills the uncommitted batch (OCR P1, lavasec-ios#54 sync review).
+        // The debounced closure also retains (its dirty-retained re-run is guaranteed). A
+        // bare `dnsEventLog?.flush()` anywhere in the provider is a drain decoupled from
+        // the prune — banned outright.
+        XCTAssertTrue(helperBlock.contains("discardOnFailure ? dnsEventLog.flushOrDiscard() : dnsEventLog.flush()"))
+        let stopBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func cleanUpTunnelRuntimeAfterStop(",
+            endingBefore: "private static func errorDebugDetails("
+        )
+        XCTAssertTrue(stopBlock.contains("self.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        let sleepBlock = try sourceBlock(
+            in: source,
+            startingAt: "override func sleep(",
+            endingBefore: "override func wake("
+        )
+        XCTAssertTrue(sleepBlock.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: false)"))
+        XCTAssertFalse(source.contains("dnsEventLog?.flush()"), "every drain must go through drainAndPruneDNSEventLog so no commit can land without its coupled prune")
+        // The discard variant is the same bypass through a different door: a bare
+        // flushOrDiscard outside the helper commits (or drops) without the coupled prune
+        // (OCR P2, lavasec-ios#54 sync review). The helper's own call is non-optional
+        // (`dnsEventLog.flushOrDiscard()` after its guard-let), so the optional-chained
+        // form appearing anywhere means a call site is bypassing the primitive.
+        XCTAssertFalse(source.contains("dnsEventLog?.flushOrDiscard()"), "the discard drain must also route through drainAndPruneDNSEventLog")
+    }
+
     /// NRG: the DNS hot path (`readPackets` → `handle` → `forward`) runs for every
     /// inbound query while the tunnel is up, so steady-state CPU work there is the
     /// dominant always-on energy cost. These pins guard four reductions that remove
@@ -1205,13 +1294,13 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "let defaults",
             endingBefore: "if notification.kind.isProblem {"
         )
-        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         let problemBranch = try sourceBlock(
             in: source,
             startingAt: "if notification.kind.isProblem {",
             endingBefore: "private static func removeSupersededProtectionNotifications"
         )
-        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKey"))
+        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
         // No recovery-acknowledgement delivery path remains in recordDelivery.
         XCTAssertFalse(recordBlock.contains(".reconnected"))
     }
@@ -1230,7 +1319,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "let requestIdentifiers = identifiers.map {"
         )
         XCTAssertTrue(
-            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
         )
     }
@@ -1350,7 +1439,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "// Use the pre-clear"
         )
         XCTAssertTrue(
-            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKey)"),
+            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
             "Coverage with no outstanding banner must lift the duplicate-guard id (tunnel consumer)."
         )
     }
@@ -3720,7 +3809,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private func readPackets()"
         )
 
-        XCTAssertTrue(source.contains("LavaSecAppGroup.latencyOperationIDOptionKey"))
+        XCTAssertTrue(source.contains("LavaSecAppGroup.latencyOperationIDOptionKeyName"))
         XCTAssertTrue(source.contains("private static func latencyOperationID(from options: [String: NSObject]?) -> LatencyOperationID?"))
         XCTAssertTrue(latencyHelperBlock.contains("LatencyDebugLogEventSink(operationKind: operationKind)"))
         XCTAssertTrue(latencyHelperBlock.contains("LavaSecDeviceDebugLog.append(component: \"tunnel\""))
@@ -4651,20 +4740,20 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
     }
 
     /// The app reads the self-reconnect timeline for a bug report's incident summary (LAV-94 B)
-    /// from `LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKey`, while the tunnel WRITES it under
-    /// its own private `selfReconnectAttemptsDefaultsKey`. Both are the same magic string — lock the
+    /// from `LavaSecAppGroup.selfReconnectAttemptTimesDefaultsKeyName`, while the tunnel WRITES it under
+    /// its own private `selfReconnectAttemptsDefaultsKeyName`. Both are the same magic string — lock the
     /// two literals together (cross-file) so a future rename on one side can't silently strand the
     /// app's read of a key the tunnel no longer writes.
     func testSelfReconnectAttemptTimesDefaultsKeyMatchesSharedConstant() throws {
-        let key = "tunnel.selfReconnectAttemptTimes"
+        let sharedKeyValue = "tunnel.selfReconnectAttemptTimes"
         let tunnelSource = try readSource(.packetTunnelProvider)
         let sharedSource = try readSource(.appGroup)
         XCTAssertTrue(
-            tunnelSource.contains("selfReconnectAttemptsDefaultsKey = \"\(key)\""),
+            tunnelSource.contains("selfReconnectAttemptsDefaultsKeyName = \"\(sharedKeyValue)\""),
             "Tunnel must persist the self-reconnect timeline under the shared key literal."
         )
         XCTAssertTrue(
-            sharedSource.contains("selfReconnectAttemptTimesDefaultsKey = \"\(key)\""),
+            sharedSource.contains("selfReconnectAttemptTimesDefaultsKeyName = \"\(sharedKeyValue)\""),
             "The shared app-group constant the app reads must equal the tunnel's persisted key."
         )
     }
@@ -4935,12 +5024,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "private func clearSelfReconnectGapMarkers()",
             endingBefore: "private func"
         )
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapStartedAtDefaultsKey"))
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapEndedAtDefaultsKey"))
-        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapCountDefaultsKey"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapStartedAtDefaultsKeyName"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapEndedAtDefaultsKeyName"))
+        XCTAssertTrue(gapClearBlock.contains("selfReconnectGapCountDefaultsKeyName"))
         // The operational cooldown store and tunnel-health are deliberately NOT wiped (frozen
         // recovery control flow); the gap-marker clear must not touch the attempt-times key.
-        XCTAssertFalse(gapClearBlock.contains("selfReconnectAttemptTimesDefaultsKey"))
+        XCTAssertFalse(gapClearBlock.contains("selfReconnectAttemptTimesDefaultsKeyName"))
     }
 
     func testRefreshDiagnosticsDefersPruneWriteBackWhileTunnelOwnsFile() throws {
@@ -5054,11 +5143,11 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         // The persisted end is the floored value, NOT a raw `now` — so the reader never sees a
         // stale `ended <= started`.
         XCTAssertTrue(
-            closeBlock.contains("defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)"),
+            closeBlock.contains("defaults.set(endedRaw, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)"),
             "The close must persist the floored end, never an unconditional now stamp (COH-2)."
         )
         XCTAssertFalse(
-            closeBlock.contains("defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKey)"),
+            closeBlock.contains("defaults.set(now.timeIntervalSince1970, forKey: LavaSecAppGroup.selfReconnectGapEndedAtDefaultsKeyName)"),
             "The close must not stamp a raw now for the gap end (COH-2)."
         )
         // The anomaly is observable in the device log so a floored close is diagnosable.
