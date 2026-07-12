@@ -591,17 +591,7 @@ final class EnergyCounters: @unchecked Sendable {
         EnergySignpost.event("nrg-window")   // mark each counter window on the Instruments timeline
     }
 }
-
-// QA-only Points-of-Interest signposts (Phase 2) so an Instruments Energy Log run
-// can correlate battery cost to each lever firing. Emitted ONLY at low-frequency
-// sites — never per debug-log append (that would be the observer effect); the
-// debug-log lever is represented by the once-per-window `nrg-window` mark above.
-// The counters give per-lever RATES; these signposts give the per-event timeline
-// brackets Instruments attributes energy to.
-enum EnergySignpost {
-    static let poiLog = OSLog(subsystem: "app.lavasecurity.nrg", category: .pointsOfInterest)
-    static func event(_ name: StaticString) {
-        os_signpost(.event, log: poiLog, name: name)
-    }
-}
+// The QA-only `EnergySignpost` helper lives in `Shared/EnergySignpost.swift` — its own
+// dedicated file so the app layer's sole OSLog/os_signpost site (and its reviewed
+// mobsfscan `ios_log` suppression) never widens to this file.
 #endif

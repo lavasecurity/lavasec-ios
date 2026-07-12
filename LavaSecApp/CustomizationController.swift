@@ -383,8 +383,10 @@ final class CustomizationController: ObservableObject {
             do {
                 try await iconPersonalizer.setAppIcon(targetIconName)
             } catch {
-                #if DEBUG
-                print("Failed to switch Lava app icon: \(error.localizedDescription)")
+                #if DEBUG || LAVA_QA_TOOLS
+                LavaSecDeviceDebugLog.append(component: "app", event: "app-icon-switch-failed", details: [
+                    "error": error.localizedDescription
+                ])
                 #endif
             }
         }
