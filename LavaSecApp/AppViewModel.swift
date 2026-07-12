@@ -724,6 +724,11 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var compiledRuleCount = 0
     @Published private(set) var protectedRuleCount = 0
     @Published private(set) var compiledBlocklistRuleCount = 0
+    #if DEBUG
+    // Capture-only presentation override. The underlying counters remain intact
+    // for app behavior; this controls only the numbers rendered in media fixtures.
+    private var developerMediaCaptureVisibleRuleCount: Int?
+    #endif
     // The backup @Published state (encryptedBackupState, isBackingUpNow,
     // isBackupMaintenanceInProgress, isAutomaticBackupEnabled) lives on `backup`
     // (BackupController), which views observe as its own environment object.
@@ -932,6 +937,9 @@ final class AppViewModel: ObservableObject {
         isHeadless = headless
 
         loadPersistedConfiguration()
+        #if DEBUG
+        applyDeveloperMediaCaptureFixtureIfPresent()
+        #endif
         #if DEBUG || LAVA_QA_TOOLS
         applyLiveDNSSmokeTestConfigurationIfRequested()
         #endif
@@ -1588,7 +1596,7 @@ final class AppViewModel: ObservableObject {
     /// same total the Filters screen headlines as "rules in effect"), so manual
     /// blocked domains count even when no curated blocklist is enabled.
     var guardFiltersRowStat: String {
-        let count = compiledRuleCount
+        let count = displayedCompiledRuleCount
         guard count > 0 else {
             return "No filter active yet"
         }
@@ -1665,7 +1673,7 @@ final class AppViewModel: ObservableObject {
             maxAge: catalogSyncFreshnessInterval,
             statusIsError: catalogStatusIsError,
             sync: catalog.syncState,
-            ruleCount: compiledRuleCount
+            ruleCount: displayedCompiledRuleCount
         )
     }
 
@@ -1678,7 +1686,7 @@ final class AppViewModel: ObservableObject {
     }
 
     var configuredBlockedDomainCountText: String {
-        let count = compiledRuleCount
+        let count = displayedCompiledRuleCount
         switch catalogPresentationState.ruleCount {
         case .one:
             return "%@ blocked domain".lavaLocalizedFormat(count.formatted())
@@ -1688,11 +1696,11 @@ final class AppViewModel: ObservableObject {
     }
 
     var configuredBlockedDomainNumberText: String {
-        compiledRuleCount.formatted()
+        displayedCompiledRuleCount.formatted()
     }
 
     var configuredProtectedDomainNumberText: String {
-        protectedRuleCount.formatted()
+        displayedProtectedRuleCount.formatted()
     }
 
     var configuredAllowlistExceptionNumberText: String {
@@ -3503,7 +3511,7 @@ final class AppViewModel: ObservableObject {
     /// count, or a saved filter's projected list count plus its manual blocked domains.
     func filterRuleCount(for filter: Filter) -> Int {
         if filter.id == activeFilterID {
-            return protectedRuleCount
+            return displayedProtectedRuleCount
         }
         return projectedFilterRuleCount(forEnabledIDs: filter.enabledBlocklistIDs).known
             + filter.blockedDomains.count
@@ -9252,6 +9260,16 @@ enum WebsiteAssetCaptureProtectionState {
 }
 
 extension AppViewModel {
+    private func applyDeveloperMediaCaptureFixtureIfPresent() {
+        guard !isHeadless, let fixture = DeveloperMediaCaptureFixture.load() else {
+            return
+        }
+
+        library = fixture.configuredLibrary()
+        mirrorActiveFilterIntoConfiguration()
+        developerMediaCaptureVisibleRuleCount = fixture.visibleRuleCount
+    }
+
     static func previewProtectionState(health: TunnelHealthSnapshot) -> AppViewModel {
         let viewModel = AppViewModel(loadVPNState: false)
         viewModel.vpnStatus = .connected
@@ -9313,13 +9331,32 @@ extension AppViewModel {
             lastUpstreamSuccessAt: now.addingTimeInterval(-8)
         )
 
-        compiledRuleCount = 1
-        protectedRuleCount = 1
+        let captureRuleCount = developerMediaCaptureVisibleRuleCount ?? 1
+        compiledRuleCount = captureRuleCount
+        protectedRuleCount = captureRuleCount
         vpnMessage = nil
         vpnMessageIsError = false
     }
 }
 #endif
+
+private extension AppViewModel {
+    var displayedCompiledRuleCount: Int {
+        #if DEBUG
+        developerMediaCaptureVisibleRuleCount ?? compiledRuleCount
+        #else
+        compiledRuleCount
+        #endif
+    }
+
+    var displayedProtectedRuleCount: Int {
+        #if DEBUG
+        developerMediaCaptureVisibleRuleCount ?? protectedRuleCount
+        #else
+        protectedRuleCount
+        #endif
+    }
+}
 
 // The private GuardianShieldStyle.lavaGuardID extension moved to
 // CustomizationController.swift with its only callers (Phase D5 peel).

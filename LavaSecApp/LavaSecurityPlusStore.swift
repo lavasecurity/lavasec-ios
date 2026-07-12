@@ -178,6 +178,10 @@ final class LavaSecurityPlusStore: ObservableObject {
             options.insert(.appAccountToken(appAccountToken))
         }
         if offer.plan.kind == .yearlyPaidMonthly {
+            // Xcode 26.3 ships the iOS 26.2 StoreKit interface, which does not
+            // declare the iOS 26.4 billing-plan APIs. Keep the runtime gate for
+            // newer SDKs while allowing older toolchains to compile the fallback.
+            #if compiler(>=6.3)
             if #available(iOS 26.4, *) {
                 guard product.subscription?.pricingTerms.contains(where: {
                     $0.billingPlanType == .monthly
@@ -189,6 +193,9 @@ final class LavaSecurityPlusStore: ObservableObject {
             } else {
                 throw LavaSecurityPlusStoreError.productUnavailable
             }
+            #else
+            throw LavaSecurityPlusStoreError.productUnavailable
+            #endif
         }
 
         let result = try await product.purchase(options: options)
@@ -318,6 +325,7 @@ final class LavaSecurityPlusStore: ObservableObject {
             return nil
         }
 
+        #if compiler(>=6.3)
         if #available(iOS 26.4, *) {
             guard let subscription = product.subscription,
                   let commitmentPricingTerms = subscription.pricingTerms.first(where: {
@@ -336,6 +344,7 @@ final class LavaSecurityPlusStore: ObservableObject {
                 product: product
             )
         }
+        #endif
 
         return nil
     }

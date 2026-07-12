@@ -139,6 +139,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("case .yearlyPaidMonthly"))
         XCTAssertTrue(storeSource.contains("Product.products(for: LavaSecurityPlusPolicy.paywallProductIDs)"))
         XCTAssertTrue(storeSource.contains("pricingTerms"))
+        XCTAssertTrue(storeSource.contains("#if compiler(>=6.3)"))
         XCTAssertTrue(storeSource.contains("if #available(iOS 26.4, *)"))
         XCTAssertTrue(storeSource.contains("billingPlanType == .monthly"))
         XCTAssertTrue(storeSource.contains("product.subscription?.pricingTerms.contains"))

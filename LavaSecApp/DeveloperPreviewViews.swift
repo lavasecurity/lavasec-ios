@@ -136,6 +136,42 @@ struct WebsiteAssetCaptureConfiguration {
     }
 }
 
+/// DEBUG-only fixture for deterministic App Store media captures. The capture
+/// pipeline writes this ordinary JSON file to the existing App Group before it
+/// launches the app; no launch arguments or production state are involved.
+struct DeveloperMediaCaptureFixture: Codable {
+    static let filename = "media-capture-fixture.json"
+
+    let activeFilterID: String
+    let filterNames: [String: String]
+    let visibleRuleCount: Int
+
+    static func load() -> DeveloperMediaCaptureFixture? {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            return nil
+        }
+
+        let url = containerURL.appendingPathComponent(filename)
+        guard let data = try? Data(contentsOf: url),
+              let fixture = try? JSONDecoder().decode(DeveloperMediaCaptureFixture.self, from: data),
+              fixture.visibleRuleCount > 0
+        else {
+            return nil
+        }
+
+        return fixture
+    }
+
+    func configuredLibrary() -> FilterLibrary {
+        var library = FilterLibrary.seededDefaults(active: .balanced)
+        for (id, name) in filterNames {
+            library.mutateFilter(id: id) { $0.name = name }
+        }
+        library.setActiveFilter(id: activeFilterID)
+        return library
+    }
+}
+
 struct WebsiteAssetCaptureRootView: View {
     let configuration: WebsiteAssetCaptureConfiguration
 
