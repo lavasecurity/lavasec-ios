@@ -500,8 +500,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             guard let diagnosticsURL = self.diagnosticsURL else {
                 return false
             }
-            try? DiagnosticsPersistence.save(self.diagnostics, to: diagnosticsURL)
-            return dnsEventLogPruneCompleted
+            // The JSON save's success folds into the return value alongside the prune result:
+            // now that a false return is what arms the controller's self-scheduled retry, a
+            // swallowed save failure would clear the dirty flag with the diagnostics
+            // unpersisted and nothing re-trying (OCR P1, lavasec-ios#54 sync review — the
+            // swallow itself predates #351, but the retry semantics made it load-bearing).
+            let diagnosticsSaved = (try? DiagnosticsPersistence.save(self.diagnostics, to: diagnosticsURL)) != nil
+            return dnsEventLogPruneCompleted && diagnosticsSaved
         }
     )
     private let dohResolver = DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds) { event, details in
@@ -791,6 +796,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // just like stop, so a successful drain of a pre-clear batch here must carry the
             // prune with it or the cleared rows outlive the process (PR #351 round 4). The
             // prune is index-walking and mostly a no-op — negligible on the sleep handshake.
+            // Worst-case latency bound (OCR, lavasec-ios#54 sync review): each half can wait
+            // at most one 2s busy_timeout, and only when a cross-process writer contends that
+            // half independently — ~4s needs two just-in-time lock grabs in succession. The
+            // pre-#351 sleep drain already accepted the first 2s; NEProvider sleep completion
+            // has no hard watchdog (iOS holds suspension until it's signalled), and trading a
+            // rare bounded delay for the clear-local-logs promise is the right side to err on.
             self?.drainAndPruneDNSEventLog(discardOnFailure: true)
             completion.complete()
         }
@@ -5761,6 +5772,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         do {
             try dnsEventLog.prune(before: cutoff)
         } catch {
+            // Failure-only line (no per-event cost): a transient busy-timeout loss to the
+            // app's clear writer self-heals via the controller's re-armed retry, but a
+            // PERSISTENTLY failing prune (schema drift, disk corruption) would otherwise be
+            // invisible in a field report while cleared rows stay stored (OCR P2,
+            // lavasec-ios#54 sync review). Error detail carries sqlite context only — the
+            // prune SQL is parameterized, never a domain.
+            LavaSecDeviceDebugLog.append(
+                component: "tunnel",
+                event: "dns-event-log-prune-failed",
+                details: Self.errorDebugDetails(error)
+            )
             return false
         }
         return true

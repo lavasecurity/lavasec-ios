@@ -75,8 +75,17 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             endingBefore: "private let dohResolver = DoHTransport("
         )
         XCTAssertTrue(writeBlock.contains("let dnsEventLogPruneCompleted = self.drainAndPruneDNSEventLog(now: now, discardOnFailure: false)"))
-        XCTAssertTrue(writeBlock.contains("return dnsEventLogPruneCompleted"))
-        XCTAssertFalse(writeBlock.contains("return true"), "the closure must not unconditionally report success once a prune can be skipped")
+        // The JSON save's success folds in too: a false return is what arms the controller's
+        // self-scheduled retry, so a swallowed save failure would clear the dirty flag with
+        // the diagnostics unpersisted (OCR P1, lavasec-ios#54 sync review).
+        XCTAssertTrue(writeBlock.contains("return dnsEventLogPruneCompleted && diagnosticsSaved"))
+        // Scan CODE lines only — a comment legitimately discussing `return true` must not
+        // trip the ban (OCR P3, lavasec-ios#54 sync review).
+        let writeBlockCodeLines = writeBlock
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        XCTAssertFalse(writeBlockCodeLines.contains("return true"), "the closure must not unconditionally report success once a prune can be skipped")
 
         // The terminal paths use the SAME coupled primitive, in DISCARD mode: a failed
         // flush() retains its batch and arms an async retry that can commit pre-clear rows
@@ -99,6 +108,12 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         )
         XCTAssertTrue(sleepBlock.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: true)"))
         XCTAssertFalse(source.contains("dnsEventLog?.flush()"), "every drain must go through drainAndPruneDNSEventLog so no commit can land without its coupled prune")
+        // The discard variant is the same bypass through a different door: a bare
+        // flushOrDiscard outside the helper commits (or drops) without the coupled prune
+        // (OCR P2, lavasec-ios#54 sync review). The helper's own call is non-optional
+        // (`dnsEventLog.flushOrDiscard()` after its guard-let), so the optional-chained
+        // form appearing anywhere means a call site is bypassing the primitive.
+        XCTAssertFalse(source.contains("dnsEventLog?.flushOrDiscard()"), "the discard drain must also route through drainAndPruneDNSEventLog")
     }
 
     /// NRG: the DNS hot path (`readPackets` → `handle` → `forward`) runs for every

@@ -592,8 +592,8 @@ final class DNSEventLogTests: XCTestCase {
                 SQLITE_OK
             )
             let connection = try XCTUnwrap(checkpointConnection)
+            defer { sqlite3_close_v2(connection) }
             XCTAssertEqual(sqlite3_exec(connection, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil), SQLITE_OK)
-            sqlite3_close_v2(connection)
 
             try log.append(domain: "after-checkpoint.example.com", decision: block, timestamp: at(200))
             let window = log.writeInstrumentationSnapshotAndReset()
