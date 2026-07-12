@@ -90,6 +90,21 @@ public final class DNSEventLog: @unchecked Sendable {
     /// flush window instead of one per event — see `appendBestEffort`.
     private var pendingBestEffort: [DNSQueryEvent] = []
     private var bestEffortFlushScheduled = false
+    /// Supersession token for armed interval ticks (the configurationGeneration pattern): a
+    /// failed flush bumps it and re-arms a FRESH full-interval tick, so a stale tick that
+    /// expired DURING the failure's 2s busy wait (queued right behind it) no-ops instead of
+    /// immediately starting another busy transaction back-to-back — the alignment that let
+    /// two attempts ride the busy timeout inside one interval (Codex P3, PR #354 round 4).
+    private var bestEffortFlushTickGeneration = 0
+    /// True after a failed batch commit, until any attempt succeeds. While set, the row-cap
+    /// branch in `appendBestEffort` must NOT trigger another immediate attempt: with the cap
+    /// still exceeded by the retained batch, every incoming event would otherwise re-enter a
+    /// fresh transaction and ride the full 2s busy timeout — a suspended app-side lock holder
+    /// turns that into one 2s stall per DNS event on this queue, and a stop/sleep drain then
+    /// waits behind the whole backlog instead of the documented next-tick retry (Codex P2,
+    /// lavasec-ios#54 sync review). Explicit drains (`flush()`/`flushOrDiscard()`) bypass the
+    /// backoff deliberately — a terminal caller wants exactly one more attempt.
+    private var bestEffortRetryBackoff = false
     private let bestEffortFlushInterval: TimeInterval
     private let bestEffortFlushRowCap: Int
 
@@ -336,7 +351,9 @@ public final class DNSEventLog: @unchecked Sendable {
     /// buffered pre-clear event still lands on the correct side of the clear floor.
     /// A failed flush retains its batch for the next attempt, capped at 8x the row cap
     /// (oldest dropped first) so a persistently failing store cannot grow resident state
-    /// (INV-MEM-1).
+    /// (INV-MEM-1), and enters retry BACKOFF: until an attempt succeeds, further appends
+    /// only buffer — at most one transaction attempt per flush interval rides the busy
+    /// timeout, never one per event (see `bestEffortRetryBackoff`).
     /// - pinned: DNSEventLogTests.testBestEffortAppendsBufferUntilFlushAndCommitTogether
     public func appendBestEffort(domain: String, decision: FilterDecision, timestamp: Date) {
         queue.async { [weak self] in
@@ -346,7 +363,16 @@ public final class DNSEventLog: @unchecked Sendable {
             self.pendingBestEffort.append(
                 DNSQueryEvent(timestamp: timestamp, domain: domain, decision: decision)
             )
-            if self.pendingBestEffort.count >= self.bestEffortFlushRowCap {
+            // Bound the buffer at APPEND time too: while the retry backoff suppresses
+            // cap-triggered attempts, the flush path's trim never runs, so a DNS burst
+            // during the flush interval would otherwise grow the retained batch past the
+            // advertised 8x cap (INV-MEM-1; Codex P2, PR #354 review). Same
+            // oldest-dropped-first policy as the failure-path trim.
+            let retainedCap = self.bestEffortFlushRowCap * 8
+            if self.pendingBestEffort.count > retainedCap {
+                self.pendingBestEffort.removeFirst(self.pendingBestEffort.count - retainedCap)
+            }
+            if self.pendingBestEffort.count >= self.bestEffortFlushRowCap, !self.bestEffortRetryBackoff {
                 self.flushPendingBestEffortOnQueue()
             } else {
                 self.scheduleBestEffortFlushOnQueue()
@@ -362,8 +388,14 @@ public final class DNSEventLog: @unchecked Sendable {
             return
         }
         bestEffortFlushScheduled = true
+        let generation = bestEffortFlushTickGeneration
         queue.asyncAfter(deadline: .now() + bestEffortFlushInterval) { [weak self] in
             guard let self else {
+                return
+            }
+            guard generation == self.bestEffortFlushTickGeneration else {
+                // Superseded by a failure re-arm while this tick was queued/expiring; the
+                // scheduled flag now belongs to the fresh tick — leave it alone.
                 return
             }
             self.bestEffortFlushScheduled = false
@@ -387,6 +419,7 @@ public final class DNSEventLog: @unchecked Sendable {
                     try insert(domain: event.domain, decision: event.decision, timestamp: event.timestamp)
                 }
             }
+            bestEffortRetryBackoff = false
             #if DEBUG || LAVA_QA_TOOLS
             qaFlushes += 1
             qaFlushedRows += batch.count
@@ -396,6 +429,7 @@ public final class DNSEventLog: @unchecked Sendable {
             DNSEventLogSignpost.event("sqlite-flush")
             #endif
         } catch {
+            bestEffortRetryBackoff = true
             #if DEBUG || LAVA_QA_TOOLS
             qaFlushRetries += 1
             #endif
@@ -404,6 +438,13 @@ public final class DNSEventLog: @unchecked Sendable {
             if pendingBestEffort.count > retainedCap {
                 pendingBestEffort.removeFirst(pendingBestEffort.count - retainedCap)
             }
+            // Supersede any tick that expired during this attempt's busy wait and re-arm a
+            // FRESH full interval — otherwise that queued stale tick fires immediately after
+            // this failure and rides a second back-to-back busy timeout, violating the
+            // one-attempt-per-interval bound the backoff exists to hold (Codex P3, PR #354
+            // round 4).
+            bestEffortFlushTickGeneration += 1
+            bestEffortFlushScheduled = false
             scheduleBestEffortFlushOnQueue()
         }
     }
@@ -465,6 +506,12 @@ public final class DNSEventLog: @unchecked Sendable {
             flushPendingBestEffortOnQueue()
             guard pendingBestEffort.isEmpty else {
                 pendingBestEffort.removeAll(keepingCapacity: false)
+                // The discard empties the buffer, so there is nothing left to back off FOR —
+                // leaving the flag set would strand a reused instance on the
+                // scheduled-interval path (the armed retry no-ops on the empty buffer
+                // without clearing it), weakening the row-cap durability bound for the rest
+                // of the session (Codex P3, PR #354 round 3).
+                bestEffortRetryBackoff = false
                 return false
             }
             return true

@@ -470,6 +470,172 @@ final class DNSEventLogTests: XCTestCase {
         }
     }
 
+    /// A discarded failure must also CLEAR the retry backoff — the buffer is empty, so there
+    /// is nothing left to back off for, and a stranded flag would push every later
+    /// cap-reaching append onto the scheduled-interval path (the armed retry no-ops on the
+    /// empty buffer without clearing it), weakening the row-cap durability bound for the
+    /// rest of a reused instance's session (Codex P3, PR #354 round 3). The far interval
+    /// means only the restored cap-triggered immediate flush can commit the reuse rows.
+    func testDiscardedFailureDoesNotStrandTheBackoff() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-discard-unstrand") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 2)
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            // Cap-hit attempt fails and arms the backoff (count() is the queue barrier),
+            // then the terminal drain fails too and DISCARDS — which must clear the flag.
+            log.appendBestEffort(domain: "seed-a.example.com", decision: block, timestamp: at(100))
+            log.appendBestEffort(domain: "seed-b.example.com", decision: block, timestamp: at(101))
+            XCTAssertEqual(log.count(), 0)
+            XCTAssertFalse(log.flushOrDiscard())
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            log.appendBestEffort(domain: "reuse-a.example.com", decision: block, timestamp: at(200))
+            log.appendBestEffort(domain: "reuse-b.example.com", decision: block, timestamp: at(201))
+            XCTAssertEqual(log.count(), 2, "a discarded failure must not strand the backoff on an empty buffer")
+        }
+    }
+
+    /// After a failed batch commit, further appends past the row cap must only BUFFER until
+    /// the armed retry (or an explicit drain) succeeds — without the backoff, every event
+    /// arriving over a still-held lock starts a fresh transaction attempt that rides the full
+    /// 2s busy timeout, backing up the log queue one stall per event and making stop/sleep
+    /// drains wait behind the pile (Codex P2, lavasec-ios#54 sync review). Observable via
+    /// qaFlushRetries: exactly ONE failed attempt despite cap-exceeding appends afterwards.
+    #if DEBUG || LAVA_QA_TOOLS
+    func testFailedFlushBacksOffCapTriggeredRetriesUntilAnAttemptSucceeds() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-flush-backoff") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 2)
+            _ = log.writeInstrumentationSnapshotAndReset()
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            // Hitting the cap triggers the one immediate attempt, which fails (2s busy) and
+            // arms the backoff.
+            log.appendBestEffort(domain: "a.example.com", decision: block, timestamp: at(100))
+            log.appendBestEffort(domain: "b.example.com", decision: block, timestamp: at(101))
+            // These exceed the cap while the lock is still held: with backoff they must only
+            // buffer — no fresh transaction attempts.
+            log.appendBestEffort(domain: "c.example.com", decision: block, timestamp: at(102))
+            log.appendBestEffort(domain: "d.example.com", decision: block, timestamp: at(103))
+
+            let window = log.writeInstrumentationSnapshotAndReset()
+            XCTAssertEqual(window.flushRetries, 1, "exactly one failed attempt — cap-triggered retries must back off while the failure persists")
+            XCTAssertEqual(window.flushes, 0)
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            // An explicit drain bypasses the backoff, succeeds, and clears it.
+            XCTAssertTrue(log.flush())
+            XCTAssertEqual(log.count(), 4)
+            // Backoff cleared: the cap forces an immediate commit again (interval is 3600,
+            // so only a cap-triggered flush can have committed these).
+            log.appendBestEffort(domain: "e.example.com", decision: block, timestamp: at(104))
+            log.appendBestEffort(domain: "f.example.com", decision: block, timestamp: at(105))
+            XCTAssertEqual(log.count(), 6)
+        }
+    }
+    /// A tick that expired DURING a failed attempt's 2s busy wait sits queued right behind
+    /// the failure — without supersession it fires immediately and rides a SECOND
+    /// back-to-back busy timeout, violating the one-attempt-per-interval bound (Codex P3,
+    /// PR #354 round 4). The 1s interval puts the tick's expiry inside the 2s busy window;
+    /// the snapshot barrier lands right after the (instant, superseded) stale tick, a full
+    /// second before the re-armed fresh tick could fire.
+    func testStaleTickQueuedBehindAFailedFlushDoesNotStartASecondBusyAttempt() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-stale-tick") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 1.0, bestEffortFlushRowCap: 2)
+            _ = log.writeInstrumentationSnapshotAndReset()
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            // Append 1 arms the 1s tick; append 2 hits the cap and starts the attempt that
+            // busy-waits ~2s — the tick expires mid-wait (t≈1s) and queues right behind it.
+            log.appendBestEffort(domain: "seed-a.example.com", decision: block, timestamp: at(100))
+            log.appendBestEffort(domain: "seed-b.example.com", decision: block, timestamp: at(101))
+
+            // Sleep past the failure (t≈2s) so the snapshot barrier below is enqueued AFTER
+            // the stale tick's queued closure — enqueueing it earlier would put it ahead of
+            // the stale tick in queue order and it could never observe the second attempt
+            // (this test's own first draft made exactly that mistake and its RED never
+            // fired). With supersession the stale tick no-ops instantly and the snapshot
+            // runs at t≈2.5 with one recorded failure; without it, the stale tick rides a
+            // second 2s busy wait and the snapshot reports two.
+            Thread.sleep(forTimeInterval: 2.5)
+            let window = log.writeInstrumentationSnapshotAndReset()
+            XCTAssertEqual(window.flushRetries, 1, "the stale tick queued behind the failure must not ride a second back-to-back busy timeout")
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            XCTAssertTrue(log.flush())
+            XCTAssertEqual(log.count(), 2)
+        }
+    }
+    #endif
+
+    /// While the backoff suppresses cap-triggered attempts, the buffer must stay bounded at
+    /// APPEND time — the flush path's 8x-cap trim never runs during backoff, so a DNS burst
+    /// within the flush interval would otherwise grow resident state past the advertised
+    /// bound (INV-MEM-1; Codex P2, PR #354 review). Oldest dropped first, same as the
+    /// failure-path trim.
+    func testBackoffBufferStaysBoundedAtAppendTime() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-backoff-bound") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            // Row cap 2 -> retained cap 16.
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 2)
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            // Two appends hit the cap; the one attempt fails, arming the backoff. The
+            // count() call is a queue.sync barrier: it does not return until the seed
+            // attempt has actually FAILED (releasing the blocker before then would let the
+            // in-flight attempt's busy retry succeed and never arm the backoff — a race
+            // this test caught in its own first draft). Zero rows: the failed txn rolled
+            // back.
+            log.appendBestEffort(domain: "seed-a.example.com", decision: block, timestamp: at(100))
+            log.appendBestEffort(domain: "seed-b.example.com", decision: block, timestamp: at(101))
+            XCTAssertEqual(log.count(), 0)
+
+            // A burst of 20 more arrives while the lock is still held and the backoff is
+            // armed: each must only buffer, trimmed to the 8x cap as it lands.
+            for index in 0..<20 {
+                log.appendBestEffort(domain: "burst-\(index).example.com", decision: block, timestamp: at(Double(102 + index)))
+            }
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            XCTAssertTrue(log.flush())
+            XCTAssertEqual(log.count(), 16, "22 buffered events must have been trimmed to the 8x retained cap, oldest first")
+        }
+    }
+
     /// `prune` THROWS (rather than silently no-oping) when a contending writer holds the lock
     /// past the busy timeout — the error the tunnel's drain-and-prune helper must surface in
     /// its return value: the clear writer can grab the lock BETWEEN a successful drain and
