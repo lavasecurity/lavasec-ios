@@ -30,6 +30,77 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("diagnosticsPersistence.flush(force: force)"))
     }
 
+    /// A buffered best-effort DNS event append isn't in the SQLite table yet, so any drain
+    /// that commits it WITHOUT a coupled same-pass prune can resurrect pre-clear rows —
+    /// through the debounced write (prune-before-flush), through a contention-skipped prune
+    /// whose closure still reported success (cancelling the dirty retry), or through the
+    /// stop/sleep paths' bare terminal flush landing the retained batch with no later pass
+    /// ever running (P1 chain: lavasec-ios#54 promotion review + PR #351 rounds 2-4). One
+    /// primitive — `drainAndPruneDNSEventLog` — owns the coupling; these pins lock its
+    /// internal order, its use at ALL three drain sites, and ban any bare flush that would
+    /// bypass it.
+    /// - pinned: DNSEventLogTests.testFlushingBeforePruneRemovesABufferedPreClearEvent
+    /// - pinned: DNSEventLogTests.testPruningBeforeFlushLeavesABufferedPreClearEventToBeResurrectedLater
+    /// - pinned: DNSEventLogTests.testFlushReportsFailureWhenTheBatchCommitCannotAcquireTheWriteLock
+    func testDiagnosticsPersistenceFlushesBufferedDNSEventsBeforePruning() throws {
+        let source = try readSource(.packetTunnelProvider)
+
+        // The primitive itself: prune only ever runs AFTER a successful drain (guard shape).
+        let helperBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func drainAndPruneDNSEventLog(",
+            endingBefore: "// MARK: - Configuration & device-DNS state accessors"
+        )
+        let drainGuardRange = try XCTUnwrap(helperBlock.range(of: "guard drained else"))
+        let pruneRange = try XCTUnwrap(helperBlock.range(of: "try dnsEventLog.prune(before: cutoff)"))
+        XCTAssertLessThan(
+            drainGuardRange.lowerBound,
+            pruneRange.lowerBound,
+            "the buffer must drain successfully before the prune runs, or a buffered pre-clear event can be reinserted after the clear"
+        )
+        // The prune's OWN failure must surface in the return value too: a `try?` here reports
+        // a pass complete with pre-clear rows freshly committed and unpruned, clearing the
+        // dirty flag that guarantees the retry (PR #351 round 5).
+        XCTAssertFalse(
+            helperBlock.contains("try? dnsEventLog.prune"),
+            "a swallowed prune failure after a successful drain silently completes an incomplete pass"
+        )
+
+        // The debounced write closure routes through the primitive and folds its result into
+        // the closure's return value — a skipped prune must keep the controller dirty so the
+        // pass is guaranteed to re-run (PR #351 round 3).
+        let writeBlock = try sourceBlock(
+            in: source,
+            startingAt: "private lazy var diagnosticsPersistence = DebouncedPersistenceController(",
+            endingBefore: "private let dohResolver = DoHTransport("
+        )
+        XCTAssertTrue(writeBlock.contains("let dnsEventLogPruneCompleted = self.drainAndPruneDNSEventLog(now: now, discardOnFailure: false)"))
+        XCTAssertTrue(writeBlock.contains("return dnsEventLogPruneCompleted"))
+        XCTAssertFalse(writeBlock.contains("return true"), "the closure must not unconditionally report success once a prune can be skipped")
+
+        // The terminal paths use the SAME coupled primitive, in DISCARD mode: a failed
+        // flush() retains its batch and arms an async retry that can commit pre-clear rows
+        // in the teardown/pre-suspension window with no later prune (PR #351 rounds 4 and
+        // 7) — so stop and sleep must pass discardOnFailure: true, and the debounced
+        // closure (which HAS a guaranteed dirty-retained re-run) must not. A bare
+        // `dnsEventLog?.flush()` anywhere in the provider is a drain decoupled from the
+        // prune — banned outright.
+        XCTAssertTrue(helperBlock.contains("discardOnFailure ? dnsEventLog.flushOrDiscard() : dnsEventLog.flush()"))
+        let stopBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func cleanUpTunnelRuntimeAfterStop(",
+            endingBefore: "private static func errorDebugDetails("
+        )
+        XCTAssertTrue(stopBlock.contains("self.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        let sleepBlock = try sourceBlock(
+            in: source,
+            startingAt: "override func sleep(",
+            endingBefore: "override func wake("
+        )
+        XCTAssertTrue(sleepBlock.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        XCTAssertFalse(source.contains("dnsEventLog?.flush()"), "every drain must go through drainAndPruneDNSEventLog so no commit can land without its coupled prune")
+    }
+
     /// NRG: the DNS hot path (`readPackets` → `handle` → `forward`) runs for every
     /// inbound query while the tunnel is up, so steady-state CPU work there is the
     /// dominant always-on energy cost. These pins guard four reductions that remove

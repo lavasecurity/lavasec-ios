@@ -33,15 +33,18 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         // physically deletes rows within a cadence instead of leaving them stored (PR #327).
         XCTAssertTrue(source.contains("let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)"))
         XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName"))
-        XCTAssertTrue(source.contains("try? dnsEventLog.prune(before: cutoff)"))
+        XCTAssertTrue(source.contains("try dnsEventLog.prune(before: cutoff)"))
 
         // Stop cleanup drains queued fire-and-forget appends so a suspended NE process doesn't
-        // drop the newest decisions from the SQLite-backed list (PR #327 review).
-        XCTAssertTrue(source.contains("self.dnsEventLog?.flush()"))
+        // drop the newest decisions from the SQLite-backed list (PR #327 review) — via the
+        // drain-AND-prune primitive, so a successful terminal drain of a pre-clear batch
+        // carries the prune with it (PR #351 round 4).
+        XCTAssertTrue(source.contains("self.drainAndPruneDNSEventLog(discardOnFailure: true)"))
         // sleep() drains the buffered append batch too: with batched best-effort appends
         // (UR-53 follow-up) a jetsam while suspended would otherwise drop up to a flush
-        // window of Domain History.
-        XCTAssertTrue(source.contains("self?.dnsEventLog?.flush()"))
+        // window of Domain History. Same coupled primitive — a jetsam while suspended is
+        // terminal just like stop.
+        XCTAssertTrue(source.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: true)"))
 
         // QA energy coverage (UR-53 follow-up): the tunnel pulls the store's write-path
         // window into the energy counters on the EXISTING 60 s Focus tick — no new timer.

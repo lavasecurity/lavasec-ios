@@ -463,10 +463,21 @@ final class EnergyCounters: @unchecked Sendable {
         lastCPUTimeMs = Self.processCPUTimeMs()
         windowStartedAt = now
         lastFlushAt = now
-        let previousObserver = thermalObserver
         // Count thermal-state transitions for the window (field signal for UR-53-class
         // "device feels warm" reports). Re-registering per activation keeps one observer
         // per (re)started tunnel session; the closure only bumps under the lock.
+        // ORDER is the fix for the re-activation double-count, and it must be
+        // remove-BEFORE-add: NotificationCenter fixes a post's delivery set at post time,
+        // so a transition posted while both observers are registered merely BLOCKS both
+        // callbacks on this lock and then bumps twice after unlock — holding the lock
+        // across the swap serializes the bumps without deduplicating them (Codex P3,
+        // PR #351 round 6, correcting the atomicity framing from the earlier rounds).
+        // With remove-first there is never an instant with two observers; the residual is
+        // an at-most-one UNDERcount for a transition landing in the remove→add gap of a
+        // startTunnel activation — the right side to err on for a QA rate counter.
+        if let previousObserver = thermalObserver {
+            NotificationCenter.default.removeObserver(previousObserver)
+        }
         thermalObserver = NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil,
@@ -475,9 +486,6 @@ final class EnergyCounters: @unchecked Sendable {
             self?.bump(.thermalTransition)
         }
         lock.unlock()
-        if let previousObserver {
-            NotificationCenter.default.removeObserver(previousObserver)
-        }
     }
 
     // Feed one pulled DNSEventLog write-path window (the tunnel pulls a snapshot per 60 s

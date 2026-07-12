@@ -347,6 +347,156 @@ final class DNSEventLogTests: XCTestCase {
         XCTAssertEqual(log.page(action: .block, limit: 10).map(\.domain), ["fresh.example.com"])
     }
 
+    /// A buffered best-effort append isn't in the SQLite table yet, so a prune that runs
+    /// before the buffer is drained can't catch it — flushing first makes the SAME prune
+    /// pass complete against everything true as of now, so a clear followed immediately by
+    /// a prune can't leave a pre-clear domain physically resident (P1, lavasec-ios#54
+    /// promotion review). See the inverse below for what happens without the flush.
+    func testFlushingBeforePruneRemovesABufferedPreClearEvent() throws {
+        let log = try DNSEventLog(inMemory: true, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 1_000)
+        log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
+        XCTAssertTrue(log.flush())
+        XCTAssertEqual(try log.prune(before: at(500)), 1)
+        XCTAssertEqual(log.count(), 0)
+    }
+
+    /// The ordering hazard the fix above closes: pruning BEFORE flushing finds nothing to
+    /// delete (the event is still buffered, not yet a row), but the buffered event still
+    /// commits on the next flush and reappears in the store with its original pre-clear
+    /// timestamp — physically resident until whatever LATER prune pass catches it (worst
+    /// case: never, if the process exits before one runs).
+    func testPruningBeforeFlushLeavesABufferedPreClearEventToBeResurrectedLater() throws {
+        let log = try DNSEventLog(inMemory: true, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 1_000)
+        log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
+        XCTAssertEqual(try log.prune(before: at(500)), 0)
+        XCTAssertEqual(log.count(), 0)
+
+        log.flush()
+        XCTAssertEqual(log.count(), 1)
+        XCTAssertEqual(try log.prune(before: at(500)), 1)
+    }
+
+    /// If the buffered batch's own commit fails (e.g. a concurrent cross-process writer holds
+    /// the file past the busy timeout), `flush()` must report that the buffer did NOT drain —
+    /// a caller that guards a prune on the return value can then skip that pass instead of
+    /// pruning against a stale picture (Codex catch, PR #351 review).
+    func testFlushReportsFailureWhenTheBatchCommitCannotAcquireTheWriteLock() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-flush-contention") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 1_000)
+            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
+            // A second connection to the SAME file holds the write lock across flush()'s own
+            // BEGIN IMMEDIATE, so its commit can't acquire it before the busy timeout expires.
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            XCTAssertFalse(log.flush(), "the commit could not acquire the write lock, so the buffer must not report drained")
+            XCTAssertEqual(log.count(), 0, "the batch stays buffered for its own retry, not silently dropped")
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            XCTAssertTrue(log.flush(), "once the contending writer releases the lock, the retained batch commits")
+            XCTAssertEqual(log.count(), 1)
+        }
+    }
+
+    /// The resurrection vector the terminal drop exists to close, demonstrated with the
+    /// RETAIN-and-retry `flush()`: a failed drain retains its batch and arms an async retry
+    /// on the log's own queue, and once the contending writer releases the lock that retry
+    /// commits the batch — AFTER a terminal caller has already returned, with no coupled
+    /// prune ever running (Codex P2, PR #351 round 7). Fine mid-session (the dirty-retained
+    /// debounced pass prunes within a cadence); fatal on stop/sleep.
+    func testRetainedBatchArmedRetryCommitsOnceTheLockReleases() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-retry-resurrect") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 0.05, bestEffortFlushRowCap: 1_000)
+            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            XCTAssertFalse(log.flush(), "contended drain retains the batch and arms the retry")
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+
+            let deadline = Date().addingTimeInterval(5)
+            while log.count() == 0, Date() < deadline {
+                usleep(20_000)
+            }
+            XCTAssertEqual(log.count(), 1, "the armed retry commits the retained batch once the lock releases")
+        }
+    }
+
+    /// `flushOrDiscard()` is the terminal-drain shape: a contended commit DROPS the batch
+    /// instead of retaining it, so the retry the failure armed finds an empty buffer and
+    /// commits nothing — cleared rows cannot be resurrected after a stop/sleep caller has
+    /// returned. Waits past several retry intervals to prove the drop, not just observe
+    /// the retry hasn't fired yet.
+    func testFlushOrDiscardDropsTheBatchSoTheArmedRetryCannotResurrectIt() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-terminal-drop") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 0.05, bestEffortFlushRowCap: 1_000)
+            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            XCTAssertFalse(log.flushOrDiscard(), "contended terminal drain reports the drop")
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+
+            Thread.sleep(forTimeInterval: 0.3)
+            XCTAssertEqual(log.count(), 0, "the dropped batch must not be resurrected by the armed retry")
+            XCTAssertTrue(log.flush(), "the buffer is genuinely empty, not retained")
+            XCTAssertEqual(log.count(), 0)
+        }
+    }
+
+    /// `prune` THROWS (rather than silently no-oping) when a contending writer holds the lock
+    /// past the busy timeout — the error the tunnel's drain-and-prune helper must surface in
+    /// its return value: the clear writer can grab the lock BETWEEN a successful drain and
+    /// the coupled prune, and a swallowed failure there reports a pass complete with
+    /// pre-clear rows freshly committed and unpruned (PR #351 round 5).
+    func testPruneThrowsWhenAContendingWriterHoldsTheLock() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-prune-contention") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url)
+            try log.append(domain: "old.example.com", decision: block, timestamp: at(100))
+
+            var blockerHandle: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let blocker = try XCTUnwrap(blockerHandle)
+            defer { sqlite3_close_v2(blocker) }
+            XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            XCTAssertThrowsError(try log.prune(before: at(500)))
+
+            XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
+            XCTAssertEqual(try log.prune(before: at(500)), 1, "the same prune succeeds once the lock is released")
+        }
+    }
+
     /// Best-effort appends must BUFFER on the log's queue and commit together on `flush()` —
     /// one transaction per flush window, not one per event. The per-event transaction shape
     /// re-appended the same hot B-tree pages to the WAL on every commit: ~175x flash write
@@ -419,6 +569,38 @@ final class DNSEventLogTests: XCTestCase {
             XCTAssertEqual(drained.flushes, 0)
             XCTAssertEqual(drained.flushedRows, 0)
             XCTAssertEqual(drained.walFramesWritten, 0)
+        }
+    }
+
+    /// A WAL checkpoint (autocheckpoint's default ~1000-page trigger, or an explicit
+    /// `wal_checkpoint`) resets the frame count SQLite reports via `sqlite3_wal_hook` on the
+    /// NEXT commit — the common case this metric must treat as a new baseline, not the 32-bit
+    /// wraparound an earlier version of the hook mistook every drop for, which added ~2.1B
+    /// bogus frames per ordinary checkpoint (Codex catch, PR #351 review).
+    func testWALFrameCounterTreatsACheckpointResetAsANewBaselineNotAWraparound() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-wal-reset") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url, bestEffortFlushInterval: 3_600, bestEffortFlushRowCap: 1_000)
+            try log.append(domain: "before-checkpoint.example.com", decision: block, timestamp: at(100))
+            _ = log.writeInstrumentationSnapshotAndReset()
+
+            // A second connection to the SAME file forces a checkpoint, resetting the WAL frame
+            // count SQLite will report on the log's next commit.
+            var checkpointConnection: OpaquePointer?
+            XCTAssertEqual(
+                sqlite3_open_v2(url.path, &checkpointConnection, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
+                SQLITE_OK
+            )
+            let connection = try XCTUnwrap(checkpointConnection)
+            XCTAssertEqual(sqlite3_exec(connection, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil), SQLITE_OK)
+            sqlite3_close_v2(connection)
+
+            try log.append(domain: "after-checkpoint.example.com", decision: block, timestamp: at(200))
+            let window = log.writeInstrumentationSnapshotAndReset()
+            // A handful of frames for one small commit — not the ~2.1B a wraparound
+            // misinterpretation of the reset would add.
+            XCTAssertGreaterThan(window.walFramesWritten, 0)
+            XCTAssertLessThan(window.walFramesWritten, 1_000)
         }
     }
 

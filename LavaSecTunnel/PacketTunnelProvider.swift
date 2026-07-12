@@ -482,19 +482,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // ts predicate full-scanned the whole table every pass — UR-53 follow-up,
             // 2026-07-12), mostly a no-op — the orphan sweep inside prune only runs on a pass
             // that actually deleted events (#339) — and off the DNS path.
-            if let dnsEventLog = self.dnsEventLog {
-                let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
-                let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName)
-                let cutoff = clearFloorMs > 0
-                    ? max(retentionCutoff, Date(timeIntervalSince1970: Double(clearFloorMs) / 1000))
-                    : retentionCutoff
-                try? dnsEventLog.prune(before: cutoff)
-            }
+            // Drain the event log's buffered best-effort appends, then prune — as ONE
+            // primitive (`drainAndPruneDNSEventLog`): a buffered pre-clear event isn't a row
+            // yet, so pruning before the drain leaves it to be re-inserted by a later flush
+            // with its pre-clear timestamp; and draining without the coupled prune (or pruning
+            // after a FAILED drain — a clear-contended commit retains its batch for retry) is
+            // the same resurrection through a different door (P1s, lavasec-ios#54 promotion
+            // review + PR #351 rounds 2/4).
+            //
+            // The result folds into this closure's return value: a pass whose prune was
+            // skipped is INCOMPLETE even though the JSON diagnostics save below can still
+            // succeed — returning `true` regardless would clear
+            // DebouncedPersistenceController's dirty flag and cancel the guaranteed retry
+            // (Codex catch, PR #351 round 3).
+            // - pinned: PacketTunnelDNSRuntimeSourceTests.testDiagnosticsPersistenceFlushesBufferedDNSEventsBeforePruning
+            let dnsEventLogPruneCompleted = self.drainAndPruneDNSEventLog(now: now, discardOnFailure: false)
             guard let diagnosticsURL = self.diagnosticsURL else {
                 return false
             }
             try? DiagnosticsPersistence.save(self.diagnostics, to: diagnosticsURL)
-            return true
+            return dnsEventLogPruneCompleted
         }
     )
     private let dohResolver = DoHTransport(timeoutSeconds: PacketTunnelProvider.dohTimeoutSeconds) { event, details in
@@ -780,7 +787,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // process: batched appends (UR-53 follow-up) hold up to a flush window in memory,
             // and a jetsam while suspended would silently drop that tail from Domain History.
             // One bounded transaction, mirroring the stop-path drain (PR #327 review).
-            self?.dnsEventLog?.flush()
+            // Same drain-and-prune primitive as stop: a jetsam while suspended is terminal
+            // just like stop, so a successful drain of a pre-clear batch here must carry the
+            // prune with it or the cleared rows outlive the process (PR #351 round 4). The
+            // prune is index-walking and mostly a no-op — negligible on the sleep handshake.
+            self?.drainAndPruneDNSEventLog(discardOnFailure: true)
             completion.complete()
         }
     }
@@ -1014,7 +1025,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // stop completion. The JSON diagnostics were just force-flushed, but the app reads
             // Domain History from SQLite — so if the NE process is suspended with appends still
             // queued, the newest decisions would vanish from the list (PR #327 review).
-            self.dnsEventLog?.flush()
+            //
+            // Drain-AND-prune, not a bare flush: if the force-flushed diagnostics pass above
+            // skipped ITS prune because an app-side clear held the SQLite lock, a bare drain
+            // here that then succeeds would commit the retained pre-clear batch with no later
+            // pass ever running — the process is exiting and the debounced controller's dirty
+            // retention can't help a dead process (Codex P1, PR #351 round 4). The helper
+            // couples the prune to the successful drain; a drain that STILL fails is
+            // privacy-fail-safe (the uncommitted batch dies with the process).
+            self.drainAndPruneDNSEventLog(discardOnFailure: true)
             completion()
         }
     }
@@ -5692,6 +5711,59 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func persistDiagnosticsIfNeeded(force: Bool = false) {
         diagnosticsPersistence.flush(force: force)
+    }
+
+    // Drains the DNS event log's buffered best-effort appends and, ONLY when the buffer
+    // fully drained, prunes below the 7-day retention window and the app's clear floor.
+    // The single primitive behind every drain site — the debounced diagnostics write, the
+    // stop-path teardown, and sleep() — so no drain can ever land a buffered pre-clear
+    // batch WITHOUT the prune that removes it running right after in the same pass. The
+    // stop path is why the coupling must live here and not in the write closure alone: a
+    // clear-contended closure pass skips its prune (and stays dirty), but the process is
+    // exiting — if the teardown's own drain then succeeds, it would commit the retained
+    // pre-clear rows with no later pass ever running (Codex P1, PR #351 round 4). A drain
+    // that fails here is privacy-FAIL-SAFE: the uncommitted batch dies with the process
+    // rather than being resurrected.
+    // Runs on dnsStateQueue at every call site (the write closure's scheduler, the stop
+    // teardown's async block, and sleep()'s async block), matching the log's established
+    // cross-queue usage (INV-QUEUE-1: no new confinement shape).
+    // Returns whether BOTH halves completed — a swallowed prune failure after a successful
+    // drain (the clear writer can grab the lock BETWEEN the two) would report a pass as
+    // complete with pre-clear rows freshly committed and unpruned, clearing the dirty flag
+    // that guarantees the retry (Codex P2, PR #351 round 5). A false return leaves the
+    // debounced controller dirty; at a terminal site the residual is bounded by the clear
+    // floor persisting in shared defaults — the next tunnel session's first pass prunes
+    // below it, and the app's read path hides the rows meanwhile.
+    //
+    // `discardOnFailure` is the terminal-vs-debounced split for the DRAIN half: a failed
+    // flush() RETAINS its batch and arms an async retry on the log's own queue, which on a
+    // terminal path can commit pre-clear rows in the teardown/pre-suspension window AFTER
+    // this helper skipped the coupled prune — with no later pass ever running (Codex P2,
+    // PR #351 round 7). Terminal callers (stop, sleep) pass true so a failed drain DROPS
+    // the batch (the armed retry then no-ops on the empty buffer); the debounced caller
+    // passes false and keeps retain-and-retry — in-session, its resurrected rows are
+    // removed within one cadence by the dirty-retained re-run.
+    // - pinned: PacketTunnelDNSRuntimeSourceTests.testDiagnosticsPersistenceFlushesBufferedDNSEventsBeforePruning
+    @discardableResult
+    private func drainAndPruneDNSEventLog(now: Date = Date(), discardOnFailure: Bool) -> Bool {
+        guard let dnsEventLog else {
+            return true
+        }
+        let drained = discardOnFailure ? dnsEventLog.flushOrDiscard() : dnsEventLog.flush()
+        guard drained else {
+            return false
+        }
+        let retentionCutoff = now.addingTimeInterval(-LocalLogRetention.fineGrainedWindow)
+        let clearFloorMs = LavaSecAppGroup.sharedDefaults.integer(forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName)
+        let cutoff = clearFloorMs > 0
+            ? max(retentionCutoff, Date(timeIntervalSince1970: Double(clearFloorMs) / 1000))
+            : retentionCutoff
+        do {
+            try dnsEventLog.prune(before: cutoff)
+        } catch {
+            return false
+        }
+        return true
     }
 
     // MARK: - Configuration & device-DNS state accessors

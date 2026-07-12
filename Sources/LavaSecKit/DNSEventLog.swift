@@ -1,8 +1,5 @@
 import Foundation
 import SQLite3
-#if DEBUG || LAVA_QA_TOOLS
-import os
-#endif
 
 // SQLITE_TRANSIENT tells sqlite to COPY a bound blob/text during the bind call, so a Swift
 // String temporary is safe to pass; sqlite doesn't retain the pointer past the call. The C
@@ -109,7 +106,6 @@ public final class DNSEventLog: @unchecked Sendable {
     private var qaOrphanSweeps = 0
     private var qaWALFramesTotal: Int64 = 0
     private var qaWALLastFrames: Int32 = 0
-    private static let qaSignpostLog = OSLog(subsystem: "app.lavasecurity.nrg", category: .pointsOfInterest)
 
     /// One pulled-and-reset window of write-path activity, for QA energy attribution.
     public struct WriteInstrumentationSnapshot: Sendable {
@@ -157,8 +153,19 @@ public final class DNSEventLog: @unchecked Sendable {
     /// Counts WAL frames appended per commit via `sqlite3_wal_hook`. The hook fires on the
     /// committing thread (this instance's serial queue), so the counters stay queue-confined.
     /// `frames` is the WAL's TOTAL frame count after the commit, so the per-commit delta is
-    /// measured against the last observed total; a drop means a checkpoint reset the WAL and
-    /// the new total IS the delta.
+    /// measured against the last observed total.
+    ///
+    /// A DROP is treated as a checkpoint reset (the new total IS the delta), not a 32-bit
+    /// wraparound. This connection never disables WAL autocheckpoint (default trigger ~1000
+    /// pages), so a reset drop from a small-to-moderate `qaWALLastFrames` is the only decrease
+    /// this metric will realistically ever observe; a true `Int32` wraparound needs ~2^31
+    /// frames (~8.8 TB at 4 KB/page) accumulated in a SINGLE uncheckpointed WAL, categorically
+    /// outside what this app produces. An earlier version of this hook tried to distinguish the
+    /// two by reconstructing a wraparound delta on every drop — that misread every ordinary
+    /// checkpoint reset as a wraparound and added ~2.1B bogus frames per reset, corrupting the
+    /// write-volume metric on the COMMON path to guard a scenario this app will never hit
+    /// (Codex catch, PR #351 review — same P2 badge OCR's own suggested patch for the prior
+    /// finding had). Delta arithmetic stays in `Int64` purely so the subtraction can never trap.
     private func installQAWALHook() {
         let context = Unmanaged.passUnretained(self).toOpaque()
         sqlite3_wal_hook(db, { context, _, _, frames in
@@ -166,8 +173,10 @@ public final class DNSEventLog: @unchecked Sendable {
                 return SQLITE_OK
             }
             let log = Unmanaged<DNSEventLog>.fromOpaque(context).takeUnretainedValue()
-            let delta = frames >= log.qaWALLastFrames ? frames - log.qaWALLastFrames : frames
-            log.qaWALFramesTotal += Int64(delta)
+            let frames64 = Int64(frames)
+            let previous = Int64(log.qaWALLastFrames)
+            let delta = frames64 >= previous ? frames64 - previous : frames64
+            log.qaWALFramesTotal += delta
             log.qaWALLastFrames = frames
             return SQLITE_OK
         }, context)
@@ -220,7 +229,13 @@ public final class DNSEventLog: @unchecked Sendable {
         if let db {
             #if DEBUG || LAVA_QA_TOOLS
             // The WAL hook holds an unretained self; clear it before the connection closes so
-            // no late commit can call back into a deallocating instance.
+            // no late commit can call back into a deallocating instance. This clears the hook
+            // on WHICHEVER thread drops the last reference, not synchronized with an in-flight
+            // commit on `queue` — the same unretained-capture shape `db` itself already has.
+            // Callers own the contract: `flush()` before dropping the last reference so no
+            // batched commit is still in flight when this runs (OCR P2, lavasec-ios#54
+            // promotion review). The tunnel already does this on every teardown path (stop,
+            // sleep, and now every debounced prune pass) via `flush()`.
             sqlite3_wal_hook(db, nil, nil)
             #endif
             sqlite3_close_v2(db)
@@ -378,7 +393,7 @@ public final class DNSEventLog: @unchecked Sendable {
             // Low-frequency POI (at most one per flush window) so an Instruments run can
             // correlate the store's commits with CPU/IO on the timeline — never per event
             // (the energy doc's observer-effect rule).
-            os_signpost(.event, log: Self.qaSignpostLog, name: "sqlite-flush")
+            DNSEventLogSignpost.event("sqlite-flush")
             #endif
         } catch {
             #if DEBUG || LAVA_QA_TOOLS
@@ -414,9 +429,45 @@ public final class DNSEventLog: @unchecked Sendable {
     /// drop the newest decisions: the JSON diagnostics are force-flushed on stop, and the app
     /// reads Domain History from SQLite, so an un-drained append would make those rows vanish
     /// from the list.
-    public func flush() {
+    ///
+    /// Returns whether the buffer is empty once the call returns. A commit can fail without
+    /// throwing past this call (e.g. a concurrent cross-process writer holds the file past the
+    /// busy timeout) — `flushPendingBestEffortOnQueue` retains the batch and schedules its own
+    /// retry rather than propagating the error here. `false` means the retained batch is STILL
+    /// buffered: a caller that must not act on stale state (e.g. pruning against a clear floor)
+    /// should treat it as "not drained yet" rather than assuming the commit landed (Codex catch,
+    /// PR #351 review).
+    @discardableResult
+    public func flush() -> Bool {
         queue.sync {
             flushPendingBestEffortOnQueue()
+            return pendingBestEffort.isEmpty
+        }
+    }
+
+    /// One-shot TERMINAL drain: attempts the same single-transaction commit as `flush()`,
+    /// but on failure the buffered batch is DISCARDED instead of retained — which also makes
+    /// the retry that `flushPendingBestEffortOnQueue` armed on the failure a no-op (an empty
+    /// buffer is skipped), so nothing can commit after the caller returns.
+    ///
+    /// For callers on a terminal path (tunnel stop / sleep): a RETAINED batch's queue-armed
+    /// retry can fire in the teardown or pre-suspension window and commit pre-clear rows
+    /// AFTER the caller's coupled prune was skipped, with no later pass to remove them —
+    /// resurrecting cleared Domain History (Codex P2, PR #351 round 7). The durability cost
+    /// of the drop is the already-accepted jetsam bound (at most one flush window's tail,
+    /// and only when the terminal drain was contended), traded deliberately for the
+    /// clear-local-logs promise. Returns whether the batch actually committed
+    /// (`false` = dropped).
+    /// - pinned: DNSEventLogTests.testFlushOrDiscardDropsTheBatchSoTheArmedRetryCannotResurrectIt
+    @discardableResult
+    public func flushOrDiscard() -> Bool {
+        queue.sync {
+            flushPendingBestEffortOnQueue()
+            guard pendingBestEffort.isEmpty else {
+                pendingBestEffort.removeAll(keepingCapacity: false)
+                return false
+            }
+            return true
         }
     }
 
@@ -785,6 +836,11 @@ public final class DNSEventLog: @unchecked Sendable {
             #if DEBUG || LAVA_QA_TOOLS
             qaPrunePasses += 1
             qaPrunedRows += deleted
+            // Prune is low-frequency (the tunnel's ~30 s debounced diagnostics cadence), so a
+            // matching POI gives the same Instruments timeline-correlation benefit the flush
+            // signpost exists for, keeping the instrumentation symmetric (OCR P3, lavasec-ios#54
+            // promotion review).
+            DNSEventLogSignpost.event("sqlite-prune")
             #endif
             return deleted
         }
