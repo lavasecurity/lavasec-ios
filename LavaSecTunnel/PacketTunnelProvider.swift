@@ -792,17 +792,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // process: batched appends (UR-53 follow-up) hold up to a flush window in memory,
             // and a jetsam while suspended would silently drop that tail from Domain History.
             // One bounded transaction, mirroring the stop-path drain (PR #327 review).
-            // Same drain-and-prune primitive as stop: a jetsam while suspended is terminal
-            // just like stop, so a successful drain of a pre-clear batch here must carry the
-            // prune with it or the cleared rows outlive the process (PR #351 round 4). The
-            // prune is index-walking and mostly a no-op — negligible on the sleep handshake.
+            // Same drain-and-prune primitive as stop, but RETAIN on failure — sleep is a
+            // SUSPENSION, not termination: iOS resumes the process in the common case, and
+            // dropping a contended batch here would permanently lose up to a flush window of
+            // legitimate history on every ordinary resume (OCR P1, lavasec-ios#54 sync
+            // review, correcting PR #351 round 7's over-extension of the stop-path drop).
+            // Retention is privacy-safe in every leg: post-wake, the retained batch's retry
+            // commits and the controller's self-re-armed pass prunes below the persisted
+            // floor even on an idle tunnel (PR #351 round 8); a jetsam while suspended kills
+            // the uncommitted in-memory batch outright; and the pre-suspension-retry leg is
+            // improbable (queues freeze at suspension, the retry sits a full flush interval
+            // out) and even then bounded by the floor + the next session's first pass. Only
+            // STOP keeps the drop — there the process exit is certain and no later pass
+            // exists.
             // Worst-case latency bound (OCR, lavasec-ios#54 sync review): each half can wait
             // at most one 2s busy_timeout, and only when a cross-process writer contends that
             // half independently — ~4s needs two just-in-time lock grabs in succession. The
             // pre-#351 sleep drain already accepted the first 2s; NEProvider sleep completion
             // has no hard watchdog (iOS holds suspension until it's signalled), and trading a
             // rare bounded delay for the clear-local-logs promise is the right side to err on.
-            self?.drainAndPruneDNSEventLog(discardOnFailure: true)
+            self?.drainAndPruneDNSEventLog(discardOnFailure: false)
             completion.complete()
         }
     }
@@ -2873,7 +2882,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         if let dnsEventLog {
             // NRG SQLite lever (UR-53 follow-up): pull the depth store's write-path window
             // (flushes/rows/prunes/WAL frames) into the counters on the same existing tick —
-            // no new timer, no per-event logging.
+            // no new timer, no per-event logging. The snapshot's queue.sync can wait behind
+            // an in-flight retry commit that is itself riding the 2s busy_timeout against a
+            // cross-process clear writer — a rare, bounded ≤~2s stall on this 60s QA-only
+            // tick (OCR, lavasec-ios#54 sync review); everything else on the log's queue
+            // originates from this same dnsStateQueue and is therefore already serialized.
             EnergyCounters.shared.recordSQLiteWindow(dnsEventLog.writeInstrumentationSnapshotAndReset())
         }
         EnergyCounters.shared.flushIfDue()           // NRG: flush the per-window counter summary (piggybacks this tick)
@@ -5776,12 +5789,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // app's clear writer self-heals via the controller's re-armed retry, but a
             // PERSISTENTLY failing prune (schema drift, disk corruption) would otherwise be
             // invisible in a field report while cleared rows stay stored (OCR P2,
-            // lavasec-ios#54 sync review). Error detail carries sqlite context only — the
-            // prune SQL is parameterized, never a domain.
+            // lavasec-ios#54 sync review). Leak surface: none — LogError is a plain Swift
+            // enum (no LocalizedError conformance), so the bridged localizedDescription is
+            // the generic type-and-code form and never carries the associated SQL/errmsg
+            // strings; and even those are parameterized statement text or engine messages,
+            // never a domain. The structured sqliteCode below is what actually carries the
+            // diagnosis.
+            var details = Self.errorDebugDetails(error)
+            if case let DNSEventLog.LogError.sql(_, code) = error {
+                details["sqliteCode"] = "\(code)"
+            } else if case let DNSEventLog.LogError.open(code) = error {
+                details["sqliteCode"] = "\(code)"
+            }
             LavaSecDeviceDebugLog.append(
                 component: "tunnel",
                 event: "dns-event-log-prune-failed",
-                details: Self.errorDebugDetails(error)
+                details: details
             )
             return false
         }

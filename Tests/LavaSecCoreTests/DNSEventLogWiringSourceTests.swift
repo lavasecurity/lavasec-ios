@@ -42,9 +42,10 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("self.drainAndPruneDNSEventLog(discardOnFailure: true)"))
         // sleep() drains the buffered append batch too: with batched best-effort appends
         // (UR-53 follow-up) a jetsam while suspended would otherwise drop up to a flush
-        // window of Domain History. Same coupled primitive — a jetsam while suspended is
-        // terminal just like stop.
-        XCTAssertTrue(source.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        // window of Domain History. Same coupled primitive, but RETAIN mode — sleep is a
+        // suspension, not termination, so a contended batch must survive an ordinary
+        // resume (lavasec-ios#54 sync review).
+        XCTAssertTrue(source.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: false)"))
 
         // QA energy coverage (UR-53 follow-up): the tunnel pulls the store's write-path
         // window into the energy counters on the EXISTING 60 s Focus tick — no new timer.

@@ -87,13 +87,16 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             .joined(separator: "\n")
         XCTAssertFalse(writeBlockCodeLines.contains("return true"), "the closure must not unconditionally report success once a prune can be skipped")
 
-        // The terminal paths use the SAME coupled primitive, in DISCARD mode: a failed
-        // flush() retains its batch and arms an async retry that can commit pre-clear rows
-        // in the teardown/pre-suspension window with no later prune (PR #351 rounds 4 and
-        // 7) — so stop and sleep must pass discardOnFailure: true, and the debounced
-        // closure (which HAS a guaranteed dirty-retained re-run) must not. A bare
-        // `dnsEventLog?.flush()` anywhere in the provider is a drain decoupled from the
-        // prune — banned outright.
+        // The terminal-vs-suspension asymmetry is deliberate and pinned: STOP passes
+        // discardOnFailure: true (process exit is certain; a retained batch's armed retry
+        // could commit pre-clear rows after the skipped prune with no later pass — PR #351
+        // rounds 4 and 7). SLEEP passes false — it is a suspension, not termination, and
+        // dropping on an ordinary resume would permanently lose real history; retention is
+        // privacy-safe there because the controller's self-re-armed pass prunes post-wake
+        // and a jetsam kills the uncommitted batch (OCR P1, lavasec-ios#54 sync review).
+        // The debounced closure also retains (its dirty-retained re-run is guaranteed). A
+        // bare `dnsEventLog?.flush()` anywhere in the provider is a drain decoupled from
+        // the prune — banned outright.
         XCTAssertTrue(helperBlock.contains("discardOnFailure ? dnsEventLog.flushOrDiscard() : dnsEventLog.flush()"))
         let stopBlock = try sourceBlock(
             in: source,
@@ -106,7 +109,7 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
             startingAt: "override func sleep(",
             endingBefore: "override func wake("
         )
-        XCTAssertTrue(sleepBlock.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: true)"))
+        XCTAssertTrue(sleepBlock.contains("self?.drainAndPruneDNSEventLog(discardOnFailure: false)"))
         XCTAssertFalse(source.contains("dnsEventLog?.flush()"), "every drain must go through drainAndPruneDNSEventLog so no commit can land without its coupled prune")
         // The discard variant is the same bypass through a different door: a bare
         // flushOrDiscard outside the helper commits (or drops) without the coupled prune
