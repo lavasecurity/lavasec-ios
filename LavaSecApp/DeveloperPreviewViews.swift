@@ -147,6 +147,7 @@ struct DeveloperMediaCaptureFixture: Codable {
     let visibleRuleCount: Int
 
     static func load() -> DeveloperMediaCaptureFixture? {
+        #if targetEnvironment(simulator)
         guard let containerURL = LavaSecAppGroup.containerURL else {
             return nil
         }
@@ -160,6 +161,9 @@ struct DeveloperMediaCaptureFixture: Codable {
         }
 
         return fixture
+        #else
+        return nil
+        #endif
     }
 
     func configuredLibrary() -> FilterLibrary {

@@ -13,8 +13,16 @@ final class MediaCaptureDriverUITests: XCTestCase {
             throw XCTSkip("Media capture driver requires destination and ready-path environment values.")
         }
 
+        let environment = ProcessInfo.processInfo.environment
         let app = XCUIApplication()
-        app.launchArguments = ["-hasSeenLavaOnboarding", "YES"]
+        var launchArguments = ["-hasSeenLavaOnboarding", "YES"]
+        if let locale = environment["LAVA_MEDIA_LOCALE"], !locale.isEmpty {
+            launchArguments += ["-AppleLanguages", String(format: "(%@)", locale)]
+        }
+        if let appleLocale = environment["LAVA_MEDIA_APPLE_LOCALE"], !appleLocale.isEmpty {
+            launchArguments += ["-AppleLocale", appleLocale]
+        }
+        app.launchArguments = launchArguments
         app.launchEnvironment = ["LAVA_UI_TEST_RESET_SECURITY": "1"]
         app.launch()
 
