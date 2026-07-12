@@ -5077,6 +5077,72 @@
         }
       }
     },
+    "A DNS check failed. Lava is retrying.": {
+      "comment": "Protection status subtitle under the \"Reconnecting\" title: an automatic DNS health check failed and Lava keeps retrying on its own; filtering stays active and no user action is needed.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A DNS check failed. Lava is retrying."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine DNS-Prüfung ist fehlgeschlagen. Lava versucht es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ha fallado una comprobación de DNS. Lava lo está reintentando."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une vérification DNS a échoué. Lava réessaie."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un controllo DNS non è riuscito. Lava sta riprovando."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS チェックに失敗しました。Lava が再試行しています。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 확인에 실패했어요. Lava가 다시 시도하고 있어요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma verificação de DNS falhou. A Lava está tentando novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS 检查未通过。Lava 正在自动重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有一項 DNS 檢查失敗。Lava 正在自動重試。"
+          }
+        }
+      }
+    },
     "A Lava a day keeps bad domains away.": {
       "comment": "GuardianShieldStyle.settingsDescription .original (SettingsView:2110); shown as Guard-look subtitle when revealed, SettingsView:1976. Catalog-only.",
       "extractionState": "manual",
@@ -15956,72 +16022,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "確認你的 Passkey"
-          }
-        }
-      }
-    },
-    "Connection changed, refreshing DNS protection": {
-      "comment": "Localization-gap backfill (was hardcoded in ProtectionConnectivityPresentation.swift).",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connection changed, refreshing DNS protection"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verbindung geändert, DNS-Schutz wird aktualisiert"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La conexión cambió, actualizando la protección DNS"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connexion modifiée, actualisation de la protection DNS"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connessione cambiata, aggiornamento della protezione DNS"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "接続が変わりました。DNS 保護を更新しています"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결이 바뀌어 DNS 보호를 새로고침하는 중이에요"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "A conexão mudou, atualizando a proteção de DNS"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "连接已改变，正在刷新 DNS 保护"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "連線已變更，正在重新整理 DNS 保護"
           }
         }
       }

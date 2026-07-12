@@ -576,7 +576,11 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
         XCTAssertEqual(assessment.primaryAction, .turnOff)
     }
 
-    func testFreshNetworkRuntimeResetShowsRecoveringBeforeFailuresArrive() {
+    // A zero-evidence settle wait right after a handoff reads `.healthy`, matching cold
+    // start under the same zero evidence — `.recovering` is reserved for real failure
+    // evidence (the honesty floor). Previously this window showed "Reconnecting" for up
+    // to 10s while merely waiting for the first post-reset success.
+    func testFreshNetworkRuntimeResetStaysHealthyBeforeEvidenceArrives() {
         let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
         let health = TunnelHealthSnapshot(
             lastNetworkChangeAt: networkChangedAt,
@@ -584,6 +588,61 @@ final class ProtectionConnectivityPolicyTests: XCTestCase {
             lastResolverRuntimeResetReason: "network-path-changed",
             resolverRuntimeResetCount: 1,
             lastUpstreamSuccessAt: networkChangedAt.addingTimeInterval(-10)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: networkChangedAt.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(assessment.severity, .healthy)
+        XCTAssertEqual(assessment.primaryAction, .turnOff)
+    }
+
+    // The pause-resume shape of the same wait: a `.protectionPolicyRefresh` runtime reset
+    // (pause flip, filter toggle) stamps `lastResolverRuntimeResetAt` hours after the last
+    // handoff. The removed window branch keyed on ANY reset postdating ANY network change,
+    // so resuming from pause flashed "Reconnecting" with zero failure evidence whenever a
+    // handoff existed earlier in the session.
+    func testPolicyRefreshResetAfterStaleNetworkChangeStaysHealthy() {
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let resumedAt = networkChangedAt.addingTimeInterval(7_200)
+        let health = TunnelHealthSnapshot(
+            upstreamSuccessCount: 40,
+            lastNetworkChangeAt: networkChangedAt,
+            lastResolverRuntimeResetAt: resumedAt,
+            lastResolverRuntimeResetReason: "pause-updated",
+            resolverRuntimeResetCount: 2,
+            lastUpstreamSuccessAt: resumedAt.addingTimeInterval(-30)
+        )
+
+        let assessment = ProtectionConnectivityPolicy.assessment(
+            isConnected: true,
+            health: health,
+            now: resumedAt.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(assessment.severity, .healthy)
+        XCTAssertEqual(assessment.primaryAction, .turnOff)
+    }
+
+    // The floor still owns the immediate post-handoff window when evidence of trouble
+    // exists: one uncovered failed probe inside the old 10s window must stay `.recovering`,
+    // proving the removal above dropped only the zero-evidence wait, not the floor.
+    func testFailedProbeRightAfterNetworkChangeStillRecovering() {
+        let networkChangedAt = Date(timeIntervalSinceReferenceDate: 800_720_000)
+        let health = TunnelHealthSnapshot(
+            lastFailureReason: "timeout",
+            consecutiveUpstreamFailureCount: 1,
+            lastDNSSmokeProbeAt: networkChangedAt.addingTimeInterval(3),
+            lastDNSSmokeProbeSucceeded: false,
+            consecutiveDNSSmokeProbeFailureCount: 1,
+            lastNetworkChangeAt: networkChangedAt,
+            lastResolverRuntimeResetAt: networkChangedAt.addingTimeInterval(1),
+            lastResolverRuntimeResetReason: "network-path-changed",
+            resolverRuntimeResetCount: 1,
+            lastUpstreamFailureAt: networkChangedAt.addingTimeInterval(3)
         )
 
         let assessment = ProtectionConnectivityPolicy.assessment(

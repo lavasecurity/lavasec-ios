@@ -54,16 +54,6 @@ public struct ProtectionConnectivityAssessment: Equatable, Sendable {
 }
 
 public enum ProtectionConnectivityPolicy {
-    // FUTURE (dns-recovery optimization D, pending rc/debug-log evidence): within
-    // this window after a runtime reset the state stays `.recovering` rather than
-    // escalating to `.needsReconnect`. The 1504 export hit `backed-off` ~15s after
-    // a handoff — just outside this 10s window — so a normal handoff briefly showed
-    // the alarming `needs-reconnect`. Widening to ~20–30s would keep an ordinary
-    // handoff in `.recovering` (the light recapture/reprobe recovery still runs
-    // throughout). Trade-off: a genuinely-broken-after-handoff case takes longer to
-    // escalate to the heavy self-reconnect — mostly cosmetic, but confirm typical
-    // handoff recovery duration from the device debug log before widening.
-    private static let freshRecoveryWindow: TimeInterval = 10
     private static let reconnectFailureThreshold = 3
     private static let slowResponseThresholdMilliseconds = 2_500
 
@@ -128,16 +118,24 @@ public enum ProtectionConnectivityPolicy {
             return ProtectionConnectivityAssessment(severity: .dnsSlow, primaryAction: .reconnect)
         }
 
-        if isRecoveringFromRecentNetworkChange(health, now: now) {
-            return ProtectionConnectivityAssessment(severity: .recovering, primaryAction: .turnOff)
-        }
-
         // Honesty floor: a current, uncovered smoke-probe failure (below the reconnect
         // threshold) must never read as `.healthy`. Otherwise — when forwarding is light
         // or carried by the encrypted fallback, which resets consecutiveUpstreamFailureCount
         // — the app showed "Protected" while the primary resolver's health probe was
         // failing. Surface `.recovering` until a probe actually succeeds (it escalates to
         // `.needsReconnect` once the smoke failures reach the threshold, above).
+        //
+        // This floor is the ONLY `.recovering` producer, so the state always carries real
+        // failure evidence. A zero-evidence settle wait (post-handoff / post-resume runtime
+        // reset with no success AND no failed probe yet) deliberately reads `.healthy`:
+        // filtering is fail-closed throughout (INV-DNS-1) and the ~1.5s network-settle probe
+        // supplies evidence promptly, so surfacing "Reconnecting" there mis-read a passive
+        // evidence wait as connection difficulty — cold start already read `.healthy` under
+        // identical zero evidence. (Replaced the former 10s `freshRecoveryWindow` branch,
+        // which keyed on ANY runtime reset postdating ANY network change — including a
+        // pause-resume policy refresh hours after a handoff — and never gated escalation:
+        // `hasCurrentRestartWorthyFailure` runs above it either way.)
+        // pinned: ProtectionConnectivityPolicyTests.testFreshNetworkRuntimeResetStaysHealthyBeforeEvidenceArrives
         if hasUncoveredFailedSmokeProbe(health) {
             return ProtectionConnectivityAssessment(severity: .recovering, primaryAction: .turnOff)
         }
@@ -483,25 +481,6 @@ public enum ProtectionConnectivityPolicy {
         if let failureAt = health.lastUpstreamFailureAt,
            let successAt = health.lastUpstreamSuccessAt,
            failureAt > successAt {
-            return false
-        }
-
-        return true
-    }
-
-    private static func isRecoveringFromRecentNetworkChange(
-        _ health: TunnelHealthSnapshot,
-        now: Date
-    ) -> Bool {
-        guard let networkChangeAt = health.lastNetworkChangeAt,
-              let resetAt = health.lastResolverRuntimeResetAt,
-              resetAt >= networkChangeAt,
-              now.timeIntervalSince(resetAt) <= freshRecoveryWindow
-        else {
-            return false
-        }
-
-        if let successAt = health.lastUpstreamSuccessAt, successAt >= resetAt {
             return false
         }
 
