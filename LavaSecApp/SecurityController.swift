@@ -467,6 +467,16 @@ final class SecurityController: ObservableObject {
         return await requestPasscode(surface: surface, reason: reason)
     }
 
+    // INV-LOCK-1: the app lock is an anti-snooping UI gate, not a cryptographic boundary.
+    // Success flips in-memory session flags only — no key material or keychain
+    // access-control item hangs on this Bool, because the tunnel, widget, and Focus
+    // engine must read the app-group data headless (they fail closed instead of
+    // authenticating). A hook-bypass attacker (jailbroken device) reads the container
+    // directly, so keychain access-control-backed auth here buys no attacker-facing
+    // delta; crypto-backed depth for backup secrets is tracked separately (release-gate
+    // P2-4). Founder-accepted disposition, PR #355 — hence the reviewed mobsfscan
+    // suppression below.
+    // pinned: SecuritySettingsSourceTests.testBiometricGateStaysANonCryptographicUIBoundary
     private func evaluateBiometrics(reason: String) async -> Bool {
         let context = LAContext()
         var error: NSError?
@@ -480,7 +490,7 @@ final class SecurityController: ObservableObject {
         }
 
         return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in // mobsf-ignore: ios_biometric_bool
                 continuation.resume(returning: success)
             }
         }

@@ -214,6 +214,27 @@ App→tunnel pushes use `sendProviderMessage` exclusively.
 - Home: `PacketTunnelProvider.swift` — Focus config poll section.
 - Enforced: `PacketTunnelDNSRuntimeSourceTests` (asserts observer APIs stay absent).
 
+## App lock
+
+### INV-LOCK-1 — The app lock is an anti-snooping UI gate, not a cryptographic boundary
+Biometric/passcode success in `SecurityController` flips in-memory session flags that
+unblock UI over the opt-in protected surfaces (`SecurityAccessPolicy`) — nothing
+cryptographic hangs on the result. No keychain access-control (biometry-bound) item
+exists anywhere in the codebase, and the app-group data stays headless-readable by
+design: the tunnel, widget, and Focus engine never authenticate — they fail closed.
+Threat model: the lock defends against a snooping holder of the unlocked device. A
+jailbroken/hooking attacker reads the container files directly, so keychain-backed
+auth on this gate would add biometry re-enrollment breakage for zero attacker-facing
+delta (founder-accepted disposition 2026-07-12, PR #355; the mobsfscan
+`ios_biometric_bool` suppression at the home site is the reviewed marker of this
+decision). Crypto-backed depth for backup secrets stays on its own track (release-gate
+review P2-4). A diff that makes auth success release key material falsifies this entry
+— update it here and revisit the suppression in the same PR.
+- Home: `LavaSecApp/SecurityController.swift` — `evaluateBiometrics(reason:)`.
+- Enforced: `SecuritySettingsSourceTests.testBiometricGateStaysANonCryptographicUIBoundary`
+  (fails if keychain access-control APIs appear in the controller, or if the reviewed
+  suppression marker disappears while `evaluatePolicy` remains).
+
 ## Release
 
 ### INV-REL-1 — RC tags match the declared version and never regress

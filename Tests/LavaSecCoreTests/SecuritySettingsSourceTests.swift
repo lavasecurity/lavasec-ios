@@ -17,6 +17,31 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(controller.contains("rawPasscode"))
     }
 
+    // INV-LOCK-1: the biometric gate is an anti-snooping UI boundary, not a
+    // cryptographic one (founder-accepted disposition, PR #355). The suppression
+    // marker is the reviewed record of that decision; a diff that wires auth success
+    // to keychain access-control key material falsifies the invariant and must update
+    // docs/invariants.md and revisit the suppression together.
+    func testBiometricGateStaysANonCryptographicUIBoundary() throws {
+        let controller = try readSource(.securityController)
+
+        // The gate stays Bool-only: no biometry-bound keychain access-control items.
+        XCTAssertFalse(controller.contains("SecAccessControl"))
+        XCTAssertFalse(controller.contains("kSecAttrAccessControl"))
+
+        // While the LAContext idiom remains, the reviewed ios_biometric_bool
+        // suppression must sit ON an evaluatePolicy match line — mobsfscan's
+        // suppressions are line-scoped, so a marker that drifts to a nearby comment
+        // line silently reopens the six advisory alerts. `.evaluatePolicy(` (dotted)
+        // targets the authenticating call; `canEvaluatePolicy` is not a valid carrier.
+        let lines = controller.components(separatedBy: "\n")
+        if lines.contains(where: { $0.contains(".evaluatePolicy(") }) {
+            XCTAssertTrue(lines.contains { line in
+                line.contains(".evaluatePolicy(") && line.contains("// mobsf-ignore: ios_biometric_bool")
+            })
+        }
+    }
+
     func testBiometricToggleUsesConcreteDeviceBiometryLabelOnly() throws {
         let controller = try readSource(.securityController)
         let settings = try readSource(.privacySecuritySettingsView)

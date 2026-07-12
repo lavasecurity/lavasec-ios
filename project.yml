@@ -216,6 +216,7 @@ targets:
       # Shared/ files compiled into the app process (each Shared file lists every
       # process it compiles into; keep the per-target lists in sync when adding one).
       - path: Shared/AppGroup.swift
+      - path: Shared/EnergySignpost.swift
       - path: Shared/FocusSwitchEnvironment.swift
       - path: Shared/LavaActivityAttributes.swift
       - path: Shared/LavaFilterEntity.swift
@@ -314,6 +315,7 @@ targets:
       - path: LavaSecTunnel/PacketTunnelProvider.swift
       - path: LavaSecTunnel/DeviceDNSResolver.c
       - path: Shared/AppGroup.swift
+      - path: Shared/EnergySignpost.swift
       - path: Shared/LavaActivityAttributes.swift
       - path: LavaSecTunnel/Info.plist
         buildPhase: none
@@ -365,6 +367,7 @@ targets:
     sources:
       - path: LavaSecWidget/LavaSecWidget.swift
       - path: Shared/AppGroup.swift
+      - path: Shared/EnergySignpost.swift
       - path: Shared/SoftShieldGuardian.swift
       - path: Shared/LavaActivityAttributes.swift
       - path: Shared/LavaLiveActivityActionRequest.swift
@@ -421,6 +424,7 @@ targets:
       - path: LavaSecIntents/FocusFilterIntent.swift
       - path: LavaSecIntents/LavaSecIntentsExtension.swift
       - path: Shared/AppGroup.swift
+      - path: Shared/EnergySignpost.swift
       - path: Shared/FocusSwitchEnvironment.swift
       - path: Shared/LavaFilterEntity.swift
       - path: LavaSecIntents/Localizable.xcstrings

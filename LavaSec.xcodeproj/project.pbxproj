@@ -12,6 +12,7 @@
 		0A78CCB4BCCD90E58A3CDB9A /* LavaFilterEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F29EB806D797757826AFCC /* LavaFilterEntity.swift */; };
 		0BEC6C839FC5808F6CD3B150 /* ProtectionConnectivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE5788769192F41A62C8FBB /* ProtectionConnectivityPresentation.swift */; };
 		0BFF25BEE3E201152D055E9D /* LavaSecFilterPipeline in Frameworks */ = {isa = PBXBuildFile; productRef = AA2168B3530EFB31655AC947 /* LavaSecFilterPipeline */; };
+		0C8504B713125D73A4B47BB3 /* EnergySignpost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A42E638F05E8E570DFD305 /* EnergySignpost.swift */; };
 		0FD1F5BDB46AAF8D1E79EAE1 /* LavaSecWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E61E81E0049BC464964CD618 /* LavaSecWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		18A7D521C5FFCA77A3957B88 /* AccountAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1684C162C60DB73CD1C5176 /* AccountAuthService.swift */; };
 		19EBDB26B5F1BD7AE6A7B5E3 /* LavaSecKit in Frameworks */ = {isa = PBXBuildFile; productRef = 74D58CE109FD06F7B4865F17 /* LavaSecKit */; };
@@ -26,6 +27,7 @@
 		22BE365D7FAA7E80D4699AE2 /* LavaSecKit in Frameworks */ = {isa = PBXBuildFile; productRef = A9C01C0E7FA3393D18FB3458 /* LavaSecKit */; };
 		22E2AC46225A09D859737264 /* LavaLiveActivityActionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631308081BEDBCB9110A86FB /* LavaLiveActivityActionRequest.swift */; };
 		296833CEF7406BD3CAEE0A8B /* LavaSecPresentation in Frameworks */ = {isa = PBXBuildFile; productRef = 05BD3F0EC87B1DA85BB90F9C /* LavaSecPresentation */; };
+		2AD3B0E111758908D7BB35E8 /* EnergySignpost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A42E638F05E8E570DFD305 /* EnergySignpost.swift */; };
 		2C270B1939D9E69B0AB32170 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
 		35B66B50DB7CE592EC8ED31F /* LavaFilterEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F29EB806D797757826AFCC /* LavaFilterEntity.swift */; };
 		3848BA4B978A21ABE812D640 /* LavaSecurityPlusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FB3410530DA6E54514EA0C /* LavaSecurityPlusStore.swift */; };
@@ -56,6 +58,7 @@
 		741BF292A98B7C17D0AA5D49 /* CustomizationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA70AF9763D2F398CDF73775 /* CustomizationSettingsView.swift */; };
 		7610F8020E3FFC929D2545BA /* DarwinNotificationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2BF04367698AD931D1CBA3 /* DarwinNotificationObserver.swift */; };
 		775A367E44D46A2DDF7074CF /* LavaSecApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74243102EA37FA0885E082F /* LavaSecApp.swift */; };
+		7A5336011B08DF0B5DFC98D4 /* EnergySignpost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A42E638F05E8E570DFD305 /* EnergySignpost.swift */; };
 		7C48199EEFE3E16A9E159D10 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2E7D6B281C23F85D208C16 /* AppGroup.swift */; };
 		7D61B31D5B5CAF457D42E4CC /* LavaLiveActivityIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338908D107D703D426EDAED1 /* LavaLiveActivityIntents.swift */; };
 		7E6A4E307AFA5800542D80F5 /* FocusSwitchEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */; };
@@ -87,6 +90,7 @@
 		B87C67226E34E62B77B60245 /* SoftShieldGuardian.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E90F37FD03A59436C87C9 /* SoftShieldGuardian.swift */; };
 		B8C9A0E0056A58C6B07EEE1E /* LavaSecFilterPipeline in Frameworks */ = {isa = PBXBuildFile; productRef = F63E139045319BAB98C3FD85 /* LavaSecFilterPipeline */; };
 		BFBA6BE4E35B13CEE5BE415A /* AppIconCherryQuartz.icon in Resources */ = {isa = PBXBuildFile; fileRef = 9758F66E43B8E6F2E892B5E3 /* AppIconCherryQuartz.icon */; };
+		C42D9D448BD0C09B3985EF24 /* EnergySignpost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A42E638F05E8E570DFD305 /* EnergySignpost.swift */; };
 		C4447F583558505C8059370B /* FilterReviewFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11F58C8B8DE72A46657CD185 /* FilterReviewFlowView.swift */; };
 		C5EEDE1442744604E7FC14BD /* LavaSecWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6ED257949723A3277496D67 /* LavaSecWidget.swift */; };
 		CBC311AE721E6DBD7DD3CBFA /* FilterMyListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88AAE86D675ACF8EC7A62E7C /* FilterMyListView.swift */; };
@@ -237,9 +241,10 @@
 		7D88815E2DF25E0B2E3BDB4B /* Lava.QA.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Lava.QA.xcconfig; sourceTree = "<group>"; };
 		83427A3F020AA78216FC7A30 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		834B784D68C7737F32E2702F /* LegalVersionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalVersionSettingsView.swift; sourceTree = "<group>"; };
+		84A42E638F05E8E570DFD305 /* EnergySignpost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergySignpost.swift; sourceTree = "<group>"; };
 		8597EB5045B101155CB6F3BC /* SettingsCommon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCommon.swift; sourceTree = "<group>"; };
+		85C64FD74BF5BE059D8DAE4C /* residual-fp-cleanup */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "residual-fp-cleanup"; path = .; sourceTree = SOURCE_ROOT; };
 		87586B94D5F1BDE576E914A6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		880F2026E7F9614F41528C94 /* kit-split */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "kit-split"; path = .; sourceTree = SOURCE_ROOT; };
 		88AAE86D675ACF8EC7A62E7C /* FilterMyListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterMyListView.swift; sourceTree = "<group>"; };
 		89EE9460526FFD0F581A5C2A /* LavaSecApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LavaSecApp.entitlements; sourceTree = "<group>"; };
 		8B97ADBDACBB780512623EA0 /* FilterLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterLibraryView.swift; sourceTree = "<group>"; };
@@ -376,6 +381,7 @@
 			isa = PBXGroup;
 			children = (
 				9D2E7D6B281C23F85D208C16 /* AppGroup.swift */,
+				84A42E638F05E8E570DFD305 /* EnergySignpost.swift */,
 				7ACEFA312B7B6C80A5A69110 /* FocusSwitchEnvironment.swift */,
 				1601B5F46769951F4E81BCDE /* LavaActivityAttributes.swift */,
 				70F29EB806D797757826AFCC /* LavaFilterEntity.swift */,
@@ -400,7 +406,7 @@
 		5216389391CED1E31BACF991 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				880F2026E7F9614F41528C94 /* kit-split */,
+				85C64FD74BF5BE059D8DAE4C /* residual-fp-cleanup */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -756,6 +762,7 @@
 			files = (
 				60E6CF21D875196E34046D9F /* AppGroup.swift in Sources */,
 				A96F5E3A787610CA1F279DE0 /* DeviceDNSResolver.c in Sources */,
+				0C8504B713125D73A4B47BB3 /* EnergySignpost.swift in Sources */,
 				FC725F7AC290FDC4F58E6E97 /* LavaActivityAttributes.swift in Sources */,
 				FDC6382B8A59455A290A53FE /* PacketTunnelProvider.swift in Sources */,
 			);
@@ -766,6 +773,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2C270B1939D9E69B0AB32170 /* AppGroup.swift in Sources */,
+				7A5336011B08DF0B5DFC98D4 /* EnergySignpost.swift in Sources */,
 				4516E79CC0891D448A5E8FFF /* LavaActivityAttributes.swift in Sources */,
 				490DA8B239CBB16916A8C4B6 /* LavaLiveActivityActionRequest.swift in Sources */,
 				E4971600095483200CCE05D6 /* LavaLiveActivityIntents.swift in Sources */,
@@ -780,6 +788,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7C48199EEFE3E16A9E159D10 /* AppGroup.swift in Sources */,
+				C42D9D448BD0C09B3985EF24 /* EnergySignpost.swift in Sources */,
 				E86FD4DE8D4841746C71EC47 /* FocusFilterIntent.swift in Sources */,
 				7E6A4E307AFA5800542D80F5 /* FocusSwitchEnvironment.swift in Sources */,
 				0A78CCB4BCCD90E58A3CDB9A /* LavaFilterEntity.swift in Sources */,
@@ -828,6 +837,7 @@
 				7FC27F8EA0ADDC5F63B67CA6 /* DiagnosticsNetworkActivity.swift in Sources */,
 				221895476E2670AC0F013349 /* DiagnosticsTopDomains.swift in Sources */,
 				6E74B1C99D1B509A8F1461C3 /* DiagnosticsView.swift in Sources */,
+				2AD3B0E111758908D7BB35E8 /* EnergySignpost.swift in Sources */,
 				1E5C9A411E1363F0EF412762 /* FilterDomainSheets.swift in Sources */,
 				2000D7E7AD6FB86693FA2802 /* FilterLibraryView.swift in Sources */,
 				CBC311AE721E6DBD7DD3CBFA /* FilterMyListView.swift in Sources */,
