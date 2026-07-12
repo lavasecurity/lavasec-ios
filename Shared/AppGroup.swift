@@ -1,6 +1,5 @@
 import Foundation
 import LavaSecKit
-import os
 
 enum LavaSecAppGroup {
     static let identifier = "group.com.lavasec"
