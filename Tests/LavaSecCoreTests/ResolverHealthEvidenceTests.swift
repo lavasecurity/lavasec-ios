@@ -581,6 +581,25 @@ final class ResolverHealthEvidenceTests: XCTestCase {
         )
     }
 
+    func testLifecycleResetClearsLatencyHistogram() {
+        // The latency histogram lives in `session`, so it inherits the tunnel-session reset
+        // boundary (INV-DNS-4). Seed it, then confirm lifecycleReset empties it.
+        var state = seededState()
+        state.session.upstreamLatencyHistogram.record(durationMilliseconds: 42)
+        XCTAssertEqual(state.session.upstreamLatencyHistogram.sampleCount, 1)
+
+        let transition = ResolverHealthReducer.reduce(
+            state: state,
+            event: .lifecycleReset(
+                ResolverHealthLifecycleReset(occurredAt: later)
+            ),
+            projectingOnto: providerOwnedBase()
+        )
+
+        XCTAssertEqual(transition.state.session.upstreamLatencyHistogram, DNSLatencyHistogram())
+        XCTAssertEqual(transition.state.session.upstreamLatencyHistogram.sampleCount, 0)
+    }
+
     func testEveryContextProjectionPreservesProviderOwnedEnvelopeAndTallies() {
         let base = providerOwnedBase()
         let events: [ResolverHealthEvent] = [

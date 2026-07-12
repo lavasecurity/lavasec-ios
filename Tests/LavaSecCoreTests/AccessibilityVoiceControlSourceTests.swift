@@ -23,10 +23,12 @@ final class AccessibilityVoiceControlSourceTests: XCTestCase {
         // Additive AND alias-first: `.accessibilityInputLabels` replaces the default set, and Voice
         // Control's Show Names surfaces the FIRST entry — so aliases come first (short command is
         // surfaced) with the accessibility label appended (original "tap <label>" still matches).
+        // The appended label is localized to match the localized `.accessibilityLabel`, so the
+        // "tap <label>" command matches the spoken label in every locale (UR-56 l10n sweep).
         // Empty aliases collapse to just the label (identical to the system default).
         XCTAssertTrue(
-            block.contains(".accessibilityInputLabels(accessibilityInputLabels + [accessibilityLabel])"),
-            "The wrapper must surface aliases first, then append the accessibility label (additive + discoverable)."
+            block.contains(".accessibilityInputLabels(accessibilityInputLabels + [accessibilityLabel.lavaLocalized])"),
+            "The wrapper must surface aliases first, then append the localized accessibility label (additive + discoverable)."
         )
     }
 
