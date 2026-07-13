@@ -198,6 +198,7 @@ final class CustomizationController: ObservableObject {
     /// app-group store (`LavaNotificationPreferences`) the extension + tunnel read; default ON.
     @Published private(set) var notifiesFilterChanges = true
     @Published private(set) var notifiesFilterCouldNotApply = true
+    @Published private(set) var notifiesProtectionResumed = true
     @Published private(set) var notifiesConnectivity = true
 
     private let appearancePreferenceDefaultsKeyName = "lavasec.customization.appearance"
@@ -499,6 +500,7 @@ final class CustomizationController: ObservableObject {
         // mirror them into the @Published properties for the Customization → Notifications section.
         notifiesFilterChanges = LavaNotificationPreferences.isEnabled(.filterChanged, in: appGroupDefaults)
         notifiesFilterCouldNotApply = LavaNotificationPreferences.isEnabled(.filterCouldNotApply, in: appGroupDefaults)
+        notifiesProtectionResumed = LavaNotificationPreferences.isEnabled(.protectionResumed, in: appGroupDefaults)
         notifiesConnectivity = LavaNotificationPreferences.isEnabled(.connectivity, in: appGroupDefaults)
     }
 
@@ -510,6 +512,7 @@ final class CustomizationController: ObservableObject {
         switch category {
         case .filterChanged: notifiesFilterChanges = enabled
         case .filterCouldNotApply: notifiesFilterCouldNotApply = enabled
+        case .protectionResumed: notifiesProtectionResumed = enabled
         case .connectivity: notifiesConnectivity = enabled
         }
         if enabled {

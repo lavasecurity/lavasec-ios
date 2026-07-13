@@ -2536,6 +2536,105 @@ final class PacketTunnelDNSRuntimeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("resetDNSRuntimeForProtectionPolicyChange"))
     }
 
+    /// The pause-expiry banner (Customization → Notifications "Protection resumed") is posted ONLY from
+    /// the tunnel's expiry-timer path — the one process guaranteed alive when a pause ends with the app
+    /// closed — and NEVER from the vanished-pause reconcile (a vanished pause is a user-initiated resume
+    /// or a defensive cap-discard, both of which must stay silent). Cross-process wiring the compiler
+    /// can't see; the category/body/gating logic has executable tests in LavaEventNotificationsTests.
+    func testTemporaryPauseExpiryPostsProtectionResumedBannerOnlyFromTimerPath() throws {
+        let source = try readSource(.packetTunnelProvider)
+        let expiryBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func resumeExpiredTemporaryProtectionPauseIfNeeded()",
+            endingBefore: "private func updateLiveActivitiesAfterTemporaryProtectionPauseExpired()"
+        )
+        XCTAssertTrue(expiryBlock.contains("postPauseEndedNotification()"),
+                      "The expiry-timer path must post the pause-ended banner (the app may not be running).")
+
+        // The "ONLY from the timer path" in the test name is an exhaustiveness claim — pin it with a
+        // whole-file CALL-SITE count (code lines only; the definition line is excluded by the
+        // `func` filter). Exactly one call site means a future start-tunnel / reload-pause path can't
+        // silently add a second banner source without failing here.
+        let sourceCodeOnly = source
+            .replacingOccurrences(of: "(?s)/\\*.*?\\*/", with: "", options: [.regularExpression])
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+        let bannerCallSites = sourceCodeOnly.filter {
+            $0.contains("postPauseEndedNotification()") && !$0.contains("func postPauseEndedNotification")
+        }
+        XCTAssertEqual(bannerCallSites.count, 1,
+                       "The banner poster must have exactly one call site (the expiry-timer path); found \(bannerCallSites.count).")
+
+        let posterBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func postPauseEndedNotification()",
+            endingBefore: "private func isTemporaryProtectionPauseActive("
+        )
+        // Match the defaults argument by shape (\w+), not the literal local name, so renaming the local
+        // (defaults → prefs → …) doesn't fail these behavior-unchanged pins.
+        XCTAssertNotNil(posterBlock.range(of: #"guard !LavaAppForegroundPublication\.isForegroundActive\(in: \w+\) else \{ return \}"#, options: .regularExpression),
+                        "The banner must be closed/backgrounded-only via the age-bounded kit read (a foreground app shows the flip in-UI).")
+        XCTAssertTrue(posterBlock.contains("category: .protectionResumed"),
+                      "The banner must post under the protectionResumed category (its own Customization toggle).")
+        XCTAssertTrue(posterBlock.contains("LavaEventNotificationPoster.pauseEndedBody("),
+                      "The body must come from the kit catalog (Bundle.module) so it localizes in the tunnel bundle.")
+        XCTAssertNotNil(posterBlock.range(of: #"LavaNotificationLanguage\.pinnedCode\(in: \w+\)"#, options: .regularExpression),
+                        "The banner must honor the app's pinned UI language (the tunnel doesn't inherit per-app language).")
+
+        // The stale-publish guard (Codex #208 pattern): the unstructured Task can suspend long enough
+        // for a NEW pause to start, so the store must be re-verified nil co-located with the post —
+        // "protection is back on" must never land while filtering is paused again.
+        XCTAssertTrue(posterBlock.contains("guard (try? protectionPauseStore.currentPauseState()) == nil else { return }"),
+                      "The poster must re-verify no pause is active right before adding the banner.")
+        // The post must be the FIRST CODE line after the recheck guard: blank lines and comments between
+        // them are fine (a maintainer documenting the race must not be pushed to delete the guard to
+        // satisfy a strict line-adjacency pin), but no STATEMENT — an `await`, a Task.yield(), any
+        // defaults/language read — may intervene, since that is exactly what reintroduces the Codex #208
+        // suspension race. Match on trimmed content so re-indentation doesn't break the pin.
+        let posterLines = posterBlock.components(separatedBy: "\n")
+        var sawRecheck = false
+        var firstCodeLineAfterRecheck: Int?
+        for (index, raw) in posterLines.enumerated() {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("//") { continue }
+            if sawRecheck { firstCodeLineAfterRecheck = index; break }
+            if trimmed == "guard (try? protectionPauseStore.currentPauseState()) == nil else { return }" {
+                sawRecheck = true
+            }
+        }
+        XCTAssertTrue(sawRecheck, "The pause re-verification line was not found in the poster block.")
+        let postLine = try XCTUnwrap(
+            posterLines.firstIndex(where: { $0.contains("await LavaEventNotificationPoster.post(") }),
+            "The post call line was not found in the poster block."
+        )
+        XCTAssertEqual(firstCodeLineAfterRecheck, postLine,
+                       "The pause re-verification must be the last CODE line before the post (comments/blanks OK; no statements or awaits between).")
+
+        // Manual resumes stay silent: the vanished-pause reconcile must NOT post.
+        let vanishedBlock = try sourceBlock(
+            in: source,
+            startingAt: "private func reconcileProtectionOnAfterVanishedTemporaryPause()",
+            endingBefore: "private func cacheTemporaryProtectionPauseUntil("
+        )
+        // Strip comments first: a future doc mention of postPauseEndedNotification() — whether a `//` line
+        // ("// unlike postPauseEndedNotification(), this path is silent") OR a `/* ... */` block (even
+        // multi-line) — must not trip the negative pin. Remove block-comment spans ((?s) so `.` spans
+        // newlines, non-greedy) then `//` lines; assert on real code only.
+        // Caveat: the block-comment regex would also blank a `/* */` span INSIDE a `"""` string literal.
+        // This file has no multi-line string literals, so it can't mask a real call today; if any are
+        // added, replace this with a tokenizer-based strip before trusting the negative pin.
+        let vanishedCodeOnly = vanishedBlock
+            .replacingOccurrences(of: "(?s)/\\*.*?\\*/", with: "", options: [.regularExpression])
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        XCTAssertFalse(vanishedCodeOnly.contains("postPauseEndedNotification()"),
+                       "A vanished pause (user-initiated resume / cap-discard) must NOT banner — only real expiry does.")
+        // Canary: the negative pin above keys on this identifier — if a rename removes it from the
+        // pinned source, that pin passes vacuously. Fail here instead, then re-anchor both sides.
+        XCTAssertTrue(source.contains("private func postPauseEndedNotification()"))
+    }
+
     func testTunnelLifecycleBoundsTemporaryPauseToCurrentVPNSession() throws {
         let source = try readSource(.packetTunnelProvider)
         let startBlock = try sourceBlock(

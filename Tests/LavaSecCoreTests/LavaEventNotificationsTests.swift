@@ -129,6 +129,28 @@ final class LavaEventNotificationsTests: XCTestCase {
         )
     }
 
+    func testPauseEndedBodyIsLocalizedAndHonorsPinnedLanguage() {
+        // Resolves against the package's Bundle.module catalog so the TUNNEL (the posting process for
+        // pause expiry) localizes without the app's string catalog; the pinned language selects a
+        // specific .lproj and an unresolvable code falls back to ambient (English in the test process).
+        XCTAssertEqual(
+            LavaEventNotificationPoster.pauseEndedBody(),
+            "Pause ended — protection is back on."
+        )
+        XCTAssertEqual(
+            LavaEventNotificationPoster.pauseEndedBody(languageCode: "de"),
+            "Pause beendet — der Schutz ist wieder aktiv."
+        )
+        XCTAssertEqual(
+            LavaEventNotificationPoster.pauseEndedBody(languageCode: "ja"),
+            "一時停止が終了し、保護が再開されました。"
+        )
+        XCTAssertEqual(
+            LavaEventNotificationPoster.pauseEndedBody(languageCode: "xx-Fake"),
+            "Pause ended — protection is back on."
+        )
+    }
+
     func testNotificationLanguagePinRoundTripsAndClears() {
         let defaults = makeDefaults()
         XCTAssertNil(LavaNotificationLanguage.pinnedCode(in: defaults), "Absent by default.")

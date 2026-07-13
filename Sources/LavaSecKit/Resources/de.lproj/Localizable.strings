@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "Filter zu %@ gewechselt";
 "notif.body.couldNotSwitchTo" = "Wechsel zu %@ nicht möglich";
+"notif.body.pauseEnded" = "Pause beendet — der Schutz ist wieder aktiv.";
 "notif.body.reconnectTitle" = "Lava neu verbinden";
 "notif.body.reconnectMessage" = "In diesem Netzwerk werden DNS-Anfragen nicht aufgelöst. Tippe, um den Schutz neu zu verbinden.";
 "notif.body.dnsSlowTitle" = "Lava DNS ist langsam";

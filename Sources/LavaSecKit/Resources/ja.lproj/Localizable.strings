@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "フィルターを%@に切り替えました";
 "notif.body.couldNotSwitchTo" = "%@に切り替えできませんでした";
+"notif.body.pauseEnded" = "一時停止が終了し、保護が再開されました。";
 "notif.body.reconnectTitle" = "Lavaを再接続";
 "notif.body.reconnectMessage" = "このネットワークでDNSを解決できません。タップして保護を再接続してください。";
 "notif.body.dnsSlowTitle" = "LavaのDNSが遅くなっています";

@@ -127,6 +127,13 @@ struct CustomizationSettingsView: View {
                         .tint(LavaStyle.safeGreen)
                         .lavaControlRowCard()
 
+                    Toggle("Protection resumed", isOn: notificationBinding(for: .protectionResumed))
+                        .font(.headline)
+                        .tint(LavaStyle.safeGreen)
+                        .lavaControlRowCard()
+                    Text("Tells you when a pause ends and protection turns back on while Lava is closed or in the background.".lavaLocalized)
+                        .lavaQuietNoteText()
+
                     Toggle("Connection updates", isOn: notificationBinding(for: .connectivity))
                         .font(.headline)
                         .tint(LavaStyle.safeGreen)
@@ -258,6 +265,7 @@ struct CustomizationSettingsView: View {
             switch category {
             case .filterChanged: return customization.notifiesFilterChanges
             case .filterCouldNotApply: return customization.notifiesFilterCouldNotApply
+            case .protectionResumed: return customization.notifiesProtectionResumed
             case .connectivity: return customization.notifiesConnectivity
             }
         } set: { isEnabled in

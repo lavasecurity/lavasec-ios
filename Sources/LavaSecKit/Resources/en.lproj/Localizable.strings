@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "Filter switched to %@";
 "notif.body.couldNotSwitchTo" = "Couldn't switch to %@";
+"notif.body.pauseEnded" = "Pause ended — protection is back on.";
 "notif.body.reconnectTitle" = "Reconnect Lava";
 "notif.body.reconnectMessage" = "DNS is not resolving on this network. Tap to reconnect protection.";
 "notif.body.dnsSlowTitle" = "Lava DNS is slow";

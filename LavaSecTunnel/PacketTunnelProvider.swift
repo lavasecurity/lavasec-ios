@@ -6530,6 +6530,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         cacheTemporaryProtectionPauseUntil(nil)
         lastAppliedTemporaryProtectionPauseIsActive = false
         updateLiveActivitiesAfterTemporaryProtectionPauseExpired()
+        postPauseEndedNotification()
         // No DNS runtime reset or snapshot reload on expiry: the loaded snapshot
         // is identity-unchanged, pause-era cache entries expire with the pause
         // window, and pending forwards re-check policy at completion.
@@ -6574,6 +6575,46 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 }
                 await activity.update(content)
             }
+        }
+    }
+
+    /// Post the "Pause ended — protection is back on" banner for a pause that EXPIRED on the tunnel's
+    /// timer — the only process guaranteed alive when a pause ends with the app closed, which is exactly
+    /// the moment the user has no other signal (the Live Activity flip reaches only users who enabled
+    /// it). Closed/backgrounded only via the age-bounded foreground read; the category toggle
+    /// (`protectionResumed`) + notification permission are enforced inside `LavaEventNotificationPoster`.
+    /// Deliberately NOT called from `reconcileProtectionOnAfterVanishedTemporaryPause`: a vanished pause
+    /// is a user-initiated resume (in-app / widget / Live Activity — the user watched the flip) or a
+    /// defensive cap-discard, not an expiry. A fire-and-forget Task is safe HERE, unlike the App Intents
+    /// poster's awaited post (Codex P2 lineage): the NE process is long-lived, so there is no
+    /// perform()-return suspension race. The Task touches no dnsStateQueue-confined state — only the
+    /// lock-protected pause store, mirroring the Live Activity republish task above (INV-QUEUE-1).
+    private func postPauseEndedNotification() {
+        Task {
+            let defaults = LavaSecAppGroup.sharedDefaults
+            guard !LavaAppForegroundPublication.isForegroundActive(in: defaults) else { return }
+            let body = LavaEventNotificationPoster.pauseEndedBody(
+                languageCode: LavaNotificationLanguage.pinnedCode(in: defaults)
+            )
+            // Re-verify the store right before the post, co-located with it — the same Codex #208
+            // pattern the Live Activity republish above uses: this unstructured Task can suspend long
+            // enough for the user to start a NEW pause from the widget/Live Activity, and "protection
+            // is back on" must never land while filtering is paused again. Any active pause → drop the
+            // banner; that pause's own expiry posts its own. (The residual await inside the poster is
+            // the same accepted window as the LA loop's activity.update.)
+            guard (try? protectionPauseStore.currentPauseState()) == nil else { return }
+            await LavaEventNotificationPoster.post(
+                category: .protectionResumed,
+                requestIdentifier: LavaSecAppGroup.eventNotificationRequestIdentifierPrefix
+                    + LavaNotificationCategory.protectionResumed.rawValue,
+                title: "Lava",
+                body: body,
+                userInfo: [
+                    LavaSecAppGroup.protectionNotificationRouteUserInfoKeyName:
+                        LavaSecAppGroup.protectionNotificationGuardRouteValue
+                ],
+                defaults: defaults
+            )
         }
     }
 

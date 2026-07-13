@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "已將篩選器切換至 %@";
 "notif.body.couldNotSwitchTo" = "無法切換至 %@";
+"notif.body.pauseEnded" = "暫停已結束，保護已重新開啟。";
 "notif.body.reconnectTitle" = "重新連線 Lava";
 "notif.body.reconnectMessage" = "DNS 在此網路上無法解析。點一下即可重新連線保護。";
 "notif.body.dnsSlowTitle" = "Lava DNS 反應緩慢";

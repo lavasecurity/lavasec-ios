@@ -8,7 +8,7 @@ import UserNotifications
 /// (connectivity) — reads the same on/off switch.
 ///
 /// `connectivity` deliberately gates the PRE-EXISTING reconnect/DNS notifications
-/// (`ProtectionConnectivityNotificationPolicy`); the other two are simple event notifications posted
+/// (`ProtectionConnectivityNotificationPolicy`); the other three are simple event notifications posted
 /// through `LavaEventNotificationPoster` (no cooldown/supersession policy — they are discrete events).
 ///
 /// All notification copy (these event bodies AND the connectivity titles/messages) is localized across the
@@ -29,6 +29,14 @@ public enum LavaNotificationCategory: String, CaseIterable, Sendable {
     case filterChanged = "filter-changed"
     /// "Couldn't switch to <Filter>" — a Focus switch was refused (e.g. auth-to-edit on, target gone).
     case filterCouldNotApply = "filter-could-not-apply"
+    /// "Pause ended — protection is back on" — the temporary protection pause EXPIRED and filtering
+    /// resumed. Posted by the TUNNEL's expiry timer, the only process guaranteed alive when a pause ends
+    /// with the app closed — exactly the moment the user has no other signal (the Live Activity flip
+    /// reaches only users who enabled it). Closed/backgrounded only (a foreground app shows the Guard
+    /// flip in-UI). Deliberately NOT posted for user-initiated resumes (in-app, widget, or Live Activity
+    /// "Resume") — the user tapped the control and watches the state change, so a banner would be
+    /// redundant.
+    case protectionResumed = "protection-resumed"
     /// Gates the existing connectivity/reconnect notifications (DNS not resolving, network unavailable, …).
     case connectivity = "connectivity"
 
@@ -204,7 +212,7 @@ enum LavaNotificationLocalizer {
     }
 }
 
-/// Posts a SIMPLE event notification (filter switched / couldn't apply / paused-resumed) — gated by the
+/// Posts a SIMPLE event notification (filter switched / couldn't switch / pause ended) — gated by the
 /// category toggle and the existing notification permission, de-duped by request identifier. Distinct
 /// from the connectivity poster (`ProtectionConnectivityNotificationPolicy` + the app/tunnel controllers),
 /// which keeps its freshness/cooldown/supersession policy; these are discrete one-shot events.
@@ -224,6 +232,14 @@ public enum LavaEventNotificationPoster {
     public static func filterSwitchBody(committed: Bool, filterName: String, languageCode: String? = nil) -> String {
         let key = committed ? "notif.body.switchedTo" : "notif.body.couldNotSwitchTo"
         return String(format: LavaNotificationLocalizer.string(key, languageCode: languageCode), filterName)
+    }
+
+    /// Localized body for the pause-expiry banner — "Pause ended — protection is back on." Localized
+    /// against THIS package's catalog (`Bundle.module`) so it resolves in the NE tunnel bundle, whose
+    /// process posts it; `languageCode` pins the app's UI language (`LavaNotificationLanguage`) so the
+    /// tunnel renders in the same language as the app, `nil` uses ambient resolution.
+    public static func pauseEndedBody(languageCode: String? = nil) -> String {
+        LavaNotificationLocalizer.string("notif.body.pauseEnded", languageCode: languageCode)
     }
 
     /// Add (or replace, by identifier) a passive event notification IF `category` is enabled and

@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "已将过滤器切换到 %@";
 "notif.body.couldNotSwitchTo" = "无法切换到 %@";
+"notif.body.pauseEnded" = "暂停已结束，保护已重新开启。";
 "notif.body.reconnectTitle" = "重新连接 Lava";
 "notif.body.reconnectMessage" = "此网络上的 DNS 无法解析。点按以重新连接保护。";
 "notif.body.dnsSlowTitle" = "Lava DNS 响应缓慢";
