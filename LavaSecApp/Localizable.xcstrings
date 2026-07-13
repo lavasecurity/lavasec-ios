@@ -3279,7 +3279,7 @@
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@개 로컬에서 보호됨"
+            "value": "%@ 동안 로컬에서 보호됨"
           }
         },
         "pt-BR": {
@@ -7273,7 +7273,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Añádelo como un nuevo filter o reemplaza uno de los tuyos. Tus excepciones permitidas y tu DNS no cambian."
+            "value": "Añádelo como un nuevo filtro o reemplaza uno de los tuyos. Tus excepciones permitidas y tu DNS no cambian."
           }
         },
         "fr": {
@@ -21018,7 +21018,7 @@
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Device DNS(기기 DNS)"
+            "value": "기기 DNS"
           }
         },
         "pt-BR": {
@@ -21030,7 +21030,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Device DNS（设备 DNS）"
+            "value": "设备 DNS"
           }
         },
         "zh-Hant": {
@@ -22379,7 +22379,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cada filter es su propio conjunto de blocklists. Aplica uno para que sea el filter en uso; los demás quedan guardados."
+            "value": "Cada filtro es su propio conjunto de blocklists. Aplica uno para que sea el filtro en uso; los demás quedan guardados."
           }
         },
         "fr": {
@@ -27591,7 +27591,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cómo funcionan los filters"
+            "value": "Cómo funcionan los filtros"
           }
         },
         "fr": {
@@ -45529,7 +45529,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Eliminar un filter borra sus listas y ajustes. El filter en uso nunca se elimina."
+            "value": "Eliminar un filtro borra sus listas y ajustes. El filtro en uso nunca se elimina."
           }
         },
         "fr": {
@@ -55952,7 +55952,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esto aplica el filter en el dispositivo y nunca envía tu tráfico a ningún servidor."
+            "value": "Esto aplica el filtro en el dispositivo y nunca envía tu tráfico a ningún servidor."
           }
         },
         "fr": {
