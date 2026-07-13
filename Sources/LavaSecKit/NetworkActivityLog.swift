@@ -5,34 +5,88 @@ import Darwin
 public struct NetworkActivityLogEntry: Codable, Equatable, Identifiable, Sendable {
     /// The stable identifier of the log entry.
     public let id: UUID
-    /// The time at which the event was recorded.
+    /// The time of the MOST RECENT occurrence. A roll-up advances this to the latest occurrence so
+    /// the entry reflects "last seen"; the displayed timestamp collapses a burst to one line.
     public let timestamp: Date
     /// The network or user event that occurred.
     public let event: NetworkActivityEvent
     /// The protection and resolver state observed with the event.
     public let lavaState: LavaStateSnapshot
+    /// How many identical occurrences (same event + Lava state) this entry represents. A burst within
+    /// the log's coalescing window rolls up into ONE entry with an incrementing count instead of one
+    /// row per occurrence — e.g. a device-DNS recovery re-probing every ~30s on a flapping network,
+    /// which otherwise emits a "DNS smoke probe failed" row every probe.
+    public let occurrenceCount: Int
+    /// The time of the FIRST occurrence rolled into this entry. Retention prunes on THIS (not the
+    /// advancing latest `timestamp`) so a rolled-up entry can never outlive the retention window: a
+    /// still-recurring event whose latest timestamp keeps refreshing would otherwise never age out,
+    /// and its count would keep aggregating occurrences older than the advertised window. Once the
+    /// first occurrence crosses the window the whole entry is pruned, and the next occurrence starts a
+    /// fresh roll-up — i.e. the roll-up resets at the retention boundary (Codex, #368).
+    public let firstOccurrenceTimestamp: Date
 
-    /// Creates a network activity entry from an event and captured state.
+    /// Creates a network activity entry from an event and captured state. `firstOccurrenceTimestamp`
+    /// defaults to `timestamp` (a brand-new, single-occurrence entry) and is clamped to be no later
+    /// than `timestamp`.
     public init(
         id: UUID = UUID(),
         timestamp: Date,
         event: NetworkActivityEvent,
-        lavaState: LavaStateSnapshot
+        lavaState: LavaStateSnapshot,
+        occurrenceCount: Int = 1,
+        firstOccurrenceTimestamp: Date? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
         self.event = event
         self.lavaState = lavaState
+        self.occurrenceCount = max(1, occurrenceCount)
+        self.firstOccurrenceTimestamp = Swift.min(firstOccurrenceTimestamp ?? timestamp, timestamp)
     }
 
-    /// The entry timestamp formatted for local-log display.
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, event, lavaState, occurrenceCount, firstOccurrenceTimestamp
+    }
+
+    /// Custom decode so entries persisted before roll-up (no `occurrenceCount` key) still load. A
+    /// synthesized decoder would make the new key required and throw, failing the whole log's decode
+    /// and silently wiping existing activity on upgrade — the encoder stays synthesized.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            timestamp: try container.decode(Date.self, forKey: .timestamp),
+            event: try container.decode(NetworkActivityEvent.self, forKey: .event),
+            lavaState: try container.decode(LavaStateSnapshot.self, forKey: .lavaState),
+            occurrenceCount: (try? container.decodeIfPresent(Int.self, forKey: .occurrenceCount) ?? 1) ?? 1,
+            firstOccurrenceTimestamp: try? container.decodeIfPresent(Date.self, forKey: .firstOccurrenceTimestamp)
+        )
+    }
+
+    /// The entry timestamp (latest occurrence) formatted for local-log display.
     public var timestampLine: String {
         LocalLogTimestampFormatter.string(from: timestamp)
     }
 
-    /// A privacy-safe display line describing the event.
+    /// A privacy-safe display line describing the event, suffixed with the occurrence count when the
+    /// entry rolled up more than one identical occurrence (e.g. "DNS smoke probe failed: send-failed (×6)").
     public var eventLine: String {
-        event.displayLine
+        let line = event.displayLine
+        return occurrenceCount > 1 ? "\(line) (×\(occurrenceCount))" : line
+    }
+
+    /// Returns a copy that rolls a newer identical occurrence into this entry: the count grows by the
+    /// newer entry's count and the timestamp advances to the most recent occurrence, keeping this
+    /// entry's stable identity so the row stays put in a SwiftUI diff.
+    func rollingUp(with newer: NetworkActivityLogEntry) -> NetworkActivityLogEntry {
+        NetworkActivityLogEntry(
+            id: id,
+            timestamp: Swift.max(timestamp, newer.timestamp),
+            event: event,
+            lavaState: lavaState,
+            occurrenceCount: occurrenceCount + newer.occurrenceCount,
+            firstOccurrenceTimestamp: Swift.min(firstOccurrenceTimestamp, newer.firstOccurrenceTimestamp)
+        )
     }
 
     /// A privacy-safe display line summarizing captured Lava state.
@@ -218,8 +272,16 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
 public struct NetworkActivityLog: Codable, Equatable, Sendable {
     /// The default maximum number of entries retained by a log.
     public static let defaultMaximumEntryCount = 300
-    /// The default duplicate-coalescing window in seconds.
-    public static let defaultDuplicateCoalescingWindow: TimeInterval = 30
+    /// The default duplicate-coalescing (roll-up) window in seconds. Deliberately LARGER than the
+    /// device-DNS fallback recovery smoke-probe cadence (`DeviceDNSFallbackPolicy
+    /// .fallbackRecoverySmokeProbeInterval`, 30s) plus iOS wake/timer slop: a sustained recovery
+    /// re-probes every ~30s and the failures land ~31–60s apart, so a window at/below the cadence
+    /// would roll up nothing and the log would still show one "DNS smoke probe failed" row per probe.
+    /// The window is rolling (measured from each entry's latest occurrence), so a burst chains into a
+    /// single counted entry as long as successive occurrences stay within it — 120s (2 min) also
+    /// absorbs a backed-off recovery whose probe interval has stretched past the base 30s. Pinned by
+    /// `NetworkActivityLogTests.testDefaultCoalescingWindowOutrunsRecoveryProbeCadence`.
+    public static let defaultDuplicateCoalescingWindow: TimeInterval = 120
 
     /// Retained entries ordered from newest to oldest.
     public private(set) var entries: [NetworkActivityLogEntry]
@@ -272,16 +334,65 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
         TimeInterval(LocalLogRetention.fineGrainedDays) * 86_400
     }
 
-    /// Adds an entry unless a matching recent event is coalesced, then enforces both limits.
+    /// How far in the FUTURE (relative to a trusted wall-clock `now`) an entry's first occurrence may
+    /// be before it is treated as a device-clock-skew artifact and discarded on load. Both the app and
+    /// the tunnel stamp events from the same system clock, so real inter-process drift is sub-second;
+    /// this tolerance only needs to absorb an NTP step correction while still catching a device whose
+    /// clock ran minutes-to-days ahead (which would otherwise never satisfy the too-old cutoff and
+    /// persist for ~skew + retentionWindow).
+    /// pinned: NetworkActivityLogTests.testPruneExpiredDiscardsImplausiblyFutureEntriesAndKeepsRecentOnes
+    public static let futureTimestampTolerance: TimeInterval = 300
+
+    /// Whether an incoming event's own first occurrence is within the retention window of the trusted
+    /// `now` — i.e. a valid, retainable event and not a stale (queued / clock-skewed) or future-skewed
+    /// outlier. The persistence layer GATES `append` on this so a stale incoming can neither enter the
+    /// log nor roll up into a live matching row: rolling a below-cutoff occurrence in would drag that
+    /// row's `firstOccurrenceTimestamp` out of the window (`rollingUp` takes the min), and the retention
+    /// prune would then drop the whole aggregate, losing the retained occurrence (Codex, #370). Bounds
+    /// match `pruneExpired`, so a gated incoming is exactly one the prune would immediately remove.
+    /// pinned: NetworkActivityLogTests.testStaleIncomingIsGatedAndDoesNotPoisonLiveRollUp
+    public static func isRetainable(_ entry: NetworkActivityLogEntry, now: Date = Date()) -> Bool {
+        entry.firstOccurrenceTimestamp >= now.addingTimeInterval(-retentionWindow)
+            && entry.firstOccurrenceTimestamp <= now.addingTimeInterval(futureTimestampTolerance)
+    }
+
+    /// Adds an entry, ROLLING UP a matching recent event (same event + Lava state within the
+    /// coalescing window) into a single counted entry rather than adding a new row or silently
+    /// dropping the duplicate: the matched entry's `occurrenceCount` grows and its timestamp advances
+    /// to the latest occurrence. Otherwise inserts. A sustained recovery that re-probes every ~30s
+    /// therefore collapses to one "… (×N)" row instead of flooding the log.
+    ///
+    /// This enforces ONLY the count cap (`trimToMaximumEntryCount`), which is clock-independent and
+    /// deterministic. It deliberately does NOT age-prune: retention is a WALL-CLOCK property, and this
+    /// value type has no trusted clock — every attempt to age-prune here off an entry timestamp
+    /// (`entries.first` OR the incoming event) is defeated by a future-skewed or out-of-order timestamp
+    /// and can erase live entries (Codex, #370). Age retention is owned by `pruneExpired(now:)`, which
+    /// the persistence layer runs with the trusted wall clock on every write AND on load. `indexOf
+    /// RollUpTarget` still span-caps roll-ups to the retention window so a single aggregate's count
+    /// never covers more than the window; the aggregate itself ages out through `pruneExpired`.
     public mutating func append(_ entry: NetworkActivityLogEntry) {
-        guard !isDuplicateWithinCoalescingWindow(entry) else {
+        if let index = indexOfRollUpTarget(for: entry) {
+            // The rolled-up entry's timestamp advances to `max`, so only it can move (toward the front);
+            // reposition just that one entry instead of re-sorting the whole array on the tunnel hot path.
+            let updated = entries.remove(at: index).rollingUp(with: entry)
+            insertKeepingNewestFirst(updated)
             return
         }
 
-        entries.insert(entry, at: 0)
-        entries.sort { $0.timestamp > $1.timestamp }
-        pruneEntriesOlderThanRetentionWindow()
+        // A fresh entry may be out-of-order (older than existing rows), so it is NOT necessarily the
+        // newest — insert it at its sorted position rather than at index 0 + full re-sort (#370 OCR P3).
+        insertKeepingNewestFirst(entry)
         trimToMaximumEntryCount()
+    }
+
+    /// Inserts `entry` keeping `entries` sorted newest-first. Only one entry is added/moved per append,
+    /// so an O(n) positioned insert replaces the O(n log n) `sort` the append used to run on both
+    /// branches — the tunnel's `tryAppend` is on the DNS-serving queue. Correct for out-of-order arrivals
+    /// (unlike a bare insert-at-0), which is why the sort existed; this preserves that while dropping the
+    /// cost.
+    private mutating func insertKeepingNewestFirst(_ entry: NetworkActivityLogEntry) {
+        let index = entries.firstIndex { $0.timestamp < entry.timestamp } ?? entries.count
+        entries.insert(entry, at: index)
     }
 
     /// Removes every retained entry.
@@ -295,27 +406,45 @@ public struct NetworkActivityLog: Codable, Equatable, Sendable {
     @discardableResult
     public mutating func pruneExpired(now: Date = Date()) -> Bool {
         let cutoff = now.addingTimeInterval(-Self.retentionWindow)
+        let futureBound = now.addingTimeInterval(Self.futureTimestampTolerance)
         let countBefore = entries.count
-        entries.removeAll { $0.timestamp < cutoff }
+        // Prune on the FIRST occurrence, not the advancing latest timestamp, so a rolled-up entry
+        // can't outlive the retention window while it keeps recurring (see firstOccurrenceTimestamp).
+        // ALSO discard entries stamped implausibly far in the future: a device clock that ran ahead
+        // (then corrected) leaves entries whose first occurrence never satisfies the too-old cutoff, so
+        // they would otherwise persist for ~skew + retentionWindow and break the retention promise.
+        // This is the ONLY age-based prune, and it runs with the trusted wall clock (`now`), so it
+        // can't drop a legitimately-recent entry the way an append-time reference could — `append`
+        // deliberately does no age-pruning (a value type has no trusted clock). The persistence layer
+        // runs this on every write and on load.
+        entries.removeAll { $0.firstOccurrenceTimestamp < cutoff || $0.firstOccurrenceTimestamp > futureBound }
         return entries.count != countBefore
     }
 
-    private mutating func pruneEntriesOlderThanRetentionWindow() {
-        // Reference the newest entry's timestamp (not wall-clock) so append stays
-        // deterministic for tests and so a batch of dated entries prunes coherently.
-        guard let newest = entries.first?.timestamp else {
-            return
-        }
-
-        let cutoff = newest.addingTimeInterval(-Self.retentionWindow)
-        entries.removeAll { $0.timestamp < cutoff }
-    }
-
-    private func isDuplicateWithinCoalescingWindow(_ entry: NetworkActivityLogEntry) -> Bool {
-        entries.contains { existing in
+    /// The index of the recent entry a new occurrence should roll up into — same event AND Lava state,
+    /// within the (rolling) coalescing window of that entry's latest occurrence — or nil to insert
+    /// fresh. Roll-up keeps at most one entry per (event, state) inside the window, so the first match
+    /// is the running rolled-up entry.
+    private func indexOfRollUpTarget(for entry: NetworkActivityLogEntry) -> Int? {
+        entries.firstIndex { existing in
             existing.event == entry.event
                 && existing.lavaState == entry.lavaState
                 && abs(entry.timestamp.timeIntervalSince(existing.timestamp)) <= duplicateCoalescingWindow
+                // The coalescing window is bidirectional (so a burst straddling the reference chains),
+                // but the SPAN is one-directional: the new occurrence's FIRST occurrence must be AT OR
+                // AFTER the aggregate's. `rollingUp` rewinds the anchor via `min(first, newer.first)`, so
+                // the guard compares `firstOccurrenceTimestamp` — not the incoming latest `timestamp`,
+                // which the public init/decoder allow to be later than a pre-rolled-up incoming's own
+                // first occurrence (Codex, #370). Without this, a replayed/out-of-order/skewed occurrence
+                // could rewind the anchor into the past and the next `pruneExpired` could evict the whole
+                // aggregate incl. its live occurrences. Requiring `>=` makes the value type self-safe
+                // (independent of the persistence retention gate); such an occurrence starts a fresh row.
+                && entry.firstOccurrenceTimestamp >= existing.firstOccurrenceTimestamp
+                // Span cap: never roll up into an entry that would then span more than the retention
+                // window from its first occurrence, so a rolled-up count never covers more than the
+                // window. Past that the occurrence starts a fresh entry and the old aggregate ages out
+                // through `pruneExpired` rather than being revived (Codex, #368).
+                && entry.timestamp.timeIntervalSince(existing.firstOccurrenceTimestamp) <= Self.retentionWindow
         }
     }
 
@@ -355,13 +484,26 @@ public enum NetworkActivityLogPersistence {
 
     /// BLOCKING append — used by the APP for foreground user actions and the connected
     /// event (`AppViewModel.appendNetworkActivity`). A user action must never be silently
-    /// dropped, so this waits for the lock. The app is NOT on the DNS-serving path, so a
+    /// dropped by CONTENTION, so this waits for the lock (the retention gate below rejects only a
+    /// stale/future incoming, which a live user action — stamped at the moment — never is). The app
+    /// is NOT on the DNS-serving path, so a
     /// rare brief wait is a minor UI hiccup, not a stall — and even if the app holds the
     /// lock while suspended, the tunnel uses `tryAppend` and still can't wedge DNS (CON-1).
     public static func append(_ entry: NetworkActivityLogEntry, to url: URL) {
         withExclusiveFileLock(for: url) {
             var log = load(from: url)
-            log.append(entry)
+            // Retention is enforced HERE with the trusted wall clock (`append` itself does no age-prune;
+            // #370), by two mechanisms that together guarantee every entry after the write is in-window:
+            //   1. prune the existing log FIRST, so expired/future rows free their slots before the
+            //      append's count cap could evict a live incoming event instead (Codex, #370); and
+            //   2. GATE the append on `isRetainable`, so a stale/future incoming is neither inserted nor
+            //      rolled into a live matching row (which would drag that row's first occurrence out of
+            //      the window and lose it to the prune). A gated incoming is one the prune would drop.
+            let now = Date()
+            log.pruneExpired(now: now)
+            if NetworkActivityLog.isRetainable(entry, now: now) {
+                log.append(entry)
+            }
             try? save(log, to: url)
         }
     }
@@ -371,14 +513,30 @@ public enum NetworkActivityLogPersistence {
     /// DNS-serving queue while the app holds the SAME app-group lock on its main actor, so
     /// a blocking acquire could wedge every DNS query if iOS suspended the app
     /// mid-critical-section. A dropped diagnostic entry is acceptable — nothing in the
-    /// fail-closed/recovery path reads this file. Returns whether the entry was written.
+    /// fail-closed/recovery path reads this file. Returns whether the entry was actually WRITTEN —
+    /// `false` on a contention drop OR when the incoming is retention-gated (stale/future); `true` only
+    /// when it was appended and saved. (The sole caller discards the result; both non-writes report
+    /// `false`, consistent with the "was it written" contract.)
     @discardableResult
     public static func tryAppend(_ entry: NetworkActivityLogEntry, to url: URL) -> Bool {
-        withBoundedExclusiveFileLock(for: url) {
+        var appended = false
+        let lockAcquired = withBoundedExclusiveFileLock(for: url) {
             var log = load(from: url)
-            log.append(entry)
+            // Same trusted-wall-clock retention as `append` (see there): prune the existing log first,
+            // then gate the incoming on `isRetainable` so a stale/future tunnel event can't enter or
+            // poison a live roll-up. Cheap on the tunnel hot path — a filter over the <=300-entry bounded
+            // log under the lock already held.
+            let now = Date()
+            log.pruneExpired(now: now)
+            if NetworkActivityLog.isRetainable(entry, now: now) {
+                log.append(entry)
+                appended = true
+            }
             try? save(log, to: url)
         }
+        // Keep the documented contract honest: a retention-gated incoming still runs (prune + save)
+        // under the lock, so `lockAcquired` alone would report a write that never happened.
+        return lockAcquired && appended
     }
 
     /// Removes the persisted log while holding its exclusive file lock.
