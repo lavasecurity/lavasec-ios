@@ -40,6 +40,20 @@ enum LavaProtectionCommandService {
             let outcome = try await commandCoordinator.perform(request, now: now, commandID: commandID)
             await liveActivityUpdateCoordinator.schedule(outcome.activityUpdate)
 
+            // Tell the RUNNING tunnel the shared pause state just changed so it re-reads the store
+            // and (re)arms — or cancels — its `protectionPauseResumeTimer`. That timer is the ONLY
+            // thing that fires `PacketTunnelProvider.postPauseEndedNotification()` on expiry, so a
+            // pause STARTED from the Live Activity / Dynamic Island while the app is closed would
+            // otherwise never surface the "Protection resumed" banner: this service writes the pause
+            // to the App Group + ActivityKit but the tunnel only learns of it lazily on its next DNS
+            // hot-path refresh, which does NOT arm the timer. AppViewModel already sends this same
+            // message from the in-app pause path (notifyTunnelProtectionPauseUpdated); the intent
+            // path went through this service instead and skipped it (Codex, #364 follow-up). Best-
+            // effort and idempotent (the tunnel handler just refreshes pause state), so an unchanged/
+            // duplicate command or a not-connected tunnel is a harmless no-op. Reconnect returned
+            // earlier — it restarts the tunnel, which re-arms the timer via the startTunnel path.
+            await notifyTunnelPauseStateChanged()
+
             log("perform-finished", details: [
                 "request": request.rawValue,
                 "revision": String(outcome.activityUpdate.revision)
@@ -373,6 +387,78 @@ enum LavaProtectionCommandService {
             }
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
+    }
+
+    /// Sends the `reloadProtectionPause` provider message to Lava's running tunnel so it re-reads the
+    /// shared pause store and (re)arms/cancels its expiry timer — the source of the "Protection
+    /// resumed" banner (`PacketTunnelProvider.postPauseEndedNotification`). Mirrors the app's
+    /// `AppViewModel.notifyTunnelProtectionPauseUpdated`; the LiveActivityIntent runs in the app
+    /// process (holds the NE entitlement, like `performReconnect`), so the message reaches the tunnel.
+    /// Best-effort: no manager, a non-provider session, a not-`.connected` tunnel, or a send error all
+    /// fall back to the tunnel's own next hot-path refresh — i.e. exactly the pre-fix behavior. The
+    /// non-Sendable session never crosses the continuation boundary (Swift 6): only `Void` is returned.
+    private static func notifyTunnelPauseStateChanged() async {
+        #if targetEnvironment(simulator)
+        // The whole notify is a no-op on the simulator (no real NE session); leave a breadcrumb in the
+        // SAME ship-safe sink as the failure paths below, so an intent-path regression test (or a QA
+        // build) can tell "skipped by env" apart from "ran but never reached the tunnel".
+        LavaSecDeviceDebugLog.append(component: "live-activity-intent", event: "notify-pause-skip-simulator")
+        return
+        #else
+        let messageData = LavaSecProviderMessageCodec.encode(
+            kind: LavaSecAppGroup.reloadProtectionPauseMessage,
+            operationID: nil
+        )
+        // Non-throwing continuation: every outcome is handled here (recorded, not propagated). The notify is
+        // best-effort — the tunnel still converges via its own pause-state refresh and, on (re)connect,
+        // startTunnel's scheduleProtectionPauseResumeIfNeeded arms the timer from the store. But the failure
+        // paths are RECORDED (ship-safe LavaSecDeviceDebugLog, like the pause-written audit) rather than
+        // swallowed silently: this fix exists to make the "Protection resumed" banner fire for closed-app
+        // intent pauses, so a field report where it DIDN'T fire must be correlatable against whether the
+        // notify actually reached the tunnel — the fix must never degrade back to the original bug invisibly
+        // (Codex/OCR, #365 follow-up).
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            NETunnelProviderManager.loadAllFromPreferences { managers, error in
+                if let error {
+                    LavaSecDeviceDebugLog.append(component: "live-activity-intent", event: "notify-pause-load-error", details: [
+                        "error": String(describing: error)
+                    ])
+                    continuation.resume()
+                    return
+                }
+                // Pick the CONNECTED provider session, not just `.first`: loadAllFromPreferences returns
+                // only this app's Lava configs, but a device with a stale/legacy Lava profile can list a
+                // disconnected duplicate ahead of the active tunnel — `.first` would then read the dead one,
+                // fail the connected check, and skip the notify, leaving the very bug this fix closes. Scan
+                // for the live one instead (Codex, mirrors VPNLifecycleController's active-manager preference).
+                // `sendProviderMessage` is valid only on a connected session; a paused tunnel is still
+                // `.connected` (pause never tears the tunnel down), so a pause/resume tap reaches it.
+                let session = (managers ?? [])
+                    .compactMap { $0.connection as? NETunnelProviderSession }
+                    .first { $0.status == .connected }
+                guard let session else {
+                    // A pause/resume was just written but no connected Lava tunnel is loaded right now
+                    // (protection off, or the brief teardown window after a reconnect where
+                    // loadAllFromPreferences can transiently return empty). Not silently lost: startTunnel's
+                    // own arm covers a pause written across a (re)connect. Record the miss so it can be told
+                    // apart from a delivered notify in a field report.
+                    LavaSecDeviceDebugLog.append(component: "live-activity-intent", event: "notify-pause-no-connected-session")
+                    continuation.resume()
+                    return
+                }
+                do {
+                    try session.sendProviderMessage(messageData) { _ in }
+                } catch {
+                    // Best-effort: the tunnel still converges on its next pause-state refresh. The tunnel's
+                    // reply is always "ok" (no actionable payload), so only the throw is worth recording.
+                    LavaSecDeviceDebugLog.append(component: "live-activity-intent", event: "notify-pause-send-error", details: [
+                        "error": String(describing: error)
+                    ])
+                }
+                continuation.resume()
+            }
+        }
+        #endif
     }
 
     // Fixed pause cases carry their own duration; `.pauseConfigured` (the Live

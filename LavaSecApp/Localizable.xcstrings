@@ -396,6 +396,72 @@
         }
       }
     },
+    "Protection resumed": {
+      "comment": "Customization → Notifications: title for the pause-expiry (protection back on) toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection resumed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護の再開"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護恢復"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护恢复"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz wieder aktiv"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection réactivée"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protección reanudada"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호 재개"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proteção retomada"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protezione ripresa"
+          }
+        }
+      }
+    },
     "Switch filters on a schedule or with a Focus — no taps needed.": {
       "comment": "Description under the auto-switch how-to header. 'Focus' is the iOS system feature.",
       "extractionState": "manual",
@@ -53819,6 +53885,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ti avvisa quando una Full Immersion, un comando rapido o un'automazione cambia il filtro mentre Lava è chiusa o in background."
+          }
+        }
+      }
+    },
+    "Tells you when a pause ends and protection turns back on while Lava is closed or in the background.": {
+      "comment": "Customization → Notifications: helper text for the Protection resumed toggle.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tells you when a pause ends and protection turns back on while Lava is closed or in the background."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava が終了中またはバックグラウンドのときに、一時停止が終了して保護が再開されたことをお知らせします。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當暫停結束、保護在 Lava 關閉或於背景執行時重新開啟，便通知你。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当暂停结束、保护在 Lava 关闭或处于后台时重新开启，会通知你。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informiert dich, wenn eine Pause endet und der Schutz wieder aktiv wird, während Lava geschlossen ist oder im Hintergrund läuft."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vous prévient lorsqu'une pause se termine et que la protection se réactive alors que Lava est fermée ou en arrière-plan."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Te avisa cuando termina una pausa y la protección se reactiva mientras Lava está cerrada o en segundo plano."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava가 종료되었거나 백그라운드에 있을 때 일시 중지가 끝나 보호가 다시 켜지면 알려줘요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisa quando uma pausa termina e a proteção volta a ficar ativa enquanto a Lava está fechada ou em segundo plano."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ti avvisa quando una pausa termina e la protezione si riattiva mentre Lava è chiusa o in background."
           }
         }
       }

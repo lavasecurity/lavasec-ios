@@ -727,7 +727,44 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         )
         XCTAssertFalse(
             commandService.contains("CFNotificationCenterPostNotification"),
-            "Pause/resume no longer post a Darwin signal; the app delivers pause via the reload-protection-pause provider message."
+            "Pause/resume no longer post a Darwin signal; pause state reaches the tunnel via the reload-protection-pause provider message."
+        )
+        // #364 follow-up: a pause STARTED from the Live Activity / Dynamic Island runs through this
+        // service (not AppViewModel), so it must ALSO poke the tunnel to (re)arm its expiry timer —
+        // otherwise the "Protection resumed" banner (posted only by that timer) never fires for a
+        // closed-app intent pause. Pin the notify send and its wiring into perform().
+        XCTAssertTrue(
+            commandService.contains("private static func notifyTunnelPauseStateChanged() async"),
+            "The command service must notify the tunnel of pause-state changes so the resume timer arms for intent-initiated pauses."
+        )
+        XCTAssertTrue(
+            commandService.contains("await notifyTunnelPauseStateChanged()"),
+            "perform() must call notifyTunnelPauseStateChanged() after applying a pause/resume command."
+        )
+        XCTAssertTrue(
+            commandService.contains("kind: LavaSecAppGroup.reloadProtectionPauseMessage")
+                && commandService.contains("session.sendProviderMessage(messageData)"),
+            "The notify must send the reload-protection-pause provider message to the running tunnel session."
+        )
+        // Must target the CONNECTED session, not `.first`: a stale/legacy Lava profile can list a
+        // disconnected duplicate ahead of the active tunnel, and `.first` would skip the notify on
+        // those devices (Codex). Scan for the live provider session instead.
+        XCTAssertTrue(
+            commandService.contains(".first { $0.status == .connected }"),
+            "The notify must scan for the connected provider session, not just the first manager."
+        )
+        XCTAssertFalse(
+            commandService.contains("(managers ?? []).first?.connection as? NETunnelProviderSession"),
+            "Reading only the first manager's connection re-opens the stale-duplicate gap; scan for the connected one."
+        )
+        // The notify is best-effort but must not fail SILENTLY: a load/send failure or a no-connected-session
+        // miss (the fix degrading back to the original bug) has to be recordable in a field report. Pin the
+        // ship-safe breadcrumbs (OCR #365 follow-up) so a regression to an empty catch is caught here.
+        XCTAssertTrue(
+            commandService.contains("event: \"notify-pause-load-error\"")
+                && commandService.contains("event: \"notify-pause-send-error\"")
+                && commandService.contains("event: \"notify-pause-no-connected-session\""),
+            "Notify failure/miss paths must leave ship-safe LavaSecDeviceDebugLog breadcrumbs, not be swallowed."
         )
         XCTAssertFalse(commandService.contains("passThroughPreparedSnapshot"))
         XCTAssertFalse(commandService.contains("PreparedFilterSnapshotIdentity.make(configuration: passThroughConfiguration, catalog: nil)"))

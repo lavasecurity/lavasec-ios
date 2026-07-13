@@ -2,6 +2,7 @@
 
 "notif.body.switchedTo" = "Filtro cambiato a %@";
 "notif.body.couldNotSwitchTo" = "Impossibile passare a %@";
+"notif.body.pauseEnded" = "Pausa terminata — la protezione è di nuovo attiva.";
 "notif.body.reconnectTitle" = "Riconnetti Lava";
 "notif.body.reconnectMessage" = "Il DNS non risponde su questa rete. Tocca per riconnettere la protezione.";
 "notif.body.dnsSlowTitle" = "Il DNS di Lava è lento";
