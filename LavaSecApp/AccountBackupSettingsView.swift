@@ -154,8 +154,8 @@ struct AccountSettingsView: View {
                         detail: "Lava waits 30 minutes after your last settings change before it tries an automatic upload.",
                         isOn: automaticBackupBinding
                     )
-                    .disabled(!backup.isEncryptedBackupConfigured)
-                    .opacity(backup.isEncryptedBackupConfigured ? 1 : 0.45)
+                    .disabled(!isAutomaticBackupControlEnabled)
+                    .opacity(isAutomaticBackupControlEnabled ? 1 : 0.45)
 
                     if backup.isEncryptedBackupConfigured {
                         VStack(alignment: .leading, spacing: 8) {
@@ -229,9 +229,23 @@ struct AccountSettingsView: View {
         }
     }
 
+    // Automatic upload is meaningless while signed out (the upload path short-circuits to
+    // .waitingForSignIn) OR before backup is configured, so the toggle greys out on the SAME
+    // conditions as the Back Up Now / Restore rows above rather than staying live on
+    // isEncryptedBackupConfigured alone — otherwise a configured-but-signed-out account (session
+    // expired / signed out after setup) left this toggle active and showing "on" while the rest of
+    // the section was correctly greyed. Kept in lockstep with automaticBackupBinding's getter so
+    // the toggle reads OFF exactly when it is greyed.
+    private var isAutomaticBackupControlEnabled: Bool {
+        backup.isEncryptedBackupConfigured && account.isAccountSignedIn
+    }
+
     private var automaticBackupBinding: Binding<Bool> {
         Binding {
-            backup.isAutomaticBackupEnabled
+            // Reflect the preference only while the control is live; a signed-out account shows OFF
+            // even if the stored preference is on, so the greyed toggle never sits in the "on"
+            // position. The persisted preference is untouched, so it returns on re-sign-in.
+            isAutomaticBackupControlEnabled && backup.isAutomaticBackupEnabled
         } set: { isEnabled in
             performAppSettingsMutation(reason: "Edit backup settings") {
                 backup.setAutomaticBackupEnabled(isEnabled)
