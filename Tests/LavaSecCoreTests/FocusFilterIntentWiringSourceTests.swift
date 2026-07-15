@@ -276,10 +276,33 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             XCTAssertTrue(perform.contains(outcome),
                           "perform() must handle the \(outcome) engine outcome.")
         }
-        XCTAssertTrue(perform.contains("throw SwitchFilterDisallowedError(filterName: filter.name)"),
+        XCTAssertTrue(perform.contains("throw SwitchFilterDisallowedError("),
                       "perform() must THROW on .disallowed — an un-happened switch is an error, and the throw is what reaches silent automations.")
         XCTAssertTrue(source.contains("struct SwitchFilterDisallowedError: Error, CustomLocalizedStringResourceConvertible"),
                       "The disallowed error must be localized (CustomLocalizedStringResourceConvertible) for Siri/Shortcuts display.")
+
+        // Every outcome's copy (the three dialogs AND the disallowed error message) must be PRE-RESOLVED in
+        // this app process to the app's pinned UI language, NOT handed to Shortcuts as a bare
+        // `LocalizedStringResource` for the SYSTEM to re-localize in the system locale — which renders English
+        // for a user whose app runs in another language (an iOS per-app override, or a device whose system
+        // language differs), the Switch-Filter twin of the 2026-07-14 Live Activity stuck-English incident
+        // (lavasec-infra plan Phase 3). The resolved-value behavior is proved by
+        // SwitchFilterDialogLocalizationTests; this pins the app↔Shortcuts cross-process wiring the compiler
+        // can't see. The disallowed message is pre-resolved for the same reason — its error's
+        // `localizedStringResource` may be read in the Shortcuts process, which cannot read the pin.
+        XCTAssertTrue(perform.contains("LavaNotificationLanguage.pinnedCode("),
+                      "perform() must read the app's pinned UI language so dialogs match the app language, not the system language.")
+        XCTAssertTrue(perform.contains("LavaCoreStrings.localizedFormat("),
+                      "Dialog/error copy must resolve through the pinned-language catalog (LavaCoreStrings), not a bare LocalizedStringResource the system re-localizes.")
+        for key in [
+            "dialog.filterSwitchedTo", "dialog.filterAlreadyActive",
+            "dialog.filterWillApplyNextOpen", "dialog.filterSwitchDisallowed"
+        ] {
+            XCTAssertTrue(perform.contains("\"\(key)\""),
+                          "perform() must resolve the \(key) copy through the pinned-language catalog.")
+        }
+        XCTAssertFalse(perform.contains("IntentDialog(LocalizedStringResource("),
+                       "Outcome dialogs must not be a bare LocalizedStringResource — the system re-localizes those in the system locale (English for a non-system-language app).")
         // No re-implemented switch logic: the CAS/flock/marker/diagnostics all live in the engine, so the
         // intent must not touch the container writers/locks directly.
         for leak in ["SharedFilterStatePersistence", "focusSwitchLockURL", "persistArtifacts", "configurationWriteLockURL"] {

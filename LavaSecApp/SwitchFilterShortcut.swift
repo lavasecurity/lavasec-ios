@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import LavaSecKit
 
 // MARK: - Switch Filter App Intent (Shortcuts / Automations / Siri)
 //
@@ -95,17 +96,40 @@ struct SwitchFilterIntent: AppIntent {
             feedback: .systemOwnedDialog
         )
 
-        // Map the engine's outcome to a localized dialog. The filter name is bound through
-        // `LocalizedStringResource` interpolation → each String Catalog key carries a `%@` placeholder
-        // (LavaSecApp/Localizable.xcstrings, all 10 locales; resolved from the APP bundle, since this intent
-        // is app-target). "Lava" is the brand name and stays untranslated in every locale (guard-tab/brand
-        // rule).
+        // Map the engine's outcome to a dialog, PRE-RESOLVED in THIS (app) process to the app's pinned UI
+        // language — NOT handed to Shortcuts as a bare `LocalizedStringResource`. A bare resource is resolved
+        // by the SYSTEM at DISPLAY time in the SYSTEM locale, so a user whose app runs in another language
+        // (an iOS per-app language override, or a device whose system language differs from the app's) sees
+        // this dialog in English while the rest of the app is localized — the Switch-Filter twin of the
+        // 2026-07-14 Live Activity "stuck-English" incident (lavasec-infra
+        // `plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md`, Phase 3). `LavaCoreStrings`
+        // resolves the dialog copy from the pinned `.lproj` of `Bundle.module` via the same direct-`.strings`
+        // read the committed banner (`FocusSwitchEnvironment.postSwitchBanner`) and the Live Activity use, so
+        // the dialog renders in the app's language and stays CONSISTENT with the banner that appears alongside
+        // it on an interactive run. The filter name is a `%@` placeholder substituted here; the built-in level
+        // names (Core / Balanced / Extra) and "Lava" stay untranslated in every locale (guard-tab/brand rule).
+        // pinned: SwitchFilterDialogLocalizationTests.testEveryDialogKeyIsTranslatedInEveryLocaleAndNeverLeaksTheRawKey
+        // pinned: FocusFilterIntentWiringSourceTests.testSwitchPerformDrivesSharedEngineAndReturnsDialogWithCommittedOnlyEngineBanner
+        //
+        // Read the SAME shared pin the banner and Live Activity read — the deliberate single source of truth
+        // that keeps every cross-process localized surface mutually consistent. The pin is republished on each
+        // post-unlock foreground, so it lags an iOS per-app language change made BEFORE the app is next opened:
+        // a switch run in that window renders in the previous language (Codex P2 on #388). That staleness is a
+        // property of the pin's refresh cadence — shared by the banner and Live Activity, not dialog-specific —
+        // and self-heals on the next foreground; preferring this process's fresher `currentAppLocalization()`
+        // for the dialog ALONE would de-sync it from the banner it co-displays with, which is worse. The right
+        // fix is to tighten the cadence (republish on a per-app language change), updating all three surfaces
+        // together. When the pin is absent (no post-unlock foreground yet) `LavaCoreStrings` falls back to
+        // ambient `Bundle.module` resolution — correct in this app process.
+        let languageCode = LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)
         let dialog: IntentDialog
         switch outcome {
         case .committed:
-            dialog = IntentDialog(LocalizedStringResource("Switched to \(filter.name)."))
+            dialog = IntentDialog(stringLiteral:
+                LavaCoreStrings.localizedFormat("dialog.filterSwitchedTo", languageCode: languageCode, filter.name))
         case .alreadyActive:
-            dialog = IntentDialog(LocalizedStringResource("\(filter.name) is already your active filter."))
+            dialog = IntentDialog(stringLiteral:
+                LavaCoreStrings.localizedFormat("dialog.filterAlreadyActive", languageCode: languageCode, filter.name))
         case .deferred:
             // The headless path only commits a WARM switch; with no reusable warm artifact (new filter,
             // stale catalog, cache miss) the engine records a durable pending marker and defers. That marker
@@ -113,26 +137,38 @@ struct SwitchFilterIntent: AppIntent {
             // cold-compiles it, and an App Intent's short window can't either — so a switch run while Lava
             // stays closed applies on the NEXT app open, not "shortly". Say so honestly (Codex #325); the
             // switch itself is the same tolerated, self-healing deferral the Focus path already carries.
-            dialog = IntentDialog(LocalizedStringResource("\(filter.name) will apply the next time you open Lava."))
+            dialog = IntentDialog(stringLiteral:
+                LavaCoreStrings.localizedFormat("dialog.filterWillApplyNextOpen", languageCode: languageCode, filter.name))
         case .disallowed:
             // Auth-to-edit gate on (or the impossible container-unavailable case). A headless intent can't
             // prompt for auth, so the engine safely no-ops — and the switch DID NOT HAPPEN, so this is an
             // ERROR, not a result: throwing halts any downstream shortcut actions that assumed the switch,
             // Siri speaks the message, the Shortcuts app displays it, and a failed silent automation is
             // reported by Shortcuts' own failure notification — which is what preserves failure feedback
-            // with the engine banner suppressed for this caller (Codex #325).
-            throw SwitchFilterDisallowedError(filterName: filter.name)
+            // with the engine banner suppressed for this caller (Codex #325). The message is pre-resolved
+            // HERE (app process) for the SAME reason as the dialogs above — `localizedStringResource` may be
+            // read in the Shortcuts process, which is not in the app group and cannot read the pin.
+            throw SwitchFilterDisallowedError(
+                localizedMessage: LavaCoreStrings.localizedFormat(
+                    "dialog.filterSwitchDisallowed", languageCode: languageCode, filter.name))
         }
         return .result(dialog: dialog)
     }
 }
 
-/// `.disallowed` surfaced the AppIntents-idiomatic way: a thrown, localized error. Reuses the SAME String
-/// Catalog key the old disallowed dialog used (all 10 locales, `%@` placeholder), so no new translation.
+/// `.disallowed` surfaced the AppIntents-idiomatic way: a thrown, localized error. The message is resolved
+/// to the app's pinned UI language in `perform()` (the app process) and carried here as FINAL text, because
+/// AppIntents may read `localizedStringResource` in the Shortcuts process — which is not in the app group and
+/// cannot read the language pin, so resolving there would fall back to the system locale (English for an app
+/// running in another language), the same defect the outcome dialogs avoid.
 struct SwitchFilterDisallowedError: Error, CustomLocalizedStringResourceConvertible {
-    let filterName: String
+    /// Already localized to the app's UI language in `perform()`; rendered verbatim.
+    let localizedMessage: String
     var localizedStringResource: LocalizedStringResource {
-        LocalizedStringResource("Couldn't switch to \(filterName). Open Lava to check your filter settings.")
+        // The text is final. Wrapping a runtime string as a `LocalizedStringResource` uses it as its own
+        // lookup key: the catalog miss falls back to the string itself, so Shortcuts displays the
+        // app-language message we already resolved rather than re-localizing it in the system locale.
+        LocalizedStringResource(stringLiteral: localizedMessage)
     }
 }
 

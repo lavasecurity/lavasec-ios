@@ -8,6 +8,13 @@
 "notif.body.dnsSlowTitle" = "Lava DNS 反應緩慢";
 "notif.body.dnsSlowMessage" = "所選的 DNS 解析器回應緩慢。點一下即可重新連線保護。";
 
+/* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
+   pinned app language so Shortcuts renders them in the app's language, not the system locale. */
+"dialog.filterSwitchedTo" = "已切換至 %@。";
+"dialog.filterAlreadyActive" = "%@ 已經是目前生效的篩選器。";
+"dialog.filterWillApplyNextOpen" = "%@ 將在您下次開啟 Lava 時生效。";
+"dialog.filterSwitchDisallowed" = "無法切換至 %@。請開啟 Lava 檢查你的篩選器設定。";
+
 /* Live Activity / widget UI (shared via Bundle.module). */
 "widget.state.on" = "Lava Security 已開啟";
 "widget.state.paused" = "Lava Security 已暫停";
