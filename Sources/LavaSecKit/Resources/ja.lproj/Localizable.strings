@@ -8,6 +8,13 @@
 "notif.body.dnsSlowTitle" = "LavaのDNSが遅くなっています";
 "notif.body.dnsSlowMessage" = "選択中のDNSリゾルバの応答が遅くなっています。タップして保護を再接続してください。";
 
+/* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
+   pinned app language so Shortcuts renders them in the app's language, not the system locale. */
+"dialog.filterSwitchedTo" = "%@ に切り替えました。";
+"dialog.filterAlreadyActive" = "%@ はすでに有効なフィルターです。";
+"dialog.filterWillApplyNextOpen" = "%@ は次回 Lava を開いたときに適用されます。";
+"dialog.filterSwitchDisallowed" = "%@ に切り替えられませんでした。Lava を開いてフィルター設定を確認してください。";
+
 /* Live Activity / widget UI (shared via Bundle.module). */
 "widget.state.on" = "Lava Security はオンです";
 "widget.state.paused" = "Lava Security は一時停止中です";
