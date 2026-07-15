@@ -27,6 +27,13 @@ path already served LKG for hours on compile failure, so refusing it in the boot
 the ~seconds compile window traded a block-all outage for no coherent security gain. LKG
 is never fail-open — INV-DNS-3's exact-configuration gates apply everywhere it is served,
 and with no LKG candidate the bootstrap still installs fail-closed.
+An existing-but-UNREADABLE config (Data Protection on a boot start before first unlock,
+INV-PERSIST-1) is NOT "no filters": the bootstrap fails closed instead of taking the
+empty-config pass-through, the background reload aborts rather than adopting the boot
+placeholder, and the refresh marker stays nil so retries continue until the real config
+is adopted after unlock. Post-INV-PERSIST-2, control-plane files carry
+`NSFileProtectionNone`, so a pre-unlock boot normally reads the real config/artifacts and
+serves real filtering; the fail-closed branch remains for transient unreadability.
 - Home: `LavaSecTunnel/PacketTunnelProvider.swift` — `loadInitialSharedState` /
   `bootstrapResidentSnapshotFromDisk` / `serveLastKnownGoodOrFailClosed` comments.
 - Enforced: `PacketTunnelDNSRuntimeSourceTests.testLoadInitialSharedStateWarmResumesFromDiskBeforeFailingClosed`
@@ -234,6 +241,135 @@ review P2-4). A diff that makes auth success release key material falsifies this
 - Enforced: `SecuritySettingsSourceTests.testBiometricGateStaysANonCryptographicUIBoundary`
   (fails if keychain access-control APIs appear in the controller, or if the reviewed
   suppression marker disappears while `evaluatePolicy` remains).
+
+## Persistence
+
+### INV-PERSIST-1 — Unreadable is never absent; no seed persists over an unreadable store
+Every shared-state read distinguishes existing-but-UNREADABLE (Data Protection between
+reboot and first unlock, or transient I/O — the user's data is intact) from genuinely
+absent/corrupt, and no seed/migration/default may be persisted while any part of the
+store classified unreadable. Collapsing the two wiped the filter library on a
+reboot-before-first-unlock launch (2026-07-14 incident; lavasec-infra
+`plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md`): the launch reseed
+stamped seeded defaults at a winning monotonic generation over the user's locked files.
+Guards are layered — reader classification, launch-load persist gating + funnel refusal
+with post-unlock reload, the shared writer's refuse-to-replace-unreadable fence, and the
+automatic-backup suppression that keeps a reseed from propagating to the server copy.
+Phase 2 (INV-PERSIST-2) removes the common pre-unlock unreadability for control-plane
+files; these guards remain the backstop for the privacy stores (still Class C) and for
+transient I/O unreadability.
+- Home: `Sources/LavaSecKit/SharedStateFileReader.swift` (classifier);
+  `SharedFilterStatePersistence.writeConfigurationAndLibrary` (writer fence);
+  `AppViewModel.loadPersistedConfiguration` / `loadOrMigrateFilterLibrary` /
+  `reloadSharedStateIfBlockedByDataProtection` (load gating + recovery);
+  `BackupController.scheduleAutomaticBackupAfterConfigurationChange` (blast radius).
+- Home (tunnel half): `LavaSecTunnel/PacketTunnelProvider.swift` —
+  `loadConfigurationClassified` (fail-closed bootstrap + reload abort + nil refresh
+  marker on unreadable) and `beginFreshProtectionVPNSession` (canary-deferred suite
+  writes).
+- Enforced: `SharedStateFileReaderTests` (executable classification, including a
+  chmod-based unreadable fixture), `SharedFilterStatePersistenceTests`
+  (`testWriteRefusesToReplaceExistingUnreadable*` — executable writer fence),
+  `RebootFirstUnlockGuardSourceTests` (pins the load gating, funnel refusal, recovery
+  wiring, and backup suppression), and `TunnelPreUnlockGuardSourceTests` (pins the
+  tunnel's fail-closed bootstrap, refresh retry, reload abort, and canary-gated suite
+  writes).
+
+### INV-PERSIST-2 — Control-plane files carry NSFileProtectionNone; privacy stores stay Class C
+The boot-needed CONTROL-PLANE files in the shared App Group — the
+`app-configuration.json`/`filter-library.json` pair, `tunnel-health.json`, the versioned
+artifact area (`filter-artifacts/`, token trios + the `current.json` pointer), the legacy
+root artifact trio, and the tunnel's retained compile
+(`catalog-cache/tunnel-compiled-artifact/`) — carry `NSFileProtectionNone`. A DNS filter
+that boots with the device (Connect-On-Demand fires between reboot and first unlock, when
+Class C content is still locked) needs its selection/rules state readable pre-unlock to
+serve REAL filtering instead of the fail-closed block-all placeholder; these files hold
+filter selections, custom rules, and tunnel health — no browsing history — so trading
+their at-rest class for boot availability is deliberate (2026-07-14 incident, phase 2;
+lavasec-infra `plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md`). The
+PRIVACY stores — `dns-events.sqlite`, `diagnostics.json`, `network-activity-log.json`,
+`incident-ledger.json`, `vpn-debug-log.jsonl`, and the `catalog-cache` downloads outside
+the retained-compile subdirectory — record user activity and nothing at boot needs them,
+so they deliberately stay at the iOS default Class C. The advisory lock files are also
+deliberately EXCLUDED: they are content-free, every pre-unlock toucher is try-only or
+degrades on a failed open, and the shared `FilterPublishLock` open site also creates the
+privacy vpn-debug rotate lock, so a blanket re-class there would leak class-None into a
+privacy path for zero boot benefit.
+CANARY CONSEQUENCE: the tunnel's protected-content canary
+(`sharedProtectedContentIsReadable` and its static twin) must probe a file that STAYS
+Class C — it probes the shared-defaults SUITE PLIST
+(`Library/Preferences/<group>.plist`), NOT the config: re-classing the config to
+Class-None made it readable pre-unlock, so a config probe would report "unlocked" while
+the suite plist, diagnostics, and incident ledger are all still locked, silently
+reopening every INV-PERSIST-1 window the #377 gates closed. `diagnostics.json` is also
+disqualified as a probe: it can be legitimately absent long past install (counts +
+history disabled before the tunnel ever persists diagnostics) while the locked suite
+exists. The suite plist is the deferred writes' own clobber target, so both semantics
+are exact: existing-but-unreadable means locked (defer), absent means no suite content
+exists to clobber (proceed; the pre-unlock create fails harmlessly and retries). Class
+keys unlock atomically at first user authentication, so its readability also signals for
+the diagnostics/ledger writers. Because config readability no longer proves unlock, the
+refresh's `.loaded` mtime stamp is gated on no pending begin — a pre-unlock `.loaded`
+tick must keep the flush reachable past the unchanged-mtime gate. The tunnel-health
+write closure is deliberately UNGATED: its file is control-plane Class-None and health
+is never reloaded from disk, so it has no locked-file clobber class.
+MARKER CONSEQUENCE: the durable recovery-reseed backup-suppression marker guards
+`filter-library.json`, which is now Class-None, so a reboot-before-first-unlock launch can
+ACCEPT the library while the device is still locked — and must be able to read AND durably
+WRITE the marker in lockstep with it. A Class-C `UserDefaults` marker could do NEITHER: its
+read returned a spurious `false` while the standard defaults were locked (lifting the
+suppression, so the next automatic backup would upload the seeded defaults over the user's
+last good server envelope), and its write could not land durably pre-unlock — and
+`UserDefaults.synchronize()` is a no-op on modern iOS, so the stamp/clear "crash barrier" the
+old ordering relied on never existed. The marker is therefore a Class-None FILE
+(`reseed-suppression.marker`, `ReseedSuppressionMarkerStore`): its existence is
+metadata-readable while locked and its atomic write lands durably pre-unlock, exactly matching
+the library it guards. For a 1.2.5-native device the accept branch honors it INLINE — a direct
+read of the pre-unlock-readable file marker, no protected-data gate. The ONE case that cannot
+decide inline is a device upgrading from 1.2.4 whose pre-1.2.5 Class-C
+`recoveryReseedBackupSuppression` defaults key has NOT migrated to the file yet AND whose first
+post-upgrade launch is pre-first-unlock: the file marker is absent and the legacy store is
+unreadable, so the marker read returns a third `absentUnconfirmed` state and the accept
+conservatively FREEZES the suppression, re-deriving it once protected data is readable (wired to
+the same first-unlock notification + foreground re-check as the INV-PERSIST-1 reload, since an
+accepted readable library never sets `sharedStateUnavailableAtLoad`). The legacy key is read
+only while protected data is available, migrated forward to the durable file AND then CONSUMED
+(removed) in the same step — and a leftover key (a migration killed between its mark and consume)
+is likewise cleared on any later readable launch that already sees the file marker, so it can
+never be migrated back after a reset and re-suppress backups (Codex P2 ×2 on #385) — so the
+freeze is one-time per upgrading device; a 1.2.5-native device's state lives in the readable file marker and never
+freezes (Codex P1 on #385). Symmetrically on the DROP side: every user-authoritative reseed that
+LIFTS the suppression — restore-from-backup, restore-to-default, and the onboarding seed — drops
+the durable marker only AFTER its config/library pair reaches disk (the in-memory flag lifts first
+so the persist's backup hook runs unsuppressed). A reseed persist that fails before the pair lands
+KEEPS the marker, so the next launch still suppresses over the un-replaced on-disk reseed instead
+of letting automatic backup clobber the last good server envelope; clearing the durable marker
+before the write would strand the reseed unmarked (Codex P1 round 4 on #376 for restore-from-backup;
+restore-to-default + onboarding brought into the same lockstep on the 1.2.5 sync, since the
+post-#385 durable file-marker clear — unlike the pre-#385 best-effort Class-C key — reliably lands).
+The marker carries app-state (a boolean, by
+existence), never browsing history, so Class-None is the same deliberate trade as the rest of
+the control plane (Codex P1 on the 1.2.4 public sync; Kilo/OCR durability follow-up). Enforced
+by
+`RebootFirstUnlockGuardSourceTests.testAcceptedLibraryHonorsDurableFileMarker`, the deferred-drop
+pin `RebootFirstUnlockGuardSourceTests.testExplicitReseedDefersDurableMarkerDropUntilPersistLands`,
+and the executable `ReseedSuppressionMarkerStoreTests`.
+- Home: `Sources/LavaSecKit/SharedStateFileProtection.swift` (the single options/
+  attributes source every control-plane writer funnels through); writer call sites in
+  `SharedFilterStatePersistence`, `FilterArtifactStore` / `FilterArtifactStoreVersioned`,
+  `StreamingCompactSnapshotCompiler` (scratch creation + post-promotion re-stamp), the
+  tunnel-health write in `PacketTunnelProvider`, and the reseed-suppression marker in
+  `Sources/LavaSecKit/ReseedSuppressionMarkerStore.swift` (Class-None existence marker);
+  `Sources/LavaSecKit/ControlPlaneProtectionMigration.swift` + the
+  `AppViewModel.setAppForegroundActive` post-unlock hook (one-shot re-stamp of
+  pre-phase-2 files).
+- Enforced: `SharedStateFileProtectionTests` (executable platform-fallback + round-trip),
+  `ReseedSuppressionMarkerStoreTests` (executable marker existence / mark / clear + idempotent
+  no-write), `ControlPlaneProtectionMigrationTests` (executable target selection + one-shot
+  semantics), and `ControlPlaneProtectionSourceTests` (pins every writer call site, the
+  compiler's creation attributes + promotion re-stamp, the foreground migration hook, and the
+  re-stamp's post-write class verification that keeps a false-success `setAttributes` from
+  latching a still-locked file).
 
 ## Release
 

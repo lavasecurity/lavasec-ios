@@ -585,6 +585,53 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertTrue(itemIDs.contains("device_dns_unavailable"))
     }
 
+    func testBugReportCarriesLockedBootFilteringEvidence() throws {
+        // The reboot QA gate's direct locked-window evidence must reach the SUBMITTED
+        // payload on a Release RC (Feedback is the only artifact there), and a clean
+        // locked-window pass produces no incident envelope — so the lockedBoot* fields
+        // ride the always-carried vpnBody (incident plan Phase 4 follow-up, #381).
+        let windowEndedAt = Date(timeIntervalSinceReferenceDate: 800_720_100)
+        let bundle = makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                details: "Reboot QA gate evidence capture.",
+                includeDiagnostics: true
+            ),
+            health: TunnelHealthSnapshot(
+                startedAt: Date(timeIntervalSinceReferenceDate: 10),
+                updatedAt: Date(timeIntervalSinceReferenceDate: 20),
+                lockedBootBlockedQueryCount: 3,
+                lockedBootAllowedQueryCount: 7,
+                lockedBootFailClosedQueryCount: 1,
+                lockedBootWindowEndedAt: windowEndedAt
+            )
+        )
+
+        let vpn = try XCTUnwrap(bundle.makeRequestBody()["vpn"] as? [String: Any])
+        XCTAssertEqual(vpn["locked_boot_blocked_query_count"] as? Int, 3)
+        XCTAssertEqual(vpn["locked_boot_allowed_query_count"] as? Int, 7)
+        XCTAssertEqual(vpn["locked_boot_fail_closed_query_count"] as? Int, 1)
+        XCTAssertNotNil(vpn["locked_boot_window_ended_at"])
+        XCTAssertNotEqual(vpn["locked_boot_window_ended_at"] as? String, "none")
+
+        // A session that never started locked exports zero counters and "none" — the
+        // absence signal the gate reads as "this boot had no locked window".
+        let neverLocked = makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                details: "Normal boot.",
+                includeDiagnostics: true
+            ),
+            health: TunnelHealthSnapshot(
+                startedAt: Date(timeIntervalSinceReferenceDate: 10),
+                updatedAt: Date(timeIntervalSinceReferenceDate: 20)
+            )
+        )
+        let neverLockedVPN = try XCTUnwrap(neverLocked.makeRequestBody()["vpn"] as? [String: Any])
+        XCTAssertEqual(neverLockedVPN["locked_boot_blocked_query_count"] as? Int, 0)
+        XCTAssertEqual(neverLockedVPN["locked_boot_window_ended_at"] as? String, "none")
+    }
+
     func testSubmissionPolicyKeepsPreparedSnapshotWhenContextMatches() {
         let context = BugReportContext(
             issueType: .vpnOrFilterIssue,

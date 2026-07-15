@@ -90,6 +90,13 @@ private struct RegisteredBackupPasskey: Equatable {
 protocol BackupHubBridging: AnyObject {
     var isAccountSignedIn: Bool { get }
     var accountEmailForBackupPasskey: String? { get }
+    /// True while the hub's in-memory library ORIGINATED from a launch-time reseed
+    /// (absent/corrupt store — recovery scaffolding, not user intent). The automatic-backup
+    /// scheduler refuses to re-seal or upload while set, so a reseed can never propagate
+    /// over the user's last good server backup (INV-PERSIST-1 blast-radius guard; the
+    /// 2026-07-14 incident's latent-3). Cleared by the hub when the library becomes
+    /// user-authoritative again (restore / restore-to-default / onboarding seed).
+    var libraryOriginatesFromLaunchReseed: Bool { get }
     func makeBackupConfigurationPayload() -> BackupConfigurationPayload
     func beginConfigurationReplacement() -> Int
     func isConfigurationReplacementCurrent(_ token: Int) -> Bool
@@ -677,6 +684,15 @@ final class BackupController: ObservableObject {
     }
 
     func scheduleAutomaticBackupAfterConfigurationChange() {
+        // INV-PERSIST-1 blast-radius guard (pinned: RebootFirstUnlockGuardSourceTests.testAutomaticBackupIsSuppressedWhileLibraryOriginatesFromLaunchReseed): a library
+        // that originated from a launch reseed is recovery scaffolding, not user intent. Neither
+        // re-seal the local envelope from it nor schedule the debounced upload — either would
+        // stage/propagate a wipe over the user's last good backup (incident latent-3). Checked
+        // BEFORE the re-seal below because the re-seal alone poisons the local envelope a later
+        // manual upload would send. Manual Back Up Now stays available (explicit user action).
+        guard !hub.libraryOriginatesFromLaunchReseed else {
+            return
+        }
         // Re-seal the LOCAL envelope with the current config + library on every change, BEFORE
         // consulting the cached backup state. The envelope is otherwise sealed only at
         // turn-on/restore, so without this the next upload (automatic OR manual) backs up stale

@@ -3,6 +3,109 @@ import XCTest
 @testable import LavaSecKit
 
 final class TunnelHealthSnapshotTests: XCTestCase {
+    // MARK: - Locked-boot window evidence (INV-PERSIST-2 / the reboot QA release gate)
+
+    func testLockedBootServeBucketsRealClassificationsApartFromFailClosed() {
+        var snapshot = TunnelHealthSnapshot()
+        snapshot.recordLockedBootServe(action: .block, reason: .blocklist)
+        snapshot.recordLockedBootServe(action: .block, reason: .threatGuardrail)
+        snapshot.recordLockedBootServe(action: .allow, reason: .defaultAllow)
+        snapshot.recordLockedBootServe(action: .allow, reason: .pausedAllow)
+        // A fail-closed serve arrives as action == .block but must NEVER count as a
+        // blocklist match (the #164 honesty rule) — it buckets into its own counter, so
+        // the gate's "blocked ≥ 1 pre-unlock" evidence can only come from real matches.
+        snapshot.recordLockedBootServe(action: .block, reason: .protectionUnavailable)
+
+        XCTAssertEqual(snapshot.lockedBootBlockedQueryCount, 2)
+        XCTAssertEqual(snapshot.lockedBootAllowedQueryCount, 2)
+        XCTAssertEqual(snapshot.lockedBootFailClosedQueryCount, 1)
+        XCTAssertNil(snapshot.lockedBootWindowEndedAt,
+                     "Bucketing serves must not stamp the window end — only the readable reload does.")
+    }
+
+    func testLockedBootWindowCoversComparesAgainstTheObservedLockedBoundaryOnly() {
+        var snapshot = TunnelHealthSnapshot()
+        let decisionTime = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // A never-locked boot (no stamp, no observation) admits nothing — ever.
+        XCTAssertFalse(snapshot.lockedBootWindowCovers(decisionAt: decisionTime, lastObservedLockedAt: nil))
+
+        // Window still OPEN (no end stamp): the caller's live locked observation bounds
+        // membership. There is deliberately NO flag fast path — the locked-boot store
+        // flag clears only at the throttled readable reload, so it stays set for up to
+        // one refresh interval of post-unlock traffic (Codex review, #381).
+        XCTAssertTrue(snapshot.lockedBootWindowCovers(decisionAt: decisionTime,
+                                                      lastObservedLockedAt: decisionTime.addingTimeInterval(1)))
+        XCTAssertFalse(snapshot.lockedBootWindowCovers(decisionAt: decisionTime,
+                                                       lastObservedLockedAt: decisionTime.addingTimeInterval(-1)),
+                       "A decision after the last locked observation is ambiguous — dropped, never admitted.")
+
+        // Window ENDED: the frozen stamp is the boundary and takes precedence over any
+        // (stale) live observation the caller still holds.
+        snapshot.markLockedBootWindowEnded(at: decisionTime.addingTimeInterval(1))
+        XCTAssertTrue(snapshot.lockedBootWindowCovers(decisionAt: decisionTime, lastObservedLockedAt: nil),
+                      "A pre-unlock straggler bucketed after the window stamp must be admitted by the boundary comparison.")
+        XCTAssertFalse(snapshot.lockedBootWindowCovers(decisionAt: decisionTime.addingTimeInterval(2),
+                                                       lastObservedLockedAt: decisionTime.addingTimeInterval(10)),
+                       "Post-window traffic is never evidence, whatever the caller passes.")
+    }
+
+    func testLockedBootWindowEndStampIsFirstTransitionWins() {
+        var snapshot = TunnelHealthSnapshot()
+        let unlock = Date(timeIntervalSince1970: 1_700_000_000)
+        snapshot.markLockedBootWindowEnded(at: unlock)
+        // A later readable reload must not move the stamp off the actual unlock boundary.
+        snapshot.markLockedBootWindowEnded(at: unlock.addingTimeInterval(600))
+        XCTAssertEqual(snapshot.lockedBootWindowEndedAt, unlock)
+    }
+
+    func testDecodingOldHealthDefaultsLockedBootEvidenceToEmpty() throws {
+        let data = Data("""
+        {
+          "startedAt": "2026-05-17T00:00:00Z",
+          "updatedAt": "2026-05-17T00:00:00Z",
+          "networkKind": "wifi",
+          "cacheHitCount": 0,
+          "cacheMissCount": 0,
+          "coalescedQueryCount": 0,
+          "upstreamSuccessCount": 0,
+          "upstreamFailureCount": 0,
+          "upstreamTimeoutCount": 0,
+          "udpTruncatedResponseCount": 0,
+          "tcpFallbackAttemptCount": 0,
+          "tcpFallbackSuccessCount": 0,
+          "resolverAttemptCounts": {},
+          "resolverSuccessCounts": {},
+          "resolverFailureCounts": {}
+        }
+        """.utf8)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(snapshot.lockedBootBlockedQueryCount, 0)
+        XCTAssertEqual(snapshot.lockedBootAllowedQueryCount, 0)
+        XCTAssertEqual(snapshot.lockedBootFailClosedQueryCount, 0)
+        XCTAssertNil(snapshot.lockedBootWindowEndedAt)
+    }
+
+    func testLockedBootEvidenceSurvivesAnEncodeDecodeRoundtrip() throws {
+        var snapshot = TunnelHealthSnapshot()
+        snapshot.recordLockedBootServe(action: .block, reason: .blocklist)
+        snapshot.recordLockedBootServe(action: .allow, reason: .defaultAllow)
+        snapshot.markLockedBootWindowEnded(at: Date(timeIntervalSince1970: 1_700_000_000))
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertEqual(decoded.lockedBootBlockedQueryCount, 1)
+        XCTAssertEqual(decoded.lockedBootAllowedQueryCount, 1)
+        XCTAssertEqual(decoded.lockedBootFailClosedQueryCount, 0)
+        XCTAssertEqual(decoded.lockedBootWindowEndedAt, snapshot.lockedBootWindowEndedAt,
+                       "The window-end stamp is the evidence's timestamp anchor — it must persist exactly.")
+    }
+
     func testDecodingOldHealthDefaultsResolverTransportToPlainDNS() throws {
         let data = Data("""
         {

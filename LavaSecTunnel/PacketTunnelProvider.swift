@@ -456,11 +456,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             guard let self, let containerURL = LavaSecAppGroup.containerURL else {
                 return false
             }
+            // Deliberately NOT canary-gated (the #377 gate was removed with INV-PERSIST-2):
+            // the health file is control-plane Class-None, so a pre-unlock write lands on a
+            // WRITABLE file, and health is never reloaded from disk (resetHealth builds a
+            // fresh snapshot each start) — there is no locked-file clobber class here. The
+            // resident health is this session's real state; refusing it pre-unlock would
+            // just delay the boot session's observability for nothing.
             let url = containerURL.appendingPathComponent(LavaSecAppGroup.tunnelHealthFilename)
             guard let data = try? JSONEncoder().encode(self.health) else {
                 return false
             }
-            try? data.write(to: url, options: Data.WritingOptions.atomic)
+            // Control-plane options (INV-PERSIST-2): a Connect-On-Demand boot tunnel runs
+            // and writes health BEFORE first unlock, where a Class-C write fails — and this
+            // closure's `try?` + `return true` would clear the debounced dirty flag with
+            // nothing persisted. Class-None keeps the boot tunnel's health writes landing.
+            try? data.write(to: url, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
             return true
         }
     )
@@ -469,6 +479,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         scheduler: persistenceFlushScheduler,
         write: { [weak self] now in
             guard let self else {
+                return false
+            }
+            // INV-PERSIST-1: a pre-unlock pass reads the locked diagnostics store as empty
+            // and would atomically save that emptiness over the user's counts/history — and
+            // this closure also drains the sqlite event log, which must equally wait for
+            // first unlock. Returning false keeps the controller dirty; the same debounced
+            // cadence retries post-unlock (Codex P2 round 5 on #377). The locked-boot gate
+            // closes every post-unlock ordering race (Codex P1 rounds 6 + 7): a cadence
+            // tick before the recovery reload, AND a stop-time forced flush after
+            // endProtectionVPNSession dropped the pending-begin flag, both still see the
+            // resident stores as locked-boot artifacts and refuse — the flag clears only
+            // when loadDiagnosticsAndEventLogStores runs against readable content, in the
+            // same dnsStateQueue turn as the reload it records. In a STOPPED lifecycle that
+            // reload never comes, so the stop path abandons the refused retry instead of
+            // letting it re-arm forever (see cleanUpTunnelRuntimeAfterStop).
+            guard self.sharedProtectedContentIsReadable(),
+                  !self.diagnosticsStoresReflectLockedBoot else {
                 return false
             }
             self.diagnostics.resetForCurrentDayIfNeeded(now: now)
@@ -1041,6 +1068,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             self.markDiagnosticsUpdated()
             self.persistHealthIfNeeded(force: true)
             self.persistDiagnosticsIfNeeded(force: true)
+            // A locked-boot stop can never persist diagnostics: the write closure refuses
+            // the boot-empty stores (INV-PERSIST-1) and each refusal re-arms its own retry,
+            // but loadDiagnosticsAndEventLogStores never runs again in a stopped lifecycle,
+            // so the flag cannot clear and the stopped process would wake every interval
+            // forever without a write ever succeeding (Codex P2 round 10 on #377).
+            // Abandoning loses nothing — the resident store is the boot placeholder the
+            // gate exists to bury; the user's real data is still on disk, untouched.
+            // Health is abandoned with it: post-INV-PERSIST-2 its write closure is ungated
+            // (Class-None file, writes land pre-unlock), so this abandon is defense in depth
+            // for a transiently-failed stop flush — a dead session's health that the next
+            // start's resetHealth overwrites is never worth a stopped process's retry wake.
+            if self.diagnosticsStoresReflectLockedBoot {
+                self.diagnosticsPersistence.abandonUnpersistedState()
+                self.healthPersistence.abandonUnpersistedState()
+            }
             // Drain any fire-and-forget SQLite appends still queued on the log before we signal
             // stop completion. The JSON diagnostics were just force-flushed, but the app reads
             // Domain History from SQLite — so if the NE process is suspended with appends still
@@ -1162,8 +1204,50 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             completion.complete(Data("ok".utf8))
 
         case LavaSecAppGroup.reloadProtectionPauseMessage:
-            refreshProtectionPauseStateOnly(reason: "protectionPause")
-            completion.complete(Data("ok".utf8))
+            dnsStateQueue.async { [weak self] in
+                guard let self else {
+                    completion.complete(nil)
+                    return
+                }
+                // A pause command can be the FIRST tunnel wake after first unlock: with the
+                // begin still boot-deferred, the mask in currentTemporaryProtectionPauseUntil
+                // would swallow the just-written pause INDEFINITELY on an idle tunnel — this
+                // handler is the only wake such a tunnel gets, and it previously never
+                // flushed (Codex P2 round 15 on #377). Flush through the same forced config
+                // refresh the reload-configuration message uses: a readable config lands the
+                // begin before the pause read below; a still-locked one flushes nothing and
+                // the mask correctly stays. Gated on a pending begin so the common pause
+                // toggle remains a pure pause-state refresh.
+                if self.hasPendingFreshProtectionVPNSessionBegin() {
+                    // Capture the command's just-written pause BEFORE the flush: the begin
+                    // mints a fresh session and clears the pause keys, which would turn the
+                    // user's first post-unlock Pause tap into a silent no-op while the
+                    // intent path already published .paused (Codex P2 round 16 on #377).
+                    // Carrying is sound because EVERY sender of this message writes the
+                    // pause keys immediately before sending (LavaProtectionCommandService
+                    // and the in-app path both write-then-notify), so the captured state is
+                    // the command's own payload: a resume arrives with the keys already
+                    // CLEARED (nothing to carry), and a pre-reboot leftover cannot be
+                    // captured through a just-overwritten store.
+                    let commandPause = try? self.protectionPauseStore.storedPauseState()
+                    self.refreshConfigurationIfNeeded(force: true)
+                    // Re-issue the carried pause against the FRESH session for its remaining
+                    // window — only once the begin actually landed (a still-locked config
+                    // keeps deferring, and the mask must keep masking). Best-effort: a
+                    // failed re-issue degrades to a one-command no-op, never a fail-open.
+                    if !self.hasPendingFreshProtectionVPNSessionBegin(),
+                       let commandPause,
+                       commandPause.pausedUntil.timeIntervalSinceNow > 0,
+                       let freshSessionID = try? self.protectionSessionStore.activeSessionID() {
+                        _ = try? self.protectionPauseStore.pause(
+                            for: commandPause.pausedUntil.timeIntervalSinceNow,
+                            requestedSessionID: freshSessionID
+                        )
+                    }
+                }
+                self.refreshProtectionPauseStateOnly(reason: "protectionPause")
+                completion.complete(Data("ok".utf8))
+            }
 
         case LavaSecAppGroup.reloadConfigurationMessage:
             dnsStateQueue.async { [weak self] in
@@ -1286,6 +1370,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     return
                 }
 
+                // A Feedback capture can race the deferred-begin flush: opened seconds
+                // after first unlock, before any serve/refresh tick has run the flush's
+                // locked→readable transition, the sampled payload would carry populated
+                // lockedBoot* counters with a "none" window-end stamp — a completed
+                // locked window indistinguishable from a still-locked or dead session
+                // (Codex review, #381). This handler is dnsStateQueue-confined like the
+                // flush, so it may stamp: if the content became readable while the
+                // stores still reflect the locked boot, record the window end at the
+                // conservative observed-locked boundary. The flag and the store reload
+                // stay untouched — those are the flush's heavier duties, and the flush's
+                // own later stamp is idempotent (first transition wins).
+                // pinned: TunnelPreUnlockGuardSourceTests.testHealthFlushMessageStampsAnUnstampedEndedLockedWindow
+                if self.diagnosticsStoresReflectLockedBoot, self.sharedProtectedContentIsReadable() {
+                    self.health.markLockedBootWindowEnded(at: self.lastObservedLockedSharedContentAt ?? Date())
+                }
                 self.health.networkKind = self.currentNetworkKind()
                 self.health.updatedAt = Date()
                 self.persistHealthIfNeeded(force: true)
@@ -4208,7 +4307,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private func loadInitialSharedState() -> Bool {
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadInitialSharedState-begin")
 
-        let configuration = loadConfiguration() ?? AppConfiguration()
+        // INV-PERSIST-1: classify the config read so existing-but-unreadable (Data
+        // Protection on a boot start before first unlock) never collapses into the empty
+        // default the pass-through branch below treats as "user has no filters". The empty
+        // placeholder is still installed in memory (resolver wiring reads it), but the
+        // bootstrap fails CLOSED on the flag and the refresh marker stays nil so the 30 s
+        // refresh keeps retrying until the real config is readable.
+        let configurationIsUnreadable: Bool
+        let configuration: AppConfiguration
+        switch loadConfigurationClassified() {
+        case .loaded(let loaded):
+            configurationIsUnreadable = false
+            configuration = loaded
+        case .absentOrCorrupt:
+            configurationIsUnreadable = false
+            configuration = AppConfiguration()
+        case .unreadable:
+            configurationIsUnreadable = true
+            configuration = AppConfiguration()
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "config-unreadable-at-start", details: [
+                "consequence": "fail-closed bootstrap + refresh retry until first unlock"
+            ])
+        }
         let launchFollowsRecentSelfReconnect = Self.launchFollowsRecentSelfReconnect(now: Date())
         setAppConfiguration(configuration)
         // Queue-confine the refresh bookkeeping like setAppConfiguration above and every
@@ -4217,7 +4337,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // dnsStateQueue while this off-queue start runs, so route the writes through the queue
         // (loadInitialSharedState is called from startTunnel, never on dnsStateQueue, so .sync
         // cannot deadlock).
-        let configurationModifiedAt = modificationDate(for: configurationURL)
+        // INV-PERSIST-1 retry keeper: file METADATA is readable while content is locked, so
+        // stamping the real mtime after a FAILED load would make refreshConfigurationIfNeeded's
+        // unchanged-mtime gate suppress every retry — the fail-closed placeholder would then
+        // outlive first unlock until the app's next config write (the sticky half of the
+        // incident plan's latent-1). A nil marker compares as "changed" on every refresh
+        // tick, so the tunnel keeps retrying until the post-unlock load succeeds.
+        // A PENDING deferred begin also keeps the marker nil: first unlock can land between
+        // startTunnel's begin canary and this read, making the config readable here while
+        // the begin is already deferred — and on a warm resume the snapshot reload no-ops
+        // before any forced refresh, so the cadence tick this marker un-gates is the only
+        // path left to flushDeferredFreshProtectionVPNSessionIfNeeded (Codex P2 round 14
+        // on #377). The cost is one redundant config re-load on that tick.
+        // pinned: TunnelPreUnlockGuardSourceTests.testUnreadableConfigLeavesRefreshMarkerNilSoRetriesContinue
+        let configurationModifiedAt = (configurationIsUnreadable || hasPendingFreshProtectionVPNSessionBegin())
+            ? nil
+            : modificationDate(for: configurationURL)
         dnsStateQueue.sync {
             lastConfigurationModifiedAt = configurationModifiedAt
             lastConfigurationRefreshAt = Date()
@@ -4245,7 +4380,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         let bootstrapIdentity: PreparedFilterSnapshotIdentity?
         let bootstrapHasEnabledFilters: Bool
         let shouldBeginTransientBootstrapDNSWait: Bool
-        if configuration.enabledBlocklistIDs.isEmpty {
+        if configurationIsUnreadable {
+            // INV-PERSIST-1 × INV-DNS-1 (pinned: TunnelPreUnlockGuardSourceTests.testUnreadableConfigBootstrapsFailClosedNeverPassThrough):
+            // an unreadable config is NOT "no filters" — the user's real config (and its
+            // enabled lists) is intact behind Data Protection, so serve fail-closed until
+            // the refresh retry adopts it after first unlock. The empty pass-through branch
+            // below stays reserved for a config that genuinely READS as empty. Last-known-
+            // good is not an option here: with no readable config there is nothing to
+            // config-exact-match against (INV-DNS-3). Like the transient bootstrap window
+            // below, this is deliberately NOT ledgered at entry (INV-OBS-1) — it fires on
+            // every pre-unlock boot start and resolves within one refresh of unlock; a
+            // served fail-closed query records via the serve path as usual.
+            bootstrapSnapshot = FailClosedRuntimeSnapshot(resolver: configuration.resolverPreset)
+            bootstrapIdentity = nil
+            bootstrapHasEnabledFilters = false
+            shouldBeginTransientBootstrapDNSWait = false
+        } else if configuration.enabledBlocklistIDs.isEmpty {
             bootstrapSnapshot = configuration.filterSnapshot()
             bootstrapIdentity = nil
             bootstrapHasEnabledFilters = false
@@ -4321,19 +4471,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         // to begin.
         cancelTransientBootstrapDNSWait(reason: "loadInitialSharedState")
 
-        if let diagnosticsURL {
-            diagnostics = DiagnosticsPersistence.load(from: diagnosticsURL)
-        }
-
-        // Open the Domain History depth store (best-effort) and, on first run, seed it from the
-        // JSON events buffer so an upgrading install isn't briefly blank until fresh queries
-        // accrue. Sole-writer opens read-write; the app opens the same file read-only.
-        if let dnsEventLogURL {
-            dnsEventLog = try? DNSEventLog(url: dnsEventLogURL)
-            try? dnsEventLog?.seedIfEmpty(from: diagnostics.recentEvents)
-        }
-
-        applyDiagnosticsControlIfNeeded(force: true)
+        loadDiagnosticsAndEventLogStores()
         // A prune performed during load (resetForCurrentDayIfNeeded once the fine-grained
         // retention window has elapsed) sets the store's pending-prune flag but not the
         // persistence controller's dirty flag, so persist when EITHER is set — otherwise an
@@ -4693,6 +4831,50 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                     }
                 }
             }
+            // Locked-boot filtering evidence (incident plan Phase 4 follow-up; the QA
+            // release gate's "Path A" — lavasec-infra
+            // docs/engineering/reboot-first-unlock-qa-protocol.md): while the shared
+            // stores still reflect a locked boot, bucket every decision into the health
+            // snapshot's lockedBoot* counters. Health is Class-None (INV-PERSIST-2) and
+            // never reloaded mid-session, so this is the ONE record of locked-window
+            // filtering that survives to a post-unlock export — the Class-C privacy
+            // stores defer or drop theirs (and the reload below discards their in-memory
+            // locked-window bookkeeping). Deliberately BEFORE the diagnostics-preferences
+            // gate — this is observability evidence, not a user-facing count, the same
+            // posture as the fail-closed trace above — and counters-only, no domain
+            // (privacy audit). Membership is TWO-BRANCH, because neither the flag nor a
+            // frozen timestamp alone is exact (Codex review, #381, three rounds):
+            //  • flag set + a FRESH canary probe observing locked NOW ⇒ the decision is
+            //    certainly pre-unlock — admit exactly, and the probe doubles as a fresh
+            //    locked observation. The flag alone over-admits: it clears only at the
+            //    throttled readable reload, so it stays set for up to one refresh interval
+            //    of post-unlock traffic. The probe costs one stat, paid ONLY inside the
+            //    bounded locked-boot window — never the steady-state hot path.
+            //  • otherwise ⇒ conservative boundary: admit only decisions predating the
+            //    last observed-locked instant (frozen into the window-end stamp once the
+            //    reload runs). Recovers pre-unlock stragglers whose blocks dequeue after
+            //    the reload; drops the ambiguous (observation, unlock] sliver — the gate
+            //    may under-report and rerun, never fabricate.
+            // Rides the 30 s health debounce while the window is open (the window-end
+            // stamp force-persists once at unlock); fallback-admitted stragglers force
+            // their own persist below.
+            // pinned: TunnelPreUnlockGuardSourceTests.testLockedBootServesAreBucketedIntoClassNoneHealthEvidence
+            if self.diagnosticsStoresReflectLockedBoot, !self.sharedProtectedContentIsReadable() {
+                self.lastObservedLockedSharedContentAt = Date()
+                self.health.recordLockedBootServe(action: decision.action, reason: decision.reason)
+                self.markHealthUpdated()
+            } else if self.health.lockedBootWindowCovers(decisionAt: decisionTime, lastObservedLockedAt: self.lastObservedLockedSharedContentAt) {
+                self.health.recordLockedBootServe(action: decision.action, reason: decision.reason)
+                self.markHealthUpdated()
+                // A straggler admitted past the certainly-locked branch lands at or after
+                // the unlock boundary — the window stamp's forced write may already be
+                // done, so force again or a jetsam/stop inside the 30 s debounce persists
+                // the stamp but loses the count: exactly the sparse evidence the fallback
+                // exists to preserve (Codex review, #381). Bounded by the handful of
+                // unlock-boundary blocks, never steady-state: later decisions fail the
+                // boundary comparison and never reach here.
+                self.persistHealthIfNeeded(force: true)
+            }
             let configuration = self.currentAppConfiguration()
             guard configuration.keepFilteringCounts || configuration.keepDomainDiagnostics else {
                 return
@@ -4752,9 +4934,54 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             return
         }
 
-        if let configuration = loadConfiguration() {
+        switch loadConfigurationClassified() {
+        case .loaded(let configuration):
             setAppConfiguration(configuration)
-            lastConfigurationModifiedAt = modifiedAt
+            // INV-PERSIST-1: a readable classification reaches the flush from the
+            // serve-path cadence (recordDiagnostic, ≤ one configurationRefreshInterval)
+            // and the app's reload message — NOT only the snapshot-adoption path — so a
+            // readable config whose reload exits without adopting (over-budget,
+            // unbuildable artifact) still flushes on the next cadence tick (Codex P2
+            // round 12 on #377). Post-INV-PERSIST-2 a successful CONFIG load no longer
+            // proves first unlock (the config is Class-None and reads fine pre-unlock);
+            // the flush's begin re-checks the suite-plist canary and re-defers while
+            // Class C is still locked.
+            flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: true)
+            // Stamp the mtime marker only once nothing is deferred: post-INV-PERSIST-2 a
+            // PRE-unlock tick can classify .loaded, and stamping there — with the begin
+            // just re-deferred by its canary — would wall the flush off behind the
+            // unchanged-mtime gate until an unrelated config write (the round-14 marker
+            // principle, applied at the refresh site; PR #378 review). A pre-unlock boot
+            // therefore re-reads the config each tick until the begin lands — bounded by
+            // first unlock, and the same cost the nil boot marker already accepts.
+            if !hasPendingFreshProtectionVPNSessionBegin() {
+                lastConfigurationModifiedAt = modifiedAt
+            }
+        case .absentOrCorrupt:
+            // READABLE content that fails to decode (or an absent file) proves first unlock
+            // just as well — the deferred begin must flush HERE too, or a config that turns
+            // out corrupt behind a locked boot strands the pending begin (pause mask,
+            // locked-boot diagnostics flag, fail-closed placeholder) forever, because this
+            // branch repeats on every tick (Codex P2 round 17 on #377). Deliberately no
+            // config adoption, no mtime stamp, and NO recovery reload (the false below):
+            // the nil marker keeps re-classifying each tick, so the app's reseed rewrite
+            // flips the next tick to .loaded — the same recovery corrupt configs get on a
+            // normal boot. The flush is take-once, so the repeat ticks after it are no-ops.
+            flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: false)
+        case .unreadable:
+            // Still locked — the nil marker keeps this retrying every tick until unlock.
+            // Fresh locked observation (pre-INV-PERSIST-2-migration boots, where the config
+            // itself is still Class C — post-migration ticks classify .loaded and observe
+            // locked via the begin's re-defer instead): bounds the locked-boot evidence
+            // window (see lastObservedLockedSharedContentAt). GATED on the locked-boot flag
+            // plus a fresh suite-canary probe: post-migration the config is Class-None, so
+            // a transient I/O error ALSO classifies .unreadable here — on a never-locked
+            // session an ungated stamp would seed the covers boundary and admit ordinary
+            // traffic as locked-boot evidence (Codex review, #381). The probe's stat is
+            // paid only on the rare unreadable tick, never steady-state.
+            if diagnosticsStoresReflectLockedBoot, !sharedProtectedContentIsReadable() {
+                lastObservedLockedSharedContentAt = Date()
+            }
         }
     }
 
@@ -5491,6 +5718,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         now: Date = Date(),
         synchronous: Bool = false
     ) {
+        // INV-PERSIST-1: a pre-unlock append reads the locked ledger as empty and atomically
+        // saves a one-record file over the user's incident history — the same clobber class
+        // the suite canary closes. Skipped while locked: observability-only (nothing in the
+        // recovery policy reads the ledger), and the documented cost is one unrecorded
+        // pre-unlock incident; the debug log still carries the event line.
+        guard sharedProtectedContentIsReadableForObservabilityWriters() else {
+            return
+        }
         guard let containerURL = LavaSecAppGroup.containerURL else {
             return
         }
@@ -5534,6 +5769,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // bounded lock, so it never writes synchronously inside startTunnel /
     // loadInitialSharedState and can never stall the startup path on a held lock.
     private static func sweepIncidentLedger() {
+        // INV-PERSIST-1 (pinned: TunnelPreUnlockGuardSourceTests.testObservabilityWritersAreCanaryGated):
+        // the sweep reads the ledger and rewrites it — a pre-unlock pass reads the locked
+        // file as empty and would atomically save emptiness over the user's incident
+        // history. Skipped while locked; the next sweep (each start / debounced pass) runs
+        // post-unlock.
+        guard sharedProtectedContentIsReadableForObservabilityWriters() else {
+            return
+        }
         guard let containerURL = LavaSecAppGroup.containerURL else {
             return
         }
@@ -5735,6 +5978,62 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
     private func persistDiagnosticsIfNeeded(force: Bool = false) {
         diagnosticsPersistence.flush(force: force)
+    }
+
+    // Loads — or at post-unlock recovery RELOADS — the diagnostics JSON store and the Domain
+    // History depth store from the app group. A pre-unlock boot read the locked diagnostics
+    // file as EMPTY, and serve-path markers (local-protection uptime, counts) then dirtied
+    // that empty in-memory store; without this reload the post-unlock retry would save the
+    // emptiness over the user's real counts/history (Codex P1 round 6 on #377 — the same
+    // load-then-reload discipline the app side applies via
+    // reloadSharedStateIfBlockedByDataProtection). The depth store equally reopens here: its
+    // pre-unlock open failed and left dnsEventLog nil. Boot call site runs before
+    // readPackets (nothing races the assignment); the recovery call site runs on
+    // dnsStateQueue inside the deferred-begin flush, the same serialized queue the
+    // diagnostics write closure runs on, so no persist can interleave the swap.
+    // The pre-unlock in-memory counts discarded by the reload are the locked window's
+    // transient bookkeeping — post-INV-PERSIST-2 those are real classifications, not just
+    // fail-closed SERVFAILs, but the user's persisted history is what must win. The locked
+    // window's filtering evidence is NOT lost with them: it survives in the health
+    // snapshot's lockedBoot* counters (Class-None, never reloaded — see recordDiagnostic).
+    private func loadDiagnosticsAndEventLogStores() {
+        // Record whether THIS load ran against a locked container. The diagnostics write
+        // closure refuses to persist while the resident stores reflect a locked-empty boot,
+        // INDEPENDENT of the session-begin lifecycle: tying the gate to the pending-begin
+        // flag let a post-unlock stopTunnel — whose endProtectionVPNSession legitimately
+        // drops that flag — unblock persisting the boot-empty store over the user's real
+        // history (Codex P1 round 7 on #377). The flag clears only when a load runs with
+        // the content readable (the deferred-begin flush's reload, or a normal boot);
+        // unlock is monotonic until the next reboot, so a readable probe here cannot
+        // regress before the reads below.
+        diagnosticsStoresReflectLockedBoot = !sharedProtectedContentIsReadable()
+        if diagnosticsStoresReflectLockedBoot {
+            // Fresh locked observation (boot load): bounds the locked-boot evidence
+            // window (see lastObservedLockedSharedContentAt).
+            lastObservedLockedSharedContentAt = Date()
+        }
+        // The locked→readable window-end stamp deliberately does NOT live here: this
+        // loader also runs OFF dnsStateQueue (loadInitialSharedState / startTunnel),
+        // where a reused provider instance whose flag is still set from a locked
+        // previous session would mutate health and the queue-confined health
+        // persistence off-queue (INV-QUEUE-1) — and startTunnel's resetHealth wipes
+        // the stamp moments later regardless. The transition is detected and stamped
+        // at the deferred-begin flush, the only mid-session (on-queue) readable
+        // reload (Codex review, #381).
+        // pinned: TunnelPreUnlockGuardSourceTests.testLockedBootWindowEndStampIsForcePersistedAtTheReadableReload
+        if let diagnosticsURL {
+            diagnostics = DiagnosticsPersistence.load(from: diagnosticsURL)
+        }
+
+        // Open the Domain History depth store (best-effort) and, on first run, seed it from the
+        // JSON events buffer so an upgrading install isn't briefly blank until fresh queries
+        // accrue. Sole-writer opens read-write; the app opens the same file read-only.
+        if let dnsEventLogURL {
+            dnsEventLog = try? DNSEventLog(url: dnsEventLogURL)
+            try? dnsEventLog?.seedIfEmpty(from: diagnostics.recentEvents)
+        }
+
+        applyDiagnosticsControlIfNeeded(force: true)
     }
 
     // Drains the DNS event log's buffered best-effort appends and, ONLY when the buffer
@@ -6112,6 +6411,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
             // advance only because both run on this queue. Assert so an off-queue refactor trips.
             dispatchPrecondition(condition: .onQueue(self.dnsStateQueue))
             self.snapshotReloadCoordinator.assumeIsolated { $0.finish(generation) }
+            // A deferred recovery force fires only when the coordinator is actually idle —
+            // after the LAST reload fully finished — so it can never invalidate productive
+            // work, and it converges even when the reload the flush yielded to was the
+            // pre-unlock ABORT (which adopts nothing; Codex P1 round 8 on #377). The
+            // in-flight re-check matters: a stale clear (finish above no-ops because a
+            // newer reload superseded this generation) must keep the handoff armed for the
+            // newer reload's own clear — firing on a stale clear would advance the
+            // generation and discard that in-flight snapshot, the same double-reload the
+            // yield exists to prevent. A PRODUCTIVE reload disarms the handoff when it
+            // commits (see the adoption path in loadSnapshotInBackground, FIFO-before this
+            // clear) — the pre-decode no-op gate cannot absorb the fire, because
+            // requestSnapshotReload resets the DNS runtime (draining in-flight queries as
+            // SERVFAIL) before the gate runs (Codex P2 round 13 on #377) — so a fire from
+            // here is always a genuinely-needed recovery, never a blip behind a success.
+            if self.deferredRecoveryReloadPending,
+               !self.snapshotReloadCoordinator.assumeIsolated({ $0.isReloadInFlight }) {
+                self.deferredRecoveryReloadPending = false
+                self.requestSnapshotReload(reason: "config-recovered-after-unlock-deferred", force: true)
+            }
         }
     }
 
@@ -6135,6 +6453,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 
         // Invalidation fences the abandoned load and clears ownership so the Focus poll cannot remain wedged.
         let generation = snapshotReloadCoordinator.assumeIsolated { $0.invalidate() }
+        // Invalidation supersedes ALL prior reload work — including a deferred recovery
+        // handoff still waiting on the superseded reload's clear. Left armed, that clear
+        // would see the coordinator idle (invalidate dropped reloadInFlight) and fire a
+        // forced snapshot reload into a stopped lifecycle, racing teardown or the next
+        // start (Codex P2 round 9 on #377). Stop needs no recovery: the next start
+        // re-classifies the config from scratch.
+        deferredRecoveryReloadPending = false
 
         #if DEBUG || LAVA_QA_TOOLS
         LavaSecDeviceDebugLog.append(component: "tunnel", event: "snapshot-reload-invalidated", details: [
@@ -6179,7 +6504,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 "reason": reason
             ])
 
-            let configuration = self.loadConfiguration() ?? self.currentAppConfiguration()
+            let configuration: AppConfiguration
+            switch self.loadConfigurationClassified() {
+            case .loaded(let loaded):
+                configuration = loaded
+            case .absentOrCorrupt:
+                configuration = self.currentAppConfiguration()
+            case .unreadable:
+                // INV-PERSIST-1 × INV-DNS-1: with the on-disk config merely LOCKED (a boot
+                // start before first unlock), the in-memory fallback is the boot placeholder
+                // — an EMPTY config whose "reload" would replace the fail-closed bootstrap
+                // with the unfiltered pass-through. Abort keeping the resident snapshot; the
+                // nil refresh marker keeps re-adopting attempts alive and the Focus poll's
+                // generation watermark (still at its 0 seed — nothing was adopted) drives a
+                // fresh reload once the real config is readable.
+                LavaSecDeviceDebugLog.append(component: "tunnel", event: "loadSnapshot-aborted-config-unreadable", details: [
+                    "generation": "\(generation)",
+                    "reason": reason
+                ])
+                #if DEBUG || LAVA_QA_TOOLS
+                loadSpan.end(details: ["status": "aborted-config-unreadable"])
+                #endif
+                return
+            }
 
             // Pre-decode no-op gate: if the on-disk artifact would reproduce the
             // resident snapshot, skip the multi-megabyte decode entirely. This
@@ -6462,6 +6809,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                 self.refreshDNSRuntimeAfterSnapshotOrConfigurationChange()
                 self.drainTransientBootstrapDNSWait(reason: "snapshot-loaded-\(reason)")
                 self.refreshConfigurationIfNeeded(force: true)
+                // This adoption just replaced the boot placeholder with a real snapshot, so
+                // a recovery handoff armed by the flush (which yielded to THIS reload) is
+                // satisfied — disarm it before our own clear runs (FIFO: this block was
+                // enqueued before the defer's clear). Left armed, the clear would fire a
+                // forced reload whose DNS-runtime reset drains in-flight queries as
+                // SERVFAIL BEFORE the pre-decode no-op gate can absorb anything — a
+                // needless blip behind a successful recovery (Codex P2 round 13 on #377).
+                self.deferredRecoveryReloadPending = false
                 self.applyDiagnosticsControlIfNeeded(force: true)
                 self.scheduleProtectionPauseResumeIfNeeded(reason: "snapshot-loaded-\(reason)")
                 if self.diagnosticsPersistence.isDirty {
@@ -6645,6 +7000,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func currentTemporaryProtectionPauseUntil(synchronizesDefaults: Bool = true) -> Date? {
+        // While the boot-deferred session begin is PENDING, any stored pause belongs to the
+        // PREVIOUS (pre-reboot) session: the begin that would have cleared it — and begun the
+        // fresh session that unbinds pausedSessionID — has not written yet, so the stale
+        // pause's session pair still matches on disk. Honoring it once first unlock makes the
+        // keys readable would forward DNS UNFILTERED for up to the pause's remainder
+        // (DNSQueryDispatcher gives an active pause precedence over the snapshot) — a
+        // fail-open on a freshly rebooted device (INV-DNS-1; Codex P2 round 4 on #377,
+        // pinned: TunnelPreUnlockGuardSourceTests.testStalePauseIsMaskedWhileSessionBeginIsDeferred).
+        // Masked as no-pause (fails toward filtering) until the flush's begin clears the
+        // stale keys. A NEW pause command taken after unlock is NOT lost to this mask: its
+        // own reload message flushes the pending begin and CARRIES the command across the
+        // fresh session, re-issuing it for the remaining window (Codex P2 rounds 15 + 16
+        // on #377 — an idle tunnel gets no other wake). Accepted residual: the carry is
+        // best-effort, so a failed re-issue degrades to a one-command no-op — never a
+        // fail-open.
+        guard !hasPendingFreshProtectionVPNSessionBegin() else {
+            return nil
+        }
         let now = Date()
         if synchronizesDefaults {
             return refreshTemporaryProtectionPauseState(synchronizesDefaults: true, now: now)
@@ -6760,7 +7133,221 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         return (read.state?.pausedUntil, read.clampedCappedPause)
     }
 
+    // Boot-deferred session begin (INV-PERSIST-1). Written OFF-queue by startTunnel's
+    // deferral and consumed ON dnsStateQueue by the config-refresh flush, so access runs
+    // through the specific-key accessors below (INV-QUEUE-1, same pattern as
+    // currentAppConfiguration/setAppConfiguration).
+    private var pendingFreshProtectionVPNSessionReason: String?
+    // One-shot handoff from the deferred-begin flush to clearSnapshotReloadInFlight: the
+    // recovery force yields to an in-flight reload (round 3) but must still fire if that
+    // reload turns out to be the pre-unlock abort (round 8). Disarmed by reload
+    // invalidation at stop so the superseded reload's late clear cannot fire it into a
+    // stopped lifecycle (round 9), and by a successful adoption so the fire never resets
+    // the DNS runtime behind a completed recovery (round 13). dnsStateQueue-confined —
+    // the flush, the clear, the adoption disarm, and the invalidate all run on that queue.
+    private var deferredRecoveryReloadPending = false
+    // Whether the RESIDENT diagnostics/depth stores were loaded from a locked
+    // (pre-first-unlock) container and are therefore boot-empty placeholders that must
+    // never persist (INV-PERSIST-1). Deliberately independent of the session-begin
+    // lifecycle — a stop legitimately drops the pending begin, but that must not unblock
+    // persisting the placeholder (Codex P1 round 7 on #377). Set/cleared only by
+    // loadDiagnosticsAndEventLogStores from the canary at load time; boot assignment
+    // precedes packet flow and every later access runs on dnsStateQueue (same confinement
+    // story as `diagnostics` itself).
+    private var diagnosticsStoresReflectLockedBoot = false
+    // The last instant a probe actually OBSERVED the shared protected content locked —
+    // stamped at the begin's re-defer (every pre-unlock flush tick, post-INV-PERSIST-2
+    // boots), the still-unreadable config classification (pre-migration boots), and the
+    // locked-boot store load (boot). The locked-boot evidence window's END is stamped
+    // with THIS, never the readable reload's own wall clock: the reload runs one flush
+    // latency after the real unlock, and a decision made in that gap would otherwise be
+    // admitted as pre-unlock evidence — a post-unlock blocked query could falsely satisfy
+    // the QA gate's direct-evidence criterion (Codex review, #381). Bounding at the last
+    // observed-locked instant under-counts the (last-observation, unlock] sliver instead:
+    // fail-safe for the gate, which may under-report and rerun but never fabricate.
+    // Shares the flag's confinement story: boot writes precede readPackets, steady-state
+    // writes run on dnsStateQueue.
+    private var lastObservedLockedSharedContentAt: Date?
+
+    private func setPendingFreshProtectionVPNSessionReason(_ reason: String?) {
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            pendingFreshProtectionVPNSessionReason = reason
+            return
+        }
+        dnsStateQueue.sync { pendingFreshProtectionVPNSessionReason = reason }
+    }
+
+    private func takePendingFreshProtectionVPNSessionReason() -> String? {
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            let reason = pendingFreshProtectionVPNSessionReason
+            pendingFreshProtectionVPNSessionReason = nil
+            return reason
+        }
+        return dnsStateQueue.sync {
+            let reason = pendingFreshProtectionVPNSessionReason
+            pendingFreshProtectionVPNSessionReason = nil
+            return reason
+        }
+    }
+
+    private func hasPendingFreshProtectionVPNSessionBegin() -> Bool {
+        if DispatchQueue.getSpecific(key: dnsStateQueueSpecificKey) == true {
+            return pendingFreshProtectionVPNSessionReason != nil
+        }
+        return dnsStateQueue.sync { pendingFreshProtectionVPNSessionReason != nil }
+    }
+
+    // INV-PERSIST-1 canary: whether the app-group's CLASS-C protected content is readable
+    // right now (first unlock happened). Probes the shared-defaults SUITE PLIST itself —
+    // the very file the deferred suite writes protect — so the probe target IS the clobber
+    // target and the absence semantics are exact: an absent plist means no suite content
+    // exists to clobber (fresh install pre-onboarding; the begin's own pre-unlock create
+    // fails harmlessly under try? and retries), while any configured install has one. The
+    // probe must be a file that STAYS Class C: INV-PERSIST-2 re-classed the config to
+    // Class-None precisely so a pre-unlock boot can read it, which disqualified it as an
+    // unlock signal, and diagnostics.json can be legitimately absent long past install (a
+    // user can disable counts + history before the tunnel ever persists diagnostics —
+    // PR #378 review), which disqualified it too. cfprefsd keeps the suite plist at the
+    // iOS default Class C, and class keys unlock atomically at first user authentication,
+    // so its readability also signals for the diagnostics/ledger writers. Read as a plain
+    // file probe (content readability), not through cfprefsd — a locked suite READ just
+    // returns empty, which proves nothing; the plist path is the stable app-group
+    // preferences layout (Library/Preferences/<group>.plist).
+    // pinned: TunnelPreUnlockGuardSourceTests.testBootSuiteWritesAreDeferredUntilProtectedContentIsReadable
+    private func sharedProtectedContentIsReadable() -> Bool {
+        Self.sharedProtectedContentIsReadableForObservabilityWriters()
+    }
+
+    // Static twin of the canary for the static observability writers (recordIncident /
+    // sweepIncidentLedger), single-sourced so the two can never diverge on the probe. Same
+    // semantics: probes the suite plist's CONTENT readability (metadata reads succeed
+    // while locked; the ledger those writers guard shares the plist's Class C); an absent
+    // plist counts as readable — no suite exists, so nothing protected to clobber.
+    private static func sharedProtectedContentIsReadableForObservabilityWriters() -> Bool {
+        guard let suitePlistURL = LavaSecAppGroup.containerURL?
+            .appendingPathComponent("Library/Preferences", isDirectory: true)
+            .appendingPathComponent(LavaSecAppGroup.identifier + ".plist") else {
+            return true
+        }
+        return !SharedStateFileReader.fileExistsButIsUnreadable(at: suitePlistURL)
+    }
+
+    // Flush the boot-deferred session begin once a readable config classification proved
+    // the protected content readable. Also closes any dangling self-reconnect gap the
+    // pre-unlock start skipped (its reads saw the locked suite as zeros and bailed without
+    // writing). No pause-resume scheduling is needed here: the pre-unlock schedule read a
+    // locked suite as "no pause" and armed nothing, and the begin below clears the stale
+    // pre-reboot pause keys before any consumer re-reads them (the expiry poll only arms
+    // when a pause was observed). `hasDecodableConfiguration` is the caller's
+    // classification: true only for .loaded — it gates the recovery reload below, never
+    // the suite/diagnostics duties.
+    private func flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: Bool) {
+        guard let reason = takePendingFreshProtectionVPNSessionReason() else {
+            return
+        }
+        beginFreshProtectionVPNSession(reason: reason)
+        Self.closeDanglingSelfReconnectGapIfNeeded()
+        // RELOAD the diagnostics + depth stores from the now-readable files BEFORE anything
+        // can persist: the boot loaded them as empty and serve-path markers dirtied that
+        // emptiness (Codex P1 round 6 on #377). Ordering is airtight on the serialized
+        // queue: the pending flag was taken above, this reload completes in the same
+        // dnsStateQueue turn, and the diagnostics write closure (also on this queue, and
+        // gated on the pending flag while it was set) can only run after the swap. The
+        // uptime marker the boot stamped on the discarded empty store is re-marked against
+        // the real one. GATED on the locked-boot flag: in the deferred-begin race (unlock
+        // between startTunnel's begin canary and the boot loads — Codex P2 round 14) the
+        // boot loaded these stores post-unlock, so they are REAL and dirtied by real serve
+        // marks; reloading would discard those marks for nothing.
+        if diagnosticsStoresReflectLockedBoot {
+            loadDiagnosticsAndEventLogStores()
+            if !diagnosticsStoresReflectLockedBoot {
+                // The locked-boot window just ENDED — the reload above re-derived the
+                // flag from a fresh canary probe and it flipped readable. This flush is
+                // the ONLY place the transition may stamp: the loader's other caller
+                // (loadInitialSharedState / startTunnel) runs off dnsStateQueue, where
+                // a reused instance's stale flag would fire the stamp against the
+                // queue-confined health persistence off-queue (INV-QUEUE-1) — and
+                // resetHealth clobbers it there regardless (Codex review, #381). Unlock
+                // is monotonic, so this fires exactly once per boot session; the stamp
+                // itself is also idempotent. The boundary recorded is the LAST
+                // OBSERVED-LOCKED instant, never the reload's own wall clock — the
+                // reload runs one flush latency after the real unlock, and stamping
+                // "now" would admit post-unlock decisions made in that gap as boot
+                // evidence (Codex review, #381; the ?? Date() is defensively
+                // unreachable: this transition requires the flag to have been true, and
+                // every flag-set site stamps an observation). Force-persist: health
+                // rides a 30 s debounce, and the lockedBoot* counters plus this stamp
+                // are the QA release gate's only direct record of locked-window
+                // filtering (incident plan Phase 4 follow-up, lavasec-infra
+                // docs/engineering/reboot-first-unlock-qa-protocol.md "Path A") — an
+                // early post-unlock jetsam must not lose them. One forced write per
+                // boot session, never per query.
+                // pinned: TunnelPreUnlockGuardSourceTests.testLockedBootWindowEndStampIsForcePersistedAtTheReadableReload
+                health.markLockedBootWindowEnded(at: lastObservedLockedSharedContentAt ?? Date())
+                markHealthUpdated()
+                persistHealthIfNeeded(force: true)
+            }
+            markLocalProtectionUptimeStarted()
+        }
+        // Replace the fail-closed boot placeholder with an EXPLICIT forced reload rather
+        // than relying on the Focus poll's generation watermark: a legacy config decodes
+        // with configurationGeneration == 0, and the poll's `onDisk > lastObserved` gate
+        // (0 > 0) would never fire for it — leaving fail-closed resident until an unrelated
+        // config write (Codex P2 on #377). The pending-begin state makes this exactly
+        // once-per-recovered-boot: a normal start defers nothing and never reaches here.
+        // DEFERRED (never skipped) when a snapshot reload is already in flight: forcing from
+        // here — this flush can run from refreshConfigurationIfNeeded(force:) INSIDE
+        // loadSnapshotInBackground — would advance the reload generation and discard the
+        // very snapshot that just recovered (Codex P2 round 3 on #377). But the in-flight
+        // reload can also be the pre-unlock ABORT whose async clear has not yet run, and
+        // that one adopts nothing — a plain skip would strand a generation-0 config on the
+        // fail-closed boot placeholder (Codex P1 round 8). So the force is handed to
+        // clearSnapshotReloadInFlight, which fires it after the in-flight reload fully
+        // finishes: an aborting reload gets its recovery, and a productive one DISARMS the
+        // handoff when it commits — the deferred force must never fire behind a successful
+        // adoption, whose reset would drain live DNS queries (Codex P2 round 13).
+        // GATED on the resident still being placeholder-class (identity nil): the
+        // deferred-begin race boot (round 14) warm-resumed a REAL snapshot, and forcing a
+        // reload behind it would reset the DNS runtime for a no-op — the same blip round 13
+        // eliminated on the handoff path, here on the direct one. A fail-closed placeholder
+        // (this recovery's actual target) always carries a nil identity.
+        // ALSO gated on a DECODABLE config: from the .absentOrCorrupt flush there is
+        // nothing real to load — the reload's fallback is currentAppConfiguration(), the
+        // boot-time EMPTY placeholder, whose compile installs the permissive PASS-THROUGH
+        // snapshot. That would actively downgrade block-all to allow-all on the strength
+        // of a corrupt file (INV-DNS-1 fail-open; Codex P1 round 18 on #377). Stay
+        // fail-closed instead: the app's reseed rewrite bumps the generation AND sends the
+        // reload message, so recovery arrives through the normal channels once a decodable
+        // config exists.
+        if hasDecodableConfiguration, currentResidentSnapshotIdentity() == nil {
+            let reloadAlreadyInFlight = snapshotReloadCoordinator.assumeIsolated { $0.isReloadInFlight }
+            if reloadAlreadyInFlight {
+                deferredRecoveryReloadPending = true
+            } else {
+                requestSnapshotReload(reason: "config-recovered-after-unlock", force: true)
+            }
+        }
+    }
+
     private func beginFreshProtectionVPNSession(reason: String) {
+        // INV-PERSIST-1 (pinned: TunnelPreUnlockGuardSourceTests.testBootSuiteWritesAreDeferredUntilProtectedContentIsReadable):
+        // writing into the shared suite while its backing plist is Data-Protection-locked (a
+        // boot start before first unlock) risks cfprefsd re-materializing the plist with
+        // ONLY these keys — dropping the language pin, notification prefs, pause/session
+        // state, and customization (incident plan latent-2). Defer the begin until the
+        // shared content is readable; the config-refresh success path flushes it. Suite
+        // READS degrade safely meanwhile (a locked suite reads as no pause / no session).
+        guard sharedProtectedContentIsReadable() else {
+            // Fresh locked observation — every pre-unlock flush tick re-defers through
+            // here, so this bounds the locked-boot evidence window on post-INV-PERSIST-2
+            // boots (see lastObservedLockedSharedContentAt).
+            lastObservedLockedSharedContentAt = Date()
+            setPendingFreshProtectionVPNSessionReason(reason)
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "protection-session-begin-deferred", details: [
+                "reason": reason
+            ])
+            return
+        }
         let sessionID = (try? protectionSessionStore.beginFreshSession()) ?? ""
         try? protectionPauseStore.clearStoredPause()
         cacheTemporaryProtectionPauseUntil(nil)
@@ -6774,6 +7361,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     private func endProtectionVPNSession(reason: String) {
+        // Any boot-deferred begin dies with this lifecycle (readable or not): a post-stop
+        // flush would otherwise begin a fresh session for a tunnel that is no longer
+        // serving (Codex P2 round 2 on #377).
+        setPendingFreshProtectionVPNSessionReason(nil)
+        // INV-PERSIST-1: a stop/cleanup that runs before first unlock must not write the
+        // locked suite either — same cfprefsd re-materialization hazard as the deferred
+        // begin (pinned: TunnelPreUnlockGuardSourceTests.testStopCleanupSuiteWritesAreCanaryGated).
+        // Skipping is safe: a locked suite already reads as no-session/no-pause, and the
+        // NEXT start's (possibly deferred) begin performs these same clears once the
+        // content is readable.
+        guard sharedProtectedContentIsReadable() else {
+            LavaSecDeviceDebugLog.append(component: "tunnel", event: "protection-session-end-skipped-locked", details: [
+                "reason": reason
+            ])
+            return
+        }
         _ = try? protectionSessionStore.clearActiveSessionID()
         try? protectionPauseStore.clearStoredPause()
         cacheTemporaryProtectionPauseUntil(nil)
@@ -7223,14 +7826,40 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         }
     }
 
+    // Tri-state classification of the shared configuration read (INV-PERSIST-1). The
+    // bootstrap and reload paths must distinguish existing-but-UNREADABLE — Data Protection
+    // between reboot and first unlock on a Connect-On-Demand boot start, when the user's
+    // filtering config is intact behind the lock — from absent/corrupt: collapsing them
+    // turned a locked config into the EMPTY pass-through, i.e. unfiltered serving while
+    // filtering is configured, in violation of INV-DNS-1 (2026-07-14 incident plan,
+    // latent-1). File metadata stays readable while content is locked, which is what makes
+    // the distinction reliable (see SharedStateFileReader).
+    private enum SharedConfigurationLoad {
+        case loaded(AppConfiguration)
+        case absentOrCorrupt
+        case unreadable
+    }
+
+    private func loadConfigurationClassified() -> SharedConfigurationLoad {
+        guard let configurationURL else {
+            return .absentOrCorrupt
+        }
+        switch SharedStateFileReader.read(AppConfiguration.self, from: configurationURL) {
+        case .loaded(let configuration):
+            return .loaded(configuration)
+        case .absent, .corrupt:
+            return .absentOrCorrupt
+        case .unreadable:
+            return .unreadable
+        }
+    }
+
     private func loadConfiguration() -> AppConfiguration? {
-        guard let configurationURL,
-              let data = try? Data(contentsOf: configurationURL)
-        else {
+        guard case .loaded(let configuration) = loadConfigurationClassified() else {
             return nil
         }
 
-        return try? JSONDecoder().decode(AppConfiguration.self, from: data)
+        return configuration
     }
 
     // MARK: - Snapshot compile, artifact stores & fast-resume

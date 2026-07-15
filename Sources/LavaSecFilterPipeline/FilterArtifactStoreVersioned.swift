@@ -144,9 +144,12 @@ extension FilterArtifactStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(pointer)
+        // The pointer is the boot tunnel's FIRST read — a Class-C pointer would defeat
+        // every readable artifact behind it pre-unlock, so it stamps
+        // NSFileProtectionNone alongside .atomic (INV-PERSIST-2).
         try data.write(
             to: artifactPointerURL(directoryName: directoryName, pointerFilename: pointerFilename),
-            options: [.atomic]
+            options: SharedStateFileProtection.atomicControlPlaneWritingOptions
         )
     }
 

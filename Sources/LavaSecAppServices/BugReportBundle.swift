@@ -1095,7 +1095,18 @@ public struct BugReportBundle: Sendable {
             "device_dns_fallback_activation_count": vpn.health.deviceDNSFallbackActivationCount,
             "device_dns_fallback_attempt_count": vpn.health.deviceDNSFallbackAttemptCount,
             "device_dns_fallback_success_count": vpn.health.deviceDNSFallbackSuccessCount,
-            "device_dns_unavailable_count": vpn.health.deviceDNSUnavailableCount
+            "device_dns_unavailable_count": vpn.health.deviceDNSUnavailableCount,
+            // Locked-boot filtering evidence (incident plan Phase 4 follow-up, #381):
+            // the reboot QA gate's direct proof that the tunnel classified real
+            // decisions BEFORE first unlock rides the Class-None health snapshot, and
+            // a clean locked-window pass produces NO incident envelope — so these
+            // must live in the always-carried vpnBody, not BugReportIncidentSummary,
+            // or a Release RC's Feedback submission would omit exactly the evidence
+            // the gate exists to collect (Codex review, #381).
+            "locked_boot_blocked_query_count": vpn.health.lockedBootBlockedQueryCount,
+            "locked_boot_allowed_query_count": vpn.health.lockedBootAllowedQueryCount,
+            "locked_boot_fail_closed_query_count": vpn.health.lockedBootFailClosedQueryCount,
+            "locked_boot_window_ended_at": Self.dateString(vpn.health.lockedBootWindowEndedAt) ?? "none"
         ]
     }
 

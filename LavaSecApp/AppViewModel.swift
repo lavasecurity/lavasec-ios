@@ -646,6 +646,222 @@ final class AppViewModel: ObservableObject {
     // its generation) still describes the pre-upgrade filter. The background publish path
     // consults this to abort until the foreground migration lands.
     private var didReseedFilterLibraryOnLastLoad = false
+    // True when the launch load found shared state EXISTING but UNREADABLE — Data Protection
+    // before the first post-reboot unlock, or a transient I/O failure (INV-PERSIST-1,
+    // pinned: RebootFirstUnlockGuardSourceTests.testLaunchLoadClassifiesReadsAndNeverPersistsAnUnreadableReseed).
+    // While set, the in-memory configuration +
+    // library are a placeholder, not the user's state: every persist funnel refuses to write
+    // (the writer's own unreadable fence would also throw pre-unlock, but this guard stays
+    // correct AFTER unlock makes the files writable again while the placeholder is still
+    // resident — the delayed-clobber half of the 2026-07-14 wipe). Cleared by re-running
+    // loadPersistedConfiguration once protected data becomes available / on foreground.
+    private var sharedStateUnavailableAtLoad = false
+    // True while the in-memory library ORIGINATED from a launch-time reseed over an absent,
+    // corrupt, or unreadable store. A seeded library is then recovery scaffolding, not user
+    // intent, so BackupController suppresses the debounced automatic backup and its
+    // pre-upload local re-seal while this is set — auto-uploading a reseed would overwrite
+    // the user's last good server backup with a wipe (incident plan latent-3), while the
+    // stale local envelope keeps preserving that last good state for a manual upload.
+    // Deliberately NOT set when the reseed replaces a readable, invariant-valid old-schema /
+    // lost-write-race library, NOR for the pre-library build's legacy upgrade (absent
+    // library beside a readable, decoded config): both are the designed upgrade migration,
+    // and suppressing there froze every later edit out of the envelope for users onboarding
+    // never reruns for (Codex P2 rounds 2 + 7 on #376). PERSISTED
+    // recovery reseeds (absent/corrupt) also stamp a durable marker so the suppression
+    // survives relaunches — the reseed lands on disk as a valid current-schema library the
+    // next launch would otherwise happily accept and lift (Codex P1). Cleared when the
+    // library becomes user-authoritative again: a completed backup restore, the explicit
+    // restore-to-default, the onboarding seed, or — for the never-persisted unreadable
+    // placeholder — the recovery reload accepting the user's real file. Staying suppressed
+    // until one of those explicit recoveries is the deliberate stance: the remote envelope
+    // holds the user's last good library, and only a user action may supersede it. Manual
+    // Back Up Now stays available and uploads the PRESERVED (pre-reseed) envelope, which is
+    // exactly what it should preserve. Distinct from didReseedFilterLibraryOnLastLoad, whose
+    // background-publish semantics must not change with these clears.
+    private(set) var libraryOriginatesFromLaunchReseed = false
+    // Durable companion to libraryOriginatesFromLaunchReseed (Codex P1 on #376): a CORRUPT
+    // (or absent) store's reseed is PERSISTED as a valid current-schema library, so on the
+    // next launch the accept branch would otherwise lift the in-memory suppression and let
+    // an automatic backup upload the seeded defaults over the user's last good server copy.
+    // The durable marker is a Class-None FILE (ReseedSuppressionMarkerStore) in the shared
+    // container — readable AND durably writable pre-first-unlock in lockstep with the
+    // Class-None library it guards (INV-PERSIST-2), which a Class-C UserDefaults marker could
+    // not be — and it clears exactly where the in-memory flag clears for user-authoritative
+    // reasons. This constant is the PRE-1.2.5 legacy Class-C defaults key, kept only as a read
+    // fallback (migrated forward to the file) and cleared belt-and-braces. Deliberately NOT set
+    // for the unreadable case: that placeholder is never persisted, and the recovery reload's
+    // accept of the user's REAL library must lift the suppression — a durable marker would
+    // wrongly outlive it.
+    // pinned: RebootFirstUnlockGuardSourceTests.testAcceptedLibraryHonorsDurableFileMarker
+    //
+    // ACCEPTED RESIDUAL (Codex P2 round 10 on #376, deliberate disposition): a hard kill
+    // after a restore's pair lands but before its post-persist marker drop leaves the
+    // suppression stuck on the freshly restored library until the next user-authoritative
+    // action. The inverse ordering (drop before the pair write) would instead reopen the
+    // DESTRUCTIVE window — an unmarked seeded library that auto-backup can upload over the
+    // user's last good server copy — when the kill lands before the pair does and the
+    // pre-restore store was a marked reseed. A two-store commit cannot be atomic; between a
+    // recoverable conservative freeze (manual upload still carries the restore-time
+    // envelope; re-running the restore clears it) and a data-destroying clobber, the freeze
+    // is the only defensible side.
+    private static let recoveryReseedBackupSuppressionKeyName = "lavasec.backup.recoveryReseedSuppression"
+
+    /// Stamp the durable recovery-reseed suppression marker and set the in-memory flag. Returns
+    /// whether the marker is CONFIRMED on disk — the caller must NOT persist the reseed library
+    /// unless it is, since a durable seeded library with no durable marker is read `.absentConfirmed`
+    /// next launch and lets automatic backup clobber the user's server envelope (Codex P1 on #385).
+    private func markLibraryOriginatesFromPersistedRecoveryReseed() -> Bool {
+        libraryOriginatesFromLaunchReseed = true
+        // Stamp the DURABLE marker as a Class-None file (ReseedSuppressionMarkerStore): the stamp
+        // must land ON DISK before the reseed persist's library-first write, and INV-PERSIST-2
+        // made the library Class-None, so the marker must be durably writable pre-first-unlock
+        // too. The old `UserDefaults.standard` marker could not — a Class-C write cannot land
+        // while locked, and `synchronize()` is a no-op on modern iOS, so its "crash barrier" never
+        // existed (Kilo/OCR follow-up on the 1.2.4 sync). A Class-None file's atomic write is
+        // durable pre-unlock, matching the library it guards.
+        guard let containerURL = LavaSecAppGroup.containerURL else { return false }
+        return ReseedSuppressionMarkerStore.mark(containerURL: containerURL)
+    }
+
+    private func clearLibraryOriginatesFromLaunchReseed() {
+        libraryOriginatesFromLaunchReseed = false
+        // Drop BOTH markers when the library becomes user-authoritative again. Remove the flaky
+        // legacy Class-C key FIRST, then durably clear the Class-None file marker: an interruption in
+        // between leaves the durable file marker present, and the next readable launch's isMarked
+        // branch consumes the legacy key against it — so the common interrupted case self-heals. The
+        // file-marker remove is a durable filesystem op (unlike the unflushed `UserDefaults` remove a
+        // hard kill could lose), so a restore's suppression-lift itself persists.
+        //
+        // ACCEPTED RESIDUAL (Codex P2 on #385, deliberate disposition): the legacy `removeObject` is
+        // best-effort — `UserDefaults` has no durable-flush barrier (`synchronize()` is a no-op, the
+        // reason the marker itself moved to a Class-None file). So a hard kill that lands after the
+        // durable file-marker clear but before the legacy remove flushes can leave the legacy key set
+        // with no file marker; the next launch migrates it back (`reseedSuppressionMarkerState`) and
+        // re-suppresses automatic backup over the just-cleared library. This is IRREDUCIBLE with a
+        // best-effort legacy key and no atomic multi-marker commit, and it fails SAFE — recoverable
+        // over-suppression (manual backup still works; any later user-authoritative action clears it
+        // again), never a server-envelope clobber. It is also rare: the isMarked-branch and
+        // migrate-forward consumes remove the legacy key on essentially every readable launch, so it
+        // is almost never still present at a clear. Fully closing it would mean recording the
+        // decision (suppressed/cleared) in a single atomic Class-None file rather than an existence
+        // marker + best-effort legacy key — deferred as a larger change (1.2.5 is unshipped and this
+        // residual cannot lose data).
+        UserDefaults.standard.removeObject(forKey: Self.recoveryReseedBackupSuppressionKeyName)
+        if let containerURL = LavaSecAppGroup.containerURL {
+            if !ReseedSuppressionMarkerStore.clear(containerURL: containerURL) {
+                // The durable clear FAILED — the marker is still on disk, so the next launch reads
+                // `.present` and re-suppresses. Keep the in-memory flag consistent with that reality
+                // rather than reporting the suppression lifted this session while the durable marker
+                // outlives it (mirrors mark()'s confirmed-on-disk gate — OCR P1 on the 1.2.5 sync).
+                // Fail-safe: recoverable over-suppression (manual backup still works; any later
+                // user-authoritative action retries the clear), never a server-envelope clobber.
+                libraryOriginatesFromLaunchReseed = true
+            }
+        }
+    }
+
+    /// Three-state read of the durable reseed-suppression marker. The two DEFINITE outcomes must
+    /// stay distinct from "cannot tell yet" so a pre-first-unlock accept never lifts the suppression
+    /// on an UNMIGRATED pre-1.2.5 device (Codex P1 on #385).
+    private enum ReseedSuppressionMarkerState {
+        /// The durable Class-None file marker exists — this library is a recovery reseed; suppress.
+        case present
+        /// The file marker is absent AND a legacy marker was definitively ruled out (protected data
+        /// was readable, so the Class-C store gave a trustworthy answer) — user-authoritative; lift.
+        case absentConfirmed
+        /// The file marker is absent but the pre-1.2.5 legacy `UserDefaults` marker is UNREADABLE
+        /// (Class-C, locked). A device upgrading mid-suppression may still carry it unmigrated, so
+        /// the state cannot be determined until protected data is available — the caller must freeze
+        /// conservatively rather than lift on the spurious locked `false`.
+        case absentUnconfirmed
+    }
+
+    /// Read the durable reseed-suppression marker. The Class-None file marker is readable before
+    /// first unlock; when it is absent, the pre-1.2.5 legacy `UserDefaults` marker is consulted ONLY
+    /// while protected data is readable (a locked Class-C read is a spurious `false`) and migrated
+    /// forward to the durable file — the legacy key is consumed ONLY after the file marker is
+    /// confirmed on disk (`mark()` true), so a failed app-group write keeps it for retry rather than
+    /// stranding the accepted reseed with no durable marker (Codex P1 on #385). A locked read with no
+    /// file marker returns `.absentUnconfirmed` so the accept path freezes instead of clearing the
+    /// suppression on an upgrading device whose legacy marker has not migrated yet (Codex P1 on #385
+    /// — the 1.2.4→1.2.5 upgrade-transition case). When the file marker is already present the legacy
+    /// key is consumed too (while readable), so a migration interrupted between its mark and consume
+    /// cannot leave a stale key that a later reset migrates back (Codex P2 on #385).
+    private func reseedSuppressionMarkerState() -> ReseedSuppressionMarkerState {
+        guard let containerURL = LavaSecAppGroup.containerURL else { return .absentConfirmed }
+        if ReseedSuppressionMarkerStore.isMarked(containerURL: containerURL) {
+            // The durable file marker is authoritative. Clear any LEFTOVER legacy Class-C key —
+            // e.g. a prior migration killed AFTER mark() but before its consume left both set — so
+            // it can never be migrated back after a later reset durably clears the file marker
+            // (Codex P2 on #385). Only while readable (a locked Class-C remove can't land); a no-op
+            // when the key is already absent (the 1.2.5-native case).
+            if UIApplication.shared.isProtectedDataAvailable {
+                UserDefaults.standard.removeObject(forKey: Self.recoveryReseedBackupSuppressionKeyName)
+            }
+            return .present
+        }
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            return .absentUnconfirmed
+        }
+        if UserDefaults.standard.bool(forKey: Self.recoveryReseedBackupSuppressionKeyName) {
+            // Migrate the legacy Class-C marker forward to the durable file, then CONSUME it — but
+            // ONLY once the file marker is CONFIRMED on disk (`mark()` returns true). If the write
+            // failed (app-group I/O / ENOSPC), KEEP the legacy key so the next launch retries:
+            // deleting it on a failed mark would leave NO durable marker for the already-accepted
+            // reseed library, and a relaunch would then lift the suppression and clobber the user's
+            // last good backup (Codex P1 on #385). Consuming only after a confirmed mark also closes
+            // the resurrection window (Codex P2 on #385) — the consume runs only here, while
+            // protected data is readable, so the Class-C remove can land. Either way THIS session is
+            // suppressed (.present): the legacy key said so.
+            if ReseedSuppressionMarkerStore.mark(containerURL: containerURL) {
+                UserDefaults.standard.removeObject(forKey: Self.recoveryReseedBackupSuppressionKeyName)
+            }
+            return .present
+        }
+        return .absentConfirmed
+    }
+
+    /// Whether a pre-unlock accept froze the reseed suppression because it could not read the
+    /// legacy marker (`ReseedSuppressionMarkerState.absentUnconfirmed`). Re-derived — and cleared —
+    /// once protected data is available (`confirmReseedSuppressionAfterUnlock`). Never persisted: a
+    /// fresh launch re-evaluates from the markers.
+    private var reseedSuppressionAwaitingUnlockConfirmation = false
+
+    /// Re-derive a reseed suppression that an accepted-library launch FROZE because the legacy
+    /// Class-C marker was unreadable pre-first-unlock (the 1.2.4→1.2.5 upgrade-transition case,
+    /// Codex P1 on #385). No-op unless such a freeze is pending and protected data is now readable;
+    /// then the marker state is definitive (the file marker, or the now-readable legacy store
+    /// migrated forward), so the suppression is set to its true value. Wired to the same first-unlock
+    /// notification + foreground re-check as `reloadSharedStateIfBlockedByDataProtection`, since an
+    /// accepted (readable) library never sets `sharedStateUnavailableAtLoad` and so never triggers
+    /// that reload.
+    /// - pinned: RebootFirstUnlockGuardSourceTests.testAcceptedLibraryHonorsDurableFileMarker
+    private func confirmReseedSuppressionAfterUnlock() {
+        guard reseedSuppressionAwaitingUnlockConfirmation else { return }
+        guard UIApplication.shared.isProtectedDataAvailable else { return }
+        reseedSuppressionAwaitingUnlockConfirmation = false
+        switch reseedSuppressionMarkerState() {
+        case .present:
+            libraryOriginatesFromLaunchReseed = true
+        case .absentConfirmed:
+            libraryOriginatesFromLaunchReseed = false
+        case .absentUnconfirmed:
+            // Unreachable: protected data is available here, so the read is always definitive. Keep
+            // the conservative suppression if the platform ever regressed this guarantee.
+            break
+        }
+    }
+
+    // Re-runs the blocked launch load at first unlock (see sharedStateUnavailableAtLoad).
+    private var protectedDataAvailableObserver: NSObjectProtocol?
+    // Whether init was asked to manage VPN state (false for previews/tests). Stored so the
+    // first-unlock recovery can rerun the launch tail it skipped (Codex P1 round 5 on #376).
+    private let loadsVPNState: Bool
+    // Whether the last launch load READ AND DECODED app-configuration.json. Distinguishes
+    // the pre-library build's legacy upgrade (config present, library file never existed —
+    // the designed migration, no backup suppression) from a genuine fresh install (both
+    // absent) in loadOrMigrateFilterLibrary (Codex P2 round 7 on #376).
+    private var configurationLoadedFromDisk = false
     // The filter a switch is currently targeting, kept so the shared preparation screen's
     // "Try Again" can retry the SWITCH (not the edit-draft apply) after a transient failure.
     private var pendingSwitchFilterID: String?
@@ -930,6 +1146,7 @@ final class AppViewModel: ObservableObject {
 
     init(loadVPNState: Bool = true, headless: Bool = false) {
         isHeadless = headless
+        loadsVPNState = loadVPNState
 
         loadPersistedConfiguration()
         #if DEBUG || LAVA_QA_TOOLS
@@ -984,6 +1201,26 @@ final class AppViewModel: ObservableObject {
                     await self?.reconcilePendingFilterSwitch()
                 }
             }
+            // INV-PERSIST-1 recovery: a process launched between reboot and first unlock
+            // (prewarm) reads the Class-C-protected shared pair as existing-but-unreadable;
+            // this notification fires at first unlock — the exact moment the content becomes
+            // readable — so the blocked launch load re-runs against the user's real files.
+            // The reload itself is guarded (no-op unless the load was blocked), and
+            // setAppForegroundActive re-checks on every foreground as a belt-and-braces
+            // catch for a notification delivered before this observer registered.
+            protectedDataAvailableObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.reloadSharedStateIfBlockedByDataProtection()
+                    // Also lift an upgrade-transition suppression freeze now that the legacy
+                    // marker is readable (Codex P1 on #385); an accepted library never sets
+                    // sharedStateUnavailableAtLoad, so the reload above is a no-op for it.
+                    self?.confirmReseedSuppressionAfterUnlock()
+                }
+            }
         }
 
         if loadVPNState {
@@ -996,7 +1233,20 @@ final class AppViewModel: ObservableObject {
                     // network-bound catalog work — so a fail-closed cold tunnel
                     // that iOS already brought up cannot linger mid-onboarding
                     // (block traffic / show filters red). (See the method.)
-                    await neutralizeInheritedProtectionDuringOnboarding()
+                    //
+                    // INV-PERSIST-1 sibling guard (pinned: RebootFirstUnlockGuardSourceTests.testOnboardingNeutralizeIsGatedOnProtectedDataAvailability):
+                    // hasCompletedOnboarding reads UserDefaults.standard, which is ALSO
+                    // Data-Protection-locked between reboot and first unlock — a prewarmed
+                    // launch can read `false` here for a fully onboarded user, and the
+                    // neutralize below would then STOP and REMOVE their real VPN profile.
+                    // Only trust a "not onboarded" read taken while protected data is
+                    // actually readable. Residual: a genuine fresh install prewarmed
+                    // pre-unlock skips this one-shot neutralize (the rare
+                    // reinstall-over-profile lingering-tunnel cosmetic it prevents), which
+                    // is the right side of the trade against uninstalling live protection.
+                    if UIApplication.shared.isProtectedDataAvailable {
+                        await neutralizeInheritedProtectionDuringOnboarding()
+                    }
                 }
                 await loadCachedCatalogIfAvailable()
                 await syncCatalogIfStale()
@@ -1074,6 +1324,13 @@ final class AppViewModel: ObservableObject {
         // backup (BackupController) cancels its own automatic-backup task in its deinit;
         // pauseController cancels its own resume timer in its deinit; plus's
         // LavaSecurityPlusStore cancels its Transaction.updates task in ITS deinit.
+        // The block-based protectedDataAvailableObserver is deliberately NOT removed here (OCR
+        // flagged the token as unremoved on the 1.2.4 sync): it captures [weak self], so once
+        // this @MainActor singleton deallocates the block just fires as a harmless no-op, and
+        // reading the non-Sendable `NSObjectProtocol` token from this nonisolated deinit does
+        // not compile under Swift 6 strict concurrency anyway (confirmed by the app-compile
+        // gate). The weak capture IS the cleanup. focusPendingSwitchObserver is a
+        // DarwinNotificationObserver that unregisters in its own deinit.
         Task { @MainActor [liveActivityController] in
             liveActivityController.stopObservingAuthorizationChanges()
         }
@@ -2953,9 +3210,23 @@ final class AppViewModel: ObservableObject {
         filterEditDrafts.removeAll()
         filterEditTargetID = nil
         library = .seededDefaults(active: .balanced)
+        // An EXPLICIT user reset lifts the launch-reseed automatic-backup suppression — but the
+        // DURABLE marker drops only AFTER the reseed pair reaches disk, exactly like
+        // restoreFromBackup (INV-PERSIST-2 marker consequence). Lift the IN-MEMORY flag now so this
+        // persist's backup hook runs unsuppressed (the user chose these defaults, so they belong in
+        // the next sealed envelope); a persist that fails BEFORE the pair lands must keep the durable
+        // marker, or the next launch reads the un-replaced on-disk reseed as user-authoritative
+        // (.absentConfirmed) and automatic backup clobbers the last good server copy — the same
+        // hazard restoreFromBackup defers its marker drop to avoid (Codex P1 round 4 on #376).
+        // Clearing the durable marker BEFORE the write, as this path used to, reopened that window:
+        // post-#385 a durable file-marker clear definitely lands (unlike the pre-#385 best-effort
+        // Class-C key it replaced), so a failed reset persist now reliably strands the on-disk
+        // reseed with no marker.
+        // pinned: RebootFirstUnlockGuardSourceTests.testExplicitReseedDefersDurableMarkerDropUntilPersistLands
+        libraryOriginatesFromLaunchReseed = false
         mirrorActiveFilterIntoConfiguration()
         rebuildEnabledBlockRules()
-        persistFilterChanges()
+        persistFilterReseedDroppingDurableMarkerWhenLanded()
         // Balanced may enable a curated source not yet cached on this device — fetch any missing
         // ones so the published snapshot covers Balanced rather than under-covering until a later
         // sync (the onboarding/switch paths do the same).
@@ -4173,16 +4444,38 @@ final class AppViewModel: ObservableObject {
         // chosen level loaded; mirror its blocklist set into the live config so the active filter
         // and config agree.
         library = .seededDefaults(active: protectionLevel)
+        // The onboarding seed is the user's explicit protection-level choice, so the launch-reseed
+        // automatic-backup suppression lifts — but, like restoreFiltersToDefault and
+        // restoreFromBackup, the DURABLE marker drops only AFTER the reseed pair reaches disk
+        // (INV-PERSIST-2 marker consequence). Lift the IN-MEMORY flag now so this persist's backup
+        // hook runs unsuppressed; a persist that fails before the pair lands keeps the durable marker
+        // so the next launch still suppresses over the un-replaced on-disk reseed instead of
+        // clobbering the last good server copy (Codex P1 round 4 on #376). Unlike restoreFiltersToDefault,
+        // this runs inside OnboardingFlowView.go(to: .done) right after the leaving step's choice is
+        // applied — so that choice is folded into THIS single persist (go(to:) passes
+        // persistImmediately: false) rather than firing a sibling fire-and-forget persist that could
+        // land the seeded pair ahead of this one's deferred marker clear (Codex P2 on #386).
+        // pinned: RebootFirstUnlockGuardSourceTests.testExplicitReseedDefersDurableMarkerDropUntilPersistLands
+        // pinned: RebootFirstUnlockGuardSourceTests.testOnboardingCompletionCoalescesToASingleMarkerClearingPersist
+        libraryOriginatesFromLaunchReseed = false
         mirrorActiveFilterIntoConfiguration()
         rebuildEnabledBlockRules()
-        persistFilterChanges()
+        persistFilterReseedDroppingDurableMarkerWhenLanded()
         startOnboardingDefaultBlocklistSyncIfNeeded()
     }
 
     /// Apply the onboarding connection-quality choice (Device DNS primary + an optional
     /// encrypted DoH fallback). Owns every resolver/fallback field so the `.done`
     /// residual apply never clobbers it.
-    func applyOnboardingConnectionPreferences(useEncryptedFallback: Bool, fallbackResolverPresetID: String) {
+    /// - Parameter persistImmediately: pass `false` when the SAME onboarding transition also
+    ///   seeds the recommended defaults (leaving the last surfaced step for `.done`), so this
+    ///   choice is folded into `applyOnboardingRecommendedDefaults`'s single marker-clearing
+    ///   persist instead of firing its own. A separate fire-and-forget persist here would be a
+    ///   second task that can land the seeded pair while the durable reseed marker is still
+    ///   present; a kill before the deferred clear then relaunches the onboarded defaults as a
+    ///   suppressed reseed (Codex P2 on #386). See `OnboardingFlowView.go(to:)`.
+    /// - pinned: RebootFirstUnlockGuardSourceTests.testOnboardingCompletionCoalescesToASingleMarkerClearingPersist
+    func applyOnboardingConnectionPreferences(useEncryptedFallback: Bool, fallbackResolverPresetID: String, persistImmediately: Bool = true) {
         let defaults = AppConfiguration.lavaRecommendedDefaults
         configuration.resolverPresetID = DNSResolverPreset.device.id
         configuration.customResolverAddress = defaults.customResolverAddress
@@ -4193,10 +4486,16 @@ final class AppViewModel: ObservableObject {
         configuration.fallbackCustomResolverAddress = nil
         configuration.fallbackCustomResolverSecondaryAddress = nil
         configuration.fallbackCustomResolverName = nil
-        persistFilterChanges()
+        if persistImmediately {
+            persistFilterChanges()
+        }
     }
 
-    func selectOnboardingBlocklists(_ sourceIDs: Set<String>) {
+    /// - Parameter persistImmediately: see `applyOnboardingConnectionPreferences` — `false`
+    ///   folds this choice into the onboarding-completion reseed persist so no second persist
+    ///   races the durable-marker clear (Codex P2 on #386).
+    /// - pinned: RebootFirstUnlockGuardSourceTests.testOnboardingCompletionCoalescesToASingleMarkerClearingPersist
+    func selectOnboardingBlocklists(_ sourceIDs: Set<String>, persistImmediately: Bool = true) {
         guard !sourceIDs.isEmpty else {
             return
         }
@@ -4209,7 +4508,9 @@ final class AppViewModel: ObservableObject {
         rebuildEnabledBlockRules()
         catalogStatusMessage = "Blocklist selection updated."
         catalogStatusIsError = false
-        persistFilterChanges()
+        if persistImmediately {
+            persistFilterChanges()
+        }
         startOnboardingBlocklistSyncIfNeeded(for: sourceIDs)
     }
 
@@ -7643,14 +7944,115 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// Persist the current config+library pair for an EXPLICIT user reseed (restore-to-default or
+    /// onboarding recommended-defaults), then durably drop the reseed-suppression marker ONLY once
+    /// the pair has reached disk. The caller lifts the in-memory `libraryOriginatesFromLaunchReseed`
+    /// flag first (so this persist's backup hook runs unsuppressed — the user chose these defaults);
+    /// this method defers the DURABLE marker clear until the on-disk generation advances, mirroring
+    /// `restoreFromBackup`. A persist that fails BEFORE the pair lands leaves the durable marker in
+    /// place, so the next launch reads `.present` and keeps suppressing over the un-replaced on-disk
+    /// reseed rather than letting automatic backup clobber the last good server copy (INV-PERSIST-2
+    /// marker consequence; Codex P1 round 4 on #376). A failure AFTER the pair lands (a post-pair
+    /// artifact-publish throw) still drops the marker, keyed on the generation advancing past the
+    /// pre-persist basis, not on the throw (Codex P2 round 5 on #376).
+    /// - pinned: RebootFirstUnlockGuardSourceTests.testExplicitReseedDefersDurableMarkerDropUntilPersistLands
+    private func persistFilterReseedDroppingDurableMarkerWhenLanded() {
+        Task {
+            let generationBeforePersist = configuration.configurationGeneration
+            do {
+                try await persistSharedState()
+                // The reseed pair is durably on disk — now safe to drop the durable marker.
+                clearLibraryOriginatesFromLaunchReseed()
+                appendAppNetworkActivity(.changeFilters)
+                await self.notifyTunnelSnapshotUpdated()
+            } catch {
+                // persistSharedState is not atomic: the pair write lands (syncing the bumped
+                // generation back into `configuration`) BEFORE the artifact-publish step, which can
+                // still throw. Key the durable clear on what's ON DISK — the generation advancing
+                // past the pre-persist basis — not on the throw (Codex P2 round 5 on #376).
+                if configuration.configurationGeneration > generationBeforePersist {
+                    clearLibraryOriginatesFromLaunchReseed()
+                }
+                // else: nothing reached disk — KEEP the durable marker so the next launch
+                // re-suppresses over the un-replaced on-disk reseed. The in-memory flag stays lifted
+                // for this session (the user asked to reseed); a fresh launch re-derives from the
+                // still-present marker.
+                vpnMessage = error.localizedDescription
+                vpnMessageIsError = true
+            }
+        }
+    }
+
     private func loadPersistedConfiguration() {
-        if let configurationURL,
-           let data = try? Data(contentsOf: configurationURL),
-           let persistedConfiguration = try? JSONDecoder().decode(AppConfiguration.self, from: data) {
-            configuration = persistedConfiguration
+        sharedStateUnavailableAtLoad = false
+        configurationLoadedFromDisk = false
+        if let configurationURL {
+            switch SharedStateFileReader.read(AppConfiguration.self, from: configurationURL) {
+            case .loaded(let persistedConfiguration):
+                configuration = persistedConfiguration
+                configurationLoadedFromDisk = true
+            case .absent, .corrupt:
+                // First launch or real corruption — keeping the default AppConfiguration and
+                // letting loadOrMigrateFilterLibrary seed below is the deliberate recovery.
+                break
+            case .unreadable(let description):
+                // The config EXISTS but is locked (Data Protection before first unlock) or
+                // transiently unreadable. The default value now in memory is a placeholder,
+                // not the user's state — flag it so nothing seeds or persists over the real
+                // file (INV-PERSIST-1), and so the load re-runs at first unlock.
+                sharedStateUnavailableAtLoad = true
+                // Per-file breadcrumb (incident plan Phase 4): post-INV-PERSIST-2 the config
+                // carries NSFileProtectionNone, so this firing after the control-plane
+                // migration ran signals a live anomaly, not just a pre-migration locked boot
+                // — a field log must show WHICH of the pair classified unreadable. The
+                // underlying read error rides along (the outcome carries it for exactly this),
+                // so a field log can tell a Data-Protection lock apart from a real I/O fault.
+                // pinned: RebootFirstUnlockGuardSourceTests.testUnreadableClassificationsAndFenceTripsLeaveFieldBreadcrumbs
+                LavaSecDeviceDebugLog.append(
+                    component: "app",
+                    event: "config-unreadable-at-load",
+                    details: [
+                        "consequence": "placeholder in memory; persists blocked until recovery reload (INV-PERSIST-1)",
+                        "error": description,
+                    ]
+                )
+            }
         }
 
         loadOrMigrateFilterLibrary()
+    }
+
+    /// Re-run the blocked launch load once protected data is readable (INV-PERSIST-1 recovery).
+    /// No-op unless `loadPersistedConfiguration` classified the shared state as
+    /// existing-but-unreadable, so the normal launch never reloads here. Wired to
+    /// `UIApplication.protectedDataDidBecomeAvailableNotification` (fires at first unlock —
+    /// exactly when Class-C content becomes readable) and re-checked on every foreground in
+    /// case the notification was delivered before this process observed it.
+    private func reloadSharedStateIfBlockedByDataProtection() {
+        guard sharedStateUnavailableAtLoad else { return }
+        loadPersistedConfiguration()
+        if !sharedStateUnavailableAtLoad {
+            LavaSecDeviceDebugLog.append(component: "app", event: "shared-state-reloaded-after-unlock")
+            // Rerun the init task's catalog + tunnel tail against the REAL state (Codex P1
+            // round 5 + P2 round 7 on #376): the pre-unlock pass loaded the cache/sync and
+            // derived rule state (cachedBlockRuleSets, blockRules, counts, source states)
+            // against the seeded placeholder — and against a still-LOCKED catalog cache —
+            // and, with hasCompletedOnboarding reading false from the locked standard
+            // defaults, skipped the post-launch tunnel snapshot reconcile entirely. Both
+            // reads are truthful here (this path only runs after a successful protected
+            // read). Order mirrors init: catalog first, so the reconcile builds from real
+            // rules. The NOT-onboarded neutralize is deliberately not rerun: its one-shot
+            // skip stays the documented residual (see init).
+            if loadsVPNState {
+                Task {
+                    await loadCachedCatalogIfAvailable()
+                    await syncCatalogIfStale()
+                    if hasCompletedOnboarding {
+                        await reconcileTunnelSnapshotAfterLaunch()
+                    }
+                }
+            }
+        }
     }
 
     /// Load the filter library, or (first launch on a multi-filter build, or a
@@ -7664,9 +8066,43 @@ final class AppViewModel: ObservableObject {
     /// kill between the library write and the config write is reconciled in the library's
     /// favour. Restore-safe because the backup payload now carries the whole library.
     private func loadOrMigrateFilterLibrary() {
-        if let filterLibraryURL,
-           let data = try? Data(contentsOf: filterLibraryURL),
-           let persisted = try? JSONDecoder().decode(FilterLibrary.self, from: data) {
+        // Tri-state read (INV-PERSIST-1): only a definitive outcome — absent or
+        // readable-but-corrupt — may fall through to the seed/migration below. An
+        // existing-but-UNREADABLE library (Data Protection before first unlock) marks the
+        // whole load unavailable instead: the reseed then stays a pure in-memory
+        // placeholder and the persist at the bottom is skipped, because the "missing"
+        // data is really the user's intact, locked filter library (the 2026-07-14 wipe).
+        var loadedLibrary: FilterLibrary?
+        var libraryWasCorrupt = false
+        var reseedReplacesDeliberatelyMigratedLibrary = false
+        if let filterLibraryURL {
+            switch SharedStateFileReader.read(FilterLibrary.self, from: filterLibraryURL) {
+            case .loaded(let persisted):
+                loadedLibrary = persisted
+            case .absent:
+                break
+            case .corrupt:
+                // Read fine, failed to decode — the one genuine data-loss recovery case, and
+                // the only reseed whose persist stamps the durable backup suppression below.
+                libraryWasCorrupt = true
+            case .unreadable(let description):
+                sharedStateUnavailableAtLoad = true
+                // Per-file breadcrumb (incident plan Phase 4): the library is the file the
+                // 2026-07-14 wipe destroyed — the field log names it distinctly from the
+                // config classification above, and carries the underlying read error so a
+                // Data-Protection lock is diagnosable apart from a real I/O fault.
+                // pinned: RebootFirstUnlockGuardSourceTests.testUnreadableClassificationsAndFenceTripsLeaveFieldBreadcrumbs
+                LavaSecDeviceDebugLog.append(
+                    component: "app",
+                    event: "filter-library-unreadable-at-load",
+                    details: [
+                        "consequence": "placeholder in memory; persists blocked until recovery reload (INV-PERSIST-1)",
+                        "error": description,
+                    ]
+                )
+            }
+        }
+        if let persisted = loadedLibrary {
             let normalized = persisted.normalized()
             // Accept only an invariant-valid library (>=1 filter, active id resolves) that did NOT
             // lose a two-file write race: a library stamped with an OLDER config generation than the
@@ -7681,12 +8117,61 @@ final class AppViewModel: ObservableObject {
                 // The on-disk library was accepted as-is (no reseed): a headless background
                 // publish may proceed against this config.
                 didReseedFilterLibraryOnLastLoad = false
+                // A persisted library is now live, so an earlier UNREADABLE-launch placeholder
+                // is gone — lift the suppression it carried (Codex P2 on #376: without this,
+                // the first-unlock recovery reload left automatic backups disabled all
+                // session). EXCEPT when the durable marker says this accepted library IS a
+                // recovery reseed a prior launch persisted over an absent/corrupt store (Codex
+                // P1): then the suppression carries across the relaunch until a user-authoritative
+                // clear (restore / restore-to-default / onboarding seed).
+                //
+                // INV-PERSIST-2 made filter-library.json Class-None, so this accept branch runs
+                // pre-first-unlock too. The durable marker is the Class-None ReseedSuppression-
+                // MarkerStore FILE, whose existence is readable while the device is locked, so a
+                // 1.2.5-native device is decided INLINE here with no protected-data gate — the 1.2.4
+                // read-gate + deferred-re-read hack a Class-C UserDefaults marker forced is gone for
+                // that device (its locked read was a spurious `false`). The ONE case that still
+                // cannot decide inline is a device upgrading from 1.2.4 whose legacy Class-C marker
+                // has not migrated to the file yet AND whose first post-upgrade launch is
+                // pre-first-unlock: the file marker is absent and the legacy store is unreadable, so
+                // lifting would clobber the user's last good server backup with the seeded reseed
+                // (Codex P1 on #385). That case FREEZES the suppression and re-derives at unlock.
+                // pinned: RebootFirstUnlockGuardSourceTests.testAcceptedLibraryHonorsDurableFileMarker
+                switch reseedSuppressionMarkerState() {
+                case .present:
+                    libraryOriginatesFromLaunchReseed = true
+                case .absentConfirmed:
+                    libraryOriginatesFromLaunchReseed = false
+                case .absentUnconfirmed:
+                    // Upgrade-transition conservative freeze (Codex P1 on #385): keep the
+                    // suppression and re-derive once protected data is readable
+                    // (confirmReseedSuppressionAfterUnlock). A 1.2.5-native device's state lives in
+                    // the readable file marker, so it never reaches this branch with a real
+                    // suppression — the freeze is harmless there and self-heals at first unlock.
+                    libraryOriginatesFromLaunchReseed = true
+                    reseedSuppressionAwaitingUnlockConfirmation = true
+                }
                 // Library is authoritative — regenerate the active filter's mirror in
                 // `configuration` from it (the inverse of the persist-boundary sync).
                 mirrorActiveFilterIntoConfiguration()
                 reconcileLoadedLibraryGenerationIfNeeded()
                 return
             }
+            // Falling through with a library that READ fine and is invariant-valid, but is
+            // old-schema or lost the two-file write race: the reseed below is the DESIGNED
+            // upgrade migration replacing it, not recovery from data loss — so it must not
+            // suppress automatic backup (suppressing left every later edit in the session
+            // out of the local/remote envelope, and manual Back Up Now uploading a stale
+            // pre-edit envelope — Codex P2 round 2 on #376).
+            reseedReplacesDeliberatelyMigratedLibrary = normalized.isValid
+        }
+        // An ABSENT library beside a READABLE, decoded config is the pre-library build's
+        // legacy upgrade — the same designed migration as the old-schema case above, not
+        // data loss. Suppressing here would freeze an existing auto-backup user's re-seals
+        // and uploads indefinitely: onboarding never reruns for them, and restore/reset are
+        // recovery actions they have no reason to take (Codex P2 round 7 on #376).
+        if loadedLibrary == nil, !libraryWasCorrupt, !sharedStateUnavailableAtLoad, configurationLoadedFromDisk {
+            reseedReplacesDeliberatelyMigratedLibrary = true
         }
 
         // No current (>= currentSchemaVersion), invariant-valid library that won the write race →
@@ -7704,6 +8189,26 @@ final class AppViewModel: ObservableObject {
         // unchanged). The publish path checks this and bails until the foreground migration
         // lands (the user's next launch persists it, after which this stays false).
         didReseedFilterLibraryOnLastLoad = true
+        if reseedReplacesDeliberatelyMigratedLibrary {
+            // Designed upgrade migration of a readable, coherent library: the reseed IS the
+            // intended new state (persisted just below), so automatic backup stays live — the
+            // migration and every subsequent edit belong in the next sealed envelope.
+            clearLibraryOriginatesFromLaunchReseed()
+        } else if sharedStateUnavailableAtLoad {
+            // Unreadable (Data-Protection-locked) store: in-memory suppression only. The
+            // placeholder is never persisted, so the recovery reload's accept of the user's
+            // real library lifts this — a durable marker would wrongly outlive that accept.
+            libraryOriginatesFromLaunchReseed = true
+        } else {
+            // Genuinely-fresh install (both files absent — lifted by the onboarding seed
+            // that always follows) or corrupt library (the remote envelope may hold the
+            // user's last good library; an automatic upload would clobber it — incident
+            // plan latent-3). Suppress IN MEMORY now; the DURABLE stamp (Codex P1) waits
+            // until the persist below actually lands — a headless read-only load or a
+            // swallowed persist failure must not poison future launches with a marker for
+            // a reseed that never reached disk (Codex P2 round 6).
+            libraryOriginatesFromLaunchReseed = true
+        }
         mirrorActiveFilterIntoConfiguration()
         // Persist the migration only from a foreground instance. The headless
         // background-refresh model is read-only — writing here could race a foreground
@@ -7722,7 +8227,36 @@ final class AppViewModel: ObservableObject {
         // auto-backup flag is loaded, and a migration only adds the Default filter the server copy
         // already restores to (Codex r24) — the next real change re-seals + uploads.
         if !isHeadless {
-            try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+            // INV-PERSIST-1: a reseed born from an UNREADABLE (not absent/corrupt) load is a
+            // placeholder over the user's intact, locked files — never persist it. The persist
+            // funnel's own guard would throw anyway; skipping here keeps the launch quiet and
+            // leaves recovery to reloadSharedStateIfBlockedByDataProtection at first unlock.
+            if !sharedStateUnavailableAtLoad {
+                // The durable suppression marker (Codex P1) is stamped BEFORE the persist: the
+                // shared writer lands filter-library.json FIRST, so a crash or throw between
+                // its two file writes must never leave a durable seeded library behind without
+                // its marker — the next launch would accept it with suppression lifted (Codex
+                // P2 round 8). The reverse residual — marker present with nothing landed — is
+                // self-consistent: the next launch re-encounters the absent/corrupt store and
+                // re-derives the same suppression. Round 6's poisoning hazard stays closed:
+                // this path cannot pre-stamp against a GOOD on-disk library (it only runs when
+                // the foreground load found the store absent/corrupt), and headless read-only
+                // loads never reach it. The deliberate migration cleared the in-memory flag
+                // above, so it never stamps.
+                //
+                // And if the STAMP ITSELF fails (transient marker-path/app-group write error), the
+                // reseed library must NOT be persisted: a durable seeded library with no durable
+                // marker reads `.absentConfirmed` next launch and clobbers (Codex P1 round 5 on
+                // #385). Skipping leaves the store absent/corrupt so the next launch re-reseeds and
+                // re-stamps; the in-memory library still serves this session. The deliberate
+                // migration needs no marker, so it persists unconditionally.
+                let markerLanded = libraryOriginatesFromLaunchReseed
+                    ? markLibraryOriginatesFromPersistedRecoveryReseed()
+                    : true
+                if markerLanded {
+                    try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+                }
+            }
         }
     }
 
@@ -7747,7 +8281,13 @@ final class AppViewModel: ObservableObject {
             // Suppress the backup hook (launch-time, before the auto-backup flag is loaded). A
             // reconcile changes only the backup-stripped generation, so backed-up content is
             // unchanged anyway (Codex r24).
-            try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+            // INV-PERSIST-1: skipped while the CONFIG side of the pair was unreadable at load —
+            // this durable rewrite would pair the accepted library with a placeholder config.
+            // The in-memory generation advance above still runs, so the headless-publish abort
+            // semantics are unchanged; the rewrite happens on the post-unlock reload instead.
+            if !sharedStateUnavailableAtLoad {
+                try? persistConfigurationOnly(schedulesAutomaticBackup: false)
+            }
         }
     }
 
@@ -8333,15 +8873,57 @@ final class AppViewModel: ObservableObject {
     /// shows/suppresses one banner.
     func setAppForegroundActive(_ active: Bool) {
         guard !isHeadless else { return }
+        // INV-PERSIST-1 recovery re-check: no-op on every normal foreground (guarded on the
+        // launch load having been blocked by Data Protection); heals a pre-unlock-launched
+        // process whose protectedDataDidBecomeAvailable notification was missed.
+        if active {
+            reloadSharedStateIfBlockedByDataProtection()
+            // Belt-and-braces re-derive of an upgrade-transition suppression freeze (Codex P1 on
+            // #385), for a first-unlock notification delivered before this process observed it.
+            confirmReseedSuppressionAfterUnlock()
+            // INV-PERSIST-2 one-shot migration: re-stamping a file's protection class
+            // re-encrypts its content, so it can only run POST-unlock — hence the
+            // isProtectedDataAvailable gate here rather than at launch (which can be a
+            // pre-unlock prewarm). One-shot latching + retry-on-partial-failure live in
+            // the migration type itself, so this hook stays a bare trigger; detached at
+            // utility priority because scene activation must never block on a
+            // whole-container attribute walk.
+            if UIApplication.shared.isProtectedDataAvailable, let containerURL = LavaSecAppGroup.containerURL {
+                Task.detached(priority: .utility) {
+                    ControlPlaneProtectionMigration.run(containerURL: containerURL)
+                }
+            }
+        }
         let defaults = LavaSecAppGroup.sharedDefaults
-        LavaAppForegroundPublication.publish(active, to: defaults)
+        // GUARDED on protected data (INV-PERSIST-2): the foreground-active flag lives in the
+        // Class-C shared-defaults SUITE (the same suite the tunnel's locked-content canary
+        // probes), which is unwritable while the device is locked. A pre-first-unlock
+        // prewarm/notification foreground therefore cannot persist it — and writing the locked
+        // suite is exactly the discipline the 2026-07-14 incident hardened, matching the
+        // language pin below (rather than relying on the CFPreferences write to fail silently).
+        // Skipping the write while locked is also SEMANTICALLY right: the user cannot be looking
+        // at the app while the device is locked, so the flag correctly stays absent/false
+        // pre-unlock, and the reader's stamp lease (`maxTrustedAge`) bounds any staleness from a
+        // re-lock that races the `.background` clear.
+        // pinned: RebootFirstUnlockGuardSourceTests.testForegroundActivePublishIsGuardedOnProtectedData
+        if UIApplication.shared.isProtectedDataAvailable {
+            LavaAppForegroundPublication.publish(active, to: defaults)
+        }
         if active {
             // Pin the language the app UI is CURRENTLY resolved to (honoring any iOS per-app language
-            // override) so the App Intents extension and NE tunnel — separate processes that don't inherit
-            // that override — localize their notifications in the SAME language as the app, not the system
-            // language. Refreshed on every foreground so a language change in iOS Settings takes effect on
-            // the user's next return to the app.
-            LavaNotificationLanguage.publish(LavaNotificationLanguage.currentAppLocalization(), to: defaults)
+            // override) so the App Intents extension, NE tunnel, and Live Activity widget — separate
+            // processes that don't inherit that override — localize in the SAME language as the app, not
+            // the system language. Refreshed on every foreground so a language change in iOS Settings
+            // takes effect on the user's next return to the app.
+            // GUARDED on protected data: a pre-first-unlock foreground (prewarm / notification launch)
+            // resolves this process's bundle against a still-locked AppleLanguages state — publishing
+            // THAT would overwrite the user's pin (zh-Hant → en) in the shared suite, the notification/
+            // Live Activity half of the 2026-07-14 incident's language flip (plan Phase 3). Skip it; the
+            // next post-unlock foreground republishes the correct resolution.
+            // pinned: RebootFirstUnlockGuardSourceTests.testLanguagePinPublishIsGuardedOnProtectedData
+            if UIApplication.shared.isProtectedDataAvailable {
+                LavaNotificationLanguage.publish(LavaNotificationLanguage.currentAppLocalization(), to: defaults)
+            }
         }
     }
 
@@ -8640,6 +9222,14 @@ final class AppViewModel: ObservableObject {
         // the veto (founder review P2-1).
         commitBeforeFlip: (@Sendable () throws -> Void)? = nil
     ) async throws -> FilterSnapshotPreparationService.PublishOutcome {
+        // INV-PERSIST-1 (pinned: RebootFirstUnlockGuardSourceTests.testPersistFunnelsRefuseWhileLaunchLoadWasBlocked): while the launch load was
+        // blocked by Data Protection, the in-memory pair is a placeholder — refuse every write
+        // until the post-unlock reload lands. The writer's own unreadable fence covers the
+        // pre-unlock window; this guard closes the post-unlock half, where the files are
+        // writable again but this model still holds the placeholder.
+        guard !sharedStateUnavailableAtLoad else {
+            throw LavaSecAppError.sharedStateUnavailable
+        }
         guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
@@ -8684,15 +9274,17 @@ final class AppViewModel: ObservableObject {
         // cold-rebuilds, never wrong rules). The ordering + generation-token + library-stamp logic lives
         // in the single shared writer (SharedFilterStatePersistence) so the foreground and the headless
         // warm switch can never drift; sync the bumped/stamped values back into the published state.
-        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
-            configuration: configuration,
-            library: library,
-            configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
-            filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
-            prioritizesConfigurationDurability: prioritizesConfigurationDurability,
-            // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
-            crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
-        )
+        let written = try writeSharedStateLoggingFenceTrip {
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: configuration,
+                library: library,
+                configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
+                filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
+                prioritizesConfigurationDurability: prioritizesConfigurationDurability,
+                // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
+                crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
+            )
+        }
         configuration = written.configuration
         library = written.library
         refreshFilterSwitchShortcutAfterPersist()
@@ -8749,6 +9341,10 @@ final class AppViewModel: ObservableObject {
     /// changes only the (backup-stripped) generation, so neither alters backed-up content — the next
     /// real user change re-seals and uploads normally.
     private func persistConfigurationOnly(schedulesAutomaticBackup: Bool = true) throws {
+        // INV-PERSIST-1: same placeholder-state refusal as persistSharedState (see there).
+        guard !sharedStateUnavailableAtLoad else {
+            throw LavaSecAppError.sharedStateUnavailable
+        }
         guard let containerURL = LavaSecAppGroup.containerURL else {
             throw LavaSecAppError.appGroupUnavailable
         }
@@ -8758,14 +9354,16 @@ final class AppViewModel: ObservableObject {
         // Bump the generation + write library (source of truth) then config, via the single shared
         // writer (see SharedFilterStatePersistence) so the ordering + generation token can't drift from
         // persistSharedState / the headless switch. Sync the bumped/stamped values back into state.
-        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
-            configuration: configuration,
-            library: library,
-            configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
-            filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
-            // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
-            crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
-        )
+        let written = try writeSharedStateLoggingFenceTrip {
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: configuration,
+                library: library,
+                configurationURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationFilename),
+                filterLibraryURL: containerURL.appendingPathComponent(LavaSecAppGroup.filterLibraryFilename),
+                // Cross-process CAS: serialize against the App Intents extension's commit (LAV-100 Phase 4 P4c).
+                crossProcessLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename)
+            )
+        }
         configuration = written.configuration
         library = written.library
         refreshFilterSwitchShortcutAfterPersist()
@@ -8785,6 +9383,36 @@ final class AppViewModel: ObservableObject {
     /// through both funnels.
     private func refreshFilterSwitchShortcutAfterPersist() {
         LavaShortcuts.updateAppShortcutParameters()
+    }
+
+    /// Route a persist funnel's shared-writer call so a trip of the writer-side
+    /// INV-PERSIST-1 fence leaves a loud field breadcrumb before the error propagates.
+    ///
+    /// The fence (`ExistingStateUnreadableError`) should be UNREACHABLE from this process:
+    /// both funnels guard on `sharedStateUnavailableAtLoad`, so the pair was readable when
+    /// this model loaded it. A trip therefore means the pair became unreadable AFTER a
+    /// successful load — an unmodeled re-lock or I/O fault, exactly the trace the
+    /// 2026-07-14 incident never left (plan Phase 4, lavasec-infra
+    /// `plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md`). Nothing was
+    /// overwritten (the fence throws before any write), so the caller's normal error path
+    /// still applies — log and rethrow, never swallow.
+    // pinned: RebootFirstUnlockGuardSourceTests.testUnreadableClassificationsAndFenceTripsLeaveFieldBreadcrumbs
+    private func writeSharedStateLoggingFenceTrip(
+        _ write: () throws -> (configuration: AppConfiguration, library: FilterLibrary)
+    ) throws -> (configuration: AppConfiguration, library: FilterLibrary) {
+        do {
+            return try write()
+        } catch let error as SharedFilterStatePersistence.ExistingStateUnreadableError {
+            LavaSecDeviceDebugLog.append(
+                component: "app",
+                event: "persist-blocked-existing-unreadable",
+                details: [
+                    "consequence": "write refused before touching disk (INV-PERSIST-1)",
+                    "expectation": "unreachable while the funnels guard on sharedStateUnavailableAtLoad — investigate a post-load re-lock or I/O fault"
+                ]
+            )
+            throw error
+        }
     }
 
     /// Write-through the active filter's four fields from the live `configuration`.
@@ -9403,6 +10031,10 @@ private extension NEVPNStatus {
 enum LavaSecAppError: LocalizedError {
     case appGroupUnavailable
     case vpnStillStopping
+    // The launch load classified the shared config/library pair as existing-but-unreadable
+    // (Data Protection before first unlock, INV-PERSIST-1); persisting the in-memory
+    // placeholder would overwrite the user's intact files once they become writable.
+    case sharedStateUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -9410,6 +10042,8 @@ enum LavaSecAppError: LocalizedError {
             "The shared App Group container is unavailable. Check the App Groups entitlement for the app and tunnel targets."
         case .vpnStillStopping:
             "iOS is still finishing turning off the local VPN. Wait a moment and try again."
+        case .sharedStateUnavailable:
+            "Your filters are still locked while the device finishes unlocking. Try again in a moment."
         }
     }
 }
@@ -9635,6 +10269,16 @@ extension AppViewModel: BackupHubBridging {
         // stale — wipe them so a preserved edit can't overwrite the just-restored state.
         filterEditDrafts.removeAll()
         filterEditTargetID = nil
+        // The library is user-authoritative again (their own restored backup), so the
+        // launch-reseed automatic-backup suppression lifts — IN MEMORY first, so the
+        // persist's backup re-seal/schedule below runs unsuppressed. The DURABLE marker is
+        // dropped only after the restored pair actually reaches disk (the success path
+        // below): a failed persist leaves the persisted reseed on disk, and dropping the
+        // marker first would let the next launch accept that reseed with suppression lifted
+        // (Codex P1 round 4 on #376). On failure the in-memory flag is re-armed from the
+        // untouched pre-restore value.
+        let suppressionBeforeRestore = libraryOriginatesFromLaunchReseed
+        libraryOriginatesFromLaunchReseed = false
         // Config-first persist: the restored configuration carries device-global fields the
         // library can't reconstruct, so a partial write must lose the re-restorable library, not
         // the config (see persistSharedState).
@@ -9642,7 +10286,33 @@ extension AppViewModel: BackupHubBridging {
         // on the local envelope the controller staged before this call (both restore modes), so the
         // saved envelope reflects the restored state and the upload marker is correctly cleared —
         // no post-persist save can clobber it.
-        try await persistSharedState(prioritizesConfigurationDurability: true)
+        // persistSharedState is not atomic: the pair write lands (and syncs the bumped
+        // generation back into `configuration`) BEFORE the artifact-publish step, which can
+        // still throw. The marker must key on what's ON DISK, not on the throw (Codex P2
+        // round 5 on #376): the in-memory generation advancing past this pre-persist basis
+        // is exactly "the pair landed".
+        let generationBeforeRestorePersist = configuration.configurationGeneration
+        do {
+            try await persistSharedState(prioritizesConfigurationDurability: true)
+        } catch {
+            if configuration.configurationGeneration > generationBeforeRestorePersist {
+                // The restored pair IS durably down (a post-pair step failed) — the on-disk
+                // library is user-authoritative, so the suppression and its marker lift
+                // despite the error.
+                clearLibraryOriginatesFromLaunchReseed()
+            } else {
+                // Nothing reached disk (fence / app-group / encode / write failure) — re-arm
+                // the in-memory suppression from its pre-restore value; the durable marker
+                // was never touched. (A kill between the restore's config-first write and
+                // its library write leaves a lost-race reseed library that the next launch
+                // re-migrates FROM THE RESTORED CONFIG — user-authoritative content — so the
+                // deliberate-migration clear is correct on that path.)
+                libraryOriginatesFromLaunchReseed = suppressionBeforeRestore
+            }
+            throw error
+        }
+        // The restored pair is durably on disk — drop the suppression and its marker.
+        clearLibraryOriginatesFromLaunchReseed()
         // INV-TIER-1: a restore replaces the selection wholesale with no compile on the path, so
         // a backup written under Plus (or from a device whose lists have since grown) can land an
         // over-budget selection on this tier. The user's restored data is kept as-is — the

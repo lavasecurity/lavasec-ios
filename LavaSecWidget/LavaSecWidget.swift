@@ -40,6 +40,14 @@ private struct LavaLiveActivityCompactGuardianView: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
             let protectionState = state.effectiveProtectionState(now: timeline.date)
+            // Read the app-language pin PER RENDER (every 1 s timeline tick): the widget
+            // process resolves its own bundle to the SYSTEM language — it never inherits
+            // the app's per-app language override — and it outlives reboots. A pre-unlock
+            // render reads the locked suite as nil and falls back to ambient; the first
+            // post-unlock tick reads the pin and the activity self-heals in ≤1 s without a
+            // process restart (incident plan Phase 3, lavasec-infra
+            // plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md).
+            let languageCode = LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)
             SoftShieldGuardian(
                 size: 22,
                 state: protectionState.guardianState,
@@ -52,18 +60,21 @@ private struct LavaLiveActivityCompactGuardianView: View {
             .frame(width: 24, height: 24, alignment: .center)
             // The compact trailing glyph is labeled for VoiceOver; the mascot was
             // not, leaving the compactLeading element unlabeled.
-            .accessibilityLabel(Self.accessibilityLabel(for: protectionState))
+            .accessibilityLabel(Self.accessibilityLabel(for: protectionState, languageCode: languageCode))
         }
     }
 
-    private static func accessibilityLabel(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
+    private static func accessibilityLabel(
+        for protectionState: LavaActivityAttributes.ProtectionState,
+        languageCode: String?
+    ) -> String {
         switch protectionState {
         case .on:
-            LavaCoreStrings.localized("widget.state.on")
+            LavaCoreStrings.localized("widget.state.on", languageCode: languageCode)
         case .paused:
-            LavaCoreStrings.localized("widget.state.paused")
+            LavaCoreStrings.localized("widget.state.paused", languageCode: languageCode)
         case .restarting:
-            LavaCoreStrings.localized("widget.a11y.restarting")
+            LavaCoreStrings.localized("widget.a11y.restarting", languageCode: languageCode)
         }
     }
 }
@@ -75,10 +86,13 @@ private struct LavaLiveActivityStatusGlyphView: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
             let protectionState = state.effectiveProtectionState(now: timeline.date)
+            // Per-render pin read — see LavaLiveActivityCompactGuardianView for the full
+            // rationale (system-language widget process; ≤1 s post-unlock self-heal).
+            let languageCode = LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)
             Image(systemName: statusSymbolName(for: protectionState))
                 .font(.system(size: fontSize, weight: .semibold))
                 .foregroundStyle(state.shieldStyle.dynamicIslandStatusGlyphColor)
-                .accessibilityLabel(statusAccessibilityLabel(for: protectionState))
+                .accessibilityLabel(statusAccessibilityLabel(for: protectionState, languageCode: languageCode))
         }
     }
 
@@ -93,14 +107,17 @@ private struct LavaLiveActivityStatusGlyphView: View {
         }
     }
 
-    private func statusAccessibilityLabel(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
+    private func statusAccessibilityLabel(
+        for protectionState: LavaActivityAttributes.ProtectionState,
+        languageCode: String?
+    ) -> String {
         switch protectionState {
         case .on:
-            LavaCoreStrings.localized("widget.status.on")
+            LavaCoreStrings.localized("widget.status.on", languageCode: languageCode)
         case .paused:
-            LavaCoreStrings.localized("widget.status.paused")
+            LavaCoreStrings.localized("widget.status.paused", languageCode: languageCode)
         case .restarting:
-            LavaCoreStrings.localized("widget.status.restarting")
+            LavaCoreStrings.localized("widget.status.restarting", languageCode: languageCode)
         }
     }
 }
@@ -120,6 +137,9 @@ private struct LavaLiveActivityExpandedView: View {
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
             let protectionState = state.effectiveProtectionState(now: timeline.date)
+            // Per-render pin read — see LavaLiveActivityCompactGuardianView for the full
+            // rationale (system-language widget process; ≤1 s post-unlock self-heal).
+            let languageCode = LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)
             HStack(alignment: .center, spacing: LavaLiveActivityStyle.expandedMascotContentSpacing) {
                 SoftShieldGuardian(
                     size: 76,
@@ -136,7 +156,7 @@ private struct LavaLiveActivityExpandedView: View {
                 .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(expandedTitle(for: protectionState))
+                    Text(expandedTitle(for: protectionState, languageCode: languageCode))
                         .font(.headline.weight(.bold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -155,17 +175,17 @@ private struct LavaLiveActivityExpandedView: View {
                             // Pause is the primary action and takes the row; Restart
                             // recedes to a small secondary icon beside it.
                             HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
-                                pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))
-                                restartIconButton
+                                pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))
+                                restartIconButton(languageCode: languageCode)
                             }
                         } else {
                             // Pause is locked behind authentication, so Restart stands
                             // alone — promote it to a full labelled control.
-                            restartLabeledButton
+                            restartLabeledButton(languageCode: languageCode)
                         }
                     case .paused:
                         // The only meaningful action is Resume; it fills the row.
-                        resumeButton
+                        resumeButton(languageCode: languageCode)
                     case .restarting:
                         // Restart is in progress — the title carries the status and no
                         // action is offered until it settles.
@@ -179,8 +199,8 @@ private struct LavaLiveActivityExpandedView: View {
         .activitySystemActionForegroundColor(LavaLiveActivityStyle.lavaGreen)
     }
 
-    private func pauseButtonTitle(forMinutes minutes: Int) -> String {
-        LavaCoreStrings.localizedFormat("widget.action.pauseForMinutes", minutes)
+    private func pauseButtonTitle(forMinutes minutes: Int, languageCode: String?) -> String {
+        LavaCoreStrings.localizedFormat("widget.action.pauseForMinutes", languageCode: languageCode, minutes)
     }
 
     @ViewBuilder
@@ -197,9 +217,9 @@ private struct LavaLiveActivityExpandedView: View {
     }
 
     @ViewBuilder
-    private var resumeButton: some View {
+    private func resumeButton(languageCode: String?) -> some View {
         Button(intent: ResumeLavaProtectionIntent()) {
-            liveActivityActionLabel(LavaCoreStrings.localized("widget.action.resume"))
+            liveActivityActionLabel(LavaCoreStrings.localized("widget.action.resume", languageCode: languageCode))
         }
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaGreen)
@@ -211,7 +231,7 @@ private struct LavaLiveActivityExpandedView: View {
     // (a full tunnel stop→start); a tap wakes the app to run it even from a locked
     // state, which is why the Dynamic Island can offer it reliably.
     @ViewBuilder
-    private var restartIconButton: some View {
+    private func restartIconButton(languageCode: String?) -> some View {
         Button(intent: ReconnectLavaProtectionIntent()) {
             Image(systemName: "arrow.clockwise")
                 .font(.system(
@@ -221,7 +241,7 @@ private struct LavaLiveActivityExpandedView: View {
                 ))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .accessibilityLabel(LavaCoreStrings.localized("widget.action.restart"))
+                .accessibilityLabel(LavaCoreStrings.localized("widget.action.restart", languageCode: languageCode))
         }
         .controlSize(.small)
         .tint(LavaLiveActivityStyle.lavaSecondaryGray)
@@ -232,9 +252,9 @@ private struct LavaLiveActivityExpandedView: View {
     // gets a full labelled button — still grey/secondary so it reads as recovery
     // rather than a primary control.
     @ViewBuilder
-    private var restartLabeledButton: some View {
+    private func restartLabeledButton(languageCode: String?) -> some View {
         Button(intent: ReconnectLavaProtectionIntent()) {
-            restartActivityActionLabel(LavaCoreStrings.localized("widget.action.restart"))
+            restartActivityActionLabel(LavaCoreStrings.localized("widget.action.restart", languageCode: languageCode))
         }
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaSecondaryGray)
@@ -301,14 +321,17 @@ private struct LavaLiveActivityExpandedView: View {
             .frame(maxWidth: .infinity)
     }
 
-    private func expandedTitle(for protectionState: LavaActivityAttributes.ProtectionState) -> String {
+    private func expandedTitle(
+        for protectionState: LavaActivityAttributes.ProtectionState,
+        languageCode: String?
+    ) -> String {
         switch protectionState {
         case .on:
-            LavaCoreStrings.localized("widget.state.on")
+            LavaCoreStrings.localized("widget.state.on", languageCode: languageCode)
         case .paused:
-            LavaCoreStrings.localized("widget.state.paused")
+            LavaCoreStrings.localized("widget.state.paused", languageCode: languageCode)
         case .restarting:
-            LavaCoreStrings.localized("widget.state.restartingTitle")
+            LavaCoreStrings.localized("widget.state.restartingTitle", languageCode: languageCode)
         }
     }
 }

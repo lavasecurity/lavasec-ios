@@ -143,6 +143,71 @@ final class SharedFilterStatePersistenceTests: XCTestCase {
         XCTAssertEqual(SharedFilterStatePersistence.onDiskConfigurationGeneration(at: urls.config), 0)
     }
 
+    // INV-PERSIST-1 writer fence: an EXISTING file whose content cannot be read (Data
+    // Protection before first unlock on device; permission-denied here, same failing read +
+    // intact metadata) must abort the pair write — the caller's in-memory values came from a
+    // failed read, and writing them would replace the user's intact data at a winning
+    // generation (the 2026-07-14 reboot wipe). RED against the pre-fence writer, which
+    // happily replaced the locked file.
+    func testWriteRefusesToReplaceExistingUnreadableConfig() throws {
+        try XCTSkipIf(geteuid() == 0, "chmod-based unreadable fixture requires a non-root user")
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+
+        let seeded = try JSONEncoder().encode(config(generation: 5))
+        try seeded.write(to: urls.config)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: urls.config.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: urls.config.path) }
+
+        XCTAssertThrowsError(
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: config(generation: 0), // the "seeded defaults" a blocked load holds
+                library: library(generation: 0),
+                configurationURL: urls.config,
+                filterLibraryURL: urls.library
+            )
+        ) { error in
+            XCTAssertTrue(error is SharedFilterStatePersistence.ExistingStateUnreadableError,
+                          "Replacing an existing-but-unreadable config must abort with ExistingStateUnreadableError.")
+        }
+
+        // Neither file may have been touched: the locked config's original bytes survive, and
+        // the library (written FIRST on the normal path) must not exist — proving the fence
+        // runs before any write.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: urls.config.path)
+        XCTAssertEqual(try Data(contentsOf: urls.config), seeded, "The locked config must survive byte-identical.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls.library.path),
+                       "The library write must not land when the pair's config is unreadable.")
+    }
+
+    func testWriteRefusesToReplaceExistingUnreadableLibrary() throws {
+        try XCTSkipIf(geteuid() == 0, "chmod-based unreadable fixture requires a non-root user")
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+
+        let seededLibrary = try JSONEncoder().encode(library(generation: 5))
+        try seededLibrary.write(to: urls.library)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: urls.library.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: urls.library.path) }
+
+        XCTAssertThrowsError(
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: config(generation: 0),
+                library: library(generation: 0),
+                configurationURL: urls.config,
+                filterLibraryURL: urls.library
+            )
+        ) { error in
+            XCTAssertTrue(error is SharedFilterStatePersistence.ExistingStateUnreadableError,
+                          "Replacing an existing-but-unreadable library must abort with ExistingStateUnreadableError.")
+        }
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: urls.library.path)
+        XCTAssertEqual(try Data(contentsOf: urls.library), seededLibrary, "The locked library must survive byte-identical.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls.config.path),
+                       "The config write must not land when the pair's library is unreadable.")
+    }
+
     func testRoundTripIsRepeatableAndStaysMonotonic() throws {
         let urls = makeURLs()
         defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
