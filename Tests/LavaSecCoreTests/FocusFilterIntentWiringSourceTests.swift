@@ -328,6 +328,33 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         )
         XCTAssertTrue(terminateBlock.contains("LavaAppForegroundPublication.publish(false"),
                       "willTerminate must clear the flag — a switcher force-quit can skip the scene .background clear.")
+        // Both non-scene publishers write the Class-C shared-defaults suite, unwritable before first
+        // unlock, so each is gated on protected data — completing the "no locked-suite write"
+        // discipline the scene-phase publish adopts (INV-PERSIST-2, Codex P2 on #385). The
+        // maxTrustedAge age-out covers a clear a locked launch/termination skips.
+        let terminateGateIdx = try XCTUnwrap(
+            terminateBlock.range(of: "if UIApplication.shared.isProtectedDataAvailable {")?.lowerBound,
+            "willTerminate's foreground-flag clear must be gated on protected data."
+        )
+        let terminatePublishIdx = try XCTUnwrap(
+            terminateBlock.range(of: "LavaAppForegroundPublication.publish(false")?.lowerBound
+        )
+        XCTAssertLessThan(terminateGateIdx, terminatePublishIdx,
+                          "The protected-data gate must precede the willTerminate clear.")
+        let appStructInit = try sourceBlock(
+            in: app,
+            startingAt: "struct LavaSecApp: App {",
+            endingBefore: "var body: some Scene {"
+        )
+        let initGateIdx = try XCTUnwrap(
+            appStructInit.range(of: "if UIApplication.shared.isProtectedDataAvailable {")?.lowerBound,
+            "The process-start foreground-flag clear must be gated on protected data."
+        )
+        let initPublishIdx = try XCTUnwrap(
+            appStructInit.range(of: "LavaAppForegroundPublication.publish(false")?.lowerBound
+        )
+        XCTAssertLessThan(initGateIdx, initPublishIdx,
+                          "The protected-data gate must precede the process-start clear.")
 
         let model = try readSource(.appViewModel)
         XCTAssertTrue(model.contains("LavaAppForegroundPublication.publish(active, to: defaults)"),

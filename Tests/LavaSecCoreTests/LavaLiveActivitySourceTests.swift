@@ -862,7 +862,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // when Pause is auth-locked the lone Restart is promoted to a labelled button.
         let onBlock = String(actionBlock[onIdx..<pausedIdx])
         XCTAssertTrue(onBlock.contains("if !state.pauseRequiresAuthentication"))
-        XCTAssertTrue(onBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
+        XCTAssertTrue(onBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
         XCTAssertTrue(onBlock.contains("restartIconButton"))
         XCTAssertTrue(onBlock.contains("restartLabeledButton"))
 
@@ -877,9 +877,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaGreen)"))
         XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaSecondaryGray)"))
         XCTAssertTrue(widget.contains("Image(systemName: \"arrow.clockwise\")"))
-        XCTAssertTrue(widget.contains(".accessibilityLabel(LavaCoreStrings.localized(\"widget.action.restart\"))"))
+        XCTAssertTrue(widget.contains(".accessibilityLabel(LavaCoreStrings.localized(\"widget.action.restart\", languageCode: languageCode))"))
         XCTAssertTrue(widget.contains("Button(intent: ReconnectLavaProtectionIntent())"))
-        XCTAssertTrue(widget.contains("restartActivityActionLabel(LavaCoreStrings.localized(\"widget.action.restart\"))"))
+        XCTAssertTrue(widget.contains("restartActivityActionLabel(LavaCoreStrings.localized(\"widget.action.restart\", languageCode: languageCode))"))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
         XCTAssertFalse(widget.contains("liveActivityActionLabel(\"Reconnect\")"))
 
@@ -1041,7 +1041,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         )
         XCTAssertTrue(onStateBlock.contains("if !state.pauseRequiresAuthentication"))
         // Single configured-length Pause button, gated behind the same auth check.
-        XCTAssertTrue(onStateBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
+        XCTAssertTrue(onStateBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
         XCTAssertFalse(onStateBlock.contains("pauseFiveMinutesButton(\"5 min\")"))
         XCTAssertFalse(onStateBlock.contains("pauseTenMinutesButton(\"10 min\")"))
         XCTAssertFalse(widget.contains("AuthenticatedPauseLavaProtectionFiveMinutesIntent"))
@@ -1318,7 +1318,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("effectiveProtectionState(now: timeline.date)"))
         XCTAssertTrue(widget.contains("protectionState.guardianState"))
         // The compact guardian (compactLeading) now carries a VoiceOver label, like the trailing glyph.
-        XCTAssertTrue(widget.contains(".accessibilityLabel(Self.accessibilityLabel(for: protectionState))"))
+        XCTAssertTrue(widget.contains(".accessibilityLabel(Self.accessibilityLabel(for: protectionState, languageCode: languageCode))"))
         XCTAssertTrue(widget.contains("Image(systemName: statusSymbolName(for: protectionState))"))
         XCTAssertTrue(widget.contains(".font(.system(size: fontSize, weight: .semibold))"))
         XCTAssertFalse(widget.contains(".font(.system(size: fontSize, weight: .bold))"))
@@ -1342,8 +1342,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(sharedMascot.contains("light: (0.16, 0.47, 0.34)"))
         XCTAssertTrue(sharedMascot.contains("dark: (0.45, 0.86, 0.63)"))
         XCTAssertTrue(widget.contains("LavaLiveActivityStyle.lavaGreen"))
-        XCTAssertTrue(widget.contains("LavaCoreStrings.localized(\"widget.state.on\")"))
-        XCTAssertTrue(widget.contains("LavaCoreStrings.localized(\"widget.state.paused\")"))
+        XCTAssertTrue(widget.contains("LavaCoreStrings.localized(\"widget.state.on\", languageCode: languageCode)"))
+        XCTAssertTrue(widget.contains("LavaCoreStrings.localized(\"widget.state.paused\", languageCode: languageCode)"))
         XCTAssertTrue(widget.contains(".controlSize(.regular)"))
         XCTAssertTrue(widget.contains(".tint(LavaLiveActivityStyle.lavaGreen)"))
         XCTAssertTrue(widget.contains("static let expandedMascotContentSpacing: CGFloat = 12"))
@@ -1385,8 +1385,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // A single configured-length Pause button replaces the fixed 5/10-min pair.
         XCTAssertFalse(widget.contains("pauseFiveMinutesButton(\"5 min\")"))
         XCTAssertFalse(widget.contains("pauseTenMinutesButton(\"10 min\")"))
-        XCTAssertTrue(widget.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes))"))
-        XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", minutes)"))
+        XCTAssertTrue(widget.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
+        XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
         XCTAssertTrue(widget.contains("if !state.pauseRequiresAuthentication"))
         XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionIntent())"))
@@ -1416,7 +1416,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         XCTAssertTrue(widget.contains("maskExpressionWhenPrivacyRedacted: true,\n                keepsShieldVisibleWhenRedacted: true"))
         XCTAssertTrue(widget.contains("maskExpressionWhenPrivacyRedacted: true,\n                    keepsShieldVisibleWhenRedacted: true"))
-        XCTAssertFalse(widget.contains("Text(expandedTitle(for: protectionState))\n                        .unredacted()"))
+        XCTAssertFalse(widget.contains("Text(expandedTitle(for: protectionState, languageCode: languageCode))\n                        .unredacted()"))
         XCTAssertFalse(widget.contains("liveActivityActionLabel(\"Resume\")\n                                .unredacted()"))
         XCTAssertFalse(widget.contains("pauseActivityActionLabel(title)\n                .unredacted()"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
@@ -1642,5 +1642,65 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     ) -> (red: UInt8, green: UInt8, blue: UInt8) {
         let offset = y * bytesPerRow + x * bytesPerPixel
         return (pixels[offset], pixels[offset + 1], pixels[offset + 2])
+    }
+
+    func testLiveActivityStringsResolveThroughTheLanguagePin() throws {
+        let widget = try readSource(.lavaSecWidget)
+        // The widget process resolves its bundle to the SYSTEM language and never inherits
+        // the app's per-app override, so every user-visible string must resolve through the
+        // shared LavaNotificationLanguage pin — read PER RENDER inside each TimelineView
+        // tick so a stuck-English activity self-heals within ~1 s of the pin becoming
+        // readable after first unlock, with no widget-process restart (incident plan
+        // Phase 3; the pre-unlock locked suite reads as nil and falls back to ambient).
+        // Pair each pin read to its TimelineView surface, not just the global totals: a
+        // refactor that hoists a `pinnedCode` read out of its `TimelineView` body (to a
+        // computed property or a build-time constant) would keep the counts at 3/3 yet lose
+        // the per-tick self-heal — the exact regression this pin exists to catch (OCR follow-up
+        // on the 1.2.4 sync). Each rendering view must read the pin AFTER opening its periodic
+        // TimelineView.
+        let renderViews = [
+            ("private struct LavaLiveActivityCompactGuardianView: View {", "private struct LavaLiveActivityStatusGlyphView"),
+            ("private struct LavaLiveActivityStatusGlyphView: View {", "private struct LavaLiveActivityLockScreenView"),
+            ("private struct LavaLiveActivityExpandedView: View {", "private enum LavaLiveActivityStyle"),
+        ]
+        for (start, end) in renderViews {
+            let viewBlock = try sourceBlock(in: widget, startingAt: start, endingBefore: end)
+            let timelineIdx = try XCTUnwrap(
+                viewBlock.range(of: "TimelineView(.periodic")?.lowerBound,
+                "\(start) must render on a periodic TimelineView."
+            )
+            let pinIdx = try XCTUnwrap(
+                viewBlock.range(of: "LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)")?.lowerBound,
+                "\(start) must read the language pin per render."
+            )
+            XCTAssertLessThan(timelineIdx, pinIdx,
+                              "The per-render pin read must sit INSIDE the TimelineView body (after it opens), not hoisted above it.")
+        }
+        // Global totals still move together: exactly three surfaces, three per-render reads.
+        XCTAssertEqual(
+            sourceOccurrenceCount(
+                of: "LavaNotificationLanguage.pinnedCode(in: LavaSecAppGroup.sharedDefaults)",
+                in: widget
+            ),
+            3,
+            "Each of the three TimelineView-rendering views must read the pin per tick."
+        )
+        XCTAssertEqual(
+            sourceOccurrenceCount(of: "TimelineView(.periodic", in: widget), 3,
+            "A new TimelineView surface must adopt its own per-render pin read — keep these counts moving together."
+        )
+        // Every localized call must carry the pin: 12 plain lookups + the one format call.
+        XCTAssertEqual(
+            sourceOccurrenceCount(of: "LavaCoreStrings.localized(\"", in: widget), 12,
+            "All plain widget string lookups are accounted for."
+        )
+        XCTAssertEqual(
+            sourceOccurrenceCount(of: "\", languageCode: languageCode)", in: widget), 12,
+            "Every plain lookup must pass the per-render pin — an ambient call renders the system language."
+        )
+        XCTAssertTrue(
+            widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"),
+            "The format lookup must pass the per-render pin too."
+        )
     }
 }

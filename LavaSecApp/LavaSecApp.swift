@@ -203,7 +203,14 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
         // the next launch clear (LavaSecApp.init) or the poster's maxTrustedAge age-out. Best-effort:
         // a hard crash/jetsam delivers nothing, which is exactly what the age-out covers (Codex
         // review #361).
-        LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
+        // GUARDED on protected data (INV-PERSIST-2, Codex P2 on #385): the flag lives in the Class-C
+        // shared-defaults suite, unwritable while locked — a termination that skips this write is
+        // exactly what the poster's maxTrustedAge age-out already covers, and a still-visible app
+        // being force-quit is unlocked anyway. Completes the "no Class-C suite write while locked"
+        // discipline the scene-phase publish adopts.
+        if UIApplication.shared.isProtectedDataAvailable {
+            LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
+        }
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
@@ -262,7 +269,13 @@ struct LavaSecApp: App {
         // skips .background, and the poster ages out an assert older than
         // LavaAppForegroundPublication.maxTrustedAge — a crashed app can't clear anything, and the
         // Focus EXTENSION (possibly the next process to run) must never clear the flag itself.
-        LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
+        // GUARDED on protected data (INV-PERSIST-2, Codex P2 on #385): the flag's Class-C shared
+        // suite is unwritable while locked, and a pre-first-unlock prewarm / background App-Intent
+        // launch cannot land this write anyway — the maxTrustedAge age-out clears a genuinely stuck
+        // flag, so skipping the locked-suite write here loses nothing and completes the discipline.
+        if UIApplication.shared.isProtectedDataAvailable {
+            LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
+        }
         // Register / refresh the "Switch Filter" App Shortcut at launch so a fresh install surfaces
         // it in Shortcuts & Siri and its filter parameter reflects the current library (Codex #325).
         // updateAppShortcutParameters re-reads the entity query, which loads the on-disk filter

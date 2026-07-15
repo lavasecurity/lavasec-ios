@@ -113,6 +113,22 @@ public final class DebouncedPersistenceController {
         }
     }
 
+    /// Drop unpersisted state: cancel any scheduled flush and clear the dirty flag
+    /// without writing.
+    ///
+    /// For owners whose resident state must NOT be persisted and whose lifecycle can
+    /// no longer make it persistable. The failed-write retry loop above is deliberate
+    /// for a running owner (stay dirty, retry next interval), but an owner shutting
+    /// down with a permanently-refusing write closure — the tunnel's stop path after
+    /// a locked pre-first-unlock boot, where the resident stores are boot-empty
+    /// placeholders that may never overwrite the user's real data — would otherwise
+    /// keep a stopped process waking every interval with no write ever succeeding.
+    public func abandonUnpersistedState() {
+        pendingToken?.cancel()
+        pendingToken = nil
+        isDirty = false
+    }
+
     /// Whether a debounced flush is scheduled but has not yet fired.
     public var hasPendingFlush: Bool {
         pendingToken != nil

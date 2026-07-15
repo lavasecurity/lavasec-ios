@@ -294,6 +294,37 @@ final class DebouncedPersistenceControllerTests: XCTestCase {
         XCTAssertFalse(controller.isDirty)
     }
 
+    func testAbandonUnpersistedStateCancelsTheRetryAndClearsDirty() {
+        let scheduler = ManualSettleWorkScheduler()
+        let clock = Clock(t0)
+        var attempts = 0
+        let controller = makeController(scheduler: scheduler, clock: clock) { _ in
+            attempts += 1
+            return false
+        }
+
+        // A refused forced write re-arms its own retry — the tunnel's stop-time flush
+        // after a locked (pre-first-unlock) boot, where the write closure refuses the
+        // boot-empty stores permanently because no reload can run in a stopped lifecycle.
+        controller.markDirty()
+        controller.flush(force: true)
+        XCTAssertEqual(attempts, 1)
+        XCTAssertTrue(controller.isDirty)
+        XCTAssertTrue(controller.hasPendingFlush)
+
+        controller.abandonUnpersistedState()
+        XCTAssertFalse(controller.isDirty)
+        XCTAssertFalse(controller.hasPendingFlush)
+
+        // The abandoned retry's deadline elapsing must not write, and nothing may re-arm:
+        // an abandoned controller goes fully quiet until its owner marks dirty again.
+        clock.value = t0.addingTimeInterval(interval * 2)
+        scheduler.fire()
+        XCTAssertEqual(attempts, 1, "An abandoned controller never retries on its own.")
+        XCTAssertEqual(scheduler.liveCount, 0)
+        XCTAssertEqual(controller.writeCount, 0)
+    }
+
     func testWriteReceivesTheAuthoritativeFlushTimestamp() {
         let scheduler = ManualSettleWorkScheduler()
         let clock = Clock(t0)

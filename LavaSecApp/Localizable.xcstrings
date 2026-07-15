@@ -21012,7 +21012,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Device DNS（端末の DNS）"
+            "value": "端末の DNS"
           }
         },
         "ko": {
@@ -21024,7 +21024,7 @@
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Device DNS (DNS do dispositivo)"
+            "value": "DNS do dispositivo"
           }
         },
         "zh-Hans": {

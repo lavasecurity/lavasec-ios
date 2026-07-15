@@ -30,7 +30,7 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
     func testExpandedStateTitleIsHeader() throws {
         let block = try sourceBlock(
             in: try readSource(.lavaSecWidget),
-            startingAt: "Text(expandedTitle(for: protectionState))",
+            startingAt: "Text(expandedTitle(for: protectionState, languageCode: languageCode))",
             endingBefore: "// Action row."
         )
         XCTAssertTrue(
@@ -47,7 +47,7 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.lavaSecWidget),
             startingAt: "private func pauseButton(_ title: String)",
-            endingBefore: "private var resumeButton"
+            endingBefore: "private func resumeButton(languageCode: String?)"
         )
         XCTAssertTrue(
             block.contains("Button(intent: PauseLavaProtectionIntent())"),

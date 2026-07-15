@@ -57,6 +57,15 @@ public enum SharedFilterStatePersistence {
         public init() {}
     }
 
+    /// Thrown when the write would replace an existing file whose content cannot currently be read —
+    /// Data Protection before first unlock, or a transient I/O failure (INV-PERSIST-1). A caller in
+    /// that state loaded "defaults" from a failed read; letting the write proceed would stamp them at
+    /// a winning generation over the user's real data (the 2026-07-14 reboot filter-library wipe).
+    public struct ExistingStateUnreadableError: Error {
+        /// Creates the marker error used when the on-disk pair exists but is unreadable.
+        public init() {}
+    }
+
     /// Persists a generation-matched configuration/library pair under the optional cross-process lock.
     ///
     /// - Throws: ``StaleBaseGenerationError`` when the fenced on-disk generation has already advanced,
@@ -92,6 +101,17 @@ public enum SharedFilterStatePersistence {
         // The ENTIRE generation read + bump + both-file writes must be one critical section across
         // processes — splitting the read from the write would let a second process bump in between.
         try FilterPublishLock.withExclusiveLock(at: crossProcessLockURL) {
+            // INV-PERSIST-1 writer-side backstop (pinned: SharedFilterStatePersistenceTests.testWriteRefusesToReplaceExistingUnreadableConfig): refuse to
+            // replace state that EXISTS but cannot be READ (Data Protection before first unlock, or a
+            // transient I/O failure). A caller holding such state seeded its in-memory values from a
+            // failed read; writing them would destroy the user's real files at a winning generation —
+            // the 2026-07-14 reboot wipe. Readable-but-corrupt files still write (deliberate corruption
+            // recovery), and absent files are a normal first write. Checked under the lock so the
+            // classification is atomic with the write it guards.
+            if SharedStateFileReader.fileExistsButIsUnreadable(at: configurationURL)
+                || SharedStateFileReader.fileExistsButIsUnreadable(at: filterLibraryURL) {
+                throw ExistingStateUnreadableError()
+            }
             // Generation fence UNDER the lock (atomic with the read+write): a write whose fence value lost the
             // race to a newer cross-process write must not be overwritten/re-bumped at a higher generation.
             if let rejectsAdvancedBeyond,
@@ -116,13 +136,15 @@ public enum SharedFilterStatePersistence {
             // Library-first (source of truth before its derived cache) for a normal edit; a restore
             // prioritizes the unreconstructable device-global config, writing it first. EXACTLY ONE physical
             // configuration write either way — the library write is what moves to the other side
-            // (SharedConfigurationWriterInvariant).
+            // (SharedConfigurationWriterInvariant). Both files are control-plane state a
+            // Connect-On-Demand boot tunnel must read before first unlock, so the options carry
+            // NSFileProtectionNone alongside .atomic (INV-PERSIST-2).
             if !prioritizesConfigurationDurability {
-                try libraryData.write(to: filterLibraryURL, options: [.atomic])
+                try libraryData.write(to: filterLibraryURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
             }
-            try configurationData.write(to: configurationURL, options: [.atomic])
+            try configurationData.write(to: configurationURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
             if prioritizesConfigurationDurability {
-                try libraryData.write(to: filterLibraryURL, options: [.atomic])
+                try libraryData.write(to: filterLibraryURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
             }
             return (nextConfiguration, nextLibrary)
         }

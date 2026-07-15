@@ -100,7 +100,18 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         defer { try? FileManager.default.removeItem(at: scratchDir) }
 
         let blobURL = scratchDir.appendingPathComponent("block-domains.blob")
-        guard FileManager.default.createFile(atPath: blobURL.path, contents: nil) else {
+        // Class-None at creation (INV-PERSIST-2). Unlike the retained artifact — which is promoted
+        // out of scratch by a same-volume rename that inherits this class — this blob is NEVER
+        // promoted: it is mmap'd inline below (`Data(contentsOf:options:.mappedIfSafe)`) and removed
+        // by the scratch `defer`. It is still stamped Class-None because the in-extension compile
+        // mmaps it and the boot tunnel can run BEFORE first unlock, when a Class-C blob would be
+        // unreadable and the pre-unlock compile would fail. Stamping at birth is the only option —
+        // there is no post-creation re-stamp on this transient blob.
+        guard FileManager.default.createFile(
+            atPath: blobURL.path,
+            contents: nil,
+            attributes: SharedStateFileProtection.controlPlaneCreationAttributes
+        ) else {
             throw CompactFilterSnapshotError.truncatedData
         }
         let blobHandle = try FileHandle(forWritingTo: blobURL)
@@ -276,7 +287,13 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         )
 
         let outputURL = scratchDir.appendingPathComponent("snapshot.lscfsnp")
-        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil) else {
+        // Class-None at creation, same as the blob (INV-PERSIST-2): this file becomes the
+        // retained artifact via moveItem, inheriting exactly the class stamped here.
+        guard FileManager.default.createFile(
+            atPath: outputURL.path,
+            contents: nil,
+            attributes: SharedStateFileProtection.controlPlaneCreationAttributes
+        ) else {
             throw CompactFilterSnapshotError.truncatedData
         }
         let outputHandle = try FileHandle(forWritingTo: outputURL)
@@ -314,11 +331,24 @@ struct StreamingCompactSnapshotCompiler: Sendable {
                     at: retainedArtifactURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
-                if FileManager.default.fileExists(atPath: retainedArtifactURL.path) {
-                    _ = try FileManager.default.replaceItemAt(retainedArtifactURL, withItemAt: outputURL)
-                } else {
-                    try FileManager.default.moveItem(at: outputURL, to: retainedArtifactURL)
-                }
+                // Promote WITHOUT preserving destination metadata (INV-PERSIST-2):
+                // replaceItemAt can carry the DESTINATION's protection class onto the
+                // replaced item, so a pre-INV-PERSIST-2 Class-C retained artifact could
+                // re-class every republish — and a post-hoc re-stamp can FAIL before first
+                // unlock (re-classing an existing file re-encrypts it, which needs the
+                // still-locked class key), leaving a locked file to be mapped below and
+                // failing the very compile the boot tunnel depends on (PR #378 review).
+                // removeItem+moveItem makes the promoted file carry the scratch file's
+                // Class-None from creation, unconditionally. Losing replace-atomicity is
+                // fine: this is a same-process cache, and a crash between the two calls
+                // costs one recompile on the next start.
+                try? FileManager.default.removeItem(at: retainedArtifactURL)
+                try FileManager.default.moveItem(at: outputURL, to: retainedArtifactURL)
+                // Belt-and-braces re-stamp: a no-op for the just-moved scratch file (its
+                // class was stamped at creation), kept for defense in depth. Its result is
+                // deliberately ignored — the moved file already carries Class-None, so the
+                // mapped read below cannot hit a locked file.
+                SharedStateFileProtection.applyControlPlaneProtection(at: retainedArtifactURL)
                 mappedURL = retainedArtifactURL
             } catch {
                 mappedURL = outputURL

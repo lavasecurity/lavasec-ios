@@ -173,6 +173,38 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// fix it) vs "transient-protection-unavailable" (e.g. the cold-start bootstrap window
     /// while the real snapshot decodes).
     public var lastFailClosedReason: String?
+    /// Queries the filter pipeline classified as BLOCKED (real blocklist matches, never
+    /// fail-closed serves) while this boot session's shared diagnostics stores still
+    /// reflected a locked boot — i.e. inside the reboot-before-first-unlock window. The
+    /// health snapshot is control-plane state (`NSFileProtectionNone`, INV-PERSIST-2) and
+    /// is never reloaded mid-session, so these counters survive to a post-unlock export
+    /// as the QA release gate's DIRECT locked-window filtering evidence — the Class-C
+    /// privacy stores legitimately defer or drop their locked-window rows (incident plan
+    /// Phase 4 follow-up; lavasec-infra
+    /// `docs/engineering/reboot-first-unlock-qa-protocol.md`, "Path A").
+    public var lockedBootBlockedQueryCount: Int
+    /// Queries classified as ALLOWED inside the locked-boot window (includes
+    /// `.pausedAllow` pass-throughs — the gate runs with protection ON, so those should
+    /// not occur in a gate pass). Allowed-only with zero blocked against seeded
+    /// blocked-domain traffic is how the gate distinguishes a pass-through regression
+    /// from real filtering; see `lockedBootBlockedQueryCount`.
+    public var lockedBootAllowedQueryCount: Int
+    /// Queries served fail-closed inside the locked-boot window (the session-wide
+    /// sibling is `failClosedServedQueryCount`); see `lockedBootBlockedQueryCount`.
+    public var lockedBootFailClosedQueryCount: Int
+    /// The conservative END boundary of this boot session's locked window: the LAST
+    /// instant the shared protected content was actually OBSERVED locked, stamped at the
+    /// first readable reload. Deliberately not the reload's own wall clock — the reload
+    /// runs one flush latency after the real unlock, and a boundary of "reload time"
+    /// would admit post-unlock decisions made in that gap as boot evidence, letting a
+    /// post-unlock blocked query falsely satisfy the QA gate (Codex review, #381).
+    /// Bounding at the last observation under-counts the (observation, unlock] sliver
+    /// instead — the gate may under-report and rerun, never fabricate. nil means the
+    /// session never observed a locked window end: either it started unlocked (normal
+    /// launch — the lockedBoot* counters stay 0 and carry no meaning) or the device was
+    /// never unlocked before the process died. Non-nil with zero counters means a locked
+    /// window existed but carried no classified traffic.
+    public var lockedBootWindowEndedAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case startedAt
@@ -233,6 +265,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case failClosedServedQueryCount
         case lastFailClosedAt
         case lastFailClosedReason
+        case lockedBootBlockedQueryCount
+        case lockedBootAllowedQueryCount
+        case lockedBootFailClosedQueryCount
+        case lockedBootWindowEndedAt
     }
 
     /// Creates a snapshot from explicit health timestamps, counters, and status fields.
@@ -294,7 +330,11 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         networkSettingsReapplyFailureCount: Int = 0,
         failClosedServedQueryCount: Int = 0,
         lastFailClosedAt: Date? = nil,
-        lastFailClosedReason: String? = nil
+        lastFailClosedReason: String? = nil,
+        lockedBootBlockedQueryCount: Int = 0,
+        lockedBootAllowedQueryCount: Int = 0,
+        lockedBootFailClosedQueryCount: Int = 0,
+        lockedBootWindowEndedAt: Date? = nil
     ) {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
@@ -354,6 +394,10 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.failClosedServedQueryCount = failClosedServedQueryCount
         self.lastFailClosedAt = lastFailClosedAt
         self.lastFailClosedReason = lastFailClosedReason
+        self.lockedBootBlockedQueryCount = lockedBootBlockedQueryCount
+        self.lockedBootAllowedQueryCount = lockedBootAllowedQueryCount
+        self.lockedBootFailClosedQueryCount = lockedBootFailClosedQueryCount
+        self.lockedBootWindowEndedAt = lockedBootWindowEndedAt
     }
 
     /// Decodes a snapshot, defaulting health fields absent from older payloads.
@@ -531,6 +575,22 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             String.self,
             forKey: .lastFailClosedReason
         )
+        self.lockedBootBlockedQueryCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lockedBootBlockedQueryCount
+        ) ?? 0
+        self.lockedBootAllowedQueryCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lockedBootAllowedQueryCount
+        ) ?? 0
+        self.lockedBootFailClosedQueryCount = try container.decodeIfPresent(
+            Int.self,
+            forKey: .lockedBootFailClosedQueryCount
+        ) ?? 0
+        self.lockedBootWindowEndedAt = try container.decodeIfPresent(
+            Date.self,
+            forKey: .lockedBootWindowEndedAt
+        )
     }
 
     /// The combined cache hit and miss count.
@@ -563,5 +623,56 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         }
 
         return Double(deviceDNSFallbackSuccessCount) / Double(deviceDNSFallbackAttemptCount)
+    }
+
+    // MARK: - Locked-boot window evidence (INV-PERSIST-2 / QA release gate)
+
+    /// Buckets one served query into the locked-boot evidence counters. The caller gates
+    /// on its locked-boot store flag, so these only move inside the
+    /// reboot-before-first-unlock window. Fail-closed serves
+    /// (`reason == .protectionUnavailable`) bucket separately regardless of `action` —
+    /// a fail-closed block is not a blocklist match (the #164 honesty rule the
+    /// session-wide `failClosedServedQueryCount` follows) — so the blocked/allowed
+    /// counts are real pipeline classifications only.
+    public mutating func recordLockedBootServe(action: FilterAction, reason: FilterDecisionReason) {
+        if reason == .protectionUnavailable {
+            lockedBootFailClosedQueryCount += 1
+        } else if action == .block {
+            lockedBootBlockedQueryCount += 1
+        } else {
+            lockedBootAllowedQueryCount += 1
+        }
+    }
+
+    /// Stamps the end of the locked-boot window exactly once — the first readable reload
+    /// wins, and repeated readable reloads are no-ops. The caller passes its LAST
+    /// observed-locked instant, not the reload's wall clock (see
+    /// ``lockedBootWindowEndedAt`` for why the conservative boundary is load-bearing).
+    /// The counters freeze by the caller no longer routing serves here once
+    /// `lockedBootWindowCovers` stops admitting decisions.
+    public mutating func markLockedBootWindowEnded(at date: Date) {
+        guard lockedBootWindowEndedAt == nil else {
+            return
+        }
+        lockedBootWindowEndedAt = date
+    }
+
+    /// Whether a decision made at `decisionTime` belongs to the locked-boot window,
+    /// compared against the last instant the shared content was actually OBSERVED locked
+    /// — the frozen window-end stamp once the window ended, or the caller's live
+    /// observation while it is still open. Never a raw "flag is still set" fast path:
+    /// the locked-boot store flag clears only at the throttled readable reload, so it
+    /// stays set for up to one refresh interval of POST-unlock traffic, and admitting on
+    /// the flag alone would count that traffic as boot evidence — a post-unlock blocked
+    /// query falsely satisfying the QA gate (Codex review, #381). The caller handles the
+    /// certainly-locked case (a fresh canary probe observing locked NOW) before calling
+    /// this, so genuine pre-unlock traffic is admitted exactly; everything else is
+    /// admitted only up to the conservative boundary, and a never-locked boot (both
+    /// values nil) admits nothing.
+    public func lockedBootWindowCovers(decisionAt decisionTime: Date, lastObservedLockedAt: Date?) -> Bool {
+        guard let boundary = lockedBootWindowEndedAt ?? lastObservedLockedAt else {
+            return false
+        }
+        return decisionTime <= boundary
     }
 }

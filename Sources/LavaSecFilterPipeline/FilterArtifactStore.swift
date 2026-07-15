@@ -229,24 +229,26 @@ public struct FilterArtifactStore: Sendable {
         directoryURL.appendingPathComponent(compactSnapshotFilename)
     }
 
+    // The artifact trio is control-plane state the boot tunnel reads before first unlock,
+    // so all three writes stamp NSFileProtectionNone alongside .atomic (INV-PERSIST-2).
     package func writeManifest(_ manifest: FilterArtifactManifest) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(manifest)
-        try data.write(to: manifestURL, options: [.atomic])
+        try data.write(to: manifestURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
     }
 
     package func writePreparedSnapshot(_ preparedSnapshot: PreparedFilterSnapshot) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(preparedSnapshot).write(to: preparedSnapshotURL, options: [.atomic])
+        try encoder.encode(preparedSnapshot).write(to: preparedSnapshotURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
     }
 
     package func writeCompactSnapshot(_ compactSnapshot: CompactFilterSnapshot) throws {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        try compactSnapshot.encodedData().write(to: compactSnapshotURL, options: [.atomic])
+        try compactSnapshot.encodedData().write(to: compactSnapshotURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
     }
 
     /// Writes the prepared JSON, the compact artifact, and the manifest — in that

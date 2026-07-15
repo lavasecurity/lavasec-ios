@@ -389,7 +389,12 @@ struct LavaOnboardingView: View {
 
         // Persist the leaving step's surfaced choice so jumping away via the page dots
         // (which call go(to:) directly) applies it too, not just the Continue button (Codex P2).
-        applyCurrentStepChoiceIfNeeded()
+        // When this transition ALSO seeds the recommended defaults (→ .done, below), fold the
+        // leaving choice into that single marker-clearing reseed persist instead of firing a
+        // second racing persist: a generic persist that lands the seeded pair while the durable
+        // reseed marker is still present would, on a kill before the deferred clear, relaunch the
+        // onboarded defaults as a suppressed reseed (Codex P2 on #386).
+        applyCurrentStepChoiceIfNeeded(persistImmediately: nextPage != .done)
 
         // Reduce Motion: never leave the settled features layout — skipping the reset
         // here (not just in prepareAnimations) avoids even a one-frame unsettled pass
@@ -441,14 +446,21 @@ struct LavaOnboardingView: View {
     /// Persist the choice made on the step we're leaving. Called from every navigation
     /// path (Continue, page dots, back) so a surfaced choice is applied no matter how the
     /// user moves on — idempotent for the blocklist (no-op when unchanged).
-    private func applyCurrentStepChoiceIfNeeded() {
+    /// - Parameter persistImmediately: `false` when this same transition also seeds the
+    ///   onboarding recommended defaults (a `.done` transition), so the leaving choice is
+    ///   MUTATED into `configuration` now but its write is folded into
+    ///   `applyOnboardingRecommendedDefaults`'s single marker-clearing persist rather than a
+    ///   second fire-and-forget persist that could land the seeded pair while the durable reseed
+    ///   marker is still present (Codex P2 on #386).
+    private func applyCurrentStepChoiceIfNeeded(persistImmediately: Bool = true) {
         switch page {
         case .protectionLevel:
-            viewModel.selectOnboardingBlocklists(protectionLevel.enabledBlocklistIDs())
+            viewModel.selectOnboardingBlocklists(protectionLevel.enabledBlocklistIDs(), persistImmediately: persistImmediately)
         case .connectionQuality:
             viewModel.applyOnboardingConnectionPreferences(
                 useEncryptedFallback: useEncryptedFallback,
-                fallbackResolverPresetID: fallbackResolverPresetID
+                fallbackResolverPresetID: fallbackResolverPresetID,
+                persistImmediately: persistImmediately
             )
         default:
             break
