@@ -691,6 +691,17 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertTrue(accountBlock.contains("Lava waits 30 minutes after your last settings change before it tries an automatic upload."))
         XCTAssertFalse(accountBlock.contains("LavaDetailRow(\n                            systemImage: \"lock.shield\""))
 
+        // The Automatic Backup toggle greys out (disabled + dimmed) AND reads OFF on the same
+        // configured-and-signed-in gate as the Back Up Now / Restore rows above, so a
+        // configured-but-signed-out account no longer leaves it active and showing "on" while the
+        // rest of the section is greyed. Gating no longer keys on isEncryptedBackupConfigured alone.
+        XCTAssertTrue(accountBlock.contains(".disabled(!isAutomaticBackupControlEnabled)"))
+        XCTAssertTrue(accountBlock.contains(".opacity(isAutomaticBackupControlEnabled ? 1 : 0.45)"))
+        XCTAssertFalse(accountBlock.contains(".disabled(!backup.isEncryptedBackupConfigured)"))
+        XCTAssertFalse(accountBlock.contains(".opacity(backup.isEncryptedBackupConfigured ? 1 : 0.45)"))
+        XCTAssertTrue(accountBlock.contains("backup.isEncryptedBackupConfigured && account.isAccountSignedIn"))
+        XCTAssertTrue(accountBlock.contains("isAutomaticBackupControlEnabled && backup.isAutomaticBackupEnabled"))
+
         // Clear/Disable backup maintenance panel: a destructive pair styled like
         // "Delete Local Logs" (trash glyph + red), gated behind a confirmation
         // dialog, placed after the Automatic Backup control.
