@@ -358,13 +358,7 @@ final class DoTConnection: @unchecked Sendable {
                 return
             }
 
-            guard let lengthData, lengthData.count == 2 else {
-                self.failOrRetryCurrentQuery(outcome: .receiveFailed, resetsConnection: true)
-                return
-            }
-
-            let responseLength = Int((UInt16(lengthData[0]) << 8) | UInt16(lengthData[1]))
-            guard responseLength > 0 else {
+            guard let responseLength = DNSLengthPrefixedWireMessage.responseBodyLength(fromPrefix: lengthData) else {
                 self.failOrRetryCurrentQuery(outcome: .receiveFailed, resetsConnection: true)
                 return
             }
@@ -415,30 +409,26 @@ final class DoTConnection: @unchecked Sendable {
                     return
                 }
 
-                guard error == nil, let data, !data.isEmpty else {
+                switch DNSLengthPrefixedWireMessage.receiveStep(
+                    accumulated: accumulated,
+                    incoming: data,
+                    hadReceiveError: error != nil,
+                    isComplete: isComplete,
+                    targetByteCount: byteCount,
+                    failsOnEmptyChunk: true
+                ) {
+                case .frameComplete(let frame):
+                    completion(frame)
+                case .failed:
                     completion(nil)
-                    return
+                case .continueReceiving(let nextData):
+                    self.receiveExact(
+                        byteCount: byteCount,
+                        generation: generation,
+                        accumulated: nextData,
+                        completion: completion
+                    )
                 }
-
-                var nextData = accumulated
-                nextData.append(data)
-
-                if nextData.count >= byteCount {
-                    completion(nextData)
-                    return
-                }
-
-                guard !isComplete else {
-                    completion(nil)
-                    return
-                }
-
-                self.receiveExact(
-                    byteCount: byteCount,
-                    generation: generation,
-                    accumulated: nextData,
-                    completion: completion
-                )
             }
         }
     }
@@ -470,17 +460,12 @@ final class DoTConnection: @unchecked Sendable {
             return
         }
 
-        let maximumAttempts = max(1, bootstrapAddresses.count)
-        // Timeouts retry exactly once, and only when the attempt rode a REUSED
-        // connection: a query that timed out on a zombie pooled connection
-        // deserves one fresh connection before failing (and before the failure
-        // counts toward device-DNS fallback). Fresh-connection timeouts still
-        // fail immediately so worst-case latency stays bounded.
-        let allowsStaleConnectionRetry = outcome == .timeout
-            && currentAttemptReusedConnection
-            && currentQuery.connectionAttemptCount == 0
-        if outcome != .timeout || allowsStaleConnectionRetry,
-           currentQuery.connectionAttemptCount + 1 < maximumAttempts || allowsStaleConnectionRetry {
+        if DoTQueryRetryPolicy.shouldRetry(
+            outcome: outcome,
+            priorAttemptCount: currentQuery.connectionAttemptCount,
+            attemptRodeReusedConnection: currentAttemptReusedConnection,
+            bootstrapAddressCount: bootstrapAddresses.count
+        ) {
             currentQuery.connectionAttemptCount += 1
             self.currentQuery = currentQuery
             connectThenSendCurrentQuery()
@@ -574,8 +559,106 @@ enum DNSLengthPrefixedWireMessage {
         return frame
     }
 
+    // One accumulation step of the receive-side reassembly shared by the DoT and DoQ
+    // connections. Pure so the truncation/partial-frame/error branches get executable
+    // tests (DNSLengthPrefixedFramingTests) — the NWConnection callbacks stay thin glue.
+    enum ReceiveStep: Equatable {
+        /// The target byte count is fully accumulated; the frame is ready to consume.
+        case frameComplete(Data)
+        /// The stream cannot yield a complete frame (receive error, empty chunk where
+        /// one is required, or the peer finished the stream short). Fail the query.
+        case failed
+        /// More bytes are required; issue another receive with this accumulation.
+        case continueReceiving(accumulated: Data)
+    }
+
+    // `failsOnEmptyChunk` preserves the transports' historical difference: DoT treats a
+    // nil/empty chunk without an error as a dead read and fails immediately; DoQ
+    // tolerates it and keeps receiving (QUIC delivery can surface empty callbacks).
+    // Both agree that a stream FINishing short of the target is terminal — replaying a
+    // receive on a finished stream can spin until the query timeout instead of failing
+    // fast (the pre-extraction DoQ loop did exactly that on truncated responses).
+    static func receiveStep(
+        accumulated: Data,
+        incoming: Data?,
+        hadReceiveError: Bool,
+        isComplete: Bool,
+        targetByteCount: Int,
+        failsOnEmptyChunk: Bool
+    ) -> ReceiveStep {
+        guard !hadReceiveError else {
+            return .failed
+        }
+
+        let chunk = incoming ?? Data()
+        if failsOnEmptyChunk, chunk.isEmpty {
+            return .failed
+        }
+
+        var nextData = accumulated
+        nextData.append(chunk)
+
+        if nextData.count >= targetByteCount {
+            return .frameComplete(nextData)
+        }
+
+        guard !isComplete else {
+            return .failed
+        }
+
+        return .continueReceiving(accumulated: nextData)
+    }
+
+    // Decodes the RFC 7858 §3.3 / RFC 9250 §4.2 big-endian response-length prefix.
+    // nil for a missing/short prefix and for a zero length: a zero-length "response"
+    // carries no DNS header, so treating it as a frame would hand an empty message to
+    // response validation. Slice-safe (never assumes index 0).
+    static func responseBodyLength(fromPrefix lengthData: Data?) -> Int? {
+        guard let lengthData, lengthData.count == 2 else {
+            return nil
+        }
+
+        let firstIndex = lengthData.startIndex
+        let secondIndex = lengthData.index(after: firstIndex)
+        let responseLength = Int((UInt16(lengthData[firstIndex]) << 8) | UInt16(lengthData[secondIndex]))
+        guard responseLength > 0 else {
+            return nil
+        }
+
+        return responseLength
+    }
+
     private static func appendUInt16(_ value: UInt16, to data: inout Data) {
         data.append(UInt8((value >> 8) & 0xFF))
         data.append(UInt8(value & 0xFF))
+    }
+}
+
+// Decides whether a failed DoT attempt earns another connection attempt. Pure so the
+// retry matrix gets executable tests (DoTQueryRetryPolicyTests); DoTConnection owns the
+// side effects (bootstrap-address advance, reconnect) once the decision says retry.
+// pinned: DoTQueryRetryPolicyTests.testTimeoutOnReusedConnectionRetriesExactlyOnce
+enum DoTQueryRetryPolicy {
+    static func shouldRetry(
+        outcome: DNSTransportOutcome,
+        priorAttemptCount: Int,
+        attemptRodeReusedConnection: Bool,
+        bootstrapAddressCount: Int
+    ) -> Bool {
+        let maximumAttempts = max(1, bootstrapAddressCount)
+        // Timeouts retry exactly once, and only when the attempt rode a REUSED
+        // connection: a query that timed out on a zombie pooled connection
+        // deserves one fresh connection before failing (and before the failure
+        // counts toward device-DNS fallback). Fresh-connection timeouts still
+        // fail immediately so worst-case latency stays bounded.
+        let allowsStaleConnectionRetry = outcome == .timeout
+            && attemptRodeReusedConnection
+            && priorAttemptCount == 0
+        if outcome != .timeout || allowsStaleConnectionRetry,
+           priorAttemptCount + 1 < maximumAttempts || allowsStaleConnectionRetry {
+            return true
+        }
+
+        return false
     }
 }

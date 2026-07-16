@@ -71,11 +71,18 @@ struct ProtectionStatusPanel: View {
     @EnvironmentObject private var viewModel: AppViewModel
     // The mascot look lives on the customization controller (Phase D5 peel).
     @EnvironmentObject private var customization: CustomizationController
+    // A long-press on the mascot changes the Lava Guard look — an auth-gated Customization
+    // mutation — so this panel needs the same security gate the Customization page uses.
+    @EnvironmentObject private var security: SecurityController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var guardianOverrideState: GuardianMascotState?
     @State private var isGuardianTapAnimationRunning = false
     @State private var guardianTapAnimationTask: Task<Void, Never>?
+    @State private var isPresentingLavaGuardPicker = false
+    @State private var guardianLongPressRampTask: Task<Void, Never>?
+    @State private var guardianRevealTask: Task<Void, Never>?
+    @State private var guardianSelectionTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -88,11 +95,42 @@ struct ProtectionStatusPanel: View {
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)
                 .onTapGesture { playGuardianTapGratitude() }
+                // Long-press (2s) opens the Lava Guard picker — the same sheet the Customization
+                // page presents. The hold plays an escalating haptic "charge"
+                // (GuardianLongPressHaptics): its floor is the very same light impact as the tap
+                // above, and it balloons up into a crescendo at the reveal.
+                .onLongPressGesture(minimumDuration: GuardianLongPressHaptics.holdDuration) {
+                    presentLavaGuardPickerFromLongPress()
+                } onPressingChanged: { isPressing in
+                    if isPressing {
+                        startGuardianLongPressRamp()
+                    } else {
+                        stopGuardianLongPressRamp()
+                    }
+                }
                 .onDisappear {
                     guardianTapAnimationTask?.cancel()
                     guardianTapAnimationTask = nil
                     isGuardianTapAnimationRunning = false
                     guardianOverrideState = nil
+                    stopGuardianLongPressRamp()
+                    // Cancel an in-flight reveal/auth OR look-selection/auth task on a GENUINE
+                    // navigate-away so a prompt still resolving can't fire the reveal haptic, flip the
+                    // picker flag, or apply a look on a dismissed view (Kilo + OCR review on the 1.2.4
+                    // sync) — but NOT when this onDisappear IS the passcode auth cover: `.appSettings`
+                    // auth can present SecurityPasscodeAuthenticationView as a `fullScreenCover`
+                    // (RootView), which fires onDisappear here while a task is awaiting that very
+                    // passcode; cancelling then skips the reveal/selection after a successful passcode and
+                    // locks passcode / biometric-fallback users out of the long-press picker (Codex P2 on
+                    // the 1.2.4 sync). onDisappear can't tell the two apart, so gate on the live passcode
+                    // request — the same fullScreenCover/onDisappear conflation FilterMyListView /
+                    // FilterLibraryView already document. // pinned: GuardLongPressPickerSourceTests.testGuardMascotLongPressRevealsPickerWithEscalatingHaptic
+                    if security.passcodeAuthenticationRequest == nil {
+                        guardianRevealTask?.cancel()
+                        guardianRevealTask = nil
+                        guardianSelectionTask?.cancel()
+                        guardianSelectionTask = nil
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -112,6 +150,14 @@ struct ProtectionStatusPanel: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text("Protection status"))
                 .accessibilityValue(Text(viewModel.protectionTitle.lavaLocalized) + Text(". ") + Text(viewModel.protectionSubtitle.lavaLocalized))
+                // The long-press picker reveal hangs off the accessibilityHidden mascot, so VoiceOver /
+                // Switch Control / Full Keyboard Access users can't reach it from the Guard tab. Expose it
+                // as a custom action on this protection-status element — the same
+                // presentLavaGuardPickerFromLongPress path, including its .appSettings auth gate — so the
+                // picker isn't reachable only via the Customization page (Codex P3 + OCR on the 1.2.4 sync).
+                .accessibilityAction(named: Text("Change Lava Guard".lavaLocalized)) {
+                    presentLavaGuardPickerFromLongPress()
+                }
             }
 
             ProtectionPrimaryActionButton()
@@ -135,6 +181,15 @@ struct ProtectionStatusPanel: View {
         }
         .padding(18)
         .lavaPanelBackground()
+        .sheet(isPresented: $isPresentingLavaGuardPicker) {
+            LavaGuardLookPickerSheet(
+                selectedLook: customization.lavaGuardLook,
+                onSelect: selectLavaGuardLook
+            )
+            .environmentObject(viewModel)
+            .environmentObject(customization)
+            .environmentObject(security)
+        }
         .onChange(of: viewModel.protectionTitle + " " + viewModel.protectionSubtitle) { _, _ in
             // Announce the settled protection state to VoiceOver. Key on the FULL accessible value
             // (title + subtitle): the title alone maps healthy AND DNS-fallback both to "Protected",
@@ -144,6 +199,90 @@ struct ProtectionStatusPanel: View {
             LavaAccessibilityAnnouncer.announce(
                 viewModel.protectionTitle.lavaLocalized + ". " + viewModel.protectionSubtitle.lavaLocalized
             )
+        }
+    }
+
+    /// Drives the long-press haptic "charge": schedules each escalating pulse from the pure
+    /// `GuardianLongPressHaptics` curve against the clock. `onPressingChanged(true)` fires on
+    /// finger-down, so the schedule's first pulse waits out `GuardianLongPressHaptics.gracePeriod`
+    /// — a quick tap or aborted press is cancelled before it and stays silent (no double-haptic on
+    /// an awake tap, no buzz in sleeping/paused states). From there the pulses crowd toward the
+    /// reveal so the buildup accelerates. Cancelled the moment the finger lifts — whether the press
+    /// completed or was released early.
+    private func startGuardianLongPressRamp() {
+        guardianLongPressRampTask?.cancel()
+        guardianLongPressRampTask = Task { @MainActor in
+            var firedDelay: TimeInterval = 0
+            for pulse in GuardianLongPressHaptics.schedule {
+                let wait = pulse.delay - firedDelay
+                firedDelay = pulse.delay
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                }
+                if Task.isCancelled {
+                    return
+                }
+                ProtectionHapticFeedback.playGuardianLongPressStep(pulse.step)
+            }
+        }
+    }
+
+    private func stopGuardianLongPressRamp() {
+        guardianLongPressRampTask?.cancel()
+        guardianLongPressRampTask = nil
+    }
+
+    /// The long press completed (held the full `holdDuration`): stop the ramp and reveal the
+    /// Lava Guard picker. The sheet shows Customization-only data — the Guard catalog and unlock
+    /// progress (`lavaGuardAvailability`) — so the reveal itself is gated behind `.appSettings`
+    /// auth. Otherwise the mascot long-press would expose that settings/progress data from the
+    /// read-only Guard tab without passing the settings lock (only the later selection and the
+    /// unlock-panel links re-authenticate). `requireAuthentication` short-circuits when the surface
+    /// is unprotected or already authenticated this turn, so users without the lock — and the
+    /// Customization entry point — see no prompt. The crescendo fires on the real reveal, once auth
+    /// succeeds.
+    private func presentLavaGuardPickerFromLongPress() {
+        stopGuardianLongPressRamp()
+        // Track the reveal/auth task so `.onDisappear` can cancel it (mirrors the ramp task). The
+        // auth prompt is async; without tracking, navigating away from the Guard tab mid-prompt would
+        // let the fire-and-forget task resolve on a dismissed view and fire the reveal haptic + flip
+        // the picker flag (Kilo review on the 1.2.4 sync). The `Task.isCancelled` guard after the
+        // await closes the race where the view disappears between auth returning and the reveal.
+        guardianRevealTask?.cancel()
+        guardianRevealTask = Task { @MainActor in
+            guard await security.requireAuthentication(
+                for: .appSettings,
+                reason: "Open Settings"
+            ) else {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            ProtectionHapticFeedback.playGuardianLongPressStep(GuardianLongPressHaptics.revealStep)
+            isPresentingLavaGuardPicker = true
+        }
+    }
+
+    /// Applies a Lava Guard look chosen from the picker. Mirrors the Customization page: the
+    /// change is an app-settings mutation, so it goes through the same authentication gate.
+    ///
+    /// Tracked in `guardianSelectionTask` (mirroring the reveal task) so a rapid second tap cancels
+    /// the first in-flight auth instead of fanning out into parallel prompts, and so `.onDisappear`
+    /// can cancel a still-awaiting task on a genuine navigate-away rather than applying a look on a
+    /// view the user has already left. The `Task.isCancelled` guard after the await closes the race
+    /// where the cancel lands while auth is returning (OCR review on the 1.2.4 sync).
+    private func selectLavaGuardLook(_ look: GuardianShieldStyle) {
+        guardianSelectionTask?.cancel()
+        guardianSelectionTask = Task { @MainActor in
+            guard await security.requireAuthentication(
+                for: .appSettings,
+                reason: "Edit Customization settings"
+            ) else {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            customization.setLavaGuardLook(look)
         }
     }
 

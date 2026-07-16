@@ -797,13 +797,14 @@ private struct OnboardingConnectionPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let providers: [DNSResolverPreset] = [
-        .mullvadDoH, .cloudflareDoH, .quad9SecureDoH, .googleDoH
+        .mullvadDoH, .cloudflareDoH, .quad9SecureDoH, .hageziDoH, .googleDoH
     ]
 
     private func providerName(_ preset: DNSResolverPreset) -> String {
         if preset.id == DNSResolverPreset.mullvadDoH.id { return "Mullvad" }
         if preset.id == DNSResolverPreset.cloudflareDoH.id { return "Cloudflare" }
         if preset.id == DNSResolverPreset.quad9SecureDoH.id { return "Quad9" }
+        if preset.id == DNSResolverPreset.hageziDoH.id { return "HaGeZi" }
         if preset.id == DNSResolverPreset.googleDoH.id { return "Google" }
         return preset.displayName
     }

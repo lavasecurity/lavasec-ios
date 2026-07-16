@@ -335,11 +335,19 @@ private struct LavaGuardLookPickerRow: View {
     }
 }
 
-/// The Lava Guard catalog as a bottom sheet: an info panel up top (when more
-/// Guards are still locked) followed by the radio-style single-select list.
-private struct LavaGuardLookPickerSheet: View {
+/// The Lava Guard catalog as a bottom sheet. Opens on the *current* Guard: its mascot, its
+/// quote, and a short plain-language tip (the `LavaGuardSpotlightPanel`), then the radio-style
+/// single-select list. The quiet unlock/privacy copy moved out of the top and now sits at the
+/// bottom, below the catalog, so the sheet leads with the Guard rather than housekeeping.
+///
+/// Internal (not file-private) so the Guard screen can present the same sheet from a long-press
+/// on the Lava Guard mascot — the picker has one home, reached from Customization or the mascot.
+struct LavaGuardLookPickerSheet: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var customization: CustomizationController
+    // The unlock panel's Upgrade / Privacy & Data links reach `.appSettings`-gated settings pages,
+    // so the sheet re-authenticates before presenting them (see `authorizeAppSettingsThen`).
+    @EnvironmentObject private var security: SecurityController
     @Environment(\.dismiss) private var dismiss
     @State private var showUpgradePage = false
     @State private var showPrivacyDataPage = false
@@ -351,12 +359,7 @@ private struct LavaGuardLookPickerSheet: View {
         NavigationStack {
             LavaSheetScaffold(spacing: 18) {
                 VStack(alignment: .leading, spacing: 18) {
-                    if !viewModel.configuration.hasLavaSecurityPlus {
-                        LavaGuardUnlockInfoPanel(
-                            openUpgrade: { showUpgradePage = true },
-                            openPrivacyData: { showPrivacyDataPage = true }
-                        )
-                    }
+                    LavaGuardSpotlightPanel(look: selectedLook)
 
                     LavaSectionGroup("Choose your Guard") {
                         LavaPlainCard {
@@ -387,6 +390,15 @@ private struct LavaGuardLookPickerSheet: View {
                             }
                         }
                     }
+
+                    // The quiet unlock + privacy note moved out of the top panel to the bottom,
+                    // below the catalog — the sheet leads with the current Guard, not the copy.
+                    if !viewModel.configuration.hasLavaSecurityPlus {
+                        LavaGuardUnlockInfoPanel(
+                            openUpgrade: { authorizeAppSettingsThen { showUpgradePage = true } },
+                            openPrivacyData: { authorizeAppSettingsThen { showPrivacyDataPage = true } }
+                        )
+                    }
                 }
             }
             .navigationTitle("Lava Guard")
@@ -409,10 +421,70 @@ private struct LavaGuardLookPickerSheet: View {
             }
         }
     }
+
+    /// The Upgrade and Privacy & Data links reach `.appSettings`-gated settings pages through an
+    /// inline `navigationDestination`. Reaching this sheet does not itself pass that gate — the
+    /// Guard mascot long-press opens it straight from the read-only Guard tab — so re-authenticate
+    /// before presenting, matching the `.appSettings` lock `RootView.openSettingsRoute` enforces on
+    /// `.upgrade`/`.privacyData`. From Customization the surface is already authenticated for this
+    /// turn, so `requireAuthentication` short-circuits and no second prompt appears.
+    private func authorizeAppSettingsThen(_ present: @escaping @MainActor () -> Void) {
+        Task {
+            guard await security.requireAuthentication(for: .appSettings, reason: "Open Settings") else {
+                return
+            }
+
+            present()
+        }
+    }
+}
+
+/// The picker sheet's header: the current Lava Guard on the left, its quote on the right, and a
+/// short, plain-language tip beneath the quote. The tip unpacks the quote for a layman — the
+/// sign-in Guard's quote pairs with a note that fake sites copy real login pages to steal
+/// passwords — so the panel teaches a habit, not just a slogan. Everything is localized; the
+/// quote reuses `settingsDescription` and the tip its paired `settingsTip`.
+private struct LavaGuardSpotlightPanel: View {
+    let look: GuardianShieldStyle
+
+    var body: some View {
+        LavaInfoCard(borderTint: look.dynamicIslandStatusGlyphColor) {
+            HStack(alignment: .top, spacing: 16) {
+                SoftShieldGuardian(
+                    size: LavaGuardSpotlightMetrics.mascotSize,
+                    state: .awake,
+                    animates: false,
+                    shieldStyle: look
+                )
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(look.displayName.lavaLocalized)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(look.dynamicIslandStatusGlyphColor)
+
+                    Text(look.settingsDescription.lavaLocalized)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(LavaStyle.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(look.settingsTip.lavaLocalized)
+                        .lavaSupportingText()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+private enum LavaGuardSpotlightMetrics {
+    static let mascotSize: CGFloat = 72
 }
 
 /// Moved out of the Customization screen into the picker sheet: the same unlock
-/// and privacy copy, now presented as an info panel above the catalog.
+/// and privacy copy, now presented as an info panel below the catalog.
 private struct LavaGuardUnlockInfoPanel: View {
     let openUpgrade: () -> Void
     let openPrivacyData: () -> Void
@@ -631,6 +703,28 @@ private extension GuardianShieldStyle {
             "Make me your web-surfing buddy!"
         case .kiwiCreme:
             "Hey I'm no rock but I take security paw-sonally. U know what I mean?"
+        }
+    }
+
+    /// A bite-sized, layman tip that unpacks the Guard's quote (`settingsDescription`) into one
+    /// concrete safety habit. Shown under the quote in the picker's spotlight panel. Catalog-only
+    /// (localized at the display site via `.lavaLocalized`); keep each in sync with its quote.
+    var settingsTip: String {
+        switch self {
+        case .original:
+            "Lava quietly blocks domains known for scams and malware, so most threats never load."
+        case .fireOpal:
+            "A link can show one name but open another. Check where it really goes before you tap."
+        case .purpleObsidian:
+            "Switch on a blocklist once and Lava keeps catching those domains for you."
+        case .obsidian:
+            "Some fake sites copy a real login page to steal your password. Open the app or type the address yourself."
+        case .cherryQuartz:
+            "A real prize never needs your password or a one-time code. If it asks, it's a scam."
+        case .emerald:
+            "Keep Lava on while you browse and it watches for risky domains in the background."
+        case .kiwiCreme:
+            "Small habits help: pause before you tap, and let Lava handle the domains you should skip."
         }
     }
 }

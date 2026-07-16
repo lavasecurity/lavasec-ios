@@ -532,6 +532,40 @@ enum ProtectionHapticFeedback {
             generator.impactOccurred()
         }
     }
+
+    /// Plays one pulse of the Guard long-press "charge" ramp (`GuardianLongPressHaptics`), the
+    /// gesture that reveals the Lava Guard picker. The curve — which pulse, when — is owned by the
+    /// pure `GuardianLongPressHaptics` model; this is the UIKit playback, mapping the level to a
+    /// feedback generator. Gated by the same Lava Haptics toggle as every other surface, so the
+    /// whole ramp goes silent when haptics are off. The lightest step is a `.light` impact at full
+    /// intensity — identical to `.guardianTapAcknowledged` — so the ramp's floor equals the tap.
+    @MainActor static func playGuardianLongPressStep(_ step: GuardianLongPressHapticStep) {
+        guard isEnabled else {
+            return
+        }
+
+        let generator = UIImpactFeedbackGenerator(style: step.level.impactFeedbackStyle)
+        generator.prepare()
+        generator.impactOccurred(intensity: step.intensity)
+    }
+}
+
+private extension GuardianLongPressHapticLevel {
+    /// The UIKit impact weight for this ramp band. `.light` matches the guardian-tap floor.
+    var impactFeedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle {
+        switch self {
+        case .light:
+            .light
+        case .medium:
+            .medium
+        case .heavy:
+            .heavy
+        @unknown default:
+            // Forward-compatible with a future ramp band on the public enum; the floor light impact
+            // is the safe default (matches the guardian-tap feel).
+            .light
+        }
+    }
 }
 
 @MainActor

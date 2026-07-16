@@ -339,7 +339,7 @@
       "warning_level": "normal",
       "default_enabled": true,
       "size_hint": "medium",
-      "counsel_status": "required"
+      "counsel_status": "approved"
     },
     {
       "id": "blocklistproject-ads",
@@ -399,6 +399,22 @@
       "source_url": "https://blocklistproject.github.io/Lists/tiktok.txt",
       "project_url": "https://github.com/blocklistproject/Lists",
       "parse_format": "hosts",
+      "redistribution_mode": "source_url_only",
+      "warning_level": "advanced",
+      "default_enabled": false,
+      "size_hint": "small",
+      "counsel_status": "not_reviewed"
+    },
+    {
+      "id": "hagezi-social",
+      "name": "HaGeZi Social Networks",
+      "provider": "hagezi",
+      "category": "social",
+      "license": "GPL-3.0",
+      "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
+      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt",
+      "project_url": "https://github.com/hagezi/dns-blocklists",
+      "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
       "default_enabled": false,
@@ -563,6 +579,22 @@
       "warning_level": "advanced",
       "default_enabled": false,
       "size_hint": "small",
+      "counsel_status": "not_reviewed"
+    },
+    {
+      "id": "hagezi-anti-piracy",
+      "name": "HaGeZi Anti-Piracy",
+      "provider": "hagezi",
+      "category": "piracy",
+      "license": "GPL-3.0",
+      "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
+      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/anti.piracy-onlydomains.txt",
+      "project_url": "https://github.com/hagezi/dns-blocklists",
+      "parse_format": "domain_list",
+      "redistribution_mode": "source_url_only",
+      "warning_level": "advanced",
+      "default_enabled": false,
+      "size_hint": "medium",
       "counsel_status": "not_reviewed"
     }
   ]

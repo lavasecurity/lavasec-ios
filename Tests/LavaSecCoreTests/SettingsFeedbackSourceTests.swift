@@ -1150,12 +1150,17 @@ final class SettingsFeedbackSourceTests: XCTestCase {
             "mullvad",
             "cloudflare-1111",
             "quad9-secure",
+            "hagezi-root",
             "google-public-dns"
         ])
         XCTAssertEqual(DNSResolverPreset.mullvad.ipv4Servers, ["194.242.2.2"])
         XCTAssertEqual(DNSResolverPreset.mullvad.ipv6Servers, ["2a07:e340::2"])
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.dohEndpoint?.url.absoluteString, "https://dns.mullvad.net/dns-query")
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.dotEndpoint?.hostname, "dns.mullvad.net")
+        XCTAssertEqual(DNSResolverPreset.hagezi.ipv4Servers, ["188.34.161.210"])
+        XCTAssertEqual(DNSResolverPreset.hagezi.ipv6Servers, ["2a01:4f8:c17:1c66::1"])
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.dohEndpoint?.url.absoluteString, "https://root.hagezi.org/dns-query")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.dotEndpoint?.hostname, "root.hagezi.org")
     }
 
     func testResolverPresetMapsTransportSelectorToBaseSelection() throws {
@@ -1167,6 +1172,8 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.settingsBasePreset, .cloudflare)
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.settingsBasePreset, .quad9Secure)
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.settingsBasePreset, .mullvad)
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.settingsBasePreset, .hagezi)
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.settingsBasePreset, .hagezi)
         XCTAssertEqual(DNSResolverPreset.mullvad.dnsOverHTTPSVariant, .mullvadDoH)
         XCTAssertEqual(DNSResolverPreset.mullvad.dnsOverTLSVariant, .mullvadDoT)
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.plainDNSVariant, .mullvad)
@@ -1174,6 +1181,11 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverHTTPS), .mullvadDoH)
         XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverTLS), .mullvadDoT)
         XCTAssertEqual(DNSResolverPreset.mullvad.availableTransports, [.plainDNS, .dnsOverHTTPS, .dnsOverTLS])
+        XCTAssertEqual(DNSResolverPreset.hagezi.dnsOverHTTPSVariant, .hageziDoH)
+        XCTAssertEqual(DNSResolverPreset.hagezi.dnsOverTLSVariant, .hageziDoT)
+        XCTAssertEqual(DNSResolverPreset.hagezi.resolverVariant(for: .dnsOverHTTPS), .hageziDoH)
+        XCTAssertEqual(DNSResolverPreset.hagezi.resolverVariant(for: .dnsOverTLS), .hageziDoT)
+        XCTAssertEqual(DNSResolverPreset.hagezi.availableTransports, [.plainDNS, .dnsOverHTTPS, .dnsOverTLS])
         // Root cause for the Custom-DoQ clear coercion: Mullvad has no QUIC variant, so
         // resolverVariant(.dnsOverQUIC) degrades to the plain preset (transport != DoQ).
         XCTAssertEqual(DNSResolverPreset.mullvad.resolverVariant(for: .dnsOverQUIC), .mullvad)

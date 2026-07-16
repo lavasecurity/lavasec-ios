@@ -264,6 +264,72 @@
         }
       }
     },
+    "Change Lava Guard": {
+      "comment": "VoiceOver / Switch Control action that opens the Lava Guard picker from the Guard tab.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change Lava Guard"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Guard ändern"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cambiar Lava Guard"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer Lava Guard"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cambia Lava Guard"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Guard を変更"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Guard 변경"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alterar Lava Guard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改 Lava Guard"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改 Lava Guard"
+          }
+        }
+      }
+    },
     "Open the Settings app": {
       "comment": "Button in the auto-switch how-to Focus section; opens the iOS Settings app. 'Settings' is the iOS app name.",
       "extractionState": "manual",
@@ -66938,6 +67004,468 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tempo di risposta DNS"
+          }
+        }
+      }
+    },
+    "Lava quietly blocks domains known for scams and malware, so most threats never load.": {
+      "comment": "GuardianShieldStyle.settingsTip .original — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava quietly blocks domains known for scams and malware, so most threats never load."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava blockiert bekannte Betrugs- und Schadsoftware-Domains unauffällig, sodass die meisten Bedrohungen gar nicht erst laden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava bloquea en silencio los dominios conocidos por estafas y malware, así la mayoría de las amenazas ni siquiera se cargan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava bloque discrètement les domaines connus pour les arnaques et les logiciels malveillants, pour que la plupart des menaces ne se chargent jamais."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava blocca in silenzio i domini noti per truffe e malware, così la maggior parte delle minacce non si carica nemmeno."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava は詐欺やマルウェアで知られるドメインをそっとブロックするので、ほとんどの脅威は読み込まれません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava는 사기와 악성코드로 알려진 도메인을 조용히 차단해 대부분의 위협은 아예 열리지 않습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Lava bloqueia em silêncio domínios conhecidos por golpes e malware, então a maioria das ameaças nem carrega."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava 会默默拦截已知的诈骗和恶意软件域名，让大多数威胁根本不会加载。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava 會默默封鎖已知的詐騙與惡意程式網域，讓大多數威脅根本不會載入。"
+          }
+        }
+      }
+    },
+    "A link can show one name but open another. Check where it really goes before you tap.": {
+      "comment": "GuardianShieldStyle.settingsTip .fireOpal — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A link can show one name but open another. Check where it really goes before you tap."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein Link kann einen Namen anzeigen, aber woandershin führen. Prüfe vor dem Tippen, wohin er wirklich geht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un enlace puede mostrar un nombre pero abrir otro. Comprueba adónde lleva de verdad antes de tocar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un lien peut afficher un nom mais en ouvrir un autre. Vérifie sa vraie destination avant de toucher."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un link può mostrare un nome ma aprirne un altro. Controlla dove porta davvero prima di toccare."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リンクは表示名と実際の飛び先が違うことがあります。タップする前に本当の行き先を確認しましょう。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "링크는 보이는 이름과 실제 여는 주소가 다를 수 있습니다. 누르기 전에 진짜 목적지를 확인하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Um link pode mostrar um nome, mas abrir outro. Veja para onde ele leva de verdade antes de tocar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "链接显示的名称可能和实际打开的网址不同。点击前先确认它真正的去向。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連結顯示的名稱可能和實際開啟的網址不同。點擊前先確認它真正的去向。"
+          }
+        }
+      }
+    },
+    "Switch on a blocklist once and Lava keeps catching those domains for you.": {
+      "comment": "GuardianShieldStyle.settingsTip .purpleObsidian — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch on a blocklist once and Lava keeps catching those domains for you."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiviere eine Sperrliste einmal, und Lava fängt diese Domains dauerhaft für dich ab."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activa una lista de bloqueo una vez y Lava seguirá bloqueando esos dominios por ti."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active une liste de blocage une fois, et Lava continue de bloquer ces domaines pour toi."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attiva una volta un elenco di blocco e Lava continua a fermare quei domini per te."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブロックリストを一度オンにすれば、Lava がそのドメインをずっとブロックし続けます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "차단 목록을 한 번만 켜 두면 Lava가 그 도메인을 계속 막아 줍니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ative uma lista de bloqueio uma vez e o Lava continua barrando esses domínios por você."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启一次拦截列表，Lava 就会持续为你拦截那些域名。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟一次封鎖清單，Lava 就會持續為你攔截那些網域。"
+          }
+        }
+      }
+    },
+    "Some fake sites copy a real login page to steal your password. Open the app or type the address yourself.": {
+      "comment": "GuardianShieldStyle.settingsTip .obsidian — layman tip under the sign-in Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some fake sites copy a real login page to steal your password. Open the app or type the address yourself."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manche gefälschten Seiten kopieren eine echte Anmeldeseite, um dein Passwort zu stehlen. Öffne die App oder gib die Adresse selbst ein."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Algunos sitios falsos copian una página de inicio de sesión real para robar tu contraseña. Abre la app o escribe la dirección tú mismo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Certains faux sites copient une vraie page de connexion pour voler ton mot de passe. Ouvre l'app ou saisis l'adresse toi-même."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alcuni siti falsi copiano una vera pagina di accesso per rubare la tua password. Apri l'app o digita tu stesso l'indirizzo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "偽サイトの中には本物のログイン画面をまねてパスワードを盗むものがあります。アプリを開くか、アドレスを自分で入力しましょう。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일부 가짜 사이트는 진짜 로그인 화면을 흉내 내 비밀번호를 훔칩니다. 앱을 직접 열거나 주소를 직접 입력하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alguns sites falsos copiam uma página de login real para roubar sua senha. Abra o app ou digite o endereço você mesmo."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有些假网站会仿冒真正的登录页面来窃取你的密码。请直接打开 App，或自己输入网址。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有些假網站會仿冒真正的登入畫面來竊取你的密碼。請直接開啟 App，或自己輸入網址。"
+          }
+        }
+      }
+    },
+    "A real prize never needs your password or a one-time code. If it asks, it's a scam.": {
+      "comment": "GuardianShieldStyle.settingsTip .cherryQuartz — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A real prize never needs your password or a one-time code. If it asks, it's a scam."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein echter Gewinn braucht nie dein Passwort oder einen Einmalcode. Wird danach gefragt, ist es Betrug."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un premio real nunca pide tu contraseña ni un código de un solo uso. Si lo pide, es una estafa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un vrai lot ne demande jamais ton mot de passe ni un code à usage unique. S'il le demande, c'est une arnaque."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un premio vero non chiede mai la tua password né un codice usa e getta. Se lo chiede, è una truffa."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本物の賞品にパスワードやワンタイムコードは必要ありません。求められたら詐欺です。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진짜 경품은 비밀번호나 일회용 코드를 요구하지 않습니다. 요구한다면 사기입니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Um prêmio de verdade nunca pede sua senha nem um código de uso único. Se pedir, é golpe."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "真正的奖品绝不会索要你的密码或一次性验证码。如果索要，那就是诈骗。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "真正的獎品絕不會要你的密碼或一次性驗證碼。若有索取，那就是詐騙。"
+          }
+        }
+      }
+    },
+    "Keep Lava on while you browse and it watches for risky domains in the background.": {
+      "comment": "GuardianShieldStyle.settingsTip .emerald — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Lava on while you browse and it watches for risky domains in the background."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lass Lava beim Surfen an – es achtet im Hintergrund auf riskante Domains."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén Lava activado mientras navegas y vigilará los dominios de riesgo en segundo plano."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garde Lava activé pendant que tu navigues : il surveille les domaines à risque en arrière-plan."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni Lava attivo mentre navighi e terrà d'occhio i domini rischiosi in background."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブラウジング中も Lava をオンにしておけば、危険なドメインをバックグラウンドで見張ります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "웹을 볼 때 Lava를 켜 두면 백그라운드에서 위험한 도메인을 살펴봅니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantenha o Lava ativado enquanto navega e ele fica de olho em domínios arriscados em segundo plano."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览时让 Lava 保持开启，它会在后台留意有风险的域名。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "瀏覽時讓 Lava 保持開啟，它會在背景留意有風險的網域。"
+          }
+        }
+      }
+    },
+    "Small habits help: pause before you tap, and let Lava handle the domains you should skip.": {
+      "comment": "GuardianShieldStyle.settingsTip .kiwiCreme — layman tip under the Guard quote in the Lava Guard picker spotlight panel (CustomizationSettingsView). Catalog-only.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Small habits help: pause before you tap, and let Lava handle the domains you should skip."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kleine Gewohnheiten helfen: kurz innehalten vor dem Tippen und die zu meidenden Domains Lava überlassen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los pequeños hábitos ayudan: haz una pausa antes de tocar y deja que Lava se ocupe de los dominios que conviene evitar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les petites habitudes aident : marque une pause avant de toucher et laisse Lava gérer les domaines à éviter."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le piccole abitudini aiutano: fermati un attimo prima di toccare e lascia a Lava i domini da evitare."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小さな習慣が効きます。タップする前にひと呼吸おいて、避けるべきドメインは Lava に任せましょう。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "작은 습관이 도움이 됩니다. 누르기 전에 잠시 멈추고, 피해야 할 도메인은 Lava에 맡기세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pequenos hábitos ajudam: faça uma pausa antes de tocar e deixe o Lava cuidar dos domínios que é melhor evitar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小习惯很有用：点击前先停一下，该避开的域名就交给 Lava。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小習慣很有用：點擊前先停一下，該避開的網域就交給 Lava。"
           }
         }
       }

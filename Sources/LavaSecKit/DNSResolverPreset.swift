@@ -238,6 +238,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Quad9"
         case Self.mullvad.id:
             "Mullvad"
+        case Self.hagezi.id:
+            "HaGeZi"
         case Self.googleDoH.id:
             "Google (\(dohAnnotation))"
         case Self.cloudflareDoH.id:
@@ -246,6 +248,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Quad9 (\(dohAnnotation))"
         case Self.mullvadDoH.id:
             "Mullvad (\(dohAnnotation))"
+        case Self.hageziDoH.id:
+            "HaGeZi (\(dohAnnotation))"
         case Self.googleDoT.id:
             "Google (DoT)"
         case Self.cloudflareDoT.id:
@@ -254,6 +258,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Quad9 (DoT)"
         case Self.mullvadDoT.id:
             "Mullvad (DoT)"
+        case Self.hageziDoT.id:
+            "HaGeZi (DoT)"
         default:
             displayName
         }
@@ -298,6 +304,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Quad9"
         case Self.mullvad.id, Self.mullvadDoH.id, Self.mullvadDoT.id:
             "Mullvad"
+        case Self.hagezi.id, Self.hageziDoH.id, Self.hageziDoT.id:
+            "HaGeZi"
         default:
             displayName
         }
@@ -327,6 +335,10 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .quad9Secure
         case Self.mullvadDoT.id:
             return .mullvad
+        case Self.hageziDoH.id:
+            return .hagezi
+        case Self.hageziDoT.id:
+            return .hagezi
         default:
             return DNSResolverPreset.settingsPresets.first { $0.id == id } ?? self
         }
@@ -346,6 +358,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .quad9SecureDoH
         case Self.mullvad.id:
             return .mullvadDoH
+        case Self.hagezi.id:
+            return .hageziDoH
         default:
             return nil
         }
@@ -373,6 +387,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .quad9SecureDoT
         case Self.mullvad.id:
             return .mullvadDoT
+        case Self.hagezi.id:
+            return .hageziDoT
         default:
             return nil
         }
@@ -888,6 +904,17 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         hasUpstreamFiltering: false
     )
 
+    /// HaGeZi's public "root" resolver (https://github.com/hagezi/dns-servers), which
+    /// applies upstream ad, tracking, malware, and phishing blocking before answering.
+    public static let hagezi = DNSResolverPreset(
+        id: "hagezi-root",
+        displayName: "HaGeZi DNS",
+        ipv4Servers: ["188.34.161.210"],
+        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking.",
+        hasUpstreamFiltering: true
+    )
+
     public static let googleDoH = DNSResolverPreset(
         id: "google-public-dns-doh",
         displayName: "Google Public DNS (DoH)",
@@ -945,6 +972,25 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             url: URL(string: "https://dns.mullvad.net/dns-query")!,
             bootstrapIPv4Servers: ["194.242.2.2"],
             bootstrapIPv6Servers: ["2a07:e340::2"]
+        )
+    )
+
+    /// DNS over HTTPS variant of the HaGeZi root resolver.
+    public static let hageziDoH = DNSResolverPreset(
+        id: "hagezi-root-doh",
+        displayName: "HaGeZi DNS (DoH)",
+        ipv4Servers: ["188.34.161.210"],
+        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        // Upstream filtering is a property of the HaGeZi resolver, not the transport, so the DoH
+        // variant carries the same ad/tracking/malware/phishing caveat as the plain preset — a user
+        // inspecting only the DoH preset must still see what `hasUpstreamFiltering: true` encodes.
+        notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking, over DNS over HTTPS.",
+        hasUpstreamFiltering: true,
+        transport: .dnsOverHTTPS,
+        dohEndpoint: DNSOverHTTPSEndpoint(
+            url: URL(string: "https://root.hagezi.org/dns-query")!,
+            bootstrapIPv4Servers: ["188.34.161.210"],
+            bootstrapIPv6Servers: ["2a01:4f8:c17:1c66::1"]
         )
     )
 
@@ -1008,11 +1054,31 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         )
     )
 
+    /// DNS over TLS variant of the HaGeZi root resolver.
+    public static let hageziDoT = DNSResolverPreset(
+        id: "hagezi-root-dot",
+        displayName: "HaGeZi DNS (DoT)",
+        ipv4Servers: ["188.34.161.210"],
+        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        // Upstream filtering is a property of the HaGeZi resolver, not the transport, so the DoT
+        // variant carries the same ad/tracking/malware/phishing caveat as the plain preset — a user
+        // inspecting only the DoT preset must still see what `hasUpstreamFiltering: true` encodes.
+        notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking, over DNS over TLS.",
+        hasUpstreamFiltering: true,
+        transport: .dnsOverTLS,
+        dotEndpoint: DNSOverTLSEndpoint(
+            hostname: "root.hagezi.org",
+            bootstrapIPv4Servers: ["188.34.161.210"],
+            bootstrapIPv6Servers: ["2a01:4f8:c17:1c66::1"]
+        )
+    )
+
     public static let builtInPresets: [DNSResolverPreset] = [
         .device,
         .mullvad,
         .cloudflare,
         .quad9Secure,
+        .hagezi,
         .google
     ]
 
@@ -1021,6 +1087,7 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         .mullvad,
         .cloudflare,
         .quad9Secure,
+        .hagezi,
         .google
     ]
 
@@ -1029,14 +1096,17 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         .mullvad,
         .cloudflare,
         .quad9Secure,
+        .hagezi,
         .google,
         .mullvadDoH,
         .cloudflareDoH,
         .quad9SecureDoH,
+        .hageziDoH,
         .googleDoH,
         .mullvadDoT,
         .cloudflareDoT,
         .quad9SecureDoT,
+        .hageziDoT,
         .googleDoT
     ]
 

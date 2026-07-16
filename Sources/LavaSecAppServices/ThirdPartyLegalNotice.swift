@@ -113,6 +113,15 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
+            id: DNSResolverPreset.hagezi.id,
+            displayName: DNSResolverPreset.hagezi.displayName,
+            category: .dnsResolver,
+            ownerName: "HaGeZi",
+            noticeText: "HaGeZi DNS is a public resolver operated by the HaGeZi project.",
+            sourceURL: URL(string: "https://github.com/hagezi/dns-servers"),
+            plannedUse: dnsResolverPlannedUse
+        ),
+        ThirdPartyLegalNotice(
             id: DNSResolverPreset.google.id,
             displayName: DNSResolverPreset.google.displayName,
             category: .dnsResolver,
@@ -149,6 +158,15 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
+            id: DNSResolverPreset.hageziDoH.id,
+            displayName: DNSResolverPreset.hageziDoH.displayName,
+            category: .dnsResolver,
+            ownerName: "HaGeZi",
+            noticeText: "HaGeZi DNS is a public resolver operated by the HaGeZi project.",
+            sourceURL: URL(string: "https://github.com/hagezi/dns-servers"),
+            plannedUse: dnsResolverPlannedUse
+        ),
+        ThirdPartyLegalNotice(
             id: DNSResolverPreset.googleDoH.id,
             displayName: DNSResolverPreset.googleDoH.displayName,
             category: .dnsResolver,
@@ -182,6 +200,15 @@ public enum ThirdPartyLegalNotices {
             ownerName: "Quad9 Foundation",
             noticeText: "Quad9 is a trademark of Quad9 Foundation.",
             sourceURL: URL(string: "https://www.quad9.org/about/"),
+            plannedUse: dnsResolverPlannedUse
+        ),
+        ThirdPartyLegalNotice(
+            id: DNSResolverPreset.hageziDoT.id,
+            displayName: DNSResolverPreset.hageziDoT.displayName,
+            category: .dnsResolver,
+            ownerName: "HaGeZi",
+            noticeText: "HaGeZi DNS is a public resolver operated by the HaGeZi project.",
+            sourceURL: URL(string: "https://github.com/hagezi/dns-servers"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
