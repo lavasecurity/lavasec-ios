@@ -123,28 +123,11 @@ private struct ResolverAdjustedRuntimeSnapshot: FilterRuntimeSnapshot {
     }
 }
 
-private struct FailClosedRuntimeSnapshot: FilterRuntimeSnapshot {
-    let resolver: DNSResolverPreset
-
-    var blockRuleCount: Int { 0 }
-    var allowRuleCount: Int { 0 }
-    var guardrailRuleCount: Int { 0 }
-
-    // Blocks EVERY domain because no usable rule snapshot is resident. The reason is
-    // `.protectionUnavailable` (NOT `.blocklist`): these are precautionary fail-closed
-    // blocks, not curated matches, so labelling them `.blocklist` would forge a blocklist
-    // verdict for legitimate domains (the false positives that filled the Blocked tab with
-    // google.com / icloud / apple endpoints during fail-closed windows). The honest reason
-    // propagates to Domain History (where DiagnosticsStore drops it), bug reports, and CSV
-    // export.
-    func decision(for rawDomain: String) -> FilterDecision {
-        FilterDecision(action: .block, reason: .protectionUnavailable)
-    }
-
-    func decision(forNormalizedDomain normalizedDomain: String) -> FilterDecision {
-        FilterDecision(action: .block, reason: .protectionUnavailable)
-    }
-}
+// The block-all fail-closed snapshot (INV-DNS-1's terminal degradation step) is
+// `LavaSecKit.FailClosedRuntimeSnapshot`: it lives in the package so its block-every-
+// domain / `.protectionUnavailable` semantics are asserted by executable tests
+// (FailClosedRuntimeSnapshotTests) instead of source pins on this file. The provider
+// keeps only the install-site wiring, which PacketTunnelDNSRuntimeSourceTests pins.
 
 private struct TunnelNetworkSettingsBundle {
     let settings: NEPacketTunnelNetworkSettings

@@ -9,6 +9,7 @@ final class DNSResolverPresetTests: XCTestCase {
             "mullvad",
             "cloudflare-1111",
             "quad9-secure",
+            "hagezi-root",
             "google-public-dns"
         ])
     }
@@ -19,14 +20,17 @@ final class DNSResolverPresetTests: XCTestCase {
             "mullvad",
             "cloudflare-1111",
             "quad9-secure",
+            "hagezi-root",
             "google-public-dns",
             "mullvad-doh",
             "cloudflare-1111-doh",
             "quad9-secure-doh",
+            "hagezi-root-doh",
             "google-public-dns-doh",
             "mullvad-dot",
             "cloudflare-1111-dot",
             "quad9-secure-dot",
+            "hagezi-root-dot",
             "google-public-dns-dot"
         ])
     }
@@ -37,11 +41,13 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertNil(DNSResolverPreset.cloudflare.dohEndpoint)
         XCTAssertNil(DNSResolverPreset.quad9Secure.dohEndpoint)
         XCTAssertNil(DNSResolverPreset.mullvad.dohEndpoint)
+        XCTAssertNil(DNSResolverPreset.hagezi.dohEndpoint)
 
         XCTAssertEqual(DNSResolverPreset.googleDoH.dohEndpoint?.url.absoluteString, "https://dns.google/dns-query")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.dohEndpoint?.url.absoluteString, "https://cloudflare-dns.com/dns-query")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.dohEndpoint?.url.absoluteString, "https://dns.quad9.net/dns-query")
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.dohEndpoint?.url.absoluteString, "https://dns.mullvad.net/dns-query")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.dohEndpoint?.url.absoluteString, "https://root.hagezi.org/dns-query")
     }
 
     func testBuiltInDoTEndpointsUseExpectedHostsAndPorts() throws {
@@ -50,6 +56,7 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertNil(DNSResolverPreset.cloudflare.dotEndpoint)
         XCTAssertNil(DNSResolverPreset.quad9Secure.dotEndpoint)
         XCTAssertNil(DNSResolverPreset.mullvad.dotEndpoint)
+        XCTAssertNil(DNSResolverPreset.hagezi.dotEndpoint)
 
         XCTAssertEqual(DNSResolverPreset.googleDoT.dotEndpoint?.hostname, "dns.google")
         XCTAssertEqual(DNSResolverPreset.googleDoT.dotEndpoint?.port, 853)
@@ -58,6 +65,9 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.dotEndpoint?.port, 853)
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.dotEndpoint?.hostname, "dns.quad9.net")
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.dotEndpoint?.hostname, "dns.mullvad.net")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.dotEndpoint?.hostname, "root.hagezi.org")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.dotEndpoint?.port, 853)
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.dotEndpoint?.bootstrapIPv4Servers, ["188.34.161.210"])
     }
 
     func testDoHDisplayNamesAreSuffixed() throws {
@@ -65,6 +75,7 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.displayName, "Cloudflare 1.1.1.1 (DoH)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.displayName, "Quad9 Secure (DoH)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.displayName, "Mullvad (DoH)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.displayName, "HaGeZi DNS (DoH)")
     }
 
     func testDoTDisplayNamesAreSuffixed() throws {
@@ -72,6 +83,7 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.displayName, "Cloudflare 1.1.1.1 (DoT)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.displayName, "Quad9 Secure (DoT)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.displayName, "Mullvad (DoT)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.displayName, "HaGeZi DNS (DoT)")
     }
 
     func testShortDisplayNamesUseCompactProviderNames() throws {
@@ -80,14 +92,17 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflare.shortDisplayName, "Cloudflare")
         XCTAssertEqual(DNSResolverPreset.quad9Secure.shortDisplayName, "Quad9")
         XCTAssertEqual(DNSResolverPreset.mullvad.shortDisplayName, "Mullvad")
+        XCTAssertEqual(DNSResolverPreset.hagezi.shortDisplayName, "HaGeZi")
         XCTAssertEqual(DNSResolverPreset.googleDoH.shortDisplayName, "Google (DoH)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName, "Cloudflare (DoH)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.shortDisplayName, "Quad9 (DoH)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.shortDisplayName, "Mullvad (DoH)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.shortDisplayName, "HaGeZi (DoH)")
         XCTAssertEqual(DNSResolverPreset.googleDoT.shortDisplayName, "Google (DoT)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.shortDisplayName, "Cloudflare (DoT)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.shortDisplayName, "Quad9 (DoT)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.shortDisplayName, "Mullvad (DoT)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.shortDisplayName, "HaGeZi (DoT)")
     }
 
     func testGuardFlowDNSDetailsDoNotRepeatDNS() throws {
@@ -96,14 +111,17 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflare.guardFlowDNSDetailText, "Cloudflare (IP)")
         XCTAssertEqual(DNSResolverPreset.quad9Secure.guardFlowDNSDetailText, "Quad9 (IP)")
         XCTAssertEqual(DNSResolverPreset.mullvad.guardFlowDNSDetailText, "Mullvad (IP)")
+        XCTAssertEqual(DNSResolverPreset.hagezi.guardFlowDNSDetailText, "HaGeZi (IP)")
         XCTAssertEqual(DNSResolverPreset.googleDoH.guardFlowDNSDetailText, "Google (DoH)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.guardFlowDNSDetailText, "Cloudflare (DoH)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.guardFlowDNSDetailText, "Quad9 (DoH)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.guardFlowDNSDetailText, "Mullvad (DoH)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.guardFlowDNSDetailText, "HaGeZi (DoH)")
         XCTAssertEqual(DNSResolverPreset.googleDoT.guardFlowDNSDetailText, "Google (DoT)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoT.guardFlowDNSDetailText, "Cloudflare (DoT)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoT.guardFlowDNSDetailText, "Quad9 (DoT)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoT.guardFlowDNSDetailText, "Mullvad (DoT)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoT.guardFlowDNSDetailText, "HaGeZi (DoT)")
     }
 
     func testDoHPresetsAnnotateDoH3OnlyForNegotiatedHTTP3() {
@@ -111,6 +129,7 @@ final class DNSResolverPresetTests: XCTestCase {
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName(dohHTTPVersion: "h3"), "Cloudflare (DoH3)")
         XCTAssertEqual(DNSResolverPreset.quad9SecureDoH.shortDisplayName(dohHTTPVersion: "h3"), "Quad9 (DoH3)")
         XCTAssertEqual(DNSResolverPreset.mullvadDoH.shortDisplayName(dohHTTPVersion: "h3"), "Mullvad (DoH3)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.shortDisplayName(dohHTTPVersion: "h3"), "HaGeZi (DoH3)")
 
         // Draft ALPN identifiers still count as HTTP/3.
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName(dohHTTPVersion: "h3-29"), "Cloudflare (DoH3)")
@@ -118,6 +137,7 @@ final class DNSResolverPresetTests: XCTestCase {
         // Anything other than an observed h3 negotiation keeps the plain
         // annotation: DoH3 is preferred, never promised.
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName(dohHTTPVersion: "h2"), "Cloudflare (DoH)")
+        XCTAssertEqual(DNSResolverPreset.hageziDoH.shortDisplayName(dohHTTPVersion: "h2"), "HaGeZi (DoH)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName(dohHTTPVersion: "http/1.1"), "Cloudflare (DoH)")
         XCTAssertEqual(DNSResolverPreset.cloudflareDoH.shortDisplayName(dohHTTPVersion: nil), "Cloudflare (DoH)")
 

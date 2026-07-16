@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Last reviewed: 2026-06-21
+Last reviewed: 2026-07-15
 Status: Engineering self-review (not a formal legal opinion)
 
 Lava publishes catalog metadata for launch sources and the app fetches selected
@@ -34,6 +34,8 @@ see [`open-source-list-data-terms-carveout.md`](open-source-list-data-terms-carv
 | HaGeZi Threat Intelligence Feed Mini | GPL-3.0 | source_url_only | https://github.com/hagezi/dns-blocklists | https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt |
 | HaGeZi NSFW | GPL-3.0 | source_url_only | https://github.com/hagezi/dns-blocklists | https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/nsfw-onlydomains.txt |
 | HaGeZi Gambling | GPL-3.0 | source_url_only | https://github.com/hagezi/dns-blocklists | https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling-onlydomains.txt |
+| HaGeZi Social Networks | GPL-3.0 | source_url_only | https://github.com/hagezi/dns-blocklists | https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt |
+| HaGeZi Anti-Piracy | GPL-3.0 | source_url_only | https://github.com/hagezi/dns-blocklists | https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/anti.piracy-onlydomains.txt |
 | The Block List Project Ads | Unlicense | source_url_only | https://github.com/blocklistproject/Lists | https://blocklistproject.github.io/Lists/ads.txt |
 | The Block List Project Tracking | Unlicense | source_url_only | https://github.com/blocklistproject/Lists | https://blocklistproject.github.io/Lists/tracking.txt |
 | The Block List Project Facebook | Unlicense | source_url_only | https://github.com/blocklistproject/Lists | https://blocklistproject.github.io/Lists/facebook.txt |

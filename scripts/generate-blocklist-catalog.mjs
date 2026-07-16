@@ -46,6 +46,8 @@ const SWIFT_NAMES = {
   "hagezi-tif-mini": "hageziThreatIntelligenceFeedMini",
   "hagezi-nsfw": "hageziNSFW",
   "hagezi-gambling": "hageziGambling",
+  "hagezi-social": "hageziSocial",
+  "hagezi-anti-piracy": "hageziAntiPiracy",
   "stevenblack-unified": "stevenBlackUnifiedHosts",
   "stevenblack-social": "stevenBlackSocial",
   "stevenblack-porn": "stevenBlackAdult",

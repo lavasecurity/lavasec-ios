@@ -74,50 +74,13 @@ public final class DoHTransport: @unchecked Sendable {
                 self.finishTask()
             }
 
-            let negotiatedHTTPProtocolName = metricsRecorder.recordedProtocolName()
-
-            if let urlError = error as? URLError, urlError.code == .timedOut {
-                completion(DNSTransportResponse(
-                    response: nil,
-                    outcome: .timeout,
-                    negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
-                ))
-                return
-            }
-
-            guard error == nil, let data, let response else {
-                completion(DNSTransportResponse(
-                    response: nil,
-                    outcome: .receiveFailed,
-                    negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
-                ))
-                return
-            }
-
-            do {
-                let dnsResponse = try DNSOverHTTPSRequest.validatedDNSResponse(
-                    body: data,
-                    response: response,
-                    originalQuery: query
-                )
-                completion(DNSTransportResponse(
-                    response: dnsResponse,
-                    outcome: .success,
-                    negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
-                ))
-            } catch DNSOverHTTPSRequest.Error.httpStatus(_) {
-                completion(DNSTransportResponse(
-                    response: nil,
-                    outcome: .httpStatusFailure,
-                    negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
-                ))
-            } catch {
-                completion(DNSTransportResponse(
-                    response: nil,
-                    outcome: .receiveFailed,
-                    negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
-                ))
-            }
+            completion(Self.classifiedResponse(
+                data: data,
+                response: response,
+                error: error,
+                originalQuery: query,
+                negotiatedHTTPProtocolName: metricsRecorder.recordedProtocolName()
+            ))
         }
 
         // A per-task delegate is the only way a completion-handler task can
@@ -125,6 +88,62 @@ public final class DoHTransport: @unchecked Sendable {
         // before the completion handler runs.
         task.delegate = metricsRecorder
         task.resume()
+    }
+
+    // Classifies one completed data task into the transport outcome the resolver
+    // records: URLSession timeout → .timeout (feeds the health evidence's timeout
+    // bucket), transport/loader errors and DNS-payload mismatches → .receiveFailed,
+    // non-2xx → .httpStatusFailure, validated body → .success with the original
+    // transaction ID restored. Pure (no session state) so the mapping gets executable
+    // tests — the dataTask closure above stays thin glue.
+    // pinned: DoHResponseClassificationTests.testTimedOutTaskClassifiesAsTimeout
+    static func classifiedResponse(
+        data: Data?,
+        response: URLResponse?,
+        error: Error?,
+        originalQuery: Data,
+        negotiatedHTTPProtocolName: String?
+    ) -> DNSTransportResponse {
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return DNSTransportResponse(
+                response: nil,
+                outcome: .timeout,
+                negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
+            )
+        }
+
+        guard error == nil, let data, let response else {
+            return DNSTransportResponse(
+                response: nil,
+                outcome: .receiveFailed,
+                negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
+            )
+        }
+
+        do {
+            let dnsResponse = try DNSOverHTTPSRequest.validatedDNSResponse(
+                body: data,
+                response: response,
+                originalQuery: originalQuery
+            )
+            return DNSTransportResponse(
+                response: dnsResponse,
+                outcome: .success,
+                negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
+            )
+        } catch DNSOverHTTPSRequest.Error.httpStatus(_) {
+            return DNSTransportResponse(
+                response: nil,
+                outcome: .httpStatusFailure,
+                negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
+            )
+        } catch {
+            return DNSTransportResponse(
+                response: nil,
+                outcome: .receiveFailed,
+                negotiatedHTTPProtocolName: negotiatedHTTPProtocolName
+            )
+        }
     }
 
     private func beginTaskSession() -> URLSession {

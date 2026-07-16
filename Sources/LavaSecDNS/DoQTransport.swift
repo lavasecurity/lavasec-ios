@@ -412,8 +412,7 @@ final class DoQConnection: @unchecked Sendable {
     ) {
         let remainingByteCount = 2 - accumulated.count
         guard remainingByteCount > 0 else {
-            let responseLength = Int(Self.readUInt16(accumulated, at: 0))
-            guard responseLength > 0 else {
+            guard let responseLength = DNSLengthPrefixedWireMessage.responseBodyLength(fromPrefix: accumulated) else {
                 finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
                 return
             }
@@ -439,26 +438,31 @@ final class DoQConnection: @unchecked Sendable {
 
                 if let error {
                     self.logConnectionError(error, phase: "receive-length")
+                }
+
+                switch DNSLengthPrefixedWireMessage.receiveStep(
+                    accumulated: accumulated,
+                    incoming: data,
+                    hadReceiveError: error != nil,
+                    isComplete: isComplete,
+                    targetByteCount: 2,
+                    failsOnEmptyChunk: false
+                ) {
+                case .failed:
+                    // Includes a stream that FINishes short of the prefix: re-receiving
+                    // on a finished stream spins until the query timeout, so fail fast
+                    // (mirrors DoT's truncation handling).
                     self.finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
-                    return
+                case .frameComplete(let next), .continueReceiving(accumulated: let next):
+                    // Both re-enter through the entry guard, which parses the prefix
+                    // once the 2 bytes are accumulated.
+                    self.receiveResponseLength(
+                        connection: connection,
+                        originalQuery: originalQuery,
+                        zeroIDQuery: zeroIDQuery,
+                        accumulated: next
+                    )
                 }
-
-                var next = accumulated
-                if let data {
-                    next.append(data)
-                }
-
-                guard !next.isEmpty || !isComplete else {
-                    self.finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
-                    return
-                }
-
-                self.receiveResponseLength(
-                    connection: connection,
-                    originalQuery: originalQuery,
-                    zeroIDQuery: zeroIDQuery,
-                    accumulated: next
-                )
             }
         }
     }
@@ -495,27 +499,31 @@ final class DoQConnection: @unchecked Sendable {
 
                 if let error {
                     self.logConnectionError(error, phase: "receive-body")
+                }
+
+                switch DNSLengthPrefixedWireMessage.receiveStep(
+                    accumulated: accumulated,
+                    incoming: data,
+                    hadReceiveError: error != nil,
+                    isComplete: isComplete,
+                    targetByteCount: expectedLength,
+                    failsOnEmptyChunk: false
+                ) {
+                case .failed:
+                    // Includes a truncated body (stream FIN before expectedLength):
+                    // fail fast instead of re-receiving until the query timeout.
                     self.finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
-                    return
+                case .frameComplete(let next), .continueReceiving(accumulated: let next):
+                    // Both re-enter through the entry guard, which validates the body
+                    // once expectedLength is accumulated.
+                    self.receiveResponseBody(
+                        connection: connection,
+                        originalQuery: originalQuery,
+                        zeroIDQuery: zeroIDQuery,
+                        expectedLength: expectedLength,
+                        accumulated: next
+                    )
                 }
-
-                var next = accumulated
-                if let data {
-                    next.append(data)
-                }
-
-                guard !next.isEmpty || !isComplete else {
-                    self.finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .receiveFailed))
-                    return
-                }
-
-                self.receiveResponseBody(
-                    connection: connection,
-                    originalQuery: originalQuery,
-                    zeroIDQuery: zeroIDQuery,
-                    expectedLength: expectedLength,
-                    accumulated: next
-                )
             }
         }
     }
@@ -555,11 +563,5 @@ final class DoQConnection: @unchecked Sendable {
             "phase": phase,
             "error": String(describing: error)
         ])
-    }
-
-    private static func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
-        let firstIndex = data.index(data.startIndex, offsetBy: offset)
-        let secondIndex = data.index(after: firstIndex)
-        return (UInt16(data[firstIndex]) << 8) | UInt16(data[secondIndex])
     }
 }

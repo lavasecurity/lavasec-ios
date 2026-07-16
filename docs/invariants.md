@@ -35,8 +35,12 @@ is adopted after unlock. Post-INV-PERSIST-2, control-plane files carry
 `NSFileProtectionNone`, so a pre-unlock boot normally reads the real config/artifacts and
 serves real filtering; the fail-closed branch remains for transient unreadability.
 - Home: `LavaSecTunnel/PacketTunnelProvider.swift` — `loadInitialSharedState` /
-  `bootstrapResidentSnapshotFromDisk` / `serveLastKnownGoodOrFailClosed` comments.
-- Enforced: `PacketTunnelDNSRuntimeSourceTests.testLoadInitialSharedStateWarmResumesFromDiskBeforeFailingClosed`
+  `bootstrapResidentSnapshotFromDisk` / `serveLastKnownGoodOrFailClosed` comments; the
+  block-all snapshot itself is `Sources/LavaSecKit/FailClosedRuntimeSnapshot.swift`.
+- Enforced: `FailClosedRuntimeSnapshotTests` (executable: the fail-closed snapshot blocks
+  every domain — including non-normalizable input — with `.protectionUnavailable`, never
+  a forged `.blocklist` verdict) +
+  `PacketTunnelDNSRuntimeSourceTests.testLoadInitialSharedStateWarmResumesFromDiskBeforeFailingClosed`
   (asserts fail-closed install remains when neither strict nor LKG serves, and pins the
   strict-before-LKG bootstrap sequence).
 

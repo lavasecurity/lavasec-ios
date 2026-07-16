@@ -248,6 +248,17 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-social.
+    static let hageziSocial = BlocklistSource(
+        id: "hagezi-social",
+        name: "HaGeZi Social Networks",
+        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt")!,
+        licenseName: "GPL-3.0",
+        category: .social,
+        defaultEnabled: false,
+        warningLevel: .advanced
+    )
+
     /// Curated metadata for catalog source stevenblack-social.
     static let stevenBlackSocial = BlocklistSource(
         id: "stevenblack-social",
@@ -358,6 +369,17 @@ public extension DefaultCatalog {
         warningLevel: .advanced
     )
 
+    /// Curated metadata for catalog source hagezi-anti-piracy.
+    static let hageziAntiPiracy = BlocklistSource(
+        id: "hagezi-anti-piracy",
+        name: "HaGeZi Anti-Piracy",
+        sourceURL: URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/anti.piracy-onlydomains.txt")!,
+        licenseName: "GPL-3.0",
+        category: .piracy,
+        defaultEnabled: false,
+        warningLevel: .advanced
+    )
+
     /// Every curated source, in canonical catalog order (category order, then name).
     /// This is the single bundled list the picker and onboarding build from.
     static let curatedSources: [BlocklistSource] = [
@@ -383,6 +405,7 @@ public extension DefaultCatalog {
         blockListProjectTracking,
         blockListProjectFacebook,
         blockListProjectTikTok,
+        hageziSocial,
         stevenBlackSocial,
         hageziNSFW,
         oisdNSFW,
@@ -393,5 +416,6 @@ public extension DefaultCatalog {
         stevenBlackGambling,
         blockListProjectPiracy,
         blockListProjectTorrent,
+        hageziAntiPiracy,
     ]
 }
