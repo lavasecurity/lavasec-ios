@@ -904,13 +904,23 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         hasUpstreamFiltering: false
     )
 
+    // HaGeZi root resolver endpoint values, sourced from the upstream list at
+    // https://github.com/hagezi/dns-servers. Centralised into one constant per family so the plain /
+    // DoH / DoT presets below (which each repeat them across `ipv4Servers` / `ipv6Servers` /
+    // `bootstrap*Servers`) cannot silently drift apart on a mistyped IP — a single mistyped address
+    // would otherwise fail only ONE of the three variants and be easy to miss. Keep in sync with the
+    // upstream list (OCR review on the 1.2.4 sync).
+    private static let hageziIPv4Servers = ["188.34.161.210"]
+    private static let hageziIPv6Servers = ["2a01:4f8:c17:1c66::1"]
+    private static let hageziEncryptedHostname = "root.hagezi.org"
+
     /// HaGeZi's public "root" resolver (https://github.com/hagezi/dns-servers), which
     /// applies upstream ad, tracking, malware, and phishing blocking before answering.
     public static let hagezi = DNSResolverPreset(
         id: "hagezi-root",
         displayName: "HaGeZi DNS",
-        ipv4Servers: ["188.34.161.210"],
-        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        ipv4Servers: Self.hageziIPv4Servers,
+        ipv6Servers: Self.hageziIPv6Servers,
         notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking.",
         hasUpstreamFiltering: true
     )
@@ -979,18 +989,19 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
     public static let hageziDoH = DNSResolverPreset(
         id: "hagezi-root-doh",
         displayName: "HaGeZi DNS (DoH)",
-        ipv4Servers: ["188.34.161.210"],
-        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        ipv4Servers: Self.hageziIPv4Servers,
+        ipv6Servers: Self.hageziIPv6Servers,
         // Upstream filtering is a property of the HaGeZi resolver, not the transport, so the DoH
         // variant carries the same ad/tracking/malware/phishing caveat as the plain preset — a user
         // inspecting only the DoH preset must still see what `hasUpstreamFiltering: true` encodes.
+        // IPs/host come from the shared `hagezi*` constants above (upstream: hagezi/dns-servers).
         notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking, over DNS over HTTPS.",
         hasUpstreamFiltering: true,
         transport: .dnsOverHTTPS,
         dohEndpoint: DNSOverHTTPSEndpoint(
-            url: URL(string: "https://root.hagezi.org/dns-query")!,
-            bootstrapIPv4Servers: ["188.34.161.210"],
-            bootstrapIPv6Servers: ["2a01:4f8:c17:1c66::1"]
+            url: URL(string: "https://\(Self.hageziEncryptedHostname)/dns-query")!,
+            bootstrapIPv4Servers: Self.hageziIPv4Servers,
+            bootstrapIPv6Servers: Self.hageziIPv6Servers
         )
     )
 
@@ -1058,18 +1069,19 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
     public static let hageziDoT = DNSResolverPreset(
         id: "hagezi-root-dot",
         displayName: "HaGeZi DNS (DoT)",
-        ipv4Servers: ["188.34.161.210"],
-        ipv6Servers: ["2a01:4f8:c17:1c66::1"],
+        ipv4Servers: Self.hageziIPv4Servers,
+        ipv6Servers: Self.hageziIPv6Servers,
         // Upstream filtering is a property of the HaGeZi resolver, not the transport, so the DoT
         // variant carries the same ad/tracking/malware/phishing caveat as the plain preset — a user
         // inspecting only the DoT preset must still see what `hasUpstreamFiltering: true` encodes.
+        // IPs/host come from the shared `hagezi*` constants above (upstream: hagezi/dns-servers).
         notes: "Includes HaGeZi upstream ad, tracking, malware, and phishing blocking, over DNS over TLS.",
         hasUpstreamFiltering: true,
         transport: .dnsOverTLS,
         dotEndpoint: DNSOverTLSEndpoint(
-            hostname: "root.hagezi.org",
-            bootstrapIPv4Servers: ["188.34.161.210"],
-            bootstrapIPv6Servers: ["2a01:4f8:c17:1c66::1"]
+            hostname: Self.hageziEncryptedHostname,
+            bootstrapIPv4Servers: Self.hageziIPv4Servers,
+            bootstrapIPv6Servers: Self.hageziIPv6Servers
         )
     )
 
