@@ -75,6 +75,7 @@ struct ProtectionStatusPanel: View {
     // mutation — so this panel needs the same security gate the Customization page uses.
     @EnvironmentObject private var security: SecurityController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var guardianOverrideState: GuardianMascotState?
     @State private var isGuardianTapAnimationRunning = false
@@ -200,6 +201,17 @@ struct ProtectionStatusPanel: View {
                 viewModel.protectionTitle.lavaLocalized + ". " + viewModel.protectionSubtitle.lavaLocalized
             )
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            // The long-press ramp schedules its escalating pulses with `Task.sleep`; finger-lift and
+            // navigate-away already cancel it, but leaving the foreground does not. A 2s hold begun
+            // just before the app backgrounds (or goes inactive for the app switcher / a system
+            // alert) would otherwise keep firing haptics — even land the reveal crescendo — on a
+            // surface the user is no longer looking at. Stop the ramp on any non-active phase (OCR
+            // review on the 1.2.4 sync).
+            if newPhase != .active {
+                stopGuardianLongPressRamp()
+            }
+        }
     }
 
     /// Drives the long-press haptic "charge": schedules each escalating pulse from the pure
@@ -242,6 +254,15 @@ struct ProtectionStatusPanel: View {
     /// Customization entry point — see no prompt. The crescendo fires on the real reveal, once auth
     /// succeeds.
     private func presentLavaGuardPickerFromLongPress() {
+        // Re-entrancy guard: the picker now has TWO triggers — the mascot long-press and the
+        // protection-status `.accessibilityAction` — so a second activation while the sheet is
+        // already up (or its reveal already committed) must be a no-op, or a stale reveal would fire
+        // a second crescendo haptic over the presented sheet. Gate on the sheet flag, not the task
+        // handle: the task is not nil'd on completion, so a `guardianRevealTask == nil` check would
+        // wrongly block every reveal after the first until `.onDisappear` clears it (OCR review on
+        // the 1.2.4 sync). An in-flight reveal (flag still false) is instead superseded by the
+        // cancel-prior + `Task.isCancelled` guard below.
+        guard !isPresentingLavaGuardPicker else { return }
         stopGuardianLongPressRamp()
         // Track the reveal/auth task so `.onDisappear` can cancel it (mirrors the ramp task). The
         // auth prompt is async; without tracking, navigating away from the Guard tab mid-prompt would

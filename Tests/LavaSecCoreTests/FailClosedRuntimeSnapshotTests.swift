@@ -27,13 +27,22 @@ final class FailClosedRuntimeSnapshotTests: XCTestCase {
     func testBlocksInputThatWouldNotNormalize() {
         let snapshot = FailClosedRuntimeSnapshot(resolver: .google)
 
-        // The raw-domain entry point must stay fail-closed even for input DomainName
-        // would reject (empty, single-label, IP literal, garbage) — degrading these to
-        // allow would open a bypass exactly when no rule snapshot is resident.
+        // BOTH entry points must stay fail-closed even for input DomainName would reject (empty,
+        // single-label, IP literal, garbage) — degrading these to allow would open a bypass exactly
+        // when no rule snapshot is resident. Pin the normalized entry point on the SAME pathological
+        // inputs as the raw one so the symmetric block-regardless-of-input contract (INV-DNS-1) is
+        // enforced on both: a regression that allowed non-normalizable input through
+        // `decision(forNormalizedDomain:)` — while `decision(for:)` still blocked — would otherwise
+        // slip past this suite, which previously exercised only the raw path here (OCR review on the
+        // 1.2.4 sync).
         for rawDomain in ["", "localhost", "127.0.0.1", "not a domain", String(repeating: "a", count: 300)] {
-            let decision = snapshot.decision(for: rawDomain)
-            XCTAssertEqual(decision.action, .block)
-            XCTAssertEqual(decision.reason, .protectionUnavailable)
+            let rawDecision = snapshot.decision(for: rawDomain)
+            XCTAssertEqual(rawDecision.action, .block, "raw entry must block \(rawDomain)")
+            XCTAssertEqual(rawDecision.reason, .protectionUnavailable)
+
+            let normalizedDecision = snapshot.decision(forNormalizedDomain: rawDomain)
+            XCTAssertEqual(normalizedDecision.action, .block, "normalized entry must block \(rawDomain)")
+            XCTAssertEqual(normalizedDecision.reason, .protectionUnavailable)
         }
     }
 

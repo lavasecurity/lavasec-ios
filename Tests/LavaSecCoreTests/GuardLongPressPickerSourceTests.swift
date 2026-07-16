@@ -62,6 +62,24 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         // VoiceOver / Switch Control custom action (same presentLavaGuardPickerFromLongPress path) —
         // otherwise the Guard-tab picker is unreachable by assistive tech (Codex P3 + OCR on the 1.2.4 sync).
         XCTAssertTrue(panel.contains(".accessibilityAction(named: Text(\"Change Lava Guard\".lavaLocalized))"))
+
+        // A long-press ramp in flight is cancelled when the app leaves the foreground (any non-active
+        // scene phase), so a hold begun just before backgrounding can't keep firing haptics — or land
+        // the reveal crescendo — on a surface the user isn't looking at. Scope to the observer's OWN
+        // block (up to the next declaration) and assert it actually calls `stopGuardianLongPressRamp()`
+        // inside the non-active branch — not merely that the `.onChange` shell exists, which a no-op
+        // body would satisfy (OCR review on the 1.2.4 sync).
+        let scenePhaseBlock = try sourceBlock(
+            in: guardView,
+            startingAt: ".onChange(of: scenePhase)",
+            endingBefore: "private func startGuardianLongPressRamp"
+        )
+        let nonActiveGuardIndex = try index(of: "if newPhase != .active {", in: scenePhaseBlock)
+        let rampCancelIndex = try index(of: "stopGuardianLongPressRamp()", in: scenePhaseBlock)
+        XCTAssertLessThan(
+            nonActiveGuardIndex, rampCancelIndex,
+            "the scene-phase observer must cancel the ramp inside its non-active branch"
+        )
     }
 
     func testGuardPickerRevealIsAuthGatedFromReadOnlyGuardTab() throws {
@@ -111,6 +129,16 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         XCTAssertLessThan(authElseIndex, authReturnIndex)
         XCTAssertLessThan(authReturnIndex, crescendoIndex)
         XCTAssertLessThan(crescendoIndex, presentIndex)
+
+        // The picker has two triggers (the long-press and the protection-status accessibilityAction),
+        // so the reveal is guarded on the sheet flag at the TOP of the function — before the auth
+        // guard — so a second activation while the sheet is already up is a no-op and can't fire a
+        // second crescendo over the open sheet (OCR review on the 1.2.4 sync).
+        XCTAssertTrue(revealBlock.contains("guard !isPresentingLavaGuardPicker else { return }"))
+        XCTAssertLessThan(
+            try index(of: "guard !isPresentingLavaGuardPicker else { return }", in: revealBlock),
+            guardAuthIndex
+        )
     }
 
     func testGuardPickerSelectionIsAuthGatedLikeCustomization() throws {
@@ -222,6 +250,42 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         XCTAssertTrue(sheetBlock.contains("openUpgrade: { authorizeAppSettingsThen { showUpgradePage = true } }"))
         XCTAssertTrue(sheetBlock.contains("openPrivacyData: { authorizeAppSettingsThen { showPrivacyDataPage = true } }"))
         XCTAssertTrue(sheetBlock.contains("security.requireAuthentication(for: .appSettings, reason: \"Open Settings\")"))
+
+        // The re-auth DEBOUNCES rather than cancels: it guards on the tracked task handle so a second
+        // link tap while an auth is in flight is ignored, and nils the handle on completion (`defer`)
+        // so a later tap works. It must NOT cancel-prior — SecurityController's biometric prompt is
+        // not cancellation-aware, so cancelling a task whose Face ID the user then completes would
+        // discard that successful auth and open neither page (Codex P2 on the 1.2.4 sync).
+        XCTAssertTrue(sheetBlock.contains("guard appSettingsPresentationTask == nil else { return }"))
+        XCTAssertTrue(sheetBlock.contains("appSettingsPresentationTask = Task {"))
+        XCTAssertTrue(sheetBlock.contains("defer { appSettingsPresentationTask = nil }"))
+        XCTAssertFalse(
+            sheetBlock.contains("appSettingsPresentationTask?.cancel()"),
+            "the re-auth must debounce (guard on the in-flight task), not cancel-prior — cancelling discards a completed, non-cancellation-aware biometric auth (Codex P2)"
+        )
+        // The reveal is still auth-gated: `present()` sits AFTER the auth guard's early return, so a
+        // refactor that dropped the gate (or hoisted present() above it) is caught. The ordering
+        // anchors below bind to the sheet's own re-auth guard; enforce (not just comment) that there
+        // is exactly ONE `requireAuthentication` in the block, so a future second call (e.g. a
+        // per-link auth) can't silently shift the anchor to the wrong one (OCR review on the 1.2.4 sync).
+        XCTAssertEqual(
+            sheetBlock.components(separatedBy: "security.requireAuthentication(").count - 1, 1,
+            "exactly one requireAuthentication must live in the sheet block, or the ordering anchor binds to the wrong call"
+        )
+        let reauthAuthIndex = try index(of: "security.requireAuthentication(", in: sheetBlock)
+        let reauthAuthElseIndex = try XCTUnwrap(
+            sheetBlock.range(of: "else {", range: reauthAuthIndex..<sheetBlock.endIndex)?.lowerBound,
+            "the re-auth must be a guard with an `else {` branch"
+        )
+        let reauthAuthReturnIndex = try XCTUnwrap(
+            sheetBlock.range(of: "return", range: reauthAuthElseIndex..<sheetBlock.endIndex)?.lowerBound,
+            "the re-auth guard must return early on failure"
+        )
+        let reauthPresentIndex = try XCTUnwrap(
+            sheetBlock.range(of: "present()", range: reauthAuthReturnIndex..<sheetBlock.endIndex)?.lowerBound,
+            "present() must sit after the auth guard's early return"
+        )
+        XCTAssertLessThan(reauthAuthReturnIndex, reauthPresentIndex)
     }
 
     func testGuardSpotlightPanelPairsQuoteWithLaymanTip() throws {

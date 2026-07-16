@@ -351,6 +351,7 @@ struct LavaGuardLookPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showUpgradePage = false
     @State private var showPrivacyDataPage = false
+    @State private var appSettingsPresentationTask: Task<Void, Never>?
 
     let selectedLook: GuardianShieldStyle
     let onSelect: (GuardianShieldStyle) -> Void
@@ -426,10 +427,24 @@ struct LavaGuardLookPickerSheet: View {
     /// inline `navigationDestination`. Reaching this sheet does not itself pass that gate — the
     /// Guard mascot long-press opens it straight from the read-only Guard tab — so re-authenticate
     /// before presenting, matching the `.appSettings` lock `RootView.openSettingsRoute` enforces on
-    /// `.upgrade`/`.privacyData`. From Customization the surface is already authenticated for this
-    /// turn, so `requireAuthentication` short-circuits and no second prompt appears.
+    /// `.upgrade`/`.privacyData`. When the surface is already authenticated for this turn (e.g. a
+    /// prior `.appSettings` mutation ran), `requireAuthentication` short-circuits and no second
+    /// prompt appears; opening straight from the Guard long-press with no prior turn auth does
+    /// present one, as intended.
+    ///
+    /// DEBOUNCES rather than cancels: a second link tap while an auth is already in flight is
+    /// ignored (guard on the tracked task handle), and the task nils the handle on completion so a
+    /// later tap works. It must NOT cancel-prior — `SecurityController`'s biometric prompt is not
+    /// cancellation-aware (`evaluateBiometrics` wraps `LAContext.evaluatePolicy` in a bare
+    /// `withCheckedContinuation`), so cancelling a task whose Face ID the user then goes on to
+    /// complete would discard that successful auth, and if the replacement attempt is cancelled or
+    /// fails neither page opens even though the user authenticated (Codex P2 on the 1.2.4 sync).
+    /// Ignoring the second tap instead lets the first auth complete and open its page, and avoids the
+    /// parallel prompts the original fire-and-forget could fan out (OCR review on the 1.2.4 sync).
     private func authorizeAppSettingsThen(_ present: @escaping @MainActor () -> Void) {
-        Task {
+        guard appSettingsPresentationTask == nil else { return }
+        appSettingsPresentationTask = Task { @MainActor in
+            defer { appSettingsPresentationTask = nil }
             guard await security.requireAuthentication(for: .appSettings, reason: "Open Settings") else {
                 return
             }
