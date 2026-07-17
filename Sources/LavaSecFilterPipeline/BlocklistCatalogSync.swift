@@ -375,6 +375,20 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     /// catalog is still returned in the result, so the caller can commit it on publish success.
     /// The foreground keeps committing inline (default true); it always publishes, so its
     /// catalog and pointer stay consistent.
+    ///
+    /// One deliberate side effect in the non-committing mode: when the NETWORK fetch succeeded and
+    /// the resolved catalog is value-equal to the cached one, the cached file's mtime — the
+    /// freshness evidence warm reuse gates on — is re-stamped WITHOUT a content write. Without it,
+    /// a device whose catalog simply stops changing ages past the 7-day freshness window even
+    /// though every background run verified it current, and the headless warm switch (and the
+    /// background pending-switch drain) defers forever (lavasec-infra
+    /// `plans/2026-07-16-deferred-automation-switch-background-warm-and-apply-plan.md`). A
+    /// cache-fallback load (`shouldCache == false`) never re-stamps — that would fake freshness
+    /// from our own stale bytes. A resolved catalog that DIFFERS (even in sources the user has
+    /// not enabled) never re-stamps either: the cached basis is genuinely behind upstream, and
+    /// only a real commit may move the evidence.
+    /// pinned: BlocklistCatalogFreshnessRefreshTests.testNetworkVerifiedUnchangedCatalogRestampsFreshnessWithoutContentWrite
+    /// pinned: BlocklistCatalogFreshnessRefreshTests.testCacheFallbackNeverRestampsFreshness
     public func sync(
         enabledSourceIDs: Set<String>,
         commitsLatestCatalog: Bool = true
@@ -395,6 +409,22 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             // hashes, which keeps RuleSetCache's predicted-hash lookups valid
             // on the next run.
             try catalogRepository.saveLatestCatalog(Self.makeJSONEncoder().encode(result.catalog))
+        }
+
+        if !commitsLatestCatalog, loadedCatalog.shouldCache,
+           let cachedCatalog = try? loadLatestCatalog(), cachedCatalog == result.catalog {
+            // Network-verified unchanged: the cached catalog IS what a fresh resolve produces, so
+            // re-stamping its mtime is honest "verified current at <now>" evidence — value
+            // equality (not raw-byte compare) because the cache may hold the RESOLVED encoding
+            // from a prior commit while the fetch returns upstream bytes. KNOWN RESIDUAL (fail-safe,
+            // tracked in the drain plan's residuals): full-catalog equality is deliberately strict —
+            // a cache holding a rotated entry for a source the user has SINCE DISABLED never compares
+            // equal to a resolve that leaves disabled sources unresolved, so that shape keeps aging
+            // and defers at the foreground exactly as before this re-stamp existed. Catalog-wide
+            // freshness certifies reuse for ANY filter's selection (a switch target may enable
+            // sources outside the current set), so a narrower enabled-selection predicate would
+            // over-claim; only a real commit may move the evidence for a diverged cache.
+            catalogRepository.refreshCachedCatalogFreshness()
         }
 
         return result

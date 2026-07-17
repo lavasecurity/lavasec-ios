@@ -131,14 +131,25 @@ struct SwitchFilterIntent: AppIntent {
             dialog = IntentDialog(stringLiteral:
                 LavaCoreStrings.localizedFormat("dialog.filterAlreadyActive", languageCode: languageCode, filter.name))
         case .deferred:
-            // The headless path only commits a WARM switch; with no reusable warm artifact (new filter,
-            // stale catalog, cache miss) the engine records a durable pending marker and defers. That marker
-            // is drained ONLY by the foreground reconcile (AppViewModel/RootView) — the tunnel poll never
-            // cold-compiles it, and an App Intent's short window can't either — so a switch run while Lava
-            // stays closed applies on the NEXT app open, not "shortly". Say so honestly (Codex #325); the
-            // switch itself is the same tolerated, self-healing deferral the Focus path already carries.
+            // The headless path only commits a WARM switch. Warm-all (LAV-100 Phase 1) keeps every non-frozen
+            // filter compiled on disk, so a switch to a built-in like Balanced normally COMMITS and the tunnel
+            // adopts it closed-app via its configuration-generation poll (P4d) — it "finishes on its own", which
+            // is the `.committed` copy. This `.deferred` arm is the rarer fallback where there is no REUSABLE
+            // warm artifact AT SWITCH TIME even though warm-all ran: a stale (>7-day) catalog cache, a background
+            // catalog move since the compile, an LRU disk-pressure eviction of a dormant filter, a brand-new
+            // never-compiled filter, or a concurrent foreground write that superseded us. The engine records a
+            // durable pending marker with TWO drains: the background catalog-refresh BGTask
+            // (`BackgroundPendingSwitchDrain` after each refresh cycle — the sync re-stamps catalog freshness on
+            // a verified-unchanged catalog precisely so this drain's warm reuse can commit) and the foreground
+            // reconcile (AppViewModel/RootView), whichever runs first — the tunnel poll then adopts the committed
+            // generation bump; neither the tunnel nor an App Intent's short window ever cold-compiles. So a
+            // deferred switch self-applies with no user action, at background-refresh cadence rather than
+            // instantly — the copy is a bare "<name> will apply automatically", deliberately promising no
+            // timeline (lavasec-infra plans/2026-07-16-deferred-automation-switch-background-warm-and-apply-
+            // plan.md; founder 2026-07-16, superseding the interim "next time you open Lava" condition from
+            // the Codex PR #410 P2 round).
             dialog = IntentDialog(stringLiteral:
-                LavaCoreStrings.localizedFormat("dialog.filterWillApplyNextOpen", languageCode: languageCode, filter.name))
+                LavaCoreStrings.localizedFormat("dialog.filterWillApplyAutomatically", languageCode: languageCode, filter.name))
         case .disallowed:
             // Auth-to-edit gate on (or the impossible container-unavailable case). A headless intent can't
             // prompt for auth, so the engine safely no-ops — and the switch DID NOT HAPPEN, so this is an

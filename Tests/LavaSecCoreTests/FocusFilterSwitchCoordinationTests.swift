@@ -8,6 +8,75 @@ final class FocusFilterSwitchCoordinationTests: XCTestCase {
         return UserDefaults(suiteName: suite)!
     }
 
+    // MARK: - Manual-vs-automation supersession predicate (shared by BOTH marker drains)
+
+    /// The `<=` exact-tie rule and the no-stamp default, asserted directly on the ONE shared
+    /// implementation (`isSupersededByForegroundSwitch`) the foreground reconcile and the BGTask
+    /// drain both consume — the drift between two inline copies is what this predicate replaced.
+    func testSupersessionPredicateFavorsManualSwitchOnTies() {
+        let defaults = makeDefaults()
+        let instant = Date(timeIntervalSinceReferenceDate: 5_000)
+        let request = PendingFilterSwitchRequest(targetFilterID: "f2", requestedAt: instant)
+
+        // No manual switch ever stamped → nothing supersedes.
+        XCTAssertFalse(PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults))
+
+        // Manual switch initiated BEFORE the request → the automation is newer and stands.
+        PendingFilterSwitchStore.recordForegroundSwitch(at: instant.addingTimeInterval(-1), in: defaults)
+        XCTAssertFalse(PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults))
+
+        // Exact tie → the MANUAL switch wins (`<=`): the user's explicit action outranks the
+        // automation, and a wrongly-dropped marker is re-recorded by the next Focus edge anyway.
+        PendingFilterSwitchStore.recordForegroundSwitch(at: instant, in: defaults)
+        XCTAssertTrue(PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults))
+
+        // Manual switch initiated AFTER the request → superseded.
+        PendingFilterSwitchStore.recordForegroundSwitch(at: instant.addingTimeInterval(1), in: defaults)
+        XCTAssertTrue(PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults))
+    }
+
+    // MARK: - Compare-and-record (the replay's record half)
+
+    /// A replay must never erase a newer intent's marker: `recordIfMatches` writes ONLY while the
+    /// slot still equals the request the replay read. The flock spans compare+write, so a concurrent
+    /// intent's `record` lands strictly before (→ refuse, newer marker preserved) or strictly after
+    /// (→ its overwrite legitimately wins as newest).
+    func testRecordIfMatchesRefusesWhenMarkerChanged() {
+        let defaults = makeDefaults()
+        let original = PendingFilterSwitchRequest(
+            targetFilterID: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+        PendingFilterSwitchStore.record(original, in: defaults)
+
+        // A newer intent wins the slot while the replay is in flight…
+        let newer = PendingFilterSwitchRequest(
+            targetFilterID: "f3", requestedAt: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+        PendingFilterSwitchStore.record(newer, in: defaults)
+
+        // …so the replay's re-record must refuse and leave the newer marker untouched.
+        XCTAssertFalse(PendingFilterSwitchStore.recordIfMatches(original, expecting: original, in: defaults))
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: defaults), newer,
+                       "A refused compare-and-record must preserve the newer intent's marker.")
+
+        // An empty slot is also a mismatch — a replay must not resurrect into a cleared slot.
+        defaults.removeObject(forKey: PendingFilterSwitchStore.defaultsKeyName)
+        XCTAssertFalse(PendingFilterSwitchStore.recordIfMatches(original, expecting: original, in: defaults))
+        XCTAssertNil(PendingFilterSwitchStore.current(in: defaults))
+    }
+
+    func testRecordIfMatchesWritesWhileMarkerUnchanged() {
+        let defaults = makeDefaults()
+        let original = PendingFilterSwitchRequest(
+            targetFilterID: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+        PendingFilterSwitchStore.record(original, in: defaults)
+
+        XCTAssertTrue(PendingFilterSwitchStore.recordIfMatches(original, expecting: original, in: defaults),
+                      "An unchanged slot must accept the replay's re-record.")
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: defaults), original)
+    }
+
     // MARK: - FocusSwitchDiagnostics
 
     func testFocusSwitchDiagnosticRoundTripsAndDefaultsNil() {

@@ -96,6 +96,21 @@ enum FocusSwitchEnvironment {
         )
     }
 
+    /// Drain the durable pending Focus/Automation switch marker from the background catalog-refresh
+    /// BGTask (app process), so a `.deferred` automation switch applies without the user opening Lava.
+    ///
+    /// Thin wrapper: builds the SAME byte-identical environment every headless caller uses and hands
+    /// off to `BackgroundPendingSwitchDrain` (LavaSecFilterPipeline), where the logic lives with its
+    /// executable tests. `.closedAppBanner`: a drain that commits is a headless switch landing while
+    /// the app is closed/backgrounded, so the engine's "Switched to <name>" banner (same
+    /// `filterChanged` category/toggle as every headless commit — founder 2026-07-12) is its only
+    /// user-visible confirmation. A no-op when the App Group container is unavailable — the marker
+    /// survives for the next cycle/foreground, the fail-safe direction.
+    static func drainPendingFilterSwitchAfterBackgroundRefresh() async {
+        guard let env = make(feedback: .closedAppBanner) else { return }
+        await BackgroundPendingSwitchDrain.drain(env: env)
+    }
+
     /// Post the user-facing "Switched to <name>" / "Couldn't switch to <name>" notification for a headless
     /// Focus switch — the `.closedAppBanner` caller (see `OutcomeFeedback`). Maps the outcome to the Focus
     /// category pair; the shared `postSwitchBanner` applies the closed/backgrounded gate.

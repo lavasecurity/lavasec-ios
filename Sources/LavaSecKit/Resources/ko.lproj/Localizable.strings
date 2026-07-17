@@ -12,7 +12,7 @@
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
 "dialog.filterSwitchedTo" = "%@ 으(로) 전환했어요.";
 "dialog.filterAlreadyActive" = "%@ 은(는) 이미 적용 중인 필터예요.";
-"dialog.filterWillApplyNextOpen" = "%@ 은(는) 다음에 Lava를 열 때 적용돼요.";
+"dialog.filterWillApplyAutomatically" = "%@ 은(는) 자동으로 적용돼요.";
 "dialog.filterSwitchDisallowed" = "%@ 으(로) 전환하지 못했어요. Lava 를 열어 필터 설정을 확인하세요.";
 
 /* Live Activity / widget UI (shared via Bundle.module). */

@@ -3824,68 +3824,68 @@
         }
       }
     },
-    "%@ will apply the next time you open Lava.": {
-      "comment": "Dialog when a Shortcuts/Siri switch is deferred (no warm artifact) and applies on next app open (%@ is the filter name). \"Lava\" is the brand, untranslated. AI-drafted; needs native review.",
+    "%@ will apply automatically.": {
+      "comment": "Dialog when a Shortcuts/Siri switch is deferred (no reusable warm artifact); the switch is saved and applies automatically — via the background refresh drain or the next foreground, whichever comes first — with no user action needed (%@ is the filter name). AI-drafted; needs native review.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ will apply the next time you open Lava."
+            "value": "%@ will apply automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ wird beim nächsten Öffnen von Lava angewendet."
+            "value": "%@ wird automatisch angewendet."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ se aplicará la próxima vez que abras Lava."
+            "value": "%@ se aplicará automáticamente."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ sera appliqué à la prochaine ouverture de Lava."
+            "value": "%@ sera appliqué automatiquement."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ verrà applicato alla prossima apertura di Lava."
+            "value": "%@ verrà applicato automaticamente."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ は次回 Lava を開いたときに適用されます。"
+            "value": "%@ は自動的に適用されます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ 은(는) 다음에 Lava를 열 때 적용돼요."
+            "value": "%@ 은(는) 자동으로 적용돼요."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ será aplicado na próxima vez que você abrir o Lava."
+            "value": "%@ será aplicado automaticamente."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ 将在您下次打开 Lava 时生效。"
+            "value": "%@ 将自动生效。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ 將在您下次開啟 Lava 時生效。"
+            "value": "%@ 將自動生效。"
           }
         }
       }

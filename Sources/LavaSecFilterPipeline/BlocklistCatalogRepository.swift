@@ -119,4 +119,21 @@ public struct BlocklistCatalogRepository: Sendable {
         )
         try data.write(to: latestCatalogURL, options: [.atomic])
     }
+
+    /// Re-stamp `catalog/latest.json`'s modification date to `now` WITHOUT touching its content —
+    /// the mtime is the catalog freshness evidence (`cachedCatalogAge` reads it).
+    ///
+    /// Mechanical contract only; the WHEN (network-verified-unchanged, never cache-fallback, never
+    /// on a changed catalog) is owned by the one caller, `BlocklistCatalogSynchronizer.sync` — see
+    /// its doc comment for the full rationale + pin. Attribute-only on purpose: no content write
+    /// means a concurrent foreground `saveLatestCatalog` (atomic replace = new inode) can never be
+    /// clobbered; at worst this re-stamps the racer's just-written file, whose mtime is already
+    /// current. Best-effort: a failed re-stamp only leaves the previous (aging) evidence, the
+    /// fail-safe direction.
+    internal func refreshCachedCatalogFreshness(now: Date = Date()) {
+        try? FileManager.default.setAttributes(
+            [.modificationDate: now],
+            ofItemAtPath: latestCatalogURL.path
+        )
+    }
 }

@@ -12,7 +12,7 @@
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
 "dialog.filterSwitchedTo" = "Se cambió a %@.";
 "dialog.filterAlreadyActive" = "%@ ya es tu filtro activo.";
-"dialog.filterWillApplyNextOpen" = "%@ se aplicará la próxima vez que abras Lava.";
+"dialog.filterWillApplyAutomatically" = "%@ se aplicará automáticamente.";
 "dialog.filterSwitchDisallowed" = "No se pudo cambiar a %@. Abre Lava para revisar la configuración de tus filtros.";
 
 /* Live Activity / widget UI (shared via Bundle.module). */

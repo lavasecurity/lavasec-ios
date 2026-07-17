@@ -9005,7 +9005,9 @@ final class AppViewModel: ObservableObject {
         // This runs only on the bg-published path, where the background just COMMITTED the fresh catalog
         // to latest.json — so its mtime is already fresh and compileAndStageWarmArtifact's
         // hasFreshCachedCatalog gate passes without any touch. (We deliberately do NOT bump the mtime
-        // here: latest.json is only trustworthy-current on a commit, and a commit already refreshes it.)
+        // here: latest.json is only trustworthy-current on a commit or on the sync's NETWORK-VERIFIED
+        // unchanged re-stamp — `BlocklistCatalogSynchronizer.sync`'s attribute-only refresh — and both
+        // of those already moved it; this warm pass verified nothing upstream and must not fake it.)
         let activeID = library.activeFilterID
         let prior = store.load()
 
@@ -9230,10 +9232,14 @@ final class AppViewModel: ObservableObject {
 
     /// Foreground-only: apply any pending Focus switch recorded by the headless path. Run on appear, on
     /// becoming active, and on the headless wake nudge. The pending-switch marker is the feature's
-    /// correctness guarantee: this is the single place that CLEARS it, and only after confirming the
+    /// correctness guarantee: this is the AUTHORITATIVE clear site — it clears only after confirming the
     /// target is active (headless committed it) or applying the switch through the normal foreground
     /// path (which cold-compiles if no warm artifact exists). Compare-and-clear so a newer Focus request
-    /// recorded meanwhile is never dropped.
+    /// recorded meanwhile is never dropped. The background BGTask drain (`BackgroundPendingSwitchDrain`,
+    /// LavaSecFilterPipeline) additionally clears the SAME two moot cases this pass clears (auth gate
+    /// closed / superseded by a newer manual switch), under the same marker flock and compare-and-clear
+    /// rules; every other outcome there leaves the marker for THIS reconcile, so the re-sync/clear
+    /// protocol below is unchanged.
     func reconcilePendingFilterSwitch() async {
         guard !isHeadless else { return }
         // Re-entrancy guard: the three wake triggers (onAppear, scene .active, Darwin nudge) could
@@ -9347,12 +9353,11 @@ final class AppViewModel: ObservableObject {
         // choice and wins — drop the stale marker rather than reverting their manual switch. The stamp is
         // the switch's INITIATION instant (not its completion), so a Focus request that fired DURING a slow
         // manual switch — i.e. after the user started it — still wins over that switch (Codex round-15).
-        // Exact tie (`<=`): an identical instant intentionally favors the MANUAL switch (the user's explicit
-        // action outranks the automation), and is the safe direction anyway — a wrongly-dropped Focus marker
-        // is re-recorded by the next Focus edge, whereas a wrongly-KEPT one would silently revert the user
-        // (founder review P2-3).
-        if let lastForegroundSwitchAt = PendingFilterSwitchStore.lastForegroundSwitch(in: defaults),
-           request.requestedAt <= lastForegroundSwitchAt {
+        // The precedence rule itself (including the exact-tie `<=` that favors the MANUAL switch) lives in
+        // the SHARED `PendingFilterSwitchStore.isSupersededByForegroundSwitch` — one behaviorally-tested
+        // implementation for this reconcile AND the BGTask drain (`BackgroundPendingSwitchDrain`), so the
+        // two marker drains can never drift on who wins a manual-vs-automation race.
+        if PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults) {
             PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: pendingFilterSwitchMarkerLockURL)
             return
         }
@@ -10102,7 +10107,9 @@ final class AppViewModel: ObservableObject {
 
     /// Cross-process lock for the pending-Focus-switch marker (LAV-100 Phase 4): the foreground reconcile's
     /// `clearIfMatches` takes the SAME lock the App Intents extension's `record` does, so an extension record
-    /// can't interleave a clear's read→remove (Codex P2).
+    /// can't interleave a clear's read→remove (Codex P2). Third party on this flock: the catalog-refresh
+    /// BGTask drain (`BackgroundPendingSwitchDrain`) clears moot markers and re-records via the engine under
+    /// the same lock file — reason about marker interleavings with all THREE participants.
     private var pendingFilterSwitchMarkerLockURL: URL? {
         LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.pendingFilterSwitchMarkerLockFilename)
     }
@@ -10460,8 +10467,12 @@ struct ProtectionStatusChangeWaiter: VPNStatusChangeWaiting {
 // The Focus-driven warm filter switch is driven by the App Intents EXTENSION (LavaSecIntents), whose
 // `perform()` calls `FocusSwitchEnvironment.performSwitch` → the shared LavaSecFilterPipeline
 // `HeadlessFocusFilterSwitchEngine`. perform() runs in the extension even while Lava is closed (WWDC22
-// §10121), so there is no app-target switch entry; the app keeps only the foreground reconcile
-// (`reconcilePendingFilterSwitch`), the manual `switchToFilter`, and the non-active warm-keep helper.
+// §10121). APP-PROCESS switch entries, exhaustively (audit this list when reasoning about who can flip
+// the active filter): the foreground reconcile (`reconcilePendingFilterSwitch`), the manual
+// `switchToFilter`, the Shortcuts/Siri `SwitchFilterIntent` (background-launched app, headless engine),
+// the catalog-refresh BGTask's pending-switch drain (`BackgroundPendingSwitchDrain` via
+// `FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh` — runs unattended with the
+// app closed), and the non-active warm-keep helper (stages only, never flips).
 
 // MARK: - Catalog sync bridge
 

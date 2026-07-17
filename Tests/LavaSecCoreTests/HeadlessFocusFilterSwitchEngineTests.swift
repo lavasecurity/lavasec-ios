@@ -19,64 +19,8 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
         XCTAssertEqual(HeadlessFocusSwitchOutcome.disallowed.rawValue, "disallowed")
     }
 
-    private final class SignalSpy: @unchecked Sendable {
-        private let lock = NSLock()
-        private var names: [String] = []
-        func post(_ name: String) { lock.lock(); names.append(name); lock.unlock() }
-        var posted: [String] { lock.lock(); defer { lock.unlock() }; return names }
-    }
-
-    private struct Harness {
-        let env: HeadlessFocusFilterSwitchEngine.Environment
-        let defaults: UserDefaults
-        let spy: SignalSpy
-        let dir: URL
-    }
-
-    private func makeHarness(now: Date = Date(timeIntervalSinceReferenceDate: 10_000)) -> Harness {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hfse-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let defaults = UserDefaults(suiteName: "hfse-\(UUID().uuidString)")!
-        let spy = SignalSpy()
-        let env = HeadlessFocusFilterSwitchEngine.Environment(
-            containerURL: dir,
-            configurationURL: dir.appendingPathComponent("app-configuration.json"),
-            filterLibraryURL: dir.appendingPathComponent("filter-library.json"),
-            catalogCacheURL: dir.appendingPathComponent("catalog-cache", isDirectory: true),
-            backgroundWarmIndexURL: dir.appendingPathComponent("background-warm-index.json"),
-            publishLockURL: dir.appendingPathComponent("publish.lock"),
-            focusSwitchLockURL: dir.appendingPathComponent("focus.lock"),
-            configurationWriteLockURL: dir.appendingPathComponent("config-write.lock"),
-            pendingMarkerLockURL: dir.appendingPathComponent("marker.lock"),
-            snapshotFilename: "filter-snapshot.json",
-            compactSnapshotFilename: "filter-snapshot-compact.json",
-            defaults: defaults,
-            catalogSyncFreshnessInterval: 7 * 24 * 60 * 60,
-            now: { now },
-            postSignal: { spy.post($0) },
-            log: { _, _ in }
-        )
-        return Harness(env: env, defaults: defaults, spy: spy, dir: dir)
-    }
-
-    private func seedConfiguration(_ harness: Harness, isPaid: Bool) {
-        var config = AppConfiguration(enabledBlocklistIDs: ["s1"], customBlocklists: [], configurationGeneration: 1)
-        config.isPaid = isPaid
-        let data = try! JSONEncoder().encode(config)
-        try! data.write(to: harness.env.configurationURL)
-    }
-
-    private func seedLibrary(_ harness: Harness, active: String, ids: [String]) {
-        let filters = ids.map { Filter(id: $0, name: $0.uppercased(), enabledBlocklistIDs: ["s1"]) }
-        var lib = FilterLibrary(filters: filters, activeFilterID: active)
-        lib.configurationGeneration = 1
-        let data = try! JSONEncoder().encode(lib)
-        try! data.write(to: harness.env.filterLibraryURL)
-    }
-
-    private func cleanup(_ harness: Harness) {
-        try? FileManager.default.removeItem(at: harness.dir)
-    }
+    // Harness/seed/warm-artifact fixtures live in TestSupport/FocusSwitchEngineTestSupport.swift,
+    // SHARED with BackgroundPendingSwitchDrainTests so both suites drive the identical warm-reuse path.
 
     // MARK: - Gate (fail-closed security boundary)
 
@@ -84,9 +28,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
         // Focus auto-switch is available to ALL tiers — the Plus paywall was dropped. A free user's switch
         // is NOT gated out: with no warm artifact it simply defers to the foreground reconcile (records the
         // marker + nudges), exactly like a Plus user would.
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: false)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: false)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
 
@@ -103,9 +47,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
 
     func testAuthToEditDisallowReasonIsRecorded() async {
         // The disallow reason distinguishes auth-to-edit from a config-fallback / target-unavailable refusal.
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
         SecurityProtectedSurfaceStorage.saveProtectedSurfaces([.filterEditing], to: h.defaults)
 
         _ = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
@@ -116,9 +60,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
     }
 
     func testAuthToEditIsDisallowedAndRecordsNothing() async {
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
         SecurityProtectedSurfaceStorage.saveProtectedSurfaces([.filterEditing], to: h.defaults)
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
@@ -134,8 +78,8 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
         // device-global settings (resolver/protection/etc.). The engine must refuse — treat the config-load
         // failure as a reseed. (Before the Plus gate was dropped this was caught implicitly by isPaid=false;
         // now it's explicit — Codex.) Seed ONLY the library, no configuration file.
-        let h = makeHarness(); defer { cleanup(h) }
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
 
@@ -145,9 +89,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
     }
 
     func testMissingTargetIsDisallowed() async {
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "ghost", env: h.env)
 
@@ -158,8 +102,8 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
     // MARK: - Reseed guard
 
     func testReseedFromMissingLibraryIsDisallowed() async {
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true) // Plus passes the gate; the missing library forces a reseed.
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true) // Plus passes the gate; the missing library forces a reseed.
         // No filter-library.json written ⇒ loadState reseeds the defaults (didReseed == true).
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "filter-balanced", env: h.env)
@@ -172,9 +116,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
 
     func testAlreadyActiveRecordsMarkerAndNudges() async {
         let now = Date(timeIntervalSinceReferenceDate: 55_000)
-        let h = makeHarness(now: now); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(now: now); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f1", env: h.env)
 
@@ -194,9 +138,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
 
     func testLaterFocusRequestSupersedesEarlierMarkerAndNothingClearsItOnFocusOff() async {
         let now = Date(timeIntervalSinceReferenceDate: 91_000)
-        let h = makeHarness(now: now); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2", "f3"])
+        let h = makeFocusSwitchEngineHarness(now: now); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2", "f3"])
         // Focus A switches to f2 — no warm artifact seeded ⇒ deferred, marker recorded.
         let a = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
         XCTAssertEqual(a, .deferred)
@@ -217,78 +161,12 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
     // injection a single-threaded unit test can't deterministically produce; they stay pinned by the
     // FocusFilterSwitchWiringSourceTests structural assertions + the internal-TestFlight behavioral test.)
 
-    /// Build a fresh cached catalog + stage a warm artifact for `targetEnabledSourceIDs`, returning the
-    /// staged token + the URLs the engine Environment needs. Mirrors FilterSnapshotPreparationServiceTests' Fixture.
-    private func stageWarmArtifact(
-        cacheDir: URL,
-        containerDir: URL,
-        catalogVersion: String = "test-1",
-        catalogGeneratedAt: Date = Date()
-    ) async throws -> (token: String, configuration: AppConfiguration) {
-        let payload = Data("ads.example.com\ntrack.example.com\n".utf8)
-        let checksum = BlocklistCatalogSynchronizer.sha256Hex(of: payload)
-        let source = CatalogBlocklistSource(
-            id: "source-a", name: "Source A", category: "ads", riskLevel: "low", defaultEnabled: true,
-            licenseName: "MIT", attribution: "test",
-            projectURL: URL(string: "https://example.com")!, sourceURL: URL(string: "https://example.com/list.txt")!,
-            versionID: "source-a-v1", entryCount: 2, byteSize: payload.count, sourceHash: checksum,
-            acceptedSourceHashes: [CatalogAcceptedSourceHash(sha256: checksum)], normalizedHash: checksum,
-            publishedAt: Date(), redistributionMode: "allowed", parseFormat: .plainDomains,
-            licenseTextURL: nil, noticeURL: nil
-        )
-        let catalog = BlocklistCatalog(
-            schemaVersion: 2, catalogVersion: catalogVersion, generatedAt: catalogGeneratedAt,
-            sources: [source], guardrails: []
-        )
-        let catalogDir = cacheDir.appendingPathComponent("catalog", isDirectory: true)
-        try FileManager.default.createDirectory(at: catalogDir, withIntermediateDirectories: true)
-        try BlocklistCatalogSynchronizer.makeJSONEncoder().encode(catalog)
-            .write(to: catalogDir.appendingPathComponent("latest.json"))
-
-        var configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
-        configuration.isPaid = true
-        let service = FilterSnapshotPreparationService(
-            synchronizer: BlocklistCatalogSynchronizer(
-                catalogURL: URL(string: "https://example.com/catalog.json")!,
-                cacheDirectoryURL: cacheDir,
-                dataFetcher: { url in
-                    if url.lastPathComponent == "list.txt" { return payload }
-                    throw URLError(.cannotFindHost)
-                }
-            )
-        )
-        let prepared = try await service.prepare(
-            configuration: configuration, customSources: [], catalogFreshnessMaxAge: 3_600
-        )
-        let pointer = try await service.stageArtifacts(
-            prepared.snapshot,
-            containerURL: containerDir,
-            snapshotFilename: "filter-snapshot.json",
-            compactSnapshotFilename: "filter-snapshot.compact"
-        )
-        return (pointer.token, configuration)
-    }
-
-    /// Write a valid 2-filter library (active `f1` empty, target `f2` carrying `targetEnabled` + `token`)
-    /// + the matching active configuration to the container, at a non-zero generation (no lost-write race).
-    private func seedLibraryWithWarmTarget(_ h: Harness, token: String, targetEnabled: Set<String>) throws {
-        let f1 = Filter(id: "f1", name: "F1", enabledBlocklistIDs: [])
-        let f2 = Filter(id: "f2", name: "F2", enabledBlocklistIDs: targetEnabled, lastCompiledToken: token)
-        var library = FilterLibrary(filters: [f1, f2], activeFilterID: "f1")
-        library.configurationGeneration = 1
-        try JSONEncoder().encode(library).write(to: h.env.filterLibraryURL)
-
-        var config = AppConfiguration(enabledBlocklistIDs: [], configurationGeneration: 1) // mirrors active f1
-        config.isPaid = true
-        try JSONEncoder().encode(config).write(to: h.env.configurationURL)
-    }
-
     func testCommittedWarmFlipPublishesTargetAndLeavesMarker() async throws {
         let now = Date(timeIntervalSinceReferenceDate: 90_000)
-        let h = makeHarness(now: now); defer { cleanup(h) }
+        let h = makeFocusSwitchEngineHarness(now: now); defer { cleanupFocusSwitchHarness(h) }
         // catalogCacheURL must be where the fixture wrote the catalog; reuse the harness dir's cache path.
-        let staged = try await stageWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
-        try seedLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        try seedFocusSwitchLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
 
@@ -300,7 +178,8 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
         XCTAssertGreaterThan(config.configurationGeneration, 1, "The commit must bump the configuration generation.")
         let pointerToken = FilterArtifactStore(directoryURL: h.dir).loadArtifactPointer()?.token
         XCTAssertEqual(pointerToken, staged.token, "The artifact pointer must flip to the validated warm token.")
-        // The marker is LEFT for the foreground reconcile (the headless path never clears it).
+        // The marker is LEFT for the foreground reconcile (the ENGINE never clears it; the BGTask
+        // drain clears only the moot gate-closed/superseded cases before ever driving the engine).
         XCTAssertEqual(PendingFilterSwitchStore.current(in: h.defaults)?.targetFilterID, "f2",
                        "A committed headless switch must leave the marker for the foreground reconcile.")
         // The privacy-safe diagnostic record reflects the committed outcome.
@@ -313,15 +192,113 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
                        "A committed headless switch must post the foreground-reconcile nudge.")
     }
 
+    func testInLockReplaySupersededVetoAbortsCommitAndRollsBack() async throws {
+        // The replay-only in-lock supersession veto (Codex PR #410 P1): a warm, otherwise-committable
+        // switch whose veto reports "superseded at flip time" must ABORT with a fenced rollback — the
+        // on-disk selection stays on the pre-switch filter (the user's manual choice), the pointer
+        // never flips, and the diagnostic names the replay-superseded reason.
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        try seedFocusSwitchLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
+        // Realistic replay state: the drain always holds marker == expected at read time (a mismatch
+        // would abort earlier, at the compare-and-record — covered by its own test below).
+        let replayed = PendingFilterSwitchRequest(
+            targetFilterID: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 9_000)
+        )
+        PendingFilterSwitchStore.record(replayed, in: h.defaults, lockURL: h.env.pendingMarkerLockURL)
+        let vetoEnv = h.env.forReplay(
+            now: { replayed.requestedAt },
+            supersededVeto: { true },
+            expectedMarker: replayed
+        )
+
+        let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: vetoEnv)
+
+        XCTAssertEqual(outcome, .deferred, "The in-lock replay veto must abort the commit as a clean defer.")
+        let library = try JSONDecoder().decode(FilterLibrary.self, from: Data(contentsOf: h.env.filterLibraryURL))
+        XCTAssertEqual(library.activeFilterID, "f1",
+                       "The rollback must restore the pre-switch (manual) selection on disk.")
+        XCTAssertNil(FilterArtifactStore(directoryURL: h.dir).loadArtifactPointer()?.token,
+                     "The artifact pointer must never flip on a vetoed replay.")
+        XCTAssertEqual(FocusSwitchDiagnostics.last(in: h.defaults)?.reason, "deferred-replay-superseded-inlock",
+                       "The diagnostic must name the replay-superseded veto so the abort is diagnosable on Release.")
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: h.defaults), replayed,
+                       "The rollback must not touch the marker — the next reconcile's supersession check owns the drop.")
+    }
+
+    func testReplayMarkerChangedAbortsFailClosedAndPreservesNewerMarker() async throws {
+        // The compare-and-record seam (lavasec-ios public review of the PR #410 promotion): a NEWER
+        // intent won the marker slot while the replay was flock-blocked. The replay's main-path
+        // record must MISMATCH and abort fail-closed — never re-stamp the old request over the
+        // newer one — leaving the newer marker for the next drain pass, with its own reason.
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        // Active deliberately ≠ target so the engine takes the MAIN switch path: this test covers
+        // only that path's compare-and-record; the already-active branch's best-effort record
+        // yields silently by design and is not asserted here.
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2", "f3"])
+        let replayed = PendingFilterSwitchRequest(
+            targetFilterID: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+        // The newer intent's marker is what's on disk by the time the replay drives the engine.
+        let newer = PendingFilterSwitchRequest(
+            targetFilterID: "f3", requestedAt: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+        PendingFilterSwitchStore.record(newer, in: h.defaults, lockURL: h.env.pendingMarkerLockURL)
+        let replayEnv = h.env.forReplay(
+            now: { replayed.requestedAt },
+            supersededVeto: { false },
+            expectedMarker: replayed
+        )
+
+        let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: replayEnv)
+
+        XCTAssertEqual(outcome, .disallowed, "A replay whose marker was superseded must abort fail-closed.")
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: h.defaults), newer,
+                       "The newer intent's marker must survive the aborted replay.")
+        let library = try JSONDecoder().decode(FilterLibrary.self, from: Data(contentsOf: h.env.filterLibraryURL))
+        XCTAssertEqual(library.activeFilterID, "f1", "An aborted replay must not change the on-disk selection.")
+        XCTAssertEqual(FocusSwitchDiagnostics.last(in: h.defaults)?.reason, "disallowed-replay-marker-changed",
+                       "The abort must record its distinct Release-diagnosable reason.")
+        XCTAssertTrue(h.spy.posted.isEmpty, "The record-abort path posts no nudge (nothing changed).")
+    }
+
+    func testReplayMatchingMarkerCommitsWarmTarget() async throws {
+        // The seam must not get in a legitimate replay's way: marker unchanged since the drain read
+        // it ⇒ compare-and-record accepts and the warm commit proceeds exactly as before.
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        try seedFocusSwitchLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
+        let replayed = PendingFilterSwitchRequest(
+            targetFilterID: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 9_000)
+        )
+        PendingFilterSwitchStore.record(replayed, in: h.defaults, lockURL: h.env.pendingMarkerLockURL)
+        let replayEnv = h.env.forReplay(
+            now: { replayed.requestedAt },
+            supersededVeto: { false },
+            expectedMarker: replayed
+        )
+
+        let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: replayEnv)
+
+        XCTAssertEqual(outcome, .committed, "An unchanged marker must let the replay's warm commit proceed.")
+        let library = try JSONDecoder().decode(FilterLibrary.self, from: Data(contentsOf: h.env.filterLibraryURL))
+        XCTAssertEqual(library.activeFilterID, "f2")
+        XCTAssertEqual(FilterArtifactStore(directoryURL: h.dir).loadArtifactPointer()?.token, staged.token,
+                       "The committed warm replay must flip the artifact pointer to the staged token (parity with the non-replay committed test).")
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: h.defaults), replayed,
+                       "The committed replay leaves the marker (foreground protocol) with its ORIGINAL identity.")
+    }
+
     func testStaleCachedCatalogDefersInsteadOfFlipping() async throws {
-        let h = makeHarness(); defer { cleanup(h) }
-        let staged = try await stageWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
         // Make the cached catalog STALE on disk (freshness is the latest.json mtime, well past the env's
         // 7-day window) so the warm-reuse gate rejects it and the headless path defers (cold-compile on the
         // foreground) rather than flip a stale basis.
         let latestURL = h.env.catalogCacheURL.appendingPathComponent("catalog/latest.json")
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: latestURL.path)
-        try seedLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
+        try seedFocusSwitchLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
 
         let outcome = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
 
@@ -332,9 +309,9 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
     }
 
     func testNoWarmArtifactDefersAndKeepsMarker() async {
-        let h = makeHarness(); defer { cleanup(h) }
-        seedConfiguration(h, isPaid: true)
-        seedLibrary(h, active: "f1", ids: ["f1", "f2"])
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
         // App is NOT foreground-active and there is no staged warm artifact / fresh cached catalog,
         // so the headless path defers (it never cold-compiles inline).
 

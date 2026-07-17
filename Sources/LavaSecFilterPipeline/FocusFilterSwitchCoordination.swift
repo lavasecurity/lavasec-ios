@@ -65,6 +65,33 @@ public enum PendingFilterSwitchStore {
         }
     }
 
+    /// Compare-and-record: overwrite the marker ONLY while it still equals `expecting` — the record
+    /// half of the replay protocol (`BackgroundPendingSwitchDrain`). A REPLAY re-records the request
+    /// it read, but a NEWER Focus/Shortcut intent may have overwritten the slot while the replay was
+    /// serialized behind the focus flock; an unconditional overwrite there would erase the user's
+    /// newest automation with a re-stamped old one (the lost-update Codex flagged on the lavasec-ios
+    /// public promotion of PR #410). One flock spans the compare and the write, so an intent's
+    /// `record` can only land strictly before (→ mismatch → false, newer marker preserved) or
+    /// strictly after (→ its overwrite legitimately wins as the newest intent). Fresh intents keep
+    /// using `record` — newest-wins overwrite is correct for them.
+    /// pinned: FocusFilterSwitchCoordinationTests.testRecordIfMatchesRefusesWhenMarkerChanged
+    @discardableResult
+    package static func recordIfMatches(
+        _ request: PendingFilterSwitchRequest,
+        expecting: PendingFilterSwitchRequest,
+        in defaults: UserDefaults,
+        lockURL: URL? = nil
+    ) -> Bool {
+        FilterPublishLock.withExclusiveLock(at: lockURL) {
+            guard current(in: defaults) == expecting else { return false }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(request) else { return false }
+            defaults.set(data, forKey: defaultsKeyName)
+            return true
+        }
+    }
+
     /// Returns the pending Focus request, or `nil` when no valid record exists.
     public static func current(in defaults: UserDefaults) -> PendingFilterSwitchRequest? {
         guard let data = defaults.data(forKey: defaultsKeyName) else { return nil }
@@ -96,6 +123,22 @@ public enum PendingFilterSwitchStore {
     /// Stamp the time of a foreground-initiated switch (call from `switchToFilter`'s commit).
     public static func recordForegroundSwitch(at now: Date, in defaults: UserDefaults) {
         defaults.set(now.timeIntervalSinceReferenceDate, forKey: lastForegroundSwitchAtDefaultsKeyName)
+    }
+
+    /// The manual-vs-automation precedence rule, in ONE place so the two marker drains — the
+    /// foreground reconcile (`AppViewModel.applyPendingFilterSwitchOnce`) and the background BGTask
+    /// drain (`BackgroundPendingSwitchDrain`) — can never drift on it: a request is superseded when a
+    /// manual switch was INITIATED at-or-after it. `<=` on purpose: an exact tie favors the MANUAL
+    /// switch (the user's explicit action outranks the automation), and that is the safe direction —
+    /// a wrongly-dropped automation marker is re-recorded by the next Focus/Shortcut edge, whereas a
+    /// wrongly-KEPT one would silently revert the user (founder review P2-3 lineage, LAV-100).
+    /// pinned: FocusFilterSwitchCoordinationTests.testSupersessionPredicateFavorsManualSwitchOnTies
+    public static func isSupersededByForegroundSwitch(
+        _ request: PendingFilterSwitchRequest,
+        in defaults: UserDefaults
+    ) -> Bool {
+        guard let lastForegroundSwitchAt = lastForegroundSwitch(in: defaults) else { return false }
+        return request.requestedAt <= lastForegroundSwitchAt
     }
 
     /// The last foreground-initiated switch time, or nil if none recorded. Presence-checked (not a 0.0
