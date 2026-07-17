@@ -442,4 +442,54 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(backupPayload.contains("biometric"))
     }
 
+    // Fan-out A: the biometric path must coalesce concurrent callers onto ONE prompt, mirroring the
+    // passcode single-flight (testPasscodeAuthenticationIsSingleFlight). `.appSettings` is reachable from
+    // two independently-debounced handles (Guard-row selection + the picker sheet's toggle/links), and on
+    // the un-authenticated long-press entry neither short-circuits, so without coalescing a simultaneous
+    // tap on both fans out two Face ID prompts. The coalescer's logic is pinned behaviorally by
+    // BiometricAuthenticationCoalescerTests; here we pin the SecurityController wiring the compiler can't
+    // reach from the package suite. (Codex/OCR review on lavasec-ios#69.)
+    func testBiometricEvaluationCoalescesConcurrentPrompts() throws {
+        let controller = try readSource(.securityController)
+        let evaluateBlock = try sourceBlock(
+            in: controller,
+            startingAt: "private func evaluateBiometrics(reason: String) async -> Bool",
+            endingBefore: "private func requestPasscode"
+        )
+
+        XCTAssertTrue(controller.contains("private let biometricCoalescer = BiometricAuthenticationCoalescer()"))
+        XCTAssertTrue(evaluateBlock.contains("await biometricCoalescer.authenticate {"))
+        // The LAContext prompt must sit INSIDE the coalesced closure — otherwise the gate wraps nothing
+        // and every caller still prompts. A plain ordering check (`authenticate {` occurring before
+        // `evaluatePolicy(`) stays true even if a refactor lifts the prompt OUT of the closure — the exact
+        // "gate wraps nothing" regression — so match the trailing closure by brace balance and assert
+        // containment within it. (OCR review on lavasec-ios#71.)
+        let opener = "biometricCoalescer.authenticate {"
+        let openerEnd = try XCTUnwrap(
+            evaluateBlock.range(of: opener),
+            "coalescer opener \"\(opener)\" not found in evaluateBiometrics"
+        ).upperBound
+        var braceDepth = 1 // the `{` in `opener` is already open
+        var closureEnd: String.Index?
+        var cursor = openerEnd
+        while cursor < evaluateBlock.endIndex, closureEnd == nil {
+            switch evaluateBlock[cursor] {
+            case "{": braceDepth += 1
+            case "}":
+                braceDepth -= 1
+                if braceDepth == 0 { closureEnd = cursor }
+            default: break
+            }
+            cursor = evaluateBlock.index(after: cursor)
+        }
+        let closureBody = String(evaluateBlock[openerEnd ..< (try XCTUnwrap(
+            closureEnd,
+            "biometricCoalescer.authenticate closure is never closed in evaluateBiometrics"
+        ))])
+        XCTAssertTrue(
+            closureBody.contains("context.evaluatePolicy("),
+            "context.evaluatePolicy( must sit INSIDE the biometricCoalescer.authenticate { … } closure"
+        )
+    }
+
 }
