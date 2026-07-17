@@ -253,6 +253,10 @@ final class DiagnosticsController: ObservableObject {
     }
 
     func handleRageShake() {
+        // A rage-shake is the app's clearest "this user is frustrated" signal. Stamp it so the review
+        // prompt suppresses itself nearby — asking an annoyed user for five stars invites a one-star.
+        // Shares UserDefaults.standard with the review bookkeeping. pinned: ReviewPromptWiringSourceTests.testRageShakeStampsFrustration
+        ReviewPromptStateStorage.recordFrustration(now: Date(), in: .standard)
         let destination = RageShakeRouter.destination(allowsAdminQA: canOpenPhoneQAFromRageShake)
         if RageShakeRouter.requiresFeedbackConfirmation(for: destination) {
             pendingRageShakeConfirmation = destination

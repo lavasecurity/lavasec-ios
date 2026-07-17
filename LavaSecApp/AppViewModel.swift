@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import SwiftUI
 import UIKit
+@preconcurrency import CoreHaptics
 @preconcurrency import NetworkExtension
 @preconcurrency import UserNotifications
 import LavaSecKit
@@ -550,6 +551,152 @@ enum ProtectionHapticFeedback {
     }
 }
 
+/// Plays the Guard long-press "charge" as a single continuous Core Haptics event whose intensity and
+/// sharpness swell along `GuardianLongPressHaptics.continuousRamp` — one smooth gradient instead of a
+/// train of discrete `UIImpactFeedbackGenerator` impacts (which the Taptic Engine renders as separate
+/// taps, the "choppy" feel this replaces). Used where the hardware `supportsHaptics`; GuardView falls
+/// back to the discrete `schedule` where it does not — all iPads, pre-Core-Haptics iPhones (PR #404).
+///
+/// Lives in the app target rather than a package layer because it drives Core Haptics and the
+/// app-only `ProtectionHapticFeedback`/UIKit façade, which the narrow SPM products deliberately don't
+/// link — the tunnel especially runs under a jetsam ceiling (`INV-MEM-1`) and carries no haptics. The
+/// pure input it renders — the floor→peak `GuardianLongPressHaptics.continuousRamp` shape — DOES live
+/// in `LavaSecKit`, where it gets real behavioral tests (`GuardianLongPressHapticsTests`); this class
+/// is the thin, source-pinned player around it.
+///
+/// `@MainActor`-confined so the gesture's start/stop are serialized with the app's other haptics and
+/// the engine/player references never leave the main actor. Haptics are non-essential feedback, so
+/// every Core Haptics failure is swallowed — a broken engine must never disrupt the long-press reveal.
+@MainActor
+final class GuardianLongPressContinuousRampPlayer {
+    /// Whether this hardware can render the continuous gradient (a Taptic Engine + Core Haptics).
+    /// False on all iPads and pre-Core-Haptics iPhones, where GuardView uses the discrete fallback.
+    ///
+    /// `nonisolated static let` (cached, not recomputed): hardware haptics capability is fixed device
+    /// state that never changes at runtime, so the probe runs ONCE instead of allocating a fresh
+    /// `Capabilities` struct on every guard — one per gesture in `startGuardianLongPressRamp` plus one
+    /// per `start()` on the hot path (OCR review on lavasec-ios#69). The nonisolated
+    /// `ProtectionHapticFeedback.supportsContinuousLongPressRamp` façade reads it without hopping to the
+    /// main actor (the class itself stays `@MainActor` for the engine/player state).
+    nonisolated static let isSupported: Bool =
+        CHHapticEngine.capabilitiesForHardware().supportsHaptics
+
+    private var engine: CHHapticEngine?
+    private var player: CHHapticPatternPlayer?
+
+    /// Starts the swell from the top of the ramp. Fails silent when the hardware can't render it or
+    /// Core Haptics errors — the reveal still happens; only the charge haptic is skipped.
+    func start() {
+        guard Self.isSupported else { return }
+        // Defensive stop-before-start: if a prior gesture's player is still held in `self.player` when
+        // start() is re-entered without an intervening stop() (e.g. SwiftUI re-firing
+        // `onPressingChanged(true)`), the `self.player = player` assignment below would drop the old
+        // handle WITHOUT stopping it, orphaning a player that keeps buzzing on the shared engine until
+        // its pattern ends. stop() is main-actor + synchronous + safe on a nil/stale handle, so — unlike
+        // the async reset handler `resolvedEngine()` deliberately omits — it can't nil a live player out
+        // from under the next gesture (OCR review on lavasec-ios#69).
+        stop()
+        do {
+            let engine = try resolvedEngine()
+            try engine.start()
+            let player = try engine.makePlayer(with: Self.makePattern())
+            self.player = player
+            try player.start(atTime: CHHapticTimeImmediate)
+        } catch {
+            // A dead engine — e.g. after a media-services reset — can't recover in place, so drop it
+            // (synchronously, on the main actor); the next gesture rebuilds a fresh one via
+            // `resolvedEngine()`. Non-essential feedback: never propagate, just clean up.
+            self.engine = nil
+            stop()
+        }
+    }
+
+    /// Stops any in-flight swell — on finger-lift, reveal, navigate-away, or backgrounding. Safe to
+    /// call when nothing is playing. The engine is left to auto-shut-down when idle.
+    func stop() {
+        try? player?.stop(atTime: CHHapticTimeImmediate)
+        player = nil
+    }
+
+    private func resolvedEngine() throws -> CHHapticEngine {
+        if let engine {
+            return engine
+        }
+        let engine = try CHHapticEngine()
+        // Idle-shutdown between gestures instead of holding the Taptic Engine awake; `start()`
+        // restarts it on the next press, and a reset/dead engine is rebuilt from `start()`'s catch.
+        //
+        // Deliberately NO stopped/reset handler that nils `player`: those fire on an arbitrary queue,
+        // so a hop-to-main task from a PRIOR gesture's stop (e.g. idle auto-shutdown) could land AFTER
+        // the next gesture assigned its fresh player, nil'ing the only handle to an actively-playing
+        // player — an aborted/backgrounded press would then keep buzzing until the pattern ends
+        // (Codex P2 on #404). We don't need one: `start()` always builds a new player, and `stop()`
+        // no-ops on a stale one, so nothing plays on a dead engine and the stop handle is never lost.
+        engine.isAutoShutdownEnabled = true
+        self.engine = engine
+        return engine
+    }
+
+    private static func makePattern() throws -> CHHapticPattern {
+        // The ramp already accounts for Core Haptics' control asymmetry — `baseIntensity` full (the
+        // intensity control multiplies) and `baseSharpness` zero (the sharpness control adds) — so
+        // both curves modulate their absolute floor→peak envelope here without clamping (Codex P2 #404).
+        let ramp = GuardianLongPressHaptics.continuousRamp
+        let event = CHHapticEvent(
+            eventType: .hapticContinuous,
+            parameters: [
+                CHHapticEventParameter(parameterID: .hapticIntensity, value: ramp.baseIntensity),
+                CHHapticEventParameter(parameterID: .hapticSharpness, value: ramp.baseSharpness)
+            ],
+            relativeTime: ramp.startDelay,
+            duration: ramp.duration
+        )
+        // The event and both curves share the `startDelay` offset, so the swell stays silent through
+        // the grace period and then modulates across the event window.
+        let intensityCurve = CHHapticParameterCurve(
+            parameterID: .hapticIntensityControl,
+            controlPoints: ramp.intensityCurve.map {
+                CHHapticParameterCurve.ControlPoint(relativeTime: $0.relativeTime, value: $0.value)
+            },
+            relativeTime: ramp.startDelay
+        )
+        let sharpnessCurve = CHHapticParameterCurve(
+            parameterID: .hapticSharpnessControl,
+            controlPoints: ramp.sharpnessCurve.map {
+                CHHapticParameterCurve.ControlPoint(relativeTime: $0.relativeTime, value: $0.value)
+            },
+            relativeTime: ramp.startDelay
+        )
+        return try CHHapticPattern(events: [event], parameterCurves: [intensityCurve, sharpnessCurve])
+    }
+}
+
+extension ProtectionHapticFeedback {
+    /// Shared, main-actor player for the continuous long-press swell — one instance so the engine is
+    /// reused across gestures (rebuilt only after a system stop/reset).
+    @MainActor private static let longPressContinuousRampPlayer = GuardianLongPressContinuousRampPlayer()
+
+    /// Whether the continuous gradient can play on this hardware; GuardView uses the discrete
+    /// `schedule` fallback when false.
+    static var supportsContinuousLongPressRamp: Bool {
+        GuardianLongPressContinuousRampPlayer.isSupported
+    }
+
+    /// Starts the continuous long-press gradient, gated by the same Lava Haptics toggle as every
+    /// other surface so it goes silent when haptics are off.
+    @MainActor static func startGuardianLongPressContinuousRamp() {
+        guard isEnabled else {
+            return
+        }
+        longPressContinuousRampPlayer.start()
+    }
+
+    /// Stops the continuous long-press gradient. Safe to call when nothing is playing.
+    @MainActor static func stopGuardianLongPressContinuousRamp() {
+        longPressContinuousRampPlayer.stop()
+    }
+}
+
 private extension GuardianLongPressHapticLevel {
     /// The UIKit impact weight for this ramp band. `.light` matches the guardian-tap floor.
     var impactFeedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle {
@@ -958,6 +1105,13 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var tunnelHealth = TunnelHealthSnapshot()
     @Published var vpnMessage: String?
     @Published var vpnMessageIsError = false
+    // One-shot signal that a review anchor was earned. RootView observes it and, once the scene is
+    // active, issues the native `requestReview` (which iOS may or may not display) and records the
+    // budget spend via `markReviewRequestPresented`. Stays armed while the app is not active so a
+    // request armed from an async path off-screen is never dropped-yet-charged. The eligibility
+    // decision lives in ReviewPromptPolicy — this holds only the fire signal.
+    // Design: lavasec-infra/plans/2026-07-16-app-store-review-prompt-plan.md
+    @Published private(set) var pendingReviewRequest = false
     @Published private(set) var temporaryProtectionPauseUntil: Date?
     // The customization-preference @Published state (appearance, text size, LavaGuard
     // look, app icon, Live-Activities toggle + pause length, the haptics toggle, and the
@@ -2894,6 +3048,32 @@ final class AppViewModel: ObservableObject {
         nextConfiguration.blockedDomains = filterEditDraft.blockedDomains
         nextConfiguration.allowedDomains = filterEditDraft.allowedDomains
 
+        // Whether this foreground apply ADDED protection — the review filter-update anchor. Computed
+        // against the OLD `configuration` before the commit below. `FilterConfigurationDiff` omits
+        // custom blocklists, so a paid custom-list add correctly does NOT qualify. Only an ADDED
+        // curated blocklist or ADDED blocked domain counts: an added ALLOWED domain is an EXCEPTION
+        // that WEAKENS filtering — the very `addedAllowedDomains` that `FilterMyListView`'s
+        // `weakensProtection` gates its "reduce your protection" confirmation on — so un-blocking a
+        // site must NOT spend a scarce review slot on the opposite of the intended value moment.
+        // Consumed at the success tail.
+        // pinned: ReviewPromptWiringSourceTests.testFilterUpdateAnchorFiresOnlyWhenProtectionWasAdded
+        let reviewFilterUpdateAddedProtection: Bool = {
+            let diff = FilterConfigurationDiff(
+                from: FilterConfigurationSelection(
+                    enabledBlocklistIDs: configuration.enabledBlocklistIDs,
+                    blockedDomains: configuration.blockedDomains,
+                    allowedDomains: configuration.allowedDomains
+                ),
+                to: FilterConfigurationSelection(
+                    enabledBlocklistIDs: nextConfiguration.enabledBlocklistIDs,
+                    blockedDomains: nextConfiguration.blockedDomains,
+                    allowedDomains: nextConfiguration.allowedDomains
+                )
+            )
+            return !diff.addedBlocklistIDs.isEmpty
+                || !diff.addedBlockedDomains.isEmpty
+        }()
+
         let shouldRestoreProtection = configuration.protectionEnabled || isProtectionEnabledStatus(vpnStatus)
         // A draft apply is a wholesale config replacement too: claim the replacement token before the
         // first await so a switch/restore/import that completes mid-flight supersedes it (and vice
@@ -2974,6 +3154,12 @@ final class AppViewModel: ObservableObject {
             }
             filterPreparationState = .preparing(progress: 1, message: "Success")
             ProtectionHapticFeedback.play(.actionSucceeded)
+            // A foreground draft apply that added protection is a review anchor. Fired only AFTER the
+            // supersession recheck above confirmed THIS apply committed, so a superseded/no-op apply
+            // never asks. pinned: ReviewPromptWiringSourceTests.testFilterUpdateAnchorFiresOnlyWhenProtectionWasAdded
+            if reviewFilterUpdateAddedProtection {
+                noteFilterUpdatedReviewMoment()
+            }
 
             // Hold long enough for the bar to sweep to a full 100% (~0.55s) and then show the
             // checkmark for a beat. The cover view fills the bar, then cross-fades to the glyph.
@@ -7546,9 +7732,17 @@ final class AppViewModel: ObservableObject {
         }
         synchronizeLocalProtectionUptime(currentStatus: currentStatus)
         reconcileLiveActivity()
+        // Capture the user-initiated arm BEFORE the haptic call consumes it: the review protection-on
+        // anchor must count only deliberate turn-ons, not automatic on-demand reconnects (which never
+        // arm `awaitsProtectionOnHaptic`). See the review-prompt orchestration below.
+        // pinned: ReviewPromptWiringSourceTests.testProtectionOnAnchorCountsOnlyUserInitiatedTurnOns
+        let protectionOnWasUserInitiated = awaitsProtectionOnHaptic
         playProtectionOnSucceededHapticIfNeeded(previousStatus: previousStatus, currentStatus: currentStatus)
         if previousStatus != .connected, currentStatus == .connected {
             appendNetworkActivity(.protectionConnected)
+            if protectionOnWasUserInitiated {
+                recordUserInitiatedProtectionOnForReview()
+            }
         }
 
         #if DEBUG
@@ -7579,6 +7773,79 @@ final class AppViewModel: ObservableObject {
     private func playProtectionStartFailedHaptic() {
         awaitsProtectionOnHaptic = false
         ProtectionHapticFeedback.play(.protectionStartFailed)
+    }
+
+    // MARK: - App Store review prompting
+    //
+    // All three review anchors (protection-on, filter-update, activity-viewing) funnel through the
+    // pure `ReviewPromptPolicy`; the app keeps only this thin orchestration. Bookkeeping lives in
+    // `UserDefaults.standard` — app-only, like `hasSeenLavaOnboarding`, never the app group.
+    // Design: lavasec-infra/plans/2026-07-16-app-store-review-prompt-plan.md
+    // pinned: ReviewPromptWiringSourceTests.testEvaluationGoesThroughTheSharedPolicyAndAppOnlyDefaults
+
+    private var reviewPromptDefaults: UserDefaults { .standard }
+
+    /// Records a user-initiated successful turn-on and evaluates the protection-on anchor. Called from
+    /// the VPN-status funnel ONLY on a fresh `.connected` transition the user initiated (guarded by the
+    /// `awaitsProtectionOnHaptic` arm) — never an automatic on-demand reconnect.
+    private func recordUserInitiatedProtectionOnForReview() {
+        var state = ReviewPromptStateStorage.load(from: reviewPromptDefaults)
+        state.successfulProtectionOns += 1
+        ReviewPromptStateStorage.save(state, to: reviewPromptDefaults)
+        evaluateReviewPrompt(for: .protectionOn, state: state)
+    }
+
+    /// Evaluates the filter-update anchor after a foreground draft apply that ADDED protection (a
+    /// curated blocklist or blocked domain — never a paid custom list, and never an added allowed
+    /// domain, which is an EXCEPTION that weakens filtering; see `reviewFilterUpdateAddedProtection`).
+    private func noteFilterUpdatedReviewMoment() {
+        evaluateReviewPrompt(
+            for: .filterUpdated,
+            state: ReviewPromptStateStorage.load(from: reviewPromptDefaults)
+        )
+    }
+
+    /// Evaluates the activity-viewing anchor. `ActivityView` enforces the foreground dwell; the policy
+    /// enforces the query-volume + block-rate magnitude off the on-screen summary.
+    func noteActivityViewingReviewMoment(totalQueries: Int, blockRate: Double) {
+        evaluateReviewPrompt(
+            for: .viewingActivity(totalQueries: totalQueries, blockRate: blockRate),
+            state: ReviewPromptStateStorage.load(from: reviewPromptDefaults)
+        )
+    }
+
+    private func evaluateReviewPrompt(for moment: ReviewAhaMoment, state: ReviewPromptState) {
+        guard ReviewPromptPolicy.shouldRequest(
+            for: moment,
+            state: state,
+            hasCompletedOnboarding: hasCompletedOnboarding,
+            now: Date()
+        ) else {
+            return
+        }
+        // Only ARM here — do NOT spend the budget yet. An eligible moment can be armed from an async
+        // path (a filter apply or VPN connect finishing) after the user has left the app; the timestamp
+        // that spends the 90-day/annual budget is recorded in `markReviewRequestPresented`, when the
+        // native prompt is actually issued in an active scene. So a request armed while backgrounded and
+        // never presented (app killed first) never burns a slot. (Codex review #406.)
+        pendingReviewRequest = true
+    }
+
+    /// Records that the native review prompt was actually issued (RootView calls this only in an active
+    /// scene) and disarms the one-shot. The budget timestamp is spent HERE, not at arm time, so StoreKit
+    /// silently dropping a request fired with no active scene can never put the user on the throttle
+    /// without seeing the sheet. pinned: ReviewPromptWiringSourceTests.testEvaluationGoesThroughTheSharedPolicyAndAppOnlyDefaults
+    func markReviewRequestPresented() {
+        // The budget-spending timestamp must co-locate with the only legitimate trigger — an armed
+        // request actually presented in an active scene. Guard on `pendingReviewRequest` so a future
+        // caller (a debug menu, a test harness, or a moved call) can't append a timestamp with no UI
+        // arm, silently spending the 90-day/annual budget and throttling a later real anchor (OCR
+        // review on lavasec-ios#69).
+        guard pendingReviewRequest else { return }
+        var state = ReviewPromptStateStorage.load(from: reviewPromptDefaults)
+        state.promptTimestamps.append(Date())
+        ReviewPromptStateStorage.save(state, to: reviewPromptDefaults)
+        pendingReviewRequest = false
     }
 
     private func scheduleProtectionNotificationIfNeeded() {

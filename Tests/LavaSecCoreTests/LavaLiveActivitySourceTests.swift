@@ -45,6 +45,20 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationController.contains("let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil"))
         XCTAssertTrue(customizationController.contains("iconPersonalizer.setAppIcon(targetIconName)"))
         XCTAssertTrue(customizationController.contains("syncAppIcon(to: look)"))
+        // The keep-open picker can queue several Guard selections; icon changes serialize behind the
+        // previous one (setAlternateIconName is async + not cancellation-aware) so they apply in
+        // order and the last pick wins, instead of racing to a mismatched launcher icon (Codex P2 on #402).
+        XCTAssertTrue(customizationController.contains("private var iconSyncTask: Task<Void, Never>?"))
+        // Serialization ORDER, not just presence: capture the OLD task BEFORE assigning the new one, and
+        // await that captured OLD handle inside the new task — so each icon sync waits for its
+        // predecessor (submission order wins). A regression that captured the NEW task (after the
+        // assignment) into `previousSync` would still contain all three strings yet self-await and
+        // serialize nothing, so pin the relative positions (OCR review on lavasec-ios#69).
+        let capturePreviousIndex = try XCTUnwrap(customizationController.range(of: "let previousSync = iconSyncTask")?.lowerBound)
+        let assignNewIndex = try XCTUnwrap(customizationController.range(of: "iconSyncTask = Task {")?.lowerBound)
+        let awaitPreviousIndex = try XCTUnwrap(customizationController.range(of: "_ = await previousSync?.value")?.lowerBound)
+        XCTAssertLessThan(capturePreviousIndex, assignNewIndex)
+        XCTAssertLessThan(assignNewIndex, awaitPreviousIndex)
 
         let alternateIconSetting = "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = \"\(iconNames.joined(separator: " "))\";"
         XCTAssertEqual(project.components(separatedBy: alternateIconSetting).count - 1, 3)
@@ -165,8 +179,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let lavaGuardUnlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
         let progressPrivacyIndex = try XCTUnwrap(customizationBlock.range(of: "Lava Guard progress requires local logs")?.lowerBound)
         XCTAssertLessThan(lavaGuardUnlockNoteIndex, progressPrivacyIndex)
-        // The unlock panel uses the shared info-panel supporting-text style rather
-        // than its own one-off subheadline/footnote sizes.
+        // Two shared quiet styles, no one-off font sizes: the per-Guard spotlight tip keeps the
+        // supporting-text style, while the unlock/privacy note below the catalog dropped to the
+        // quieter footnote note style (`.lavaQuietNoteText()`, pinned below) so it reads as a calm
+        // footer rather than body copy competing with the Guard rows.
         XCTAssertTrue(customizationBlock.contains(".lavaSupportingText()"))
         XCTAssertFalse(customizationBlock.contains(".font(.footnote)"))
         XCTAssertTrue(customizationBlock.contains("if !viewModel.configuration.hasLavaSecurityPlus {"))
@@ -184,14 +200,19 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationBlock.contains("customization.setUpdatesAppIconWithLavaGuard(isEnabled)"))
         // The catalog now opens as a bottom sheet (radio-style single select) rather
         // than an inline disclosure: the row presents LavaGuardLookPickerSheet, which
-        // lists every Guard and applies the selection before dismissing.
+        // lists every Guard and applies the selection live while STAYING open — the
+        // Close (X) is the only dismiss, so selecting no longer bounces back.
         XCTAssertTrue(customizationBlock.contains(".sheet(isPresented: $isPresentingPicker)"))
-        XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerSheet(selectedLook: look, onSelect: onSelect)"))
+        XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerSheet(onSelect: onSelect)"))
         XCTAssertTrue(customizationBlock.contains("ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \\.element.id)"))
         XCTAssertTrue(customizationBlock.contains("customization.setLavaGuardLook(look)"))
         XCTAssertTrue(customizationBlock.contains("guard availability.isSelectable else"))
         XCTAssertTrue(customizationBlock.contains("onSelect(look)"))
-        XCTAssertTrue(customizationBlock.contains("dismiss()"))
+        // Selecting a Guard keeps the sheet open: no dismiss() on selection, the checkmark tracks
+        // the LIVE current look, and only the Close (X) dismisses via dismiss.callAsFunction.
+        XCTAssertFalse(customizationBlock.contains("dismiss()"))
+        XCTAssertTrue(customizationBlock.contains("isSelected: look == customization.lavaGuardLook"))
+        XCTAssertTrue(customizationBlock.contains("action: dismiss.callAsFunction"))
         XCTAssertFalse(customizationBlock.contains("DisclosureGroup(isExpanded: $isExpanded)"))
         XCTAssertTrue(customizationBlock.contains("private struct LavaGuardLookContent: View"))
         XCTAssertTrue(customizationBlock.contains("private struct MaskedLavaGuardIcon: View"))
