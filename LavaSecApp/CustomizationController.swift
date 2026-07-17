@@ -214,6 +214,10 @@ final class CustomizationController: ObservableObject {
     private let defaults = UserDefaults.standard
     private let appGroupDefaults = LavaSecAppGroup.sharedDefaults
     private let iconPersonalizer: IconPersonalizing = UIKitIconPersonalizer()
+    // Serializes app-icon changes — see `syncAppIcon`. The picker sheet stays open, so rapid Guard
+    // selections must not fire overlapping (non-cancellation-aware) icon updates that finish out of
+    // order and leave the launcher icon mismatched with the chosen Guard.
+    private var iconSyncTask: Task<Void, Never>?
 
     // The hub outlives this controller (AppViewModel owns it strongly), so an unowned
     // back-reference avoids a retain cycle without weak-optional noise on every call.
@@ -376,11 +380,28 @@ final class CustomizationController: ObservableObject {
         }
 
         let targetIconName = updatesAppIconWithLavaGuard ? look.alternateAppIconName : nil
-        guard iconPersonalizer.currentAppIconName != targetIconName else {
-            return
-        }
 
-        Task {
+        // Serialize the icon change behind any still-running one. `setAppIcon` (setAlternateIconName)
+        // is async and NOT cancellation-aware, so — now that the picker sheet stays open — tapping
+        // several Guards in a row could otherwise launch overlapping icon updates that complete out
+        // of order and strand the launcher icon on an earlier pick. Chaining each behind the previous
+        // makes them apply in submission order (the last selection wins), and the current-icon guard
+        // runs AFTER the prior update lands so an already-correct icon is skipped (Codex P2 on #402).
+        let previousSync = iconSyncTask
+        // `[weak self]` matches this file's Task convention and avoids a retain cycle
+        // (self → iconSyncTask → Task → closure → self): the chained previous-task is released once each
+        // link completes instead of being pinned alive by its own stored handle (OCR review on
+        // lavasec-ios#69).
+        iconSyncTask = Task { @MainActor [weak self] in
+            _ = await previousSync?.value
+            guard let self else {
+                return
+            }
+
+            guard iconPersonalizer.currentAppIconName != targetIconName else {
+                return
+            }
+
             do {
                 try await iconPersonalizer.setAppIcon(targetIconName)
             } catch {

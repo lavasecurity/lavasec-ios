@@ -96,10 +96,11 @@ struct ProtectionStatusPanel: View {
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)
                 .onTapGesture { playGuardianTapGratitude() }
-                // Long-press (2s) opens the Lava Guard picker — the same sheet the Customization
-                // page presents. The hold plays an escalating haptic "charge"
-                // (GuardianLongPressHaptics): its floor is the very same light impact as the tap
-                // above, and it balloons up into a crescendo at the reveal.
+                // Long-press (1.2s) opens the Lava Guard picker — the same sheet the Customization
+                // page presents. The hold plays a haptic crescendo (GuardianLongPressHaptics) whose
+                // floor is the very same light impact as the tap above: on Core Haptics hardware a
+                // single continuous swell that strengthens as a smooth gradient into the reveal, and
+                // on devices without it the discrete escalating pulses (see startGuardianLongPressRamp).
                 .onLongPressGesture(minimumDuration: GuardianLongPressHaptics.holdDuration) {
                     presentLavaGuardPickerFromLongPress()
                 } onPressingChanged: { isPressing in
@@ -115,22 +116,26 @@ struct ProtectionStatusPanel: View {
                     isGuardianTapAnimationRunning = false
                     guardianOverrideState = nil
                     stopGuardianLongPressRamp()
-                    // Cancel an in-flight reveal/auth OR look-selection/auth task on a GENUINE
-                    // navigate-away so a prompt still resolving can't fire the reveal haptic, flip the
-                    // picker flag, or apply a look on a dismissed view (Kilo + OCR review on the 1.2.4
-                    // sync) — but NOT when this onDisappear IS the passcode auth cover: `.appSettings`
-                    // auth can present SecurityPasscodeAuthenticationView as a `fullScreenCover`
-                    // (RootView), which fires onDisappear here while a task is awaiting that very
-                    // passcode; cancelling then skips the reveal/selection after a successful passcode and
+                    // Cancel an in-flight reveal/auth task on a GENUINE navigate-away so a prompt still
+                    // resolving can't fire the reveal haptic or flip the picker flag on a dismissed view
+                    // (Kilo + OCR review on the 1.2.4 sync) — but NOT when this onDisappear IS the passcode
+                    // auth cover: `.appSettings` auth can present SecurityPasscodeAuthenticationView as a
+                    // `fullScreenCover` (RootView), which fires onDisappear here while a task is awaiting
+                    // that very passcode; cancelling then skips the reveal after a successful passcode and
                     // locks passcode / biometric-fallback users out of the long-press picker (Codex P2 on
                     // the 1.2.4 sync). onDisappear can't tell the two apart, so gate on the live passcode
                     // request — the same fullScreenCover/onDisappear conflation FilterMyListView /
-                    // FilterLibraryView already document. // pinned: GuardLongPressPickerSourceTests.testGuardMascotLongPressRevealsPickerWithEscalatingHaptic
+                    // FilterLibraryView already document. NOTE the invariant the gate leans on: biometric
+                    // (Face ID/Touch ID) is a SYSTEM overlay that does NOT fire SwiftUI onDisappear — only
+                    // the passcode `fullScreenCover` does — so gating on the passcode request alone is
+                    // sufficient; do NOT OR-in a biometric-in-progress check, which would wrongly skip the
+                    // reveal after a successful Face ID (OCR review on lavasec-ios#69). The look-SELECTION auth is deliberately NOT torn
+                    // down here — it DEBOUNCES (guard-on-handle + `defer`-nil), and cancelling a
+                    // non-cancellation-aware biometric prompt would discard a completed Face ID (#401).
+                    // pinned: GuardLongPressPickerSourceTests.testGuardMascotLongPressRevealsPickerWithEscalatingHaptic
                     if security.passcodeAuthenticationRequest == nil {
                         guardianRevealTask?.cancel()
                         guardianRevealTask = nil
-                        guardianSelectionTask?.cancel()
-                        guardianSelectionTask = nil
                     }
                 }
 
@@ -183,13 +188,10 @@ struct ProtectionStatusPanel: View {
         .padding(18)
         .lavaPanelBackground()
         .sheet(isPresented: $isPresentingLavaGuardPicker) {
-            LavaGuardLookPickerSheet(
-                selectedLook: customization.lavaGuardLook,
-                onSelect: selectLavaGuardLook
-            )
-            .environmentObject(viewModel)
-            .environmentObject(customization)
-            .environmentObject(security)
+            LavaGuardLookPickerSheet(onSelect: selectLavaGuardLook)
+                .environmentObject(viewModel)
+                .environmentObject(customization)
+                .environmentObject(security)
         }
         .onChange(of: viewModel.protectionTitle + " " + viewModel.protectionSubtitle) { _, _ in
             // Announce the settled protection state to VoiceOver. Key on the FULL accessible value
@@ -202,39 +204,49 @@ struct ProtectionStatusPanel: View {
             )
         }
         .onChange(of: scenePhase) { _, newPhase in
-            // The long-press ramp schedules its escalating pulses with `Task.sleep`; finger-lift and
-            // navigate-away already cancel it, but leaving the foreground does not. A 2s hold begun
-            // just before the app backgrounds (or goes inactive for the app switcher / a system
-            // alert) would otherwise keep firing haptics — even land the reveal crescendo — on a
-            // surface the user is no longer looking at. Stop the ramp on any non-active phase (OCR
-            // review on the 1.2.4 sync).
+            // The long-press ramp plays a charge over the 1.2s hold — a continuous Core Haptics swell,
+            // or the discrete `Task.sleep` pulses on the fallback; finger-lift and navigate-away
+            // already stop it, but leaving the foreground does not. A hold begun just before the app
+            // backgrounds (or goes inactive for the app switcher / a system alert) would otherwise
+            // keep buzzing — even land the reveal crescendo — on a surface the user is no longer
+            // looking at. `stopGuardianLongPressRamp` stops BOTH renderings, so cover any non-active
+            // phase (OCR review on the 1.2.4 sync).
             if newPhase != .active {
                 stopGuardianLongPressRamp()
             }
         }
     }
 
-    /// Drives the long-press haptic "charge": schedules each escalating pulse from the pure
-    /// `GuardianLongPressHaptics` curve against the clock. `onPressingChanged(true)` fires on
-    /// finger-down, so the schedule's first pulse waits out `GuardianLongPressHaptics.gracePeriod`
-    /// — a quick tap or aborted press is cancelled before it and stays silent (no double-haptic on
-    /// an awake tap, no buzz in sleeping/paused states). From there the pulses crowd toward the
-    /// reveal so the buildup accelerates. Cancelled the moment the finger lifts — whether the press
-    /// completed or was released early.
+    /// Drives the long-press haptic "charge". On Core Haptics hardware this is ONE continuous swell
+    /// (`ProtectionHapticFeedback.startGuardianLongPressContinuousRamp`) whose intensity and sharpness
+    /// climb as a smooth gradient — the fix for the "choppy" discrete-impact feel (PR #404). Where
+    /// Core Haptics is unavailable (all iPads, pre-Core-Haptics iPhones) it FALLS BACK to scheduling
+    /// the discrete escalating pulses from the pure `GuardianLongPressHaptics.schedule` against the
+    /// clock. Either way `onPressingChanged(true)` fires on finger-DOWN, so the charge stays silent
+    /// through `GuardianLongPressHaptics.gracePeriod` — a quick tap or aborted press is stopped before
+    /// it sounds (no double-haptic on an awake tap, no buzz in sleeping/paused states). Stopped the
+    /// moment the finger lifts, whether the press completed or was released early.
     private func startGuardianLongPressRamp() {
         guardianLongPressRampTask?.cancel()
-        guardianLongPressRampTask = Task { @MainActor in
-            var firedDelay: TimeInterval = 0
-            for pulse in GuardianLongPressHaptics.schedule {
-                let wait = pulse.delay - firedDelay
-                firedDelay = pulse.delay
-                if wait > 0 {
-                    try? await Task.sleep(for: .seconds(wait))
+        guardianLongPressRampTask = nil
+        if ProtectionHapticFeedback.supportsContinuousLongPressRamp {
+            // The continuous event bakes in its own grace-period offset and full duration, so there
+            // is no per-pulse clock to drive here — start it and let Core Haptics render the gradient.
+            ProtectionHapticFeedback.startGuardianLongPressContinuousRamp()
+        } else {
+            guardianLongPressRampTask = Task { @MainActor in
+                var firedDelay: TimeInterval = 0
+                for pulse in GuardianLongPressHaptics.schedule {
+                    let wait = pulse.delay - firedDelay
+                    firedDelay = pulse.delay
+                    if wait > 0 {
+                        try? await Task.sleep(for: .seconds(wait))
+                    }
+                    if Task.isCancelled {
+                        return
+                    }
+                    ProtectionHapticFeedback.playGuardianLongPressStep(pulse.step)
                 }
-                if Task.isCancelled {
-                    return
-                }
-                ProtectionHapticFeedback.playGuardianLongPressStep(pulse.step)
             }
         }
     }
@@ -242,6 +254,9 @@ struct ProtectionStatusPanel: View {
     private func stopGuardianLongPressRamp() {
         guardianLongPressRampTask?.cancel()
         guardianLongPressRampTask = nil
+        // Stop whichever rendering was in flight: the discrete pulse task is cancelled above, and the
+        // continuous Core Haptics player is stopped here (a no-op when it was never started).
+        ProtectionHapticFeedback.stopGuardianLongPressContinuousRamp()
     }
 
     /// The long press completed (held the full `holdDuration`): stop the ramp and reveal the
@@ -287,22 +302,23 @@ struct ProtectionStatusPanel: View {
     /// Applies a Lava Guard look chosen from the picker. Mirrors the Customization page: the
     /// change is an app-settings mutation, so it goes through the same authentication gate.
     ///
-    /// Tracked in `guardianSelectionTask` (mirroring the reveal task) so a rapid second tap cancels
-    /// the first in-flight auth instead of fanning out into parallel prompts, and so `.onDisappear`
-    /// can cancel a still-awaiting task on a genuine navigate-away rather than applying a look on a
-    /// view the user has already left. The `Task.isCancelled` guard after the await closes the race
-    /// where the cancel lands while auth is returning (OCR review on the 1.2.4 sync).
+    /// Tracked in `guardianSelectionTask` (mirroring `authorizeAppSettingsThen`) so a rapid second tap
+    /// DEBOUNCES rather than cancels: a tap while an auth is already in flight is ignored (guard on the
+    /// tracked handle), and the task nils the handle on completion (`defer`) so a later tap works. It
+    /// must NOT cancel-prior — `SecurityController`'s biometric prompt is not cancellation-aware
+    /// (`evaluateBiometrics` wraps `LAContext.evaluatePolicy` in a bare `withCheckedContinuation`), so
+    /// cancelling a task whose Face ID the user then completes would discard that successful auth, and
+    /// the replacement tap would fan out a parallel prompt (#401; Codex P2 on lavasec-ios#69).
     private func selectLavaGuardLook(_ look: GuardianShieldStyle) {
-        guardianSelectionTask?.cancel()
+        guard guardianSelectionTask == nil else { return }
         guardianSelectionTask = Task { @MainActor in
+            defer { guardianSelectionTask = nil }
             guard await security.requireAuthentication(
                 for: .appSettings,
                 reason: "Edit Customization settings"
             ) else {
                 return
             }
-            guard !Task.isCancelled else { return }
-
             customization.setLavaGuardLook(look)
         }
     }

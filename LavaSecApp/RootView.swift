@@ -1,5 +1,6 @@
 import SwiftUI
 import LavaSecKit
+import StoreKit
 import UIKit
 
 enum LavaRootTab: Hashable {
@@ -34,6 +35,9 @@ struct RootView: View {
     // text-size overrides below read it, so only customization changes re-render here.
     @EnvironmentObject private var customization: CustomizationController
     @Environment(\.scenePhase) private var scenePhase
+    // Native App Store review prompt. iOS decides whether to actually display it (throttled to
+    // ~3/user/365 days) and gives no callback — so all eligibility lives upstream in ReviewPromptPolicy.
+    @Environment(\.requestReview) private var requestReview
     @AppStorage("hasSeenLavaOnboarding") private var hasSeenLavaOnboarding = false
     @State private var didHandleDebugLaunchRageShake = false
     @State private var didRequestInitialAppUnlock = false
@@ -74,6 +78,16 @@ struct RootView: View {
         // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
         // so every screen — including sheets/covers presented from it — inherits it.
         .lavaTextSizeOverride(customization.textSizeOverride)
+        // A review anchor was earned: present the native prompt, but ONLY while the scene is active.
+        // StoreKit needs a foreground-active scene to present from, and an eligible moment can be armed
+        // from an async path (a filter apply or VPN connect finishing) after the user has left the app —
+        // firing then silently drops the sheet yet would still spend the budget. So keep the flag armed
+        // and let `presentReviewRequestIfActive` gate on scene phase; the scene-becomes-active case is
+        // handled in the scenePhase onChange below. (Codex review #406.)
+        // pinned: ReviewPromptWiringSourceTests.testRootViewForwardsTheSignalToNativeRequestReview
+        .onChange(of: viewModel.pendingReviewRequest) { _, _ in
+            presentReviewRequestIfActive()
+        }
         .overlay {
             RageShakeDetector {
                 reports.handleRageShake()
@@ -205,6 +219,13 @@ struct RootView: View {
             viewModel.setAppForegroundActive(true)
             viewModel.warmNonActiveFiltersOnAppForeground()
             Task { await viewModel.reconcilePendingFilterSwitch() }
+            // Same initial-.active gap for the review prompt: a request armed BEFORE this view installed
+            // its observers (`onChange` fires on CHANGE, not the initial value; the scene-phase onChange
+            // likewise skips the launch's initial .active) would otherwise wait for a background→foreground
+            // round-trip. The guard inside no-ops unless a request is armed and the scene is active, so a
+            // foreground launch that has one presents it immediately. (Codex review on lavasec-ios#69.)
+            // pinned: ReviewPromptWiringSourceTests.testRootViewForwardsTheSignalToNativeRequestReview
+            presentReviewRequestIfActive()
             guard !didRequestInitialAppUnlock else {
                 return
             }
@@ -222,6 +243,9 @@ struct RootView: View {
                 viewModel.warmNonActiveFiltersOnAppForeground()
                 viewModel.reconcileTemporaryProtectionPause()
                 viewModel.reconcileLiveActivity()
+                // Present a review request that was armed while the app was not active (see the
+                // pendingReviewRequest onChange above). pinned: ReviewPromptWiringSourceTests.testRootViewForwardsTheSignalToNativeRequestReview
+                presentReviewRequestIfActive()
                 Task {
                     await viewModel.refreshProtectionStatus(force: true)
                     await viewModel.reconcilePendingFilterSwitch()
@@ -456,6 +480,17 @@ struct RootView: View {
 
     private func scrollToTopTrigger(for tab: LavaRootTab) -> Int {
         rootTabScrollToTopRequests[tab, default: 0]
+    }
+
+    /// Issues the native review prompt when one is armed AND the scene is active, then records the
+    /// budget spend and disarms. A no-op otherwise, leaving the flag armed for the next activation so a
+    /// request armed off-screen is never dropped-yet-charged. (Codex review #406.)
+    private func presentReviewRequestIfActive() {
+        guard viewModel.pendingReviewRequest, scenePhase == .active else {
+            return
+        }
+        requestReview()
+        viewModel.markReviewRequestPresented()
     }
 
     private func handleDebugLaunchRageShakeIfNeeded() {

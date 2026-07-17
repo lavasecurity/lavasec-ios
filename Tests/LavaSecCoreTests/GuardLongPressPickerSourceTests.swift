@@ -29,18 +29,28 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         XCTAssertTrue(panel.contains("startGuardianLongPressRamp()"))
         XCTAssertTrue(panel.contains("stopGuardianLongPressRamp()"))
 
-        // The ramp is driven from the pure schedule; each pulse plays through the gated façade,
-        // and the crescendo fires at the reveal.
+        // The charge has two renderings. PRIMARY: a continuous Core Haptics swell when the hardware
+        // supports it. FALLBACK: the discrete pulse schedule driven against the clock, each pulse
+        // through the gated façade. Either way the crescendo fires at the reveal, and both renderings
+        // are stopped on teardown.
+        XCTAssertTrue(panel.contains("ProtectionHapticFeedback.supportsContinuousLongPressRamp"))
+        XCTAssertTrue(panel.contains("ProtectionHapticFeedback.startGuardianLongPressContinuousRamp()"))
+        XCTAssertTrue(panel.contains("ProtectionHapticFeedback.stopGuardianLongPressContinuousRamp()"))
         XCTAssertTrue(panel.contains("for pulse in GuardianLongPressHaptics.schedule"))
         XCTAssertTrue(panel.contains("ProtectionHapticFeedback.playGuardianLongPressStep(pulse.step)"))
         XCTAssertTrue(panel.contains("ProtectionHapticFeedback.playGuardianLongPressStep(GuardianLongPressHaptics.revealStep)"))
         XCTAssertTrue(panel.contains("isPresentingLavaGuardPicker = true"))
+        // The continuous path is the primary branch: the support check precedes the discrete
+        // schedule fallback inside startGuardianLongPressRamp.
+        XCTAssertLessThan(
+            try index(of: "ProtectionHapticFeedback.supportsContinuousLongPressRamp", in: panel),
+            try index(of: "for pulse in GuardianLongPressHaptics.schedule", in: panel)
+        )
 
-        // The reveal presents the SAME sheet Customization uses, seeded with the current look.
+        // The reveal presents the SAME sheet Customization uses; the sheet reads the current look
+        // live off `customization`, so no snapshot is threaded through the initializer.
         XCTAssertTrue(panel.contains(".sheet(isPresented: $isPresentingLavaGuardPicker)"))
-        XCTAssertTrue(panel.contains("LavaGuardLookPickerSheet("))
-        XCTAssertTrue(panel.contains("selectedLook: customization.lavaGuardLook"))
-        XCTAssertTrue(panel.contains("onSelect: selectLavaGuardLook"))
+        XCTAssertTrue(panel.contains("LavaGuardLookPickerSheet(onSelect: selectLavaGuardLook)"))
 
         // The reveal/auth task is cancelled on a genuine navigate-away, but the cancel is GATED on the
         // passcode-auth request being absent: `.appSettings` auth can present the passcode as a
@@ -52,11 +62,15 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
             "the reveal-task cancel must be gated on the passcode request, not fire on the passcode cover's onDisappear"
         )
 
-        // The passcode-gated cancel tears down BOTH in-flight auth tasks — the reveal and the
-        // look-selection — so a genuine navigate-away can't fire the reveal haptic, flip the picker
-        // flag, or apply a look on a dismissed view (OCR review on the 1.2.4 sync).
+        // The passcode-gated cancel tears down the in-flight reveal/auth task so a genuine navigate-away
+        // can't fire the reveal haptic or flip the picker flag on a dismissed view (OCR review on the
+        // 1.2.4 sync). The look-SELECTION auth is deliberately NOT cancelled here — it DEBOUNCES
+        // (guard-on-handle + defer-nil) because the biometric prompt is not cancellation-aware (#401).
         XCTAssertTrue(panel.contains("guardianRevealTask?.cancel()"))
-        XCTAssertTrue(panel.contains("guardianSelectionTask?.cancel()"))
+        XCTAssertFalse(
+            panel.contains("guardianSelectionTask?.cancel()"),
+            "the look-selection auth debounces, so onDisappear must NOT cancel it (#401)"
+        )
 
         // The long-press hangs off the accessibilityHidden mascot, so the reveal is ALSO exposed as a
         // VoiceOver / Switch Control custom action (same presentLavaGuardPickerFromLongPress path) —
@@ -155,18 +169,30 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         XCTAssertTrue(selectBlock.contains("for: .appSettings,"))
         XCTAssertTrue(selectBlock.contains("customization.setLavaGuardLook(look)"))
 
-        // The selection auth runs in a TRACKED task (mirroring the reveal task): a rapid re-tap
-        // cancels the prior in-flight auth (`guardianSelectionTask?.cancel()` before re-assignment)
-        // instead of fanning out into parallel prompts, and a `guard !Task.isCancelled` sits BEFORE
-        // the mutation so a cancel landing during the await can't apply a look on a view the user has
-        // already left (OCR review on the 1.2.4 sync).
-        XCTAssertTrue(selectBlock.contains("guardianSelectionTask?.cancel()"))
-        XCTAssertTrue(selectBlock.contains("guardianSelectionTask = Task {"))
-        // The cancellation check only closes the dismissed-view race if it sits AFTER the async
-        // `requireAuthentication` await — the suspension point where a cancel can land — and BEFORE
-        // the mutation. A `guard !Task.isCancelled` hoisted above the await would be useless yet still
-        // satisfy a range that only starts at `Task {`, so anchor the search after the auth guard's
-        // early return, mirroring the reveal test (Codex P3 on the 1.2.4 sync).
+        // The selection auth DEBOUNCES (mirroring authorizeAppSettingsThen): a tap while an auth is
+        // already in flight is ignored (guard on the tracked handle), and the task nils the handle on
+        // completion (defer) so a later tap works. It must NOT cancel-prior and must NOT carry a
+        // `guard !Task.isCancelled` — SecurityController's biometric prompt is not cancellation-aware, so
+        // cancelling a task whose Face ID the user then completes would discard that successful auth (#401).
+        XCTAssertTrue(selectBlock.contains("guard guardianSelectionTask == nil else { return }"))
+        XCTAssertTrue(selectBlock.contains("guardianSelectionTask = Task { @MainActor in"))
+        XCTAssertTrue(selectBlock.contains("defer { guardianSelectionTask = nil }"))
+        XCTAssertFalse(
+            selectBlock.contains("guardianSelectionTask?.cancel()"),
+            "the selection auth must debounce, not cancel-prior (#401)"
+        )
+        XCTAssertFalse(
+            selectBlock.contains("Task.isCancelled"),
+            "a non-cancellation-aware biometric auth must not gate on Task.isCancelled (#401)"
+        )
+
+        // Ordering: the debounce guard precedes the task assignment (ignore-if-in-flight, not replace);
+        // the defer-nil sits at the top of the task so the handle is always cleared; and the mutation
+        // sits AFTER the auth guard's early return so a failed auth can't apply a look. Anchor the auth
+        // return AFTER `requireAuthentication(` so the debounce guard's own `return` isn't matched.
+        let debounceGuardIndex = try index(of: "guard guardianSelectionTask == nil else { return }", in: selectBlock)
+        let assignIndex = try index(of: "guardianSelectionTask = Task { @MainActor in", in: selectBlock)
+        let deferIndex = try index(of: "defer { guardianSelectionTask = nil }", in: selectBlock)
         let selectionAuthIndex = try index(of: "security.requireAuthentication(", in: selectBlock)
         let selectionAuthElseIndex = try XCTUnwrap(
             selectBlock.range(of: "else {", range: selectionAuthIndex..<selectBlock.endIndex)?.lowerBound,
@@ -176,16 +202,14 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
             selectBlock.range(of: "return", range: selectionAuthElseIndex..<selectBlock.endIndex)?.lowerBound,
             "the selection auth guard must return early on failure"
         )
-        let selectionCancelGuardIndex = try XCTUnwrap(
-            selectBlock.range(
-                of: "guard !Task.isCancelled else { return }",
-                range: selectionAuthReturnIndex..<selectBlock.endIndex
-            )?.lowerBound,
-            "the cancellation guard must sit after the auth await, before applying the look"
-        )
         let setLookIndex = try index(of: "customization.setLavaGuardLook(look)", in: selectBlock)
-        XCTAssertLessThan(selectionAuthReturnIndex, selectionCancelGuardIndex)
-        XCTAssertLessThan(selectionCancelGuardIndex, setLookIndex)
+        XCTAssertLessThan(debounceGuardIndex, assignIndex)
+        XCTAssertLessThan(assignIndex, deferIndex)
+        // The defer-nil must register BEFORE the auth await, so a thrown/failed biometric still clears the
+        // handle — otherwise the debounce guard would freeze the picker for every later tap (OCR review
+        // on lavasec-ios#69).
+        XCTAssertLessThan(deferIndex, selectionAuthIndex)
+        XCTAssertLessThan(selectionAuthReturnIndex, setLookIndex)
     }
 
     // MARK: Haptic façade — the ramp step plays through the gated choke point
@@ -208,6 +232,65 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
         XCTAssertTrue(appViewModel.contains("var impactFeedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle"))
     }
 
+    func testLongPressContinuousRampPlaysThroughCoreHaptics() throws {
+        let appViewModel = try readSource(.appViewModel)
+        let playerBlock = try sourceBlock(
+            in: appViewModel,
+            startingAt: "final class GuardianLongPressContinuousRampPlayer",
+            endingBefore: "extension ProtectionHapticFeedback"
+        )
+
+        // The gradient is ONE continuous Core Haptics event modulated by intensity + sharpness
+        // parameter curves built from the pure ramp — not a train of discrete impacts. Capability is
+        // gated on `supportsHaptics` so the fallback owns the unsupported devices.
+        XCTAssertTrue(appViewModel.contains("import CoreHaptics"))
+        XCTAssertTrue(playerBlock.contains("CHHapticEngine.capabilitiesForHardware().supportsHaptics"))
+        XCTAssertTrue(playerBlock.contains("GuardianLongPressHaptics.continuousRamp"))
+        XCTAssertTrue(playerBlock.contains("eventType: .hapticContinuous"))
+        XCTAssertTrue(playerBlock.contains("CHHapticParameterCurve("))
+        XCTAssertTrue(playerBlock.contains("parameterID: .hapticIntensityControl"))
+        XCTAssertTrue(playerBlock.contains("parameterID: .hapticSharpnessControl"))
+        // Fails silent: haptics are non-essential, so a Core Haptics error must never disrupt the
+        // gesture. Anchor that the throwing player start sits INSIDE the do — after `do {`, before
+        // `} catch {` — and that the catch CLEANS UP (drops the dead engine so the next gesture
+        // rebuilds it) rather than a `} catch {` merely appearing somewhere in the block. A refactor
+        // that hoisted the start out of the do/catch, letting a Core Haptics throw escape into the
+        // gesture, would then be caught (OCR review on #404).
+        let rampDoIndex = try index(of: "do {", in: playerBlock)
+        let rampPlayerStartIndex = try index(of: "try player.start(atTime: CHHapticTimeImmediate)", in: playerBlock)
+        let rampCatchIndex = try index(of: "} catch {", in: playerBlock)
+        XCTAssertLessThan(rampDoIndex, rampPlayerStartIndex)
+        XCTAssertLessThan(rampPlayerStartIndex, rampCatchIndex)
+        // The drop must sit INSIDE the catch body, not merely after the `} catch {` token: a refactor
+        // that moved `self.engine = nil` below the catch would run it unconditionally on SUCCESS too
+        // (dropping a healthy engine every gesture) yet still satisfy a bare "after the catch" ordering.
+        // Bound the search at the catch's closing brace (its body has no nested braces) so the pin
+        // proves fail-silent cleanup, not an unconditional drop (OCR review on lavasec-ios#69).
+        let rampCatchBodyStart = playerBlock.index(rampCatchIndex, offsetBy: "} catch {".count)
+        let rampCatchCloseIndex = try XCTUnwrap(
+            playerBlock[rampCatchBodyStart...].firstIndex(of: "}"),
+            "the ramp player's catch block must be brace-closed"
+        )
+        let rampEngineDropIndex = try XCTUnwrap(
+            playerBlock.range(of: "self.engine = nil", range: rampCatchBodyStart..<rampCatchCloseIndex)?.lowerBound,
+            "the catch must drop the dead engine INSIDE its own block — fail-silent cleanup, not an unconditional drop after the catch"
+        )
+        XCTAssertLessThan(rampCatchIndex, rampEngineDropIndex)
+
+        // The façade gates the swell on the same Lava Haptics toggle as every other surface, and
+        // exposes the support probe GuardView branches on.
+        let facadeBlock = try sourceBlock(
+            in: appViewModel,
+            startingAt: "extension ProtectionHapticFeedback",
+            endingBefore: "private extension GuardianLongPressHapticLevel"
+        )
+        XCTAssertTrue(facadeBlock.contains("static var supportsContinuousLongPressRamp: Bool"))
+        XCTAssertTrue(facadeBlock.contains("static func startGuardianLongPressContinuousRamp()"))
+        XCTAssertTrue(facadeBlock.contains("guard isEnabled else"))
+        XCTAssertTrue(facadeBlock.contains("longPressContinuousRampPlayer.start()"))
+        XCTAssertTrue(facadeBlock.contains("static func stopGuardianLongPressContinuousRamp()"))
+    }
+
     // MARK: Picker sheet — current Guard + quote + tip on top, quiet copy at the bottom
 
     func testPickerSheetLeadsWithGuardSpotlightAndTrailsTheQuietCopy() throws {
@@ -223,18 +306,23 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
             endingBefore: "private struct LavaGuardSpotlightPanel"
         )
 
-        // Order: the current-Guard spotlight leads, then the catalog, then the quiet unlock/privacy
-        // note (gated on the non-Plus tier) trails at the bottom — the copy moved OUT of the top.
-        let spotlightIndex = try index(of: "LavaGuardSpotlightPanel(look: selectedLook)", in: sheetBlock)
+        // Order: the current-Guard spotlight leads, then the catalog, then the Match App Icon toggle
+        // standing on its own, then the quiet unlock/privacy note (gated on the non-Plus tier) trails
+        // at the bottom. The toggle moved off the Customization page into the sheet — below the table
+        // and above the quiet copy, not fused into the selection card — and the copy stays OUT of the
+        // top.
+        let spotlightIndex = try index(of: "LavaGuardSpotlightPanel(look: customization.lavaGuardLook)", in: sheetBlock)
         let catalogIndex = try index(of: "LavaSectionGroup(\"Choose your Guard\")", in: sheetBlock)
+        let matchIconIndex = try index(of: "Toggle(\"Match App Icon to Lava Guard\", isOn: updatesAppIconBinding)", in: sheetBlock)
         let gateIndex = try index(of: "if !viewModel.configuration.hasLavaSecurityPlus {", in: sheetBlock)
         let unlockPanelIndex = try index(of: "LavaGuardUnlockInfoPanel(", in: sheetBlock)
         XCTAssertLessThan(spotlightIndex, catalogIndex)
-        XCTAssertLessThan(catalogIndex, gateIndex)
+        XCTAssertLessThan(catalogIndex, matchIconIndex)
+        XCTAssertLessThan(matchIconIndex, gateIndex)
         XCTAssertLessThan(gateIndex, unlockPanelIndex)
     }
 
-    func testPickerSheetReauthenticatesBeforeSettingsLinks() throws {
+    func testPickerSheetReauthenticatesBeforeGatedActions() throws {
         let settings = try readSource(.customizationSettingsView)
         let sheetBlock = try sourceBlock(
             in: settings,
@@ -242,32 +330,48 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
             endingBefore: "private struct LavaGuardSpotlightPanel"
         )
 
-        // The unlock panel's Upgrade / Privacy & Data links reach `.appSettings`-gated settings
-        // pages via an inline navigationDestination. The Guard mascot long-press opens this sheet
-        // straight from the read-only Guard tab, so both links must re-authenticate before
-        // presenting — otherwise this entry point bypasses the app-settings lock.
+        // The sheet's `.appSettings`-gated actions — the unlock panel's Upgrade / Privacy & Data
+        // links (which reach settings pages via an inline navigationDestination) and the Match App
+        // Icon toggle (an `.appSettings` preference mutation, moved off the Customization page into
+        // the sheet) — all funnel through one `authorizeAppSettingsThen` choke point. The Guard
+        // mascot long-press opens this sheet straight from the read-only Guard tab, so each must
+        // re-authenticate before taking effect — otherwise this entry point bypasses the app-settings
+        // lock.
         XCTAssertTrue(sheetBlock.contains("@EnvironmentObject private var security: SecurityController"))
+        // The Match App Icon toggle moved INTO the sheet mutates `customization`, so the sheet must
+        // carry that binding too — pin it alongside `security` so a refactor that dropped it (breaking
+        // the toggle, which the package test lane can't catch by compile) is caught here (OCR review
+        // on #403).
+        XCTAssertTrue(sheetBlock.contains("@EnvironmentObject private var customization: CustomizationController"))
         XCTAssertTrue(sheetBlock.contains("openUpgrade: { authorizeAppSettingsThen { showUpgradePage = true } }"))
         XCTAssertTrue(sheetBlock.contains("openPrivacyData: { authorizeAppSettingsThen { showPrivacyDataPage = true } }"))
-        XCTAssertTrue(sheetBlock.contains("security.requireAuthentication(for: .appSettings, reason: \"Open Settings\")"))
+        XCTAssertTrue(sheetBlock.contains("Toggle(\"Match App Icon to Lava Guard\", isOn: updatesAppIconBinding)"))
+        // The toggle mutates a preference, so it passes an action-specific reason; the links keep the
+        // "Open Settings" default (they navigate to settings pages). The choke point forwards whichever
+        // reason to `requireAuthentication` (Kilo review on lavasec-ios#69).
+        XCTAssertTrue(sheetBlock.contains("authorizeAppSettingsThen(reason: \"Edit Customization settings\") { customization.setUpdatesAppIconWithLavaGuard(isEnabled) }"))
+        XCTAssertTrue(sheetBlock.contains("reason: String = \"Open Settings\""))
+        XCTAssertTrue(sheetBlock.contains("security.requireAuthentication(for: .appSettings, reason: reason)"))
 
         // The re-auth DEBOUNCES rather than cancels: it guards on the tracked task handle so a second
-        // link tap while an auth is in flight is ignored, and nils the handle on completion (`defer`)
-        // so a later tap works. It must NOT cancel-prior — SecurityController's biometric prompt is
-        // not cancellation-aware, so cancelling a task whose Face ID the user then completes would
-        // discard that successful auth and open neither page (Codex P2 on the 1.2.4 sync).
-        XCTAssertTrue(sheetBlock.contains("guard appSettingsPresentationTask == nil else { return }"))
-        XCTAssertTrue(sheetBlock.contains("appSettingsPresentationTask = Task {"))
-        XCTAssertTrue(sheetBlock.contains("defer { appSettingsPresentationTask = nil }"))
+        // gated tap — another link, or the toggle — while an auth is in flight is ignored, and nils
+        // the handle on completion (`defer`) so a later tap works. It must NOT cancel-prior —
+        // SecurityController's biometric prompt is not cancellation-aware, so cancelling a task whose
+        // Face ID the user then completes would discard that successful auth and apply nothing
+        // (Codex P2 on the 1.2.4 sync).
+        XCTAssertTrue(sheetBlock.contains("guard appSettingsActionTask == nil else { return }"))
+        XCTAssertTrue(sheetBlock.contains("appSettingsActionTask = Task {"))
+        XCTAssertTrue(sheetBlock.contains("defer { appSettingsActionTask = nil }"))
         XCTAssertFalse(
-            sheetBlock.contains("appSettingsPresentationTask?.cancel()"),
+            sheetBlock.contains("appSettingsActionTask?.cancel()"),
             "the re-auth must debounce (guard on the in-flight task), not cancel-prior — cancelling discards a completed, non-cancellation-aware biometric auth (Codex P2)"
         )
-        // The reveal is still auth-gated: `present()` sits AFTER the auth guard's early return, so a
-        // refactor that dropped the gate (or hoisted present() above it) is caught. The ordering
+        // Each gated action stays auth-gated: `action()` runs AFTER the auth guard's early return, so
+        // a refactor that dropped the gate (or hoisted the action above it) is caught. The ordering
         // anchors below bind to the sheet's own re-auth guard; enforce (not just comment) that there
-        // is exactly ONE `requireAuthentication` in the block, so a future second call (e.g. a
-        // per-link auth) can't silently shift the anchor to the wrong one (OCR review on the 1.2.4 sync).
+        // is exactly ONE `requireAuthentication` in the block — the links and the toggle share it — so
+        // a future second call can't silently shift the anchor to the wrong call (OCR review on the
+        // 1.2.4 sync).
         XCTAssertEqual(
             sheetBlock.components(separatedBy: "security.requireAuthentication(").count - 1, 1,
             "exactly one requireAuthentication must live in the sheet block, or the ordering anchor binds to the wrong call"
@@ -281,11 +385,71 @@ final class GuardLongPressPickerSourceTests: XCTestCase {
             sheetBlock.range(of: "return", range: reauthAuthElseIndex..<sheetBlock.endIndex)?.lowerBound,
             "the re-auth guard must return early on failure"
         )
-        let reauthPresentIndex = try XCTUnwrap(
-            sheetBlock.range(of: "present()", range: reauthAuthReturnIndex..<sheetBlock.endIndex)?.lowerBound,
-            "present() must sit after the auth guard's early return"
+        let reauthActionIndex = try XCTUnwrap(
+            sheetBlock.range(of: "action()", range: reauthAuthReturnIndex..<sheetBlock.endIndex)?.lowerBound,
+            "action() must run after the auth guard's early return"
         )
-        XCTAssertLessThan(reauthAuthReturnIndex, reauthPresentIndex)
+        XCTAssertLessThan(reauthAuthReturnIndex, reauthActionIndex)
+    }
+
+    func testCustomizationGuardSelectionDebouncesInFlightAuth() throws {
+        let settings = try readSource(.customizationSettingsView)
+        let selectBlock = try sourceBlock(
+            in: settings,
+            startingAt: "private func selectLavaGuardLook(_ look: GuardianShieldStyle)",
+            endingBefore: "private struct LavaGuardLookPickerRow"
+        )
+
+        // The picker sheet now stays OPEN after a selection, so a second Guard tap can arrive while
+        // the first .appSettings biometric auth is still in flight. Customization's selection DEBOUNCES
+        // the auth in guardianSelectionTask — mirroring authorizeAppSettingsThen and GuardView — so a
+        // second tap while an auth is in flight is ignored (guard on the handle) and the task nils the
+        // handle on completion (defer). It must NOT cancel-prior and must NOT gate on Task.isCancelled:
+        // SecurityController's biometric prompt is not cancellation-aware, so cancelling a task whose
+        // Face ID the user then completes would discard that successful auth (#401; Codex P2 on
+        // lavasec-ios#69).
+        XCTAssertTrue(settings.contains("@State private var guardianSelectionTask: Task<Void, Never>?"))
+        XCTAssertTrue(selectBlock.contains("guard guardianSelectionTask == nil else { return }"))
+        XCTAssertTrue(selectBlock.contains("guardianSelectionTask = Task { @MainActor in"))
+        XCTAssertTrue(selectBlock.contains("defer { guardianSelectionTask = nil }"))
+        XCTAssertTrue(selectBlock.contains("security.requireAuthentication("))
+        XCTAssertTrue(selectBlock.contains("for: .appSettings,"))
+        XCTAssertTrue(selectBlock.contains("customization.setLavaGuardLook(look)"))
+        XCTAssertFalse(
+            selectBlock.contains("guardianSelectionTask?.cancel()"),
+            "the selection auth must debounce, not cancel-prior (#401)"
+        )
+        XCTAssertFalse(
+            selectBlock.contains("Task.isCancelled"),
+            "a non-cancellation-aware biometric auth must not gate on Task.isCancelled (#401)"
+        )
+        // Not the untracked bare-Task helper that would fan out parallel prompts on a second tap.
+        XCTAssertFalse(selectBlock.contains("performAppSettingsMutation"))
+
+        // Ordering: the debounce guard precedes the task assignment (ignore-if-in-flight, not replace);
+        // the defer-nil sits at the top of the task so the handle is always cleared; and the mutation
+        // sits AFTER the auth guard's early return so a failed auth can't apply a look. Anchor the auth
+        // return AFTER `requireAuthentication(` so the debounce guard's own `return` isn't matched.
+        let debounceGuardIndex = try index(of: "guard guardianSelectionTask == nil else { return }", in: selectBlock)
+        let selectionAssignIndex = try index(of: "guardianSelectionTask = Task { @MainActor in", in: selectBlock)
+        let deferIndex = try index(of: "defer { guardianSelectionTask = nil }", in: selectBlock)
+        XCTAssertLessThan(debounceGuardIndex, selectionAssignIndex)
+        XCTAssertLessThan(selectionAssignIndex, deferIndex)
+
+        let selectionAuthIndex = try index(of: "security.requireAuthentication(", in: selectBlock)
+        // The defer-nil must register BEFORE the auth await, so a thrown/failed biometric still clears the
+        // handle rather than freezing the picker for every later tap (OCR review on lavasec-ios#69).
+        XCTAssertLessThan(deferIndex, selectionAuthIndex)
+        let selectionAuthElseIndex = try XCTUnwrap(
+            selectBlock.range(of: "else {", range: selectionAuthIndex..<selectBlock.endIndex)?.lowerBound,
+            "the selection auth must be a guard with an `else {` branch"
+        )
+        let selectionAuthReturnIndex = try XCTUnwrap(
+            selectBlock.range(of: "return", range: selectionAuthElseIndex..<selectBlock.endIndex)?.lowerBound,
+            "the selection auth guard must return early on failure"
+        )
+        let setLookIndex = try index(of: "customization.setLavaGuardLook(look)", in: selectBlock)
+        XCTAssertLessThan(selectionAuthReturnIndex, setLookIndex)
     }
 
     func testGuardSpotlightPanelPairsQuoteWithLaymanTip() throws {
