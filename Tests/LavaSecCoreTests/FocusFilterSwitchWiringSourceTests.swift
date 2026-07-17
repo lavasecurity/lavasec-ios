@@ -35,15 +35,17 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(block.contains("WarmFilterSnapshotLoader.stillReusableAgainstCachedCatalog("),
                       "The headless commit must re-validate the warm snapshot against the current cached catalog before flipping.")
 
-        // Seven foreground-nudge sites (the two foreground-active defer guards were removed — the switch is
+        // Eight foreground-nudge sites (the two foreground-active defer guards were removed — the switch is
         // state-agnostic now): already-active + plan-unavailable + no-warm + catalog-moved-prevalidation +
         // the COMMITTED branch (Codex P1: a commit can now land while the app is foreground-active, so it must
         // wake the resident reconcile too) + the catalog-moved CLEAN-DEFER catch arm + the generation-superseded
-        // CLEAN-DEFER catch arm. The GENERIC commit-failure catch does NOT nudge.
+        // CLEAN-DEFER catch arm + the replay-superseded CLEAN-DEFER catch arm (Codex PR #410 P1: its rollback
+        // restores the manual selection and the nudge lets the reconcile promptly drop the superseded marker).
+        // The GENERIC commit-failure catch does NOT nudge.
         XCTAssertEqual(
             block.components(separatedBy: "env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)").count - 1,
-            7,
-            "already-active + 3 early defers + committed + catalog-moved + generation-superseded must post the foreground nudge."
+            8,
+            "already-active + 3 early defers + committed + catalog-moved + generation-superseded + replay-superseded must post the foreground nudge."
         )
         // The superseding-writer clean-defer arm (P4c review P2): a concurrent newer writer — caught at the
         // flip fence (SupersededError) OR the stale-base write fence (StaleBaseGenerationError) — defers
@@ -87,18 +89,41 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(catchBlock.contains("env.log(\"headless-commit-rollback-failed\""),
                       "A commit whose rollback ALSO failed (the wedge) must be logged.")
 
-        // The gate must fail-closed BEFORE anything is recorded.
+        // The gate must fail-closed BEFORE anything is recorded. Both record sites funnel through
+        // recordMarker (the compare-and-record seam): unconditional newest-wins for fresh intents,
+        // recordIfMatches for a replay — so a replay can never erase a newer intent's marker
+        // (lavasec-ios public review of the PR #410 promotion).
         let gateIdx = try XCTUnwrap(block.range(of: "SecurityProtectedSurfaceStorage.isProtected(.filterEditing")?.lowerBound)
-        let recordIdx = try XCTUnwrap(block.range(of: "PendingFilterSwitchStore.record(request, in: defaults")?.lowerBound)
+        let recordIdx = try XCTUnwrap(block.range(of: "guard recordMarker(request, env: env)")?.lowerBound)
         XCTAssertLessThan(gateIdx, recordIdx, "The auth-to-edit gate must precede recording the marker.")
-        // TWO record sites: the main path AND the already-active path (records the newest intent).
-        XCTAssertEqual(block.components(separatedBy: "PendingFilterSwitchStore.record(").count - 1, 2,
-                       "The already-active path must also record the newest intent (supersede a stale marker).")
-        let alreadyActiveRecordIdx = try XCTUnwrap(block.range(of: "PendingFilterSwitchStore.record(PendingFilterSwitchRequest(targetFilterID: id")?.lowerBound)
+        // TWO record sites: the main path AND the already-active path (records the newest intent),
+        // BOTH through the funnel (no direct PendingFilterSwitchStore.record in runLocked).
+        XCTAssertEqual(block.components(separatedBy: "recordMarker(").count - 1, 2,
+                       "Both record sites must go through the compare-and-record funnel.")
+        XCTAssertEqual(block.components(separatedBy: "PendingFilterSwitchStore.record(").count - 1, 0,
+                       "runLocked must not bypass the recordMarker funnel with a direct store record.")
+        let alreadyActiveRecordIdx = try XCTUnwrap(block.range(of: "recordMarker(PendingFilterSwitchRequest(targetFilterID: id")?.lowerBound)
         XCTAssertLessThan(gateIdx, alreadyActiveRecordIdx, "The gate must precede the already-active record site as well.")
-        // The main path FAILS CLOSED if the marker write fails.
-        XCTAssertTrue(block.contains("guard PendingFilterSwitchStore.record(request, in: defaults"),
+        // The main path FAILS CLOSED if the marker write fails — and a replay's mismatch (a newer
+        // intent won the slot) must surface its own Release-diagnosable reason.
+        XCTAssertTrue(block.contains("guard recordMarker(request, env: env) else {"),
                       "A failed marker write on the main path must fail closed (return .disallowed).")
+        XCTAssertTrue(block.contains("\"disallowed-replay-marker-changed\""),
+                      "A replay whose marker was superseded mid-flight must record its distinct reason.")
+
+        // The funnel itself: replayExpectedMarker routes to compare-and-record, nil to newest-wins.
+        let engine = try readSource(.headlessFocusFilterSwitchEngine)
+        let funnel = try sourceBlock(
+            in: engine,
+            startingAt: "private static func recordMarker(_ request: PendingFilterSwitchRequest, env: Environment) -> Bool {",
+            endingBefore: "/// Thrown by the in-lock"
+        )
+        XCTAssertTrue(funnel.contains("if let expected = env.replayExpectedMarker {"),
+                      "The funnel must branch on the replay's expected marker.")
+        XCTAssertTrue(funnel.contains("PendingFilterSwitchStore.recordIfMatches("),
+                      "A replay must record via compare-and-record (recordIfMatches).")
+        XCTAssertTrue(funnel.contains("PendingFilterSwitchStore.record(request, in: env.defaults"),
+                      "A fresh intent must keep the unconditional newest-wins record.")
 
         // STATE-AGNOSTIC: the headless switch must NOT gate on a foreground-active flag (that 5-min defer was
         // dropped — the cross-process CAS makes a concurrent foreground write safe, so it commits regardless
@@ -129,6 +154,18 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "The headless commit must pass an in-lock commitBeforeFlip catalog-basis veto.")
         XCTAssertTrue(block.contains("throw CatalogMovedError()"),
                       "The in-lock veto must throw CatalogMovedError when the catalog basis moved.")
+        // The REPLAY-only supersession veto (Codex PR #410 P1) runs in the SAME in-lock closure,
+        // BEFORE the catalog-basis guard: a manual switch that completed after a replay's off-lock
+        // pre-check must abort the flip (with rollback) rather than be switched away from.
+        let replayVetoIdx = try XCTUnwrap(block.range(of: "throw ReplaySupersededError()")?.lowerBound,
+                                          "The in-lock closure must carry the replay supersession veto.")
+        let catalogThrowIdx = try XCTUnwrap(block.range(of: "throw CatalogMovedError()")?.lowerBound)
+        XCTAssertLessThan(replayVetoIdx, catalogThrowIdx,
+                          "The replay veto must precede the catalog-basis guard inside the in-lock closure.")
+        XCTAssertTrue(block.contains("} catch is ReplaySupersededError {"),
+                      "A vetoed replay must have its own catch arm (rollback + replay-superseded reason).")
+        XCTAssertTrue(block.contains("\"deferred-replay-superseded-inlock\""),
+                      "The replay-veto defer must record its distinct diagnosable reason.")
         XCTAssertTrue(block.contains("canReuseForProtectionStartup(configuration: basisConfiguration, cachedCatalog: cachedCatalog)"),
                       "The in-lock veto must re-validate the warm snapshot's basis against the freshly-loaded cached catalog.")
         XCTAssertTrue(block.contains("catch is CatalogMovedError {"),
@@ -158,9 +195,12 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
 
     func testHeadlessSwitchNeverClearsMarkerAndFencesRollback() throws {
         let block = try Self.runLockedBlock()
-        // The headless path NEVER clears the marker (the foreground reconcile is the sole clearer).
+        // The ENGINE never clears the marker — its record path must stay clear-free so a Focus-off /
+        // replay edge can never drop a different intent's request. (Marker CLEARS live in exactly two
+        // places, both compare-and-clear under the marker flock: the foreground reconcile — the
+        // authoritative site — and BackgroundPendingSwitchDrain's two moot cases.)
         XCTAssertFalse(block.contains("clearIfMatches"),
-                       "The headless path must not clear the pending-switch marker (foreground reconcile is the sole clearer).")
+                       "The engine must not clear the pending-switch marker (clears belong to the reconcile + the drain's moot cases).")
         // A partial commit is rolled back to the previous filter so the on-disk selection stays consistent
         // with the un-flipped pointer.
         let catchIdx = try XCTUnwrap(block.range(of: "} catch {")?.lowerBound)
@@ -214,9 +254,12 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                        "Reconcile must NOT Plus-gate the apply — Focus auto-switch is free for all tiers.")
         XCTAssertTrue(block.contains("SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults)"))
         let gateIdx = try XCTUnwrap(block.range(of: "SecurityProtectedSurfaceStorage.isProtected(.filterEditing")?.lowerBound)
-        XCTAssertTrue(block.contains("PendingFilterSwitchStore.lastForegroundSwitch(in: defaults)"))
-        XCTAssertTrue(block.contains("request.requestedAt <= lastForegroundSwitchAt"))
-        let staleDropIdx = try XCTUnwrap(block.range(of: "request.requestedAt <= lastForegroundSwitchAt")?.lowerBound)
+        // The supersession decision itself (incl. the `<=` exact-tie rule) lives in the SHARED
+        // PendingFilterSwitchStore.isSupersededByForegroundSwitch — one behaviorally-tested
+        // implementation for this reconcile and the BGTask drain, so the two can never drift.
+        XCTAssertTrue(block.contains("PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults)"),
+                      "Reconcile must decide supersession through the shared predicate, not an inline rule.")
+        let staleDropIdx = try XCTUnwrap(block.range(of: "PendingFilterSwitchStore.isSupersededByForegroundSwitch(request, in: defaults)")?.lowerBound)
         XCTAssertTrue(block.contains("scheduleAutomaticBackupAfterConfigurationChange()"),
                       "Reconcile must schedule the backup for a headless-committed (already-active) change.")
         let alreadyActiveIdx = try XCTUnwrap(block.range(of: "scheduleAutomaticBackupAfterConfigurationChange()")?.lowerBound)
@@ -404,13 +447,15 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// invariant stays documented (review #5).
     func testPendingSwitchStoreSerializationInvariantIsDocumented() throws {
         let coord = try readSource(.focusFilterSwitchCoordination)
-        // The marker's record (extension process) + clearIfMatches (foreground) now take a shared flock so
-        // the cross-process record-vs-clear TOCTOU can't drop a just-recorded request (Codex P2). Pin both
-        // the shared lock parameter and that the invariant stays documented.
+        // EVERY marker mutation takes the shared flock so the cross-process record-vs-clear TOCTOU can't
+        // drop a just-recorded request (Codex P2): record (extension/intent process), recordIfMatches (the
+        // BGTask replay's compare-and-record — the compare and the write must be one flock-held slice, or
+        // an intent's record could land between them and be erased), and clearIfMatches (foreground + the
+        // drain's moot-marker clears). Pin the shared lock parameter and the mutation count.
         XCTAssertTrue(coord.contains("FilterPublishLock.withExclusiveLock(at: lockURL)"),
-                      "record + clearIfMatches must run under the shared marker flock.")
-        XCTAssertEqual(coord.components(separatedBy: "FilterPublishLock.withExclusiveLock(at: lockURL)").count - 1, 2,
-                       "Both record AND clearIfMatches must take the shared marker flock.")
+                      "Marker mutations must run under the shared marker flock.")
+        XCTAssertEqual(coord.components(separatedBy: "FilterPublishLock.withExclusiveLock(at: lockURL)").count - 1, 3,
+                       "record, recordIfMatches, AND clearIfMatches must all take the shared marker flock.")
         XCTAssertTrue(coord.contains("App Intents EXTENSION as a second"),
                       "The doc must flag that the extension is a second writer process (why the flock is needed).")
         // The app side resolves the SAME lock file the engine/extension uses.

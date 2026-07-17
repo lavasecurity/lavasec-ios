@@ -23,12 +23,14 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
                 && app.contains("BackgroundCatalogRefresh.registerHandler()"),
             "The BGTask handler must be registered before launch finishes."
         )
-        // Scheduling is OFF by default until the on-device pointer-swap gate passes:
-        // scheduleNext must early-return unless the app-group opt-in flag is set.
+        // Scheduling is ON by default behind an app-group KILL SWITCH (founder 2026-07-16 —
+        // previously an off-by-default opt-in; the on-device rapid-publish-burst mmap
+        // validation remains a release gate, see the flag's rationale comment):
+        // scheduleNext must early-return when the kill switch is set.
         let scheduleBlock = try sourceBlock(in: app, startingAt: "static func scheduleNext() {", endingBefore: "static func handle(")
         XCTAssertTrue(
-            scheduleBlock.contains("guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName)"),
-            "Background scheduling must be gated behind the off-by-default opt-in flag."
+            scheduleBlock.contains("guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName)"),
+            "Background scheduling must honor the default-on kill switch."
         )
         // Exactly-once completion + cancellation-on-expiration discipline preserved.
         XCTAssertTrue(app.contains("task.expirationHandler ="), "Must arm an expiration handler.")
@@ -114,19 +116,110 @@ final class BackgroundCatalogRefreshSourceTests: XCTestCase {
         }
     }
 
-    func testBGTaskHandlerRereadsOptInBeforeRunningWork() throws {
+    func testBGTaskHandlerRereadsKillSwitchBeforeRunningWork() throws {
         let app = try readSource(.lavaSecApp)
         let handle = try sourceBlock(in: app, startingAt: "private static func handle(", endingBefore: "task.expirationHandler =")
-        // iOS can still deliver a BGProcessingTaskRequest that was pending when the opt-in
-        // flipped OFF. The work task must re-read the flag and complete without constructing
-        // or running the headless model — the flag is the off-switch for the unproven
-        // background publisher.
+        // iOS can still deliver a BGProcessingTaskRequest that was pending when the kill
+        // switch flipped ON. The work task must re-read the flag and complete without
+        // constructing or running the headless model — the kill switch is the no-new-build
+        // off-switch for the background publisher.
         let guardIdx = try XCTUnwrap(
-            handle.range(of: "guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else {")?.lowerBound,
-            "handle() must re-read the opt-in flag inside the work task."
+            handle.range(of: "guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else {")?.lowerBound,
+            "handle() must re-read the kill switch inside the work task."
         )
         let modelIdx = try XCTUnwrap(handle.range(of: "AppViewModel(loadVPNState: false, headless: true)")?.lowerBound)
-        XCTAssertLessThan(guardIdx, modelIdx, "The opt-in re-check must precede constructing/running the headless model.")
+        XCTAssertLessThan(guardIdx, modelIdx, "The kill-switch re-check must precede constructing/running the headless model.")
+    }
+
+    /// The default-on flip's safety pairing (CLAUDE.md: safety-critical invariant comments are paired
+    /// with enforcement): the kill-switch declaration must keep carrying BOTH halves of the enable
+    /// decision — the default-ON posture and the still-open on-device release gate it rides ahead of —
+    /// so neither can silently vanish from the one place QA/release reads before shipping. A pin can't
+    /// run the device validation, but it can make deleting the gate note a failing diff.
+    func testKillSwitchCommentPairsReleaseGateWithDefaultOn() throws {
+        let app = try readSource(.lavaSecApp)
+        let declBlock = try sourceBlock(
+            in: app,
+            startingAt: "/// App-group kill switch.",
+            endingBefore: "static let killSwitchDefaultsKeyName"
+        )
+        XCTAssertTrue(declBlock.contains("ON by default"),
+                      "The kill-switch rationale must state the default-on posture.")
+        XCTAssertTrue(declBlock.contains("rapid-publish-burst mmap validation REMAINS a release gate"),
+                      "The kill-switch rationale must keep naming the on-device release gate.")
+        XCTAssertTrue(declBlock.contains("2026-07-16-background-catalog-refresh-"),
+                      "The release-gate note must cite the infra review doc so the gate is resolvable.")
+    }
+
+    /// The BGTask's pending-switch drain is cross-process/app-target wiring the compiler can't see:
+    /// the drain must run AFTER the catalog sync (the sync's freshness re-stamp / sidecar warm pass is
+    /// what lets the drain's warm reuse commit), only when the task has not expired, and through the
+    /// shared FocusSwitchEnvironment entry so the environment stays byte-identical with every other
+    /// headless caller. The drain's behavior itself is executable-tested in
+    /// BackgroundPendingSwitchDrainTests (LavaSecFilterPipeline).
+    func testBGTaskDrainsPendingSwitchAfterSyncViaSharedEnvironment() throws {
+        let app = try readSource(.lavaSecApp)
+        let syncIdx = try XCTUnwrap(
+            app.range(of: "await viewModel.syncCatalog(isBackgroundRefresh: true)")?.lowerBound,
+            "The BGTask must run the catalog sync."
+        )
+        let drainIdx = try XCTUnwrap(
+            app.range(of: "await FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh()")?.lowerBound,
+            "The BGTask must drain the pending Focus/Automation switch after the sync."
+        )
+        XCTAssertLessThan(syncIdx, drainIdx, "The drain must run AFTER the catalog sync (freshness/warm pass first).")
+
+        // The docstring's third clause ("only when the task has not expired") is a contract of its
+        // own: an expired BGTask must not START a commit-capable engine run (the drain is
+        // best-effort; the durable marker is the correctness guarantee). Pin the cancellation
+        // re-check and its position — after the sync, immediately gating the drain — the same
+        // ordering discipline the publish path pins in
+        // testBackgroundPublishStopsWhenBGTaskHasExpired (lavasec-ios public review of the
+        // PR #410 promotion).
+        let cancelIdx = try XCTUnwrap(
+            app.range(of: "if !Task.isCancelled {")?.lowerBound,
+            "The drain must be gated on the BGTask not having expired."
+        )
+        XCTAssertLessThan(syncIdx, cancelIdx, "The expiry re-check must come after the sync — it gates only the drain arm.")
+        XCTAssertLessThan(cancelIdx, drainIdx, "The Task.isCancelled guard must precede the drain call it gates.")
+        // Ordering alone can't prove CONTAINMENT (an empty guard followed by an unconditional
+        // drain would still order correctly — Codex on the PR introducing this pin). Normalize
+        // whitespace and require the drain to be the guard's direct body.
+        let normalized = app.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        XCTAssertTrue(
+            normalized.contains(
+                "if !Task.isCancelled { await FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh() }"
+            ),
+            "The drain call must be the direct body of the expiry guard — a nearby unrelated guard must not satisfy this pin."
+        )
+
+        // The env factory hands off to the package drain with the .closedAppBanner feedback — the
+        // committed banner is the drain's only user-visible confirmation while the app is closed.
+        let envFactory = try readSource(.focusSwitchEnvironment)
+        XCTAssertTrue(
+            envFactory.contains("static func drainPendingFilterSwitchAfterBackgroundRefresh() async {"),
+            "FocusSwitchEnvironment must expose the background drain entry."
+        )
+        // Containment discipline without freezing the body's exact text (Codex on the PR landing
+        // this pin): a substring PAIR can drift into different functions and still pass, so scope
+        // both statements to THIS entry's extracted block and pin their order — a comment or local
+        // diagnostic added inside the entry stays a non-event (lavasec-ios public review of the
+        // PR #410 promotion, round 3).
+        let drainEntry = try sourceBlock(
+            in: envFactory,
+            startingAt: "static func drainPendingFilterSwitchAfterBackgroundRefresh() async {",
+            endingBefore: "static func "
+        )
+        let entryGuardIdx = try XCTUnwrap(
+            drainEntry.range(of: "guard let env = make(feedback: .closedAppBanner) else { return }")?.lowerBound,
+            "The drain entry must build the shared environment with .closedAppBanner feedback."
+        )
+        let entryDrainIdx = try XCTUnwrap(
+            drainEntry.range(of: "await BackgroundPendingSwitchDrain.drain(env: env)")?.lowerBound,
+            "The drain entry must hand off to BackgroundPendingSwitchDrain."
+        )
+        XCTAssertLessThan(entryGuardIdx, entryDrainIdx,
+                          "The environment guard must precede the drain hand-off inside the entry.")
     }
 
     func testBackgroundPublishStopsWhenBGTaskHasExpired() throws {

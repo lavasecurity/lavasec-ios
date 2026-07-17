@@ -60,6 +60,23 @@ public enum HeadlessFocusFilterSwitchEngine {
         internal let postSignal: @Sendable (String) -> Void
         /// Privacy-safe device-debug logging (no-op in Release).
         internal let log: @Sendable (_ event: String, _ details: [String: String]) -> Void
+        /// REPLAY-ONLY marker identity (lavasec-ios public review of the PR #410 promotion), default
+        /// nil. When set, BOTH marker records in `runLocked` become compare-and-record
+        /// (`PendingFilterSwitchStore.recordIfMatches`, expecting this value): a replay must never
+        /// overwrite a marker that no longer equals the request it is replaying — a NEWER intent
+        /// recorded while the replay was flock-blocked would otherwise be erased by a re-stamped old
+        /// one (lost update). A mismatch on the MAIN record path aborts the replay fail-closed
+        /// (`disallowed-replay-marker-changed`); the newer marker survives for the next drain pass.
+        /// Fresh intents leave this nil — newest-wins overwrite is their correct semantics.
+        internal let replayExpectedMarker: PendingFilterSwitchRequest?
+        /// REPLAY-ONLY in-lock supersession veto (Codex PR #410 P1), default nil. Evaluated INSIDE the
+        /// held publish lock immediately before the pointer flip, AFTER the generation fence: returning
+        /// true aborts the commit with a clean rollback to the pre-switch selection. Only the background
+        /// drain's replay passes it (re-checking `PendingFilterSwitchStore.isSupersededByForegroundSwitch`
+        /// at the last possible moment, closing the pre-check→commit window in which a manual switch can
+        /// COMPLETE); fresh intents must leave it nil — a new Focus/Shortcut edge legitimately switches
+        /// away from a just-manually-switched filter (newest wins by timestamps).
+        internal let replaySupersededVeto: (@Sendable () -> Bool)?
         /// Post a user-facing notification for a switch OUTCOME — `committed == true` ⇒ "Switched to
         /// <name>"; `committed == false` ⇒ "Couldn't switch to <name>" (a refused switch, e.g. auth-to-edit).
         /// The closure (provided by `FocusSwitchEnvironment`) gates on the caller's category toggle +
@@ -88,7 +105,9 @@ public enum HeadlessFocusFilterSwitchEngine {
             now: @escaping @Sendable () -> Date = { Date() },
             postSignal: @escaping @Sendable (String) -> Void = { DarwinProtectionSignalNotifier().postNotification(named: $0) },
             log: @escaping @Sendable (_ event: String, _ details: [String: String]) -> Void = { _, _ in },
-            notifySwitchOutcome: @escaping @Sendable (_ committed: Bool, _ filterName: String) async -> Void = { _, _ in }
+            notifySwitchOutcome: @escaping @Sendable (_ committed: Bool, _ filterName: String) async -> Void = { _, _ in },
+            replaySupersededVeto: (@Sendable () -> Bool)? = nil,
+            replayExpectedMarker: PendingFilterSwitchRequest? = nil
         ) {
             self.containerURL = containerURL
             self.configurationURL = configurationURL
@@ -107,7 +126,23 @@ public enum HeadlessFocusFilterSwitchEngine {
             self.postSignal = postSignal
             self.log = log
             self.notifySwitchOutcome = notifySwitchOutcome
+            self.replaySupersededVeto = replaySupersededVeto
+            self.replayExpectedMarker = replayExpectedMarker
         }
+    }
+
+    /// The single marker-record funnel for BOTH `runLocked` record sites: an unconditional
+    /// newest-wins `record` for fresh intents, a compare-and-record (`recordIfMatches`, expecting the
+    /// replayed request) when `env.replayExpectedMarker` is set — so a replay can never erase a newer
+    /// intent's marker. See `Environment.replayExpectedMarker`.
+    @discardableResult
+    private static func recordMarker(_ request: PendingFilterSwitchRequest, env: Environment) -> Bool {
+        if let expected = env.replayExpectedMarker {
+            return PendingFilterSwitchStore.recordIfMatches(
+                request, expecting: expected, in: env.defaults, lockURL: env.pendingMarkerLockURL
+            )
+        }
+        return PendingFilterSwitchStore.record(request, in: env.defaults, lockURL: env.pendingMarkerLockURL)
     }
 
     /// Thrown by the in-lock `commitBeforeFlip` to VETO the pointer flip when a concurrent background
@@ -115,6 +150,14 @@ public enum HeadlessFocusFilterSwitchEngine {
     /// revalidation and the flip. Distinct type so the commit's catch treats it as a CLEAN DEFER (the
     /// foreground reconcile cold-compiles against the new catalog), not a commit wedge (Codex round-16).
     private struct CatalogMovedError: Error {}
+
+    /// Thrown by the in-lock `commitBeforeFlip` when the caller-supplied `replaySupersededVeto`
+    /// reports the REPLAYED request superseded by a manual switch that COMPLETED between the replay's
+    /// off-lock pre-check and this flip (Codex PR #410 P1). Distinct from `SupersededError`: the
+    /// generation fence has already passed, so OUR config write is the newest on disk and must be
+    /// ROLLED BACK to restore the user's manual selection (the CatalogMovedError posture), not left
+    /// standing (the SupersededError posture).
+    private struct ReplaySupersededError: Error {}
 
     /// Thrown by the in-lock generation fence when a concurrent (foreground) writer advanced the on-disk
     /// configuration generation PAST the one this commit wrote, between our config write and the pointer
@@ -218,18 +261,27 @@ public enum HeadlessFocusFilterSwitchEngine {
         // (overwriting any OLDER pending request to a different filter) so the foreground reconcile can't
         // switch AWAY from the now-desired filter, then nudge the foreground. Best-effort record (the
         // desired filter is already active, so a missing self-heal marker can't produce a wrong state).
+        // Funneled through recordMarker: a REPLAY's best-effort record is compare-and-record, so it
+        // silently yields to a newer intent's marker instead of erasing it.
         guard id != library.activeFilterID else {
-            PendingFilterSwitchStore.record(PendingFilterSwitchRequest(targetFilterID: id, requestedAt: now), in: defaults, lockURL: env.pendingMarkerLockURL)
+            recordMarker(PendingFilterSwitchRequest(targetFilterID: id, requestedAt: now), env: env)
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
             return SwitchDecision(.alreadyActive, "already-active")
         }
 
         // Record the durable marker FIRST — the correctness guarantee for everything below. If the write
-        // fails (theoretically impossible for this Codable), FAIL CLOSED.
+        // fails (theoretically impossible for this Codable), FAIL CLOSED. For a REPLAY the funnel is
+        // compare-and-record: a false return here also means the marker no longer equals the replayed
+        // request — a NEWER intent won the slot while this replay was flock-blocked — so the replay
+        // aborts fail-closed and the newer marker survives for the next drain pass (distinct reason,
+        // Release-diagnosable).
         let request = PendingFilterSwitchRequest(targetFilterID: id, requestedAt: now)
-        guard PendingFilterSwitchStore.record(request, in: defaults, lockURL: env.pendingMarkerLockURL) else {
+        guard recordMarker(request, env: env) else {
             env.log("record-failed-fail-closed", ["filterID": id])
-            return SwitchDecision(.disallowed, "disallowed-record-failed")
+            return SwitchDecision(
+                .disallowed,
+                env.replayExpectedMarker != nil ? "disallowed-replay-marker-changed" : "disallowed-record-failed"
+            )
         }
 
         // STATE-AGNOSTIC commit (founder 2026-06-29): the engine no longer defers on a coarse
@@ -297,6 +349,7 @@ public enum HeadlessFocusFilterSwitchEngine {
             let basisMaxAge = env.catalogSyncFreshnessInterval
             let basisSnapshot = reusable.preparedSnapshot
             let basisConfiguration = plan.configuration
+            let replayVeto = env.replaySupersededVeto
             try await commit(
                 preparedSnapshot: reusable.preparedSnapshot,
                 configuration: &configuration,
@@ -304,6 +357,15 @@ public enum HeadlessFocusFilterSwitchEngine {
                 warmIndex: warmIndex,
                 env: env,
                 commitBeforeFlip: { @Sendable in
+                    // REPLAY-ONLY supersession veto (Codex PR #410 P1), after the generation fence:
+                    // a manual switch that COMPLETED between a replay's off-lock pre-check and this
+                    // flip left its stamp visible by now — abort with a rollback so the drain never
+                    // commits an old automation over the user's just-persisted manual selection.
+                    // (A manual switch completing AFTER our config load is caught by the generation
+                    // fence instead.) nil for fresh intents — see Environment.replaySupersededVeto.
+                    if replayVeto?() == true {
+                        throw ReplaySupersededError()
+                    }
                     guard BlocklistCatalogSynchronizer.hasFreshCachedCatalog(in: basisCacheURL, maxAge: basisMaxAge),
                           let cachedCatalog = try? BlocklistCatalogSynchronizer(cacheDirectoryURL: basisCacheURL).loadCachedCatalogMetadata(),
                           basisSnapshot.canReuseForProtectionStartup(configuration: basisConfiguration, cachedCatalog: cachedCatalog)
@@ -334,6 +396,21 @@ public enum HeadlessFocusFilterSwitchEngine {
             // committed switches under that one category — founder 2026-07-12).
             await env.notifySwitchOutcome(true, target.name)
             return SwitchDecision(.committed, "committed")
+        } catch is ReplaySupersededError {
+            // CLEAN DEFER + ROLLBACK: the replay's in-lock supersession veto fired — a manual switch
+            // COMPLETED between the replay's off-lock pre-check and this flip, and the generation fence
+            // has already certified OUR config write as the newest on disk, so rolling back is what
+            // RESTORES the user's manual selection (unlike SupersededError, where the newer on-disk
+            // state is someone else's and must be left standing). Same fenced rollback as the
+            // catalog-moved arm; the kept (now-superseded) marker is dropped by the next reconcile's
+            // supersession check. (Codex PR #410 P1.)
+            let fencedGeneration = configuration.configurationGeneration
+            configuration = previousConfiguration
+            library = previousLibrary
+            try? writeConfigurationOnly(configuration: &configuration, library: &library, expectedBaseGeneration: fencedGeneration, env: env)
+            env.log("headless-commit-deferred-replay-superseded", ["filterID": id])
+            env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
+            return SwitchDecision(.deferred, "deferred-replay-superseded-inlock")
         } catch is CatalogMovedError {
             // CLEAN DEFER: the in-lock veto aborted the flip before any pointer change. Roll the on-disk
             // config+library back to the previous filter so the selection stays consistent with the un-flipped

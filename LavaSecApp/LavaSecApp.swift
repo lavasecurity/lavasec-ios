@@ -17,9 +17,15 @@ extension Notification.Name {
 /// as a manual refresh, but in `isBackgroundRefresh` mode: it re-reads the live on-disk
 /// configuration, publishes ARTIFACTS ONLY through the pointer-swap substrate under a
 /// degrade-ABORT publish lock + generation supersession check (so a concurrent foreground
-/// save always wins), and never rewrites `configuration.json` or restores protection.
-/// Thanks to the snapshot-identity gate, a run that finds nothing new is cheap and never
-/// reloads the tunnel.
+/// save always wins); the CATALOG REFRESH itself never rewrites `configuration.json` and
+/// never restores protection. Thanks to the snapshot-identity gate, a run that finds
+/// nothing new is cheap and never reloads the tunnel. After the sync, the run drains a
+/// pending Focus/Automation filter switch
+/// (`FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh`) — and THAT
+/// arm, unlike the refresh, MAY commit a filter switch: a warm commit through the shared
+/// `HeadlessFocusFilterSwitchEngine` writes config+library (generation-fenced CAS, the
+/// same cross-process writer every switch uses) and flips the artifact pointer, so a
+/// `.deferred` automation switch applies without the user opening Lava.
 ///
 /// Requires `Info.plist`: `UIBackgroundModes = [processing]` and
 /// `BGTaskSchedulerPermittedIdentifiers = [com.lavasec.catalog-refresh]`.
@@ -30,11 +36,19 @@ enum BackgroundCatalogRefresh {
     /// the App Store and dev/QA builds — no `$(PRODUCT_BUNDLE_IDENTIFIER)` substitution risk.
     static let taskIdentifier = "com.lavasec.catalog-refresh"
 
-    /// App-group opt-in. OFF by default: a background publisher running concurrently with
-    /// the live tunnel read is exactly the unproven scenario behind LAV-90 Phase 1's
-    /// still-open on-device mmap-survives-GC gate. Flip this on-device to enable the first
-    /// internal validation run; promote to default-on only after that gate passes.
-    static let optInDefaultsKeyName = "backgroundCatalogRefreshEnabled"
+    /// App-group kill switch. The refresh is ON by default (founder 2026-07-16 — closed-app list
+    /// freshness plus the pending-switch drain; previously an off-by-default opt-in): the publish
+    /// path is fail-closed end to end (artifacts-only, degrade-ABORT lock, in-lock generation +
+    /// pointer CAS, and the reader degrades to a cold rebuild or fail-closed — never wrong bytes),
+    /// which bounds the risk of enabling ahead of the LAV-90 Phase-1 on-device gate. That
+    /// rapid-publish-burst mmap validation REMAINS a release gate — run it before shipping a build
+    /// with this on (lavasec-infra `plans/reviews/2026-07-16-background-catalog-refresh-
+    /// reintroduction-review.md` §4/§7). The kill switch preserves the no-new-build off-switch QA
+    /// relied on while this was an opt-in; setting it true disables scheduling and pending runs.
+    /// NOTE for QA devices: the OLD key `backgroundCatalogRefreshEnabled` is dead — a device profile
+    /// still setting it (either value) now silently gets the new default-ON behavior.
+    /// pinned: BackgroundCatalogRefreshSourceTests.testKillSwitchCommentPairsReleaseGateWithDefaultOn
+    static let killSwitchDefaultsKeyName = "backgroundCatalogRefreshDisabled"
 
     /// Must run before the app finishes launching (called from the app delegate). Always
     /// registers (iOS requires a handler for every permitted identifier); scheduling is
@@ -50,10 +64,10 @@ enum BackgroundCatalogRefresh {
         }
     }
 
-    /// Best-effort submit of the next run (~daily). Safe to call repeatedly. No-op unless
-    /// the opt-in flag is set (see `optInDefaultsKeyName`).
+    /// Best-effort submit of the next run (~daily). Safe to call repeatedly. No-op when the
+    /// kill switch is set (see `killSwitchDefaultsKeyName`).
     static func scheduleNext() {
-        guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else { return }
+        guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else { return }
         let request = BGProcessingTaskRequest(identifier: taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
@@ -71,11 +85,11 @@ enum BackgroundCatalogRefresh {
         let completion = BGTaskCompletion(task)
 
         let work = Task { @MainActor in
-            // The opt-in is the safety off-switch for this unproven background publisher.
-            // `scheduleNext()` stops resubmitting once it is turned off, but iOS can still
+            // The kill switch is the safety off-switch for this background publisher.
+            // `scheduleNext()` stops resubmitting once it is set, but iOS can still
             // deliver a request that was already pending when the flag flipped — so re-read
             // it here and do NO work (complete cleanly) if it was disabled after scheduling.
-            guard LavaSecAppGroup.sharedDefaults.bool(forKey: optInDefaultsKeyName) else {
+            guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else {
                 completion.complete(success: true)
                 return
             }
@@ -88,6 +102,19 @@ enum BackgroundCatalogRefresh {
             // + degrade-ABORT, so it never persists launch-time state over newer on-disk state.
             let viewModel = AppViewModel(loadVPNState: false, headless: true)
             await viewModel.syncCatalog(isBackgroundRefresh: true)
+            // Drain a pending Focus/Automation switch AFTER the sync: the sync re-stamped the
+            // catalog freshness (verified-unchanged) or committed + sidecar-warmed (published),
+            // so warm reuse commits for the main pocket — an ALREADY-COMPILED target whose
+            // catalog basis is unchanged — and the tunnel adopts it via its generation poll: a
+            // deferred automation switch no longer waits for the next app open. HONEST COVERAGE
+            // LIMIT: a never-compiled or disk-pressure-evicted target still re-defers here every
+            // cycle (the sidecar warm pass runs only on published cycles, and this pass never
+            // cold-compiles in the BGTask's budgeted window) and waits for the next foreground —
+            // the drain plan's optional Phase 2 is that remainder's fix. Skipped when the BGTask
+            // already expired — the marker is the correctness guarantee, not this best-effort pass.
+            if !Task.isCancelled {
+                await FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh()
+            }
             completion.complete(success: !Task.isCancelled)
         }
 

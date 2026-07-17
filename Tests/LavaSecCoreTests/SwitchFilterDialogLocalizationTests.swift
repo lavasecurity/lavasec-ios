@@ -37,7 +37,7 @@ final class SwitchFilterDialogLocalizationTests: XCTestCase {
         )
     }
 
-    /// The committed ("Switched to …") and deferred ("… will apply the next time you open Lava") dialogs
+    /// The committed ("Switched to …") and deferred ("… will apply automatically") dialogs
     /// resolve in the pinned language too — the other two `.result(dialog:)` arms of `perform()`.
     func testCommittedAndDeferredDialogsResolveInPinnedLanguage() {
         XCTAssertEqual(
@@ -45,8 +45,8 @@ final class SwitchFilterDialogLocalizationTests: XCTestCase {
             "已切換至 Balanced。"
         )
         XCTAssertEqual(
-            LavaCoreStrings.localizedFormat("dialog.filterWillApplyNextOpen", languageCode: "zh-Hant", "Core"),
-            "Core 將在您下次開啟 Lava 時生效。"
+            LavaCoreStrings.localizedFormat("dialog.filterWillApplyAutomatically", languageCode: "zh-Hant", "Core"),
+            "Core 將自動生效。"
         )
         XCTAssertEqual(
             LavaCoreStrings.localizedFormat("dialog.filterSwitchedTo", languageCode: "de", "Balanced"),
@@ -75,7 +75,7 @@ final class SwitchFilterDialogLocalizationTests: XCTestCase {
     func testEveryDialogKeyIsTranslatedInEveryLocaleAndNeverLeaksTheRawKey() {
         let keys = [
             "dialog.filterSwitchedTo", "dialog.filterAlreadyActive",
-            "dialog.filterWillApplyNextOpen", "dialog.filterSwitchDisallowed",
+            "dialog.filterWillApplyAutomatically", "dialog.filterSwitchDisallowed",
         ]
         let nonEnglish = ["de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"]
         for key in keys {

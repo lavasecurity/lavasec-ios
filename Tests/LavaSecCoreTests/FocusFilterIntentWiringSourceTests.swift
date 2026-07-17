@@ -296,7 +296,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
                       "Dialog/error copy must resolve through the pinned-language catalog (LavaCoreStrings), not a bare LocalizedStringResource the system re-localizes.")
         for key in [
             "dialog.filterSwitchedTo", "dialog.filterAlreadyActive",
-            "dialog.filterWillApplyNextOpen", "dialog.filterSwitchDisallowed"
+            "dialog.filterWillApplyAutomatically", "dialog.filterSwitchDisallowed"
         ] {
             XCTAssertTrue(perform.contains("\"\(key)\""),
                           "perform() must resolve the \(key) copy through the pinned-language catalog.")
