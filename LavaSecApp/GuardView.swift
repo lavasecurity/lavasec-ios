@@ -306,9 +306,11 @@ struct ProtectionStatusPanel: View {
     /// DEBOUNCES rather than cancels: a tap while an auth is already in flight is ignored (guard on the
     /// tracked handle), and the task nils the handle on completion (`defer`) so a later tap works. It
     /// must NOT cancel-prior — `SecurityController`'s biometric prompt is not cancellation-aware
-    /// (`evaluateBiometrics` wraps `LAContext.evaluatePolicy` in a bare `withCheckedContinuation`), so
-    /// cancelling a task whose Face ID the user then completes would discard that successful auth, and
-    /// the replacement tap would fan out a parallel prompt (#401; Codex P2 on lavasec-ios#69).
+    /// (`evaluateBiometrics` wraps `LAContext.evaluatePolicy` in a `withCheckedContinuation`), so
+    /// cancelling a task whose Face ID the user then completes would discard that successful auth (#401;
+    /// Codex P2 on lavasec-ios#69). A concurrent replacement no longer fans out a second prompt —
+    /// `SecurityController` coalesces concurrent biometric evaluations onto one (fan-out A) — but the
+    /// debounce stays as the cheap per-handle guard that also avoids that discarded-auth hazard.
     private func selectLavaGuardLook(_ look: GuardianShieldStyle) {
         guard guardianSelectionTask == nil else { return }
         guardianSelectionTask = Task { @MainActor in

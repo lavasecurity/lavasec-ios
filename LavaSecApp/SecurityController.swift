@@ -467,6 +467,11 @@ final class SecurityController: ObservableObject {
         return await requestPasscode(surface: surface, reason: reason)
     }
 
+    /// Coalesces concurrent biometric attempts so a simultaneous Guard-row + toggle tap on the
+    /// un-authenticated `.appSettings` entry shares one Face ID prompt instead of fanning out two
+    /// (fan-out A). The passcode path already coalesces this way via `passcodeContinuations`.
+    private let biometricCoalescer = BiometricAuthenticationCoalescer()
+
     // INV-LOCK-1: the app lock is an anti-snooping UI gate, not a cryptographic boundary.
     // Success flips in-memory session flags only — no key material or keychain
     // access-control item hangs on this Bool, because the tunnel, widget, and Focus
@@ -489,9 +494,17 @@ final class SecurityController: ObservableObject {
             isBiometricAuthenticationInProgress = false
         }
 
-        return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in // mobsf-ignore: ios_biometric_bool
-                continuation.resume(returning: success)
+        // Coalesce concurrent callers onto ONE prompt: `.appSettings` is reachable from two
+        // independently-debounced handles (Guard-row selection + the picker sheet's toggle/links), and on
+        // the un-authenticated long-press entry neither short-circuits, so a simultaneous tap on both
+        // would otherwise raise two Face ID prompts. Mirrors `requestPasscode`'s continuation coalescing
+        // (fan-out A; Codex/OCR review on lavasec-ios#69).
+        // pinned: SecuritySettingsSourceTests.testBiometricEvaluationCoalescesConcurrentPrompts
+        return await biometricCoalescer.authenticate {
+            await withCheckedContinuation { continuation in
+                context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in // mobsf-ignore: ios_biometric_bool
+                    continuation.resume(returning: success)
+                }
             }
         }
     }

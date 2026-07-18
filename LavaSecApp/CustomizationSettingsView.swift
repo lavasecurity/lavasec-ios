@@ -44,8 +44,10 @@ struct CustomizationSettingsView: View {
     // The app's current system Dynamic Type size — reflects the real system setting while "Match
     // System" is on (no override applied), so it seeds the slider on the first opt-out.
     @Environment(\.dynamicTypeSize) private var systemDynamicTypeSize
-    // Tracks the in-flight Guard-selection auth so a second tap supersedes the first rather than
-    // fanning out parallel `.appSettings` prompts — see `selectLavaGuardLook`.
+    // Debounces the Guard-selection auth so a rapid re-tap on THIS handle is ignored while its
+    // `.appSettings` auth is in flight — see `selectLavaGuardLook`. The cross-handle window (a selection
+    // + toggle tap racing on the un-authenticated entry) is closed at the source by `SecurityController`'s
+    // biometric coalescing, not by this per-view handle.
     @State private var guardianSelectionTask: Task<Void, Never>?
 
     var body: some View {
@@ -480,12 +482,11 @@ struct LavaGuardLookPickerSheet: View {
     /// 1.2.4 sync). This one handle keeps the sheet's OWN gated actions — the links and the toggle — to
     /// a single `.appSettings` prompt at a time. It does NOT cover the Guard-row *selection*, which the
     /// presenting view (`CustomizationSettingsView` / `GuardView`) debounces on its separate
-    /// `guardianSelectionTask`; so a simultaneous selection + toggle tap on the un-authenticated
-    /// long-press entry can still present two prompts. That residual is accepted: both are legitimate
-    /// `.appSettings` gates, the window is a rare double-tap before either auth resolves, and unifying
-    /// them would mean either moving selection auth into the sheet (a cross-view ownership change) or
-    /// coalescing concurrent biometrics in `SecurityController` (touching the cancellation-unaware
-    /// evaluator) — deferred (OCR review on lavasec-ios#69).
+    /// `guardianSelectionTask`. A simultaneous selection + toggle tap on the un-authenticated long-press
+    /// entry no longer fans out two prompts: `SecurityController.evaluateBiometrics` coalesces concurrent
+    /// biometric evaluations onto one (via `BiometricAuthenticationCoalescer`, mirroring its passcode
+    /// single-flight), so the two handles' concurrent `.appSettings` gates share a single Face ID prompt
+    /// (fan-out A; Codex/OCR review on lavasec-ios#69).
     ///
     /// `reason` is the user-facing `LAContext.evaluatePolicy` string: it defaults to "Open Settings"
     /// for the Upgrade / Privacy & Data links (which navigate to settings pages), but the Match App
