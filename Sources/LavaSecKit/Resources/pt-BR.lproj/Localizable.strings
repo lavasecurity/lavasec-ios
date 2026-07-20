@@ -26,6 +26,8 @@
 "widget.action.resume" = "Retomar";
 "widget.action.restart" = "Reiniciar";
 "widget.action.pauseForMinutes" = "Pausar por %d min";
+/* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
+"widget.action.pauseForMinutesShort" = "%d min";
 "a11y.shieldGuardian" = "Guardião escudo do Lava";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */

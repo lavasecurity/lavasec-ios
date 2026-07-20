@@ -883,7 +883,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // when Pause is auth-locked the lone Restart is promoted to a labelled button.
         let onBlock = String(actionBlock[onIdx..<pausedIdx])
         XCTAssertTrue(onBlock.contains("if !state.pauseRequiresAuthentication"))
-        XCTAssertTrue(onBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
+        // Pause takes a duration-only visible title plus a separate full-phrase accessibility label.
+        XCTAssertTrue(onBlock.contains("pauseButton("))
+        XCTAssertTrue(onBlock.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
+        XCTAssertTrue(onBlock.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
         XCTAssertTrue(onBlock.contains("restartIconButton"))
         XCTAssertTrue(onBlock.contains("restartLabeledButton"))
 
@@ -1061,8 +1064,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: "case .paused:"
         )
         XCTAssertTrue(onStateBlock.contains("if !state.pauseRequiresAuthentication"))
-        // Single configured-length Pause button, gated behind the same auth check.
-        XCTAssertTrue(onStateBlock.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
+        // Single configured-length Pause button, gated behind the same auth check. Its visible title
+        // is duration-only; the full pause-for-minutes phrase rides the separate accessibility label.
+        XCTAssertTrue(onStateBlock.contains("pauseButton("))
+        XCTAssertTrue(onStateBlock.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
+        XCTAssertTrue(onStateBlock.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
         XCTAssertFalse(onStateBlock.contains("pauseFiveMinutesButton(\"5 min\")"))
         XCTAssertFalse(onStateBlock.contains("pauseTenMinutesButton(\"10 min\")"))
         XCTAssertFalse(widget.contains("AuthenticatedPauseLavaProtectionFiveMinutesIntent"))
@@ -1406,7 +1412,11 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // A single configured-length Pause button replaces the fixed 5/10-min pair.
         XCTAssertFalse(widget.contains("pauseFiveMinutesButton(\"5 min\")"))
         XCTAssertFalse(widget.contains("pauseTenMinutesButton(\"10 min\")"))
-        XCTAssertTrue(widget.contains("pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))"))
+        XCTAssertTrue(widget.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
+        XCTAssertTrue(widget.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
+        // Visible label draws the duration-only short key; the full pause-for-minutes phrase is kept
+        // only for the accessibility label so VoiceOver stays explicit while the drawn label fits.
+        XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutesShort\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
         XCTAssertTrue(widget.contains("if !state.pauseRequiresAuthentication"))

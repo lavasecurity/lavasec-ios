@@ -175,7 +175,10 @@ private struct LavaLiveActivityExpandedView: View {
                             // Pause is the primary action and takes the row; Restart
                             // recedes to a small secondary icon beside it.
                             HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
-                                pauseButton(pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode))
+                                pauseButton(
+                                    title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode),
+                                    accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)
+                                )
                                 restartIconButton(languageCode: languageCode)
                             }
                         } else {
@@ -199,21 +202,36 @@ private struct LavaLiveActivityExpandedView: View {
         .activitySystemActionForegroundColor(LavaLiveActivityStyle.lavaGreen)
     }
 
+    // The Pause button draws the DURATION ONLY: the leading pause.fill glyph already carries the
+    // "pause" verb, so repeating it as a word only crowded the label. The full verb phrase overran
+    // the squeezed action row (Pause shares it with the Restart icon) and truncated to "…" in the
+    // longer locales — field evidence: ja "15 分間一時停止", de "Für 15 Min. pausieren",
+    // es "Pausar durante 15 min". LiveActivityPausePreference.minutesRange caps the value at two
+    // digits, so the duration-only "15 min"/"15分"/"15 Min." always fits.
     private func pauseButtonTitle(forMinutes minutes: Int, languageCode: String?) -> String {
+        LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: languageCode, minutes)
+    }
+
+    // Dropping the visible verb is a VISUAL space fix, not an accessibility one: VoiceOver still
+    // hears the full "Pause for N min" phrase (below), so the glyph-only shorthand never reaches
+    // assistive tech and the primary control stays explicit when spoken.
+    // pinned: AccessibilityLiveActivitySourceTests.testPauseButtonCarriesLocalizedAccessibilityLabel
+    private func pauseButtonAccessibilityLabel(forMinutes minutes: Int, languageCode: String?) -> String {
         LavaCoreStrings.localizedFormat("widget.action.pauseForMinutes", languageCode: languageCode, minutes)
     }
 
     @ViewBuilder
-    private func pauseButton(_ title: String) -> some View {
+    private func pauseButton(title: String, accessibilityLabel: String) -> some View {
         Button(intent: PauseLavaProtectionIntent()) {
             pauseActivityActionLabel(title)
         }
         .controlSize(.regular)
         .tint(LavaLiveActivityStyle.lavaGreen)
         .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
-        // Speak the localized pause-for-minutes title as the button's VoiceOver label so the
-        // primary control reads clearly and its decorative pause glyph isn't announced.
-        .accessibilityLabel(title)
+        // Speak the full localized "Pause for N min" phrase as the button's VoiceOver label so the
+        // primary control reads clearly — the decorative pause glyph and the duration-only visible
+        // title are not what assistive tech announces.
+        .accessibilityLabel(accessibilityLabel)
     }
 
     @ViewBuilder

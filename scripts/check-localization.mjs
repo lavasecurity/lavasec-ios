@@ -75,6 +75,15 @@ const allowedUntranslatedValues = new Set([
   "Nerd Stats",
   "Normal"
 ]);
+// The compact Live Activity Pause label is duration-only. These locales correctly share
+// English's SI minute abbreviation, but the exception must stay scoped to this exact core key so
+// the same English value remains a localization failure everywhere else.
+const allowedUntranslatedCoreEntries = new Set([
+  "es:widget.action.pauseForMinutesShort",
+  "fr:widget.action.pauseForMinutesShort",
+  "it:widget.action.pauseForMinutesShort",
+  "pt-BR:widget.action.pauseForMinutesShort"
+]);
 const requiredReleaseKeys = [
   "Guard",
   "Filter",
@@ -287,7 +296,14 @@ if (coreBase) {
 
     for (const [key, value] of entries) {
       const english = coreBase.get(key);
-      if (english !== undefined && value === english && !allowedUntranslatedValues.has(english)) {
+      const scopedException =
+        english === "%d min" && allowedUntranslatedCoreEntries.has(`${locale}:${key}`);
+      if (
+        english !== undefined &&
+        value === english &&
+        !allowedUntranslatedValues.has(english) &&
+        !scopedException
+      ) {
         fail(`LavaSecKit ${locale}.lproj: ${key} still matches English source`);
       }
     }

@@ -290,6 +290,26 @@ struct LavaSecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
+/// Flat action-row button for a row inside a `LavaCondensedList`. Unlike the filled-pill
+/// `LavaStandaloneActionButtonStyle`, it paints no surface of its own — the list supplies the
+/// card — and only owns the row's disabled fade plus press feedback.
+///
+/// Use it instead of `.buttonStyle(.plain)` whenever a condensed-list row can be `.disabled()`: a
+/// plain button dims its OWN label when disabled, so a gated row that ALSO stacked an explicit
+/// `.opacity(0.45)` double-dimmed and rendered a darker, inconsistent grey than sibling controls at
+/// the same nominal opacity (Account & Backup's signed-out Back Up Now / Restore measured lum 95 vs
+/// the Automatic Backup toggle's 136). Owning the fade here via `isEnabled` keeps exactly one 0.45,
+/// matching the toggle and the standalone/secondary/DNS action styles.
+/// pinned: AccountSignInSourceTests.testEncryptedBackupRowsFadeOnceWhenDisabled
+struct LavaCondensedRowButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.45)
+    }
+}
+
 extension View {
     /// The shared body of a single-line row: horizontal inset plus the `LavaRowHeight`
     /// tap-target floor, with content vertically centered. One definition so a toggle

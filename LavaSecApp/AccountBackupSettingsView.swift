@@ -115,9 +115,12 @@ struct AccountSettingsView: View {
                                 }
                                 .lavaRow()
                             }
-                            .buttonStyle(.plain)
+                            // Gated rows fade ONCE via LavaCondensedRowButtonStyle (isEnabled-driven)
+                            // rather than .plain + a stacked .opacity — see the style's note on the
+                            // signed-out double-dim that made these read a different grey than the
+                            // Automatic Backup toggle beside them.
+                            .buttonStyle(LavaCondensedRowButtonStyle())
                             .disabled(!account.isAccountSignedIn || backup.isBackingUpNow || backup.isBackupMaintenanceInProgress)
-                            .opacity(account.isAccountSignedIn ? 1 : 0.45)
                         } else {
                             Button {
                                 isSettingUpBackup = true
@@ -128,9 +131,8 @@ struct AccountSettingsView: View {
                                 }
                                 .lavaRow()
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(LavaCondensedRowButtonStyle())
                             .disabled(!account.isAccountSignedIn)
-                            .opacity(account.isAccountSignedIn ? 1 : 0.45)
                         }
 
                         LavaCondensedDivider()
@@ -144,9 +146,8 @@ struct AccountSettingsView: View {
                             }
                             .lavaRow()
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(LavaCondensedRowButtonStyle())
                         .disabled(!account.isAccountSignedIn)
-                        .opacity(account.isAccountSignedIn ? 1 : 0.45)
                     }
 
                     BackupOptionControl(
@@ -200,8 +201,12 @@ struct AccountSettingsView: View {
             }
             .lavaRow()
         }
-        .buttonStyle(.plain)
-        .disabled(backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)
+        // Both delete paths hard-delete the server copy first (deleteRemoteEncryptedBackup) and
+        // refuse to tear down locally unless that is confirmed, so signed out they can only fail
+        // ("you may be offline or signed out"). Gate them on sign-in like Back Up Now / Restore so
+        // the whole section greys as one unit, and fade once via the shared row style.
+        .buttonStyle(LavaCondensedRowButtonStyle())
+        .disabled(!account.isAccountSignedIn || backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)
     }
 
     private var backupMaintenanceConfirmationBinding: Binding<Bool> {
