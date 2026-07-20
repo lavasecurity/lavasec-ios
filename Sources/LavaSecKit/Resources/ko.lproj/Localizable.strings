@@ -26,6 +26,8 @@
 "widget.action.resume" = "다시 시작";
 "widget.action.restart" = "다시 시작";
 "widget.action.pauseForMinutes" = "%d분 동안 일시 중지";
+/* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
+"widget.action.pauseForMinutesShort" = "%d분";
 "a11y.shieldGuardian" = "Lava 실드 가디언";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */

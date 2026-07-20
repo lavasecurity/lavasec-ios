@@ -41,12 +41,15 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
 
     // MARK: Pause control — the primary action carries a clear, localized VoiceOver label
 
-    /// The pause affordance is a `Button(intent:)`; its label is the localized pause-for-minutes
-    /// title so the control reads clearly and its decorative pause glyph is not separately announced.
+    /// The pause affordance is a `Button(intent:)`. Its visible title dropped the "pause" verb (the
+    /// pause.fill glyph carries it) to stop long locales truncating, but its VoiceOver label keeps the
+    /// FULL localized pause-for-minutes phrase via a dedicated `accessibilityLabel` parameter — so the
+    /// glyph-only shorthand is a visual space fix that never reaches assistive tech.
     func testPauseButtonCarriesLocalizedAccessibilityLabel() throws {
+        let widget = try readSource(.lavaSecWidget)
         let block = try sourceBlock(
-            in: try readSource(.lavaSecWidget),
-            startingAt: "private func pauseButton(_ title: String)",
+            in: widget,
+            startingAt: "private func pauseButton(title: String, accessibilityLabel: String)",
             endingBefore: "private func resumeButton(languageCode: String?)"
         )
         XCTAssertTrue(
@@ -54,8 +57,18 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
             "Canary: the pause affordance must stay a Button(intent:) so labeling it is meaningful."
         )
         XCTAssertTrue(
-            block.contains(".accessibilityLabel(title)"),
-            "The Live Activity Pause button must expose the localized pause-for-minutes title as its VoiceOver label."
+            block.contains(".accessibilityLabel(accessibilityLabel)"),
+            "The Live Activity Pause button must expose a dedicated VoiceOver label, separate from its duration-only visible title."
+        )
+        // The label passed in is the FULL "Pause for N min" phrase, while the visible title is the
+        // duration-only short key — so VoiceOver stays explicit even though the drawn label drops the verb.
+        XCTAssertTrue(
+            widget.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"),
+            "The Pause button's accessibility label must be wired from the full pause-for-minutes phrase."
+        )
+        XCTAssertTrue(
+            widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"),
+            "The accessibility-label helper must resolve the full pause-for-minutes phrase (widget.action.pauseForMinutes)."
         )
     }
 

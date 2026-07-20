@@ -61,4 +61,27 @@ final class LavaCoreStringsTests: XCTestCase {
             "暫停 10 分鐘"
         )
     }
+
+    func testLocalizedFormatResolvesTheDurationOnlyShortPauseLabel() {
+        // The Live Activity Pause button draws the duration-only short label — the pause.fill glyph
+        // carries the verb, so the longer full phrase ("15 分間一時停止" etc.) no longer truncates in
+        // the squeezed action row. The full phrase stays the VoiceOver label (asserted above). Each
+        // locale keeps its own minute form; digits follow the device region via String(format:).
+        XCTAssertEqual(
+            LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "ja", 15),
+            "15分"
+        )
+        XCTAssertEqual(
+            LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "de", 5),
+            "5 Min."
+        )
+        XCTAssertEqual(
+            LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "zh-Hant", 30),
+            "30 分鐘"
+        )
+        XCTAssertEqual(
+            LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "en", 10),
+            "10 min"
+        )
+    }
 }

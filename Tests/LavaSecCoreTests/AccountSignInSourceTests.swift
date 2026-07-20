@@ -364,4 +364,41 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("accountSignInProviderInProgress = .google"))
         XCTAssertTrue(controllerSource.contains("defer { accountSignInProviderInProgress = nil }"))
     }
+
+    /// The Encrypted Backup action rows gate on sign-in and fade EXACTLY ONCE when disabled.
+    /// A `.buttonStyle(.plain)` row dims its own label when `.disabled()`, so the earlier
+    /// `.plain` + a stacked `.opacity(0.45)` double-dimmed the signed-out rows to a darker grey than
+    /// the Automatic Backup toggle beside them (measured lum 95 vs 136). They now route through the
+    /// shared `LavaCondensedRowButtonStyle`, which owns a single isEnabled-driven fade; and both
+    /// destructive delete rows join Back Up Now / Restore in greying out while signed out, since they
+    /// hard-delete the server copy first and can only fail without a session.
+    func testEncryptedBackupRowsFadeOnceWhenDisabled() throws {
+        let view = try readSource(.accountBackupSettingsView)
+        let components = try readSource(.lavaComponents)
+
+        // The shared flat-row style fades once via isEnabled — no fill, no stacked opacity.
+        let styleBlock = try sourceBlock(
+            in: components,
+            startingAt: "struct LavaCondensedRowButtonStyle: ButtonStyle",
+            endingBefore: "extension View {"
+        )
+        XCTAssertTrue(styleBlock.contains("@Environment(\\.isEnabled) private var isEnabled"))
+        XCTAssertTrue(styleBlock.contains(".opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.45)"))
+
+        // The gated rows adopt the shared style, and the manual `.opacity(...)` that stacked on top of
+        // the plain button's own disabled dimming is gone.
+        XCTAssertTrue(view.contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
+        XCTAssertFalse(view.contains(".opacity(account.isAccountSignedIn ? 1 : 0.45)"))
+
+        // Both destructive delete rows now gate on sign-in alongside the maintenance/in-flight guards,
+        // and no longer use the double-dimming `.plain` style.
+        let deleteButtonBlock = try sourceBlock(
+            in: view,
+            startingAt: "private func backupMaintenanceButton(_ target: BackupMaintenanceAction)",
+            endingBefore: "private var backupMaintenanceConfirmationBinding"
+        )
+        XCTAssertTrue(deleteButtonBlock.contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
+        XCTAssertTrue(deleteButtonBlock.contains(".disabled(!account.isAccountSignedIn || backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)"))
+        XCTAssertFalse(deleteButtonBlock.contains(".buttonStyle(.plain)"))
+    }
 }

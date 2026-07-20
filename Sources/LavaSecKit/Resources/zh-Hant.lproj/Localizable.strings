@@ -26,6 +26,8 @@
 "widget.action.resume" = "繼續";
 "widget.action.restart" = "重新啟動";
 "widget.action.pauseForMinutes" = "暫停 %d 分鐘";
+/* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
+"widget.action.pauseForMinutesShort" = "%d 分鐘";
 "a11y.shieldGuardian" = "Lava 護盾守衛";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
