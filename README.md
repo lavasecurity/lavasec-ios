@@ -6,18 +6,27 @@
 ![Platform: iOS 18+](https://img.shields.io/badge/platform-iOS%2018%2B-000000?logo=apple&logoColor=white)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-Privacy-first, on-device DNS filtering for iPhone and iPad. Lava runs a local
-`NEPacketTunnelProvider` that resolves DNS over an encrypted transport
-(DoH/DoT/DoQ) and filters domains against on-device blocklists — your browsing
-domains are not routinely uploaded anywhere.
+[<img src="docs/media/app-store-badge.svg" alt="Download on the App Store" height="40">](https://apps.apple.com/app/lava-security/id6778022110)
 
-This is the open-source iOS client. The backend, marketing site, and operational
-infrastructure live in separate (private) repositories.
+**The internet is lava — so I made a blocklist app even my dad can use.**
 
-> **Status:** Pre-1.0 and pre-launch. The on-device DNS-filtering core is
-> functional; app surfaces, APIs, and configuration may still change before the
-> first App Store release. Issues and discussion are welcome — see
-> [CONTRIBUTING](CONTRIBUTING.md).
+Lava blocks known-bad domains right on your iPhone — no account, and nothing
+routed through us. Core protection is free, it's live on the App Store now,
+and this iOS client is fully open source.
+
+This repo is the open-source iOS client for [Lava Security](https://lavasecurity.app).
+The backend, marketing site, and operational infrastructure live in separate
+(private) repositories.
+
+> **Status:** Live on the App Store. Actively developed — app surfaces, APIs,
+> and configuration may still change between releases. Issues and discussion
+> are welcome — see [CONTRIBUTING](CONTRIBUTING.md).
+
+## How it works
+
+Lava runs a local `NEPacketTunnelProvider` that resolves DNS over an encrypted
+transport (DoH/DoT/DoQ) and filters domains against on-device blocklists —
+your browsing domains are not routinely uploaded anywhere.
 
 ## Highlights
 
