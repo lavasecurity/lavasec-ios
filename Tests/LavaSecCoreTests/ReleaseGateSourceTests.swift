@@ -17,6 +17,35 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertFalse(guardBlock.contains("gh workflow run release.yml"))
     }
 
+    func testLightBuildWorkflowGuardsMarketingVersionAheadOfLatestPublicRelease() throws {
+        let workflow = try readSource(.lightBuildWorkflow)
+        // Reads to EOF: `version-guard` is the last job in the file.
+        let jobBlock = try sourceBlock(in: workflow, startingAt: "  version-guard:")
+
+        XCTAssertTrue(jobBlock.contains("uses: actions/checkout@v7"))
+        // Unlike app-compile, this job must run on every PR unconditionally: no `needs:
+        // changes` docs-only short-circuit, and no owned-hardware runner (LIGHT_BUILD_RUNNER
+        // selects the mac VM) — it's Linux-only, so it can run for fork PRs too.
+        XCTAssertFalse(jobBlock.contains("needs: changes"))
+        XCTAssertFalse(jobBlock.contains("docs_only"))
+        XCTAssertFalse(jobBlock.contains("LIGHT_BUILD_RUNNER"))
+
+        let guardBlock = try sourceBlock(
+            in: jobBlock,
+            startingAt: "- name: Guard — MARKETING_VERSION ahead of latest public release"
+        )
+        XCTAssertTrue(guardBlock.contains("Config/Lava.xcconfig"))
+        XCTAssertTrue(guardBlock.contains("MARKETING_VERSION"))
+        XCTAssertTrue(guardBlock.contains("declared_version"))
+        XCTAssertTrue(guardBlock.contains("lavasec-ios.git"))
+        XCTAssertTrue(guardBlock.contains("[ \"$lowest\" = \"$declared_version\" ]"))
+        // A real `git ls-remote` failure (network/DNS/GitHub outage) must fail CLOSED, not
+        // be swallowed by the same fallback that covers the benign "no public tags yet"
+        // case — otherwise the gate reports green without ever comparing MARKETING_VERSION.
+        XCTAssertTrue(guardBlock.contains("if ! tags=\"$(git ls-remote"))
+        XCTAssertTrue(guardBlock.contains("failing closed"))
+    }
+
     func testPhoneQASurfacesAreCompileGatedOutOfRelease() throws {
         let adminQA = try readSource(.adminQAView)
         let settings = try readSource(.settingsView)

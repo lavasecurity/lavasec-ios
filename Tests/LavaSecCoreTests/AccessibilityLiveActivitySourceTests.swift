@@ -41,10 +41,13 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
 
     // MARK: Pause control — the primary action carries a clear, localized VoiceOver label
 
-    /// The pause affordance is a `Button(intent:)`. Its visible title dropped the "pause" verb (the
-    /// pause.fill glyph carries it) to stop long locales truncating, but its VoiceOver label keeps the
-    /// FULL localized pause-for-minutes phrase via a dedicated `accessibilityLabel` parameter — so the
-    /// glyph-only shorthand is a visual space fix that never reaches assistive tech.
+    /// The pause affordance is a `Button(intent:)`. Its visible title is the duration-only short
+    /// key (the pause.fill glyph carries the verb visually), but its VoiceOver label must be the
+    /// FULL localized pause-for-minutes phrase via a dedicated `accessibilityLabel` parameter —
+    /// the title alone would announce "15 分, button" with no action verb (Codex on #437,
+    /// reinstating the #423 split). Safe per the settled ja investigation: the a11y label is
+    /// never drawn, and the full phrase contains a space in every locale regardless (record in
+    /// lavasec-infra plans/2026-07-21-live-activity-ja-label-probe-removal-contract.md).
     func testPauseButtonCarriesLocalizedAccessibilityLabel() throws {
         let widget = try readSource(.lavaSecWidget)
         let block = try sourceBlock(
@@ -60,8 +63,6 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
             block.contains(".accessibilityLabel(accessibilityLabel)"),
             "The Live Activity Pause button must expose a dedicated VoiceOver label, separate from its duration-only visible title."
         )
-        // The label passed in is the FULL "Pause for N min" phrase, while the visible title is the
-        // duration-only short key — so VoiceOver stays explicit even though the drawn label drops the verb.
         XCTAssertTrue(
             widget.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"),
             "The Pause button's accessibility label must be wired from the full pause-for-minutes phrase."

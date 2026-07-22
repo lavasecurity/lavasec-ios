@@ -883,7 +883,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // when Pause is auth-locked the lone Restart is promoted to a labelled button.
         let onBlock = String(actionBlock[onIdx..<pausedIdx])
         XCTAssertTrue(onBlock.contains("if !state.pauseRequiresAuthentication"))
-        // Pause takes a duration-only visible title plus a separate full-phrase accessibility label.
+        // Pause draws the duration-only short title plus a separate full-phrase accessibility
+        // label (rationale on pauseButtonTitle / pauseButtonAccessibilityLabel in the widget).
         XCTAssertTrue(onBlock.contains("pauseButton("))
         XCTAssertTrue(onBlock.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
         XCTAssertTrue(onBlock.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
@@ -1064,8 +1065,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             endingBefore: "case .paused:"
         )
         XCTAssertTrue(onStateBlock.contains("if !state.pauseRequiresAuthentication"))
-        // Single configured-length Pause button, gated behind the same auth check. Its visible title
-        // is duration-only; the full pause-for-minutes phrase rides the separate accessibility label.
+        // Single configured-length Pause button, gated behind the same auth check. Its visible
+        // title is duration-only; the full pause-for-minutes phrase rides the separate
+        // accessibility label (rationale on pauseButtonTitle / pauseButtonAccessibilityLabel).
         XCTAssertTrue(onStateBlock.contains("pauseButton("))
         XCTAssertTrue(onStateBlock.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
         XCTAssertTrue(onStateBlock.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
@@ -1414,8 +1416,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(widget.contains("pauseTenMinutesButton(\"10 min\")"))
         XCTAssertTrue(widget.contains("title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
         XCTAssertTrue(widget.contains("accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)"))
-        // Visible label draws the duration-only short key; the full pause-for-minutes phrase is kept
-        // only for the accessibility label so VoiceOver stays explicit while the drawn label fits.
+        // Visible label draws the duration-only SHORT key (ja value carries its load-bearing
+        // space — see the ja catalog and LavaCoreStringsTests); the full pause-for-minutes
+        // phrase rides the separate accessibility label so VoiceOver names the action
+        // (Codex on #437). Rationale on pauseButtonTitle / pauseButtonAccessibilityLabel.
         XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutesShort\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
@@ -1730,8 +1734,12 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             "Every plain lookup must pass the per-render pin — an ambient call renders the system language."
         )
         XCTAssertTrue(
+            widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutesShort\", languageCode: languageCode, minutes)"),
+            "The visible-title format lookup must pass the per-render pin too."
+        )
+        XCTAssertTrue(
             widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"),
-            "The format lookup must pass the per-render pin too."
+            "The accessibility-label format lookup must pass the per-render pin too."
         )
     }
 }

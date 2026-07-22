@@ -378,6 +378,9 @@ and the executable `ReseedSuppressionMarkerStoreTests`.
 ## Release
 
 ### INV-REL-1 — RC tags match the declared version and never regress
-`vX.Y.Z-rcN` must equal `Config/Lava.xcconfig` `MARKETING_VERSION` and be ≥ the latest
-public release tag; clean (non-rc) release tags are always a deliberate manual action.
-- Home / enforced: `.github/workflows/tag-release.yml` guard job.
+`vX.Y.Z-rcN` must equal `Config/Lava.xcconfig` `MARKETING_VERSION`, and that version must be
+strictly greater than the latest public release tag (equal = forgot to bump after releasing,
+below = regression); clean (non-rc) release tags are always a deliberate manual action.
+- Home / enforced: `.github/workflows/tag-release.yml` guard job (RC-tag push) and
+  `.github/workflows/light-build.yml` `version-guard` job (every PR — catches a stale
+  `MARKETING_VERSION` before an RC tag is ever cut).
