@@ -202,19 +202,25 @@ private struct LavaLiveActivityExpandedView: View {
         .activitySystemActionForegroundColor(LavaLiveActivityStyle.lavaGreen)
     }
 
-    // The Pause button draws the DURATION ONLY: the leading pause.fill glyph already carries the
-    // "pause" verb, so repeating it as a word only crowded the label. The full verb phrase overran
-    // the squeezed action row (Pause shares it with the Restart icon) and truncated to "…" in the
-    // longer locales — field evidence: ja "15 分間一時停止", de "Für 15 Min. pausieren",
-    // es "Pausar durante 15 min". LiveActivityPausePreference.minutesRange caps the value at two
-    // digits, so the duration-only "15 min"/"15分"/"15 Min." always fits.
+    // Duration-only short title ("15分" / "15 min"): the pause.fill glyph carries the verb, so the
+    // full phrase only crowded the squeezed action row (it shares the row with the Restart icon)
+    // and truncated in longer locales. This is the #423 intent, restored AFTER the 2026-07-21 ja
+    // investigation settled the real constraint: the Live Activity button renderer draws short
+    // SPACE-LESS ja text runs as a bare "…", so the ja short value carries a deliberate,
+    // test-pinned TRAILING space ("%d分 " — mirroring the ja resume value; the internally-spaced
+    // "%d 分" variant regressed to "15…" on device because its space made a break point whose
+    // final bare-分 segment collapsed the same way — see the ja catalog comment and
+    // LavaCoreStringsTests). Record: lavasec-infra
+    // plans/2026-07-21-live-activity-ja-label-probe-removal-contract.md.
     private func pauseButtonTitle(forMinutes minutes: Int, languageCode: String?) -> String {
         LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: languageCode, minutes)
     }
 
-    // Dropping the visible verb is a VISUAL space fix, not an accessibility one: VoiceOver still
-    // hears the full "Pause for N min" phrase (below), so the glyph-only shorthand never reaches
-    // assistive tech and the primary control stays explicit when spoken.
+    // Dropping the visible verb is a VISUAL space fix, not an accessibility one: VoiceOver hears
+    // the full "Pause for N min" phrase (below), so the glyph-only shorthand never reaches
+    // assistive tech. Safe to resolve separately per the settled investigation: the a11y label is
+    // never DRAWN (the renderer quirk only affects drawn short space-less ja values), and the
+    // full phrase contains a space in every locale regardless (Codex on #437).
     // pinned: AccessibilityLiveActivitySourceTests.testPauseButtonCarriesLocalizedAccessibilityLabel
     private func pauseButtonAccessibilityLabel(forMinutes minutes: Int, languageCode: String?) -> String {
         LavaCoreStrings.localizedFormat("widget.action.pauseForMinutes", languageCode: languageCode, minutes)
@@ -229,8 +235,8 @@ private struct LavaLiveActivityExpandedView: View {
         .tint(LavaLiveActivityStyle.lavaGreen)
         .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
         // Speak the full localized "Pause for N min" phrase as the button's VoiceOver label so the
-        // primary control reads clearly — the decorative pause glyph and the duration-only visible
-        // title are not what assistive tech announces.
+        // primary control names its ACTION — the duration-only visible title alone would announce
+        // "15 分, button" with no verb, and the decorative pause glyph is not announced.
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -279,6 +285,10 @@ private struct LavaLiveActivityExpandedView: View {
         .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
     }
 
+    // Pre-#423 label bodies, restored verbatim for the bisection — see the revert rationale on
+    // pauseButtonTitle. The #427/#428/#431 modifier changes are deliberately absent: none of them
+    // cured the ja field failure, and the experiment's value is a one-variable delta from the
+    // state that provably rendered ja.
     private func restartActivityActionLabel(_ title: String) -> some View {
         HStack(spacing: LavaLiveActivityStyle.expandedActionLabelSpacing) {
             Image(systemName: "arrow.clockwise")

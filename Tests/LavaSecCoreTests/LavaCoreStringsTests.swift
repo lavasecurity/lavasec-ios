@@ -21,9 +21,12 @@ final class LavaCoreStringsTests: XCTestCase {
             LavaCoreStrings.localized("widget.state.on", languageCode: "zh-Hant"),
             "Lava Security 已開啟"
         )
+        // The trailing space is deliberate and load-bearing (render rescue for short space-less
+        // ja values in the Live Activity button — see the ja catalog comment); this assertion
+        // pins it so a well-meaning trim doesn't silently reintroduce the "…" collapse.
         XCTAssertEqual(
             LavaCoreStrings.localized("widget.action.resume", languageCode: "ja"),
-            "再開"
+            "再開 "
         )
     }
 
@@ -67,9 +70,13 @@ final class LavaCoreStringsTests: XCTestCase {
         // carries the verb, so the longer full phrase ("15 分間一時停止" etc.) no longer truncates in
         // the squeezed action row. The full phrase stays the VoiceOver label (asserted above). Each
         // locale keeps its own minute form; digits follow the device region via String(format:).
+        // The TRAILING space is deliberate and load-bearing (same render rescue as the ja resume
+        // value — see the ja catalog comment). The internally-spaced "15 分" variant regressed to
+        // "15…" on device: its internal space created a break point whose final bare-分 segment
+        // collapsed like the unspaced values did. This pins the exact working form.
         XCTAssertEqual(
             LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "ja", 15),
-            "15分"
+            "15分 "
         )
         XCTAssertEqual(
             LavaCoreStrings.localizedFormat("widget.action.pauseForMinutesShort", languageCode: "de", 5),

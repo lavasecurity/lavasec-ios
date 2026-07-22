@@ -193,6 +193,7 @@ enum SourceFile: String, CaseIterable {
 
     // MARK: GitHub workflows
     case iosWorkflow = ".github/workflows/ios.yml"
+    case lightBuildWorkflow = ".github/workflows/light-build.yml"
     case tagReleaseWorkflow = ".github/workflows/tag-release.yml"
 }
 
@@ -213,7 +214,7 @@ extension SourceFile {
     /// machinery actually lives, the pin still enforces (INV-REL-1).
     var isInternalOnly: Bool {
         switch self {
-        case .tagReleaseWorkflow: true
+        case .lightBuildWorkflow, .tagReleaseWorkflow: true
         default: false
         }
     }

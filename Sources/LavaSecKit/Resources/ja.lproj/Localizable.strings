@@ -23,11 +23,24 @@
 "widget.status.on" = "オン";
 "widget.status.paused" = "一時停止中";
 "widget.status.restarting" = "再起動中";
-"widget.action.resume" = "再開";
+/* The trailing space is DELIBERATE and load-bearing, not a typo: on-device bisection
+   (2026-07-21, lavasec-ios-internal#434/#435) showed the Live Activity button renderer draws
+   short SPACE-LESS ja values ("再開", "15分") as a bare truncation ellipsis while every ja value
+   containing a space ("15 分間一時停止", the titles) renders — same file, same code, same build.
+   zh/ko space-less values are unaffected, isolating iOS's ja-specific text segmentation in that
+   render context. The space is invisible in the drawn label and in VoiceOver. Do not "clean" it
+   without re-verifying ja on device. Record: lavasec-infra
+   plans/2026-07-21-live-activity-ja-label-probe-removal-contract.md. */
+"widget.action.resume" = "再開 ";
 "widget.action.restart" = "再起動";
 "widget.action.pauseForMinutes" = "%d 分間一時停止";
-/* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
-"widget.action.pauseForMinutesShort" = "%d分";
+/* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase:
+   widget.action.pauseForMinutes. The TRAILING space is deliberate — the same render rescue as
+   widget.action.resume above, and the field-correct one: the internally-spaced "%d 分" variant
+   drew as "15…" on device (2026-07-21, lavasec-ios-internal#437 build) because the internal
+   space made a break point whose final segment — bare 分, a short space-less ja run — collapsed
+   exactly like the unspaced values did. Trailing space, no internal space. */
+"widget.action.pauseForMinutesShort" = "%d分 ";
 "a11y.shieldGuardian" = "Lava シールドガーディアン";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
