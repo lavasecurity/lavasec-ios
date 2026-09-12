@@ -73,7 +73,7 @@ function assertClassification(result, expected) {
   assert.notEqual(result.stderr, "", "classification diagnostics must stay on stderr");
 }
 
-test("non-pull-request events fail safe without consulting Git", (t) => {
+test("manual and unknown events fail safe without consulting Git", (t) => {
   const root = makeTemporaryDirectory(t, "lavasec-docs-only-push-");
   const fakeBin = path.join(root, "bin");
   const marker = path.join(root, "git-was-called");
@@ -85,11 +85,12 @@ test("non-pull-request events fail safe without consulting Git", (t) => {
   );
   execFileSync("chmod", ["+x", path.join(fakeBin, "git")]);
 
-  const result = runDetector(root, "push", "missing-base", "missing-head", {
-    PATH: `${fakeBin}:${process.env.PATH}`,
-  });
-
-  assertClassification(result, "false");
+  for (const event of ["workflow_dispatch", "unknown"]) {
+    const result = runDetector(root, event, "missing-base", "missing-head", {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    });
+    assertClassification(result, "false");
+  }
   assert.equal(spawnSync("test", ["-e", marker]).status, 1);
 });
 
@@ -101,6 +102,7 @@ test("a PR containing only docs paths and markdown files is docs-only", (t) => {
   const head = commitAll(root, "add docs");
 
   assertClassification(runDetector(root, "pull_request", base, head), "true");
+  assertClassification(runDetector(root, "push", base, head), "true");
 });
 
 test("a mixed documentation and source PR runs fully", (t) => {
@@ -111,6 +113,7 @@ test("a mixed documentation and source PR runs fully", (t) => {
   const head = commitAll(root, "add docs and source");
 
   assertClassification(runDetector(root, "pull_request", base, head), "false");
+  assertClassification(runDetector(root, "push", base, head), "false");
 });
 
 test("empty and invalid PR ranges fail safe", async (t) => {
@@ -128,6 +131,14 @@ test("empty and invalid PR ranges fail safe", async (t) => {
   });
 });
 
+test("missing, new-branch and unavailable push endpoints fail safe", (t) => {
+  const root = makeRepository(t);
+  const head = git(root, "rev-parse", "HEAD");
+  for (const base of ["", "0".repeat(40), "missing-base", head]) {
+    assertClassification(runDetector(root, "push", base, head), "false");
+  }
+});
+
 test("renaming source into docs remains a full-build change", (t) => {
   const root = makeRepository(t, {
     "Sources/Feature.swift": "struct Feature {}\n",
@@ -138,6 +149,7 @@ test("renaming source into docs remains a full-build change", (t) => {
   const head = commitAll(root, "move source into docs");
 
   assertClassification(runDetector(root, "pull_request", base, head), "false");
+  assertClassification(runDetector(root, "push", base, head), "false");
 });
 
 test("deleting a file under docs remains docs-only", (t) => {
@@ -188,4 +200,17 @@ test("a large mixed diff cannot be misclassified after an early non-doc match", 
   });
 
   assertClassification(result, "false");
+
+  // Event-level path filters truncate large diffs. The local classifier must
+  // inspect all paths, including source after thousands of documentation files.
+  writeFileSync(changedFiles, [
+    ...Array.from({ length: 5_000 }, (_, index) => `docs/generated-${index}.txt`),
+    "Sources/Feature.swift", "",
+  ].join("\n"));
+  for (const event of ["pull_request", "push"]) {
+    assertClassification(runDetector(root, event, "base", "head", {
+      DOCS_ONLY_CHANGED_FILES: changedFiles,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    }), "false");
+  }
 });
