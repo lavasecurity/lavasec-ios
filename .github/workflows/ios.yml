@@ -7,16 +7,19 @@ on:
       - main
   pull_request:
 
-# NB: intentionally NO `paths-ignore` (REL-6). A docs filter means a docs-only PR never
+# NB: intentionally NO event-level `paths-ignore` (REL-6). A docs filter means a docs-only PR never
 # TRIGGERS this workflow, so its required contexts (Repo Checks, Swift Package Tests,
 # iOS Simulator Build) are never reported and the PR is stuck on "Expected — waiting for
 # status" with only an admin override to escape — hostile to the outside doc contributors
 # CONTRIBUTING.md invites, and normalizing the override habit. Instead the workflow always
 # runs; the `changes` job flags a docs-only diff so the expensive macOS jobs short-circuit
 # their work (still completing green) while the contexts always report.
+# Pushes use the same complete local diff, avoiding event-level path-filter limits.
 
 concurrency:
-  group: ios-ci-${{ github.ref }}
+  # A docs-only push must not cancel a running or queued source build.
+  # PR updates still replace obsolete checks of the same complete PR diff.
+  group: ios-ci-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 # Shared CI lane — kept BYTE-IDENTICAL in the private dev repo (lavasec-ios-internal)
@@ -43,9 +46,9 @@ concurrency:
 
 jobs:
   changes:
-    # Flags a docs-only PR so the expensive macOS jobs can short-circuit while still
+    # Flags docs-only PRs and pushes so the expensive macOS jobs can short-circuit while still
     # completing (their required contexts must report — see the no-paths-ignore note
-    # above). Cheap Linux; the mac jobs `needs:` it. Non-PR events (push/dispatch) and
+    # above). Cheap Linux; the mac jobs `needs:` it. Manual/unknown events and
     # anything that can't be classified fall through to docs_only=false → jobs run fully.
     name: Detect docs-only diff
     # Linux runner is per-repo swappable WITHOUT forking this byte-identical file — the same
@@ -68,8 +71,8 @@ jobs:
         id: detect
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           docs_only="$(ci/detect-docs-only.sh \
@@ -230,7 +233,7 @@ jobs:
             bad=$(git log "$range" --format='%ae%n%ce' | sort -u | grep -vE "$canonical" || true)
             if [ -n "$bad" ]; then
               echo "::error::promotion PR carries non-canonical author/committer identity (expected only the lavasecurity account):"
-              printf '  %s\n' $bad
+              printf '%s\n' "$bad" | sed 's/^/  /'
               fail=1
             fi
           fi

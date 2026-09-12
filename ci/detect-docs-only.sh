@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Classify a GitHub event as a docs-only pull request.
+# Classify a GitHub pull request or push as documentation-only.
 #
 # Usage:
 #   ci/detect-docs-only.sh --event EVENT [--base SHA] [--head SHA]
 #
 # Stdout is intentionally machine-only: exactly `true` or `false`. Diagnostics
 # go to stderr so workflows can capture the result for $GITHUB_OUTPUT. Any
-# missing or indeterminate PR range fails safe to `false` with a successful exit.
+# missing or indeterminate range fails safe to `false` with a successful exit.
 set -euo pipefail
 
 usage() {
@@ -41,14 +41,14 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$event_set" = 1 ] || usage
 
-if [ "$event" != "pull_request" ]; then
-  echo "not a PR -> run fully" >&2
+if [ "$event" != "pull_request" ] && [ "$event" != "push" ]; then
+  echo "not a PR or push -> run fully" >&2
   echo false
   exit 0
 fi
 
 if [ -z "$base" ] || [ -z "$head" ]; then
-  echo "missing PR diff endpoint -> run fully" >&2
+  echo "missing diff endpoint -> run fully" >&2
   echo false
   exit 0
 fi

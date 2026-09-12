@@ -48,4 +48,6 @@ if [ -z "$flock_bin" ] || [ ! -x "$flock_bin" ]; then
   exit 1
 fi
 
-exec "$flock_bin" -s "$lock" "$@"
+# flock owns the lock until the foreground command exits. Close its descriptor
+# in the command so an orphaned simctl/daemon cannot retain the lock afterward.
+exec "$flock_bin" -s -o "$lock" "$@"
