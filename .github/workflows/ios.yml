@@ -5,9 +5,14 @@ on:
   push:
     branches:
       - main
+    # Post-merge documentation pushes need no build. PRs still report every
+    # required context through the existing docs-only classifier below.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
 
-# NB: intentionally NO `paths-ignore` (REL-6). A docs filter means a docs-only PR never
+# NB: intentionally NO pull_request `paths-ignore` (REL-6). A docs filter means a docs-only PR never
 # TRIGGERS this workflow, so its required contexts (Repo Checks, Swift Package Tests,
 # iOS Simulator Build) are never reported and the PR is stuck on "Expected — waiting for
 # status" with only an admin override to escape — hostile to the outside doc contributors
@@ -230,7 +235,7 @@ jobs:
             bad=$(git log "$range" --format='%ae%n%ce' | sort -u | grep -vE "$canonical" || true)
             if [ -n "$bad" ]; then
               echo "::error::promotion PR carries non-canonical author/committer identity (expected only the lavasecurity account):"
-              printf '  %s\n' $bad
+              printf '%s\n' "$bad" | sed 's/^/  /'
               fail=1
             fi
           fi
