@@ -17,7 +17,9 @@ on:
 # Pushes use the same complete local diff, avoiding event-level path-filter limits.
 
 concurrency:
-  group: ios-ci-${{ github.ref }}
+  # A docs-only push must not cancel a running or queued source build.
+  # PR updates still replace obsolete checks of the same complete PR diff.
+  group: ios-ci-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 # Shared CI lane — kept BYTE-IDENTICAL in the private dev repo (lavasec-ios-internal)

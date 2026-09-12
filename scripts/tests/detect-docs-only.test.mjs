@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +15,24 @@ import { fileURLToPath } from "node:url";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const detectorPath = path.resolve(testDirectory, "..", "..", "ci", "detect-docs-only.sh");
+
+test("a later docs push cannot cancel or replace a pending source build", () => {
+  const workflows = path.resolve(testDirectory, "..", "..", ".github", "workflows");
+  for (const name of ["ios.yml", "light-build.yml", "react-native-ui.yml"]) {
+    const file = path.join(workflows, name);
+    if (!existsSync(file)) continue; // Public source has only the shared iOS lane.
+    const source = readFileSync(file, "utf8");
+    const template = source.match(/^  group: (.+)$/m)?.[1];
+    assert.ok(template, `${name} must declare its workflow concurrency group`);
+    const group = github => template.replace(/\$\{\{(.+?)\}\}/g, (_, expression) =>
+      String(new Function("github", `return (${expression});`)(github)));
+    const event = (event_name, ref, run_id) => ({event_name, ref, run_id});
+    const pushes = [100, 101, 102].map(id => group(event("push", "refs/heads/main", id)));
+    assert.equal(new Set(pushes).size, 3, `${name}: a docs-only push must not supersede a running OR queued source build`);
+    assert.equal(group(event("pull_request", "refs/pull/7/merge", 100)), group(event("pull_request", "refs/pull/7/merge", 101)), `${name}: updated PRs should still cancel obsolete runs`);
+    assert.notEqual(group(event("pull_request", "refs/pull/7/merge", 100)), group(event("pull_request", "refs/pull/8/merge", 101)));
+  }
+});
 
 function makeTemporaryDirectory(t, prefix) {
   const root = mkdtempSync(path.join(os.tmpdir(), prefix));
