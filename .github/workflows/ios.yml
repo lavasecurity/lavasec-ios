@@ -298,7 +298,7 @@ jobs:
         # required "iOS Simulator Build" context green.
         if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: |
-          xcodebuild \
+          ci/run-with-maintenance-lock.sh -- xcodebuild \
             -project LavaSec.xcodeproj \
             -scheme LavaSec \
             -configuration Debug \

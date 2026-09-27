@@ -72,7 +72,7 @@ jobs:
 
       - name: Build LavaSec
         run: |
-          xcodebuild \
+          ci/run-with-maintenance-lock.sh -- xcodebuild \
             -project LavaSec.xcodeproj \
             -scheme LavaSec \
             -configuration Debug \
