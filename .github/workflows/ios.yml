@@ -70,9 +70,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Require trusted branch for native validation
-        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') }}
         run: |
-          echo "::error::Native validation requires a reviewed branch in this repository. Fork code cannot run on persistent Macs, and GitHub-hosted runners are disabled."
+          echo "::error::Native validation requires a reviewed branch in this repository. Fork and unreviewed dependency-bot code cannot run on persistent Macs, and GitHub-hosted runners are disabled."
           exit 1
       - name: Checkout
         uses: actions/checkout@v7
@@ -229,7 +229,7 @@ jobs:
     # failed-dependency required check may not block the PR, so a code PR could merge without this
     # macOS check (Codex P1 #232). On a `changes` failure `docs_only` is '' so the step-level guard
     # runs the suite fully (fail-safe).
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) }}
     runs-on: [self-hosted, macOS]
     # 30, not this lane's natural ~5: VM jobs hold only the SHARED maintenance lock, so a
     # co-scheduled production release archive core-starves this REQUIRED lane instead of
@@ -283,7 +283,7 @@ jobs:
     needs: changes
     # Linux jobs use ephemeral Ubicloud runners; Xcode jobs use owned Macs.
     # Runner labels are fixed: no GitHub-hosted fallback or variable override.
-    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) }}
     runs-on: [self-hosted, macOS]
     timeout-minutes: 30
     steps:

@@ -98,6 +98,7 @@ final class MissingDocsGuardrailSourceTests: XCTestCase {
             "the blocking lane must select the dedicated config without a positional Sources path"
         )
 
+        XCTAssertTrue(workflow.contains("github.event.pull_request.user.login != 'dependabot[bot]'"))
         XCTAssertFalse(workflow.contains("vars.IOS_CI_MAC_RUNNER"))
         XCTAssertFalse(workflow.contains("runs-on: macos-"))
         let packageTestJob = try sourceBlock(
