@@ -22,27 +22,8 @@ concurrency:
   group: ios-ci-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
-# Shared CI lane — kept BYTE-IDENTICAL in the private dev repo (lavasec-ios-internal)
-# and the public OSS repo (lavasec-ios). The export pipeline ships this file
-# verbatim and the Merge-up contamination guard (below) depends on the two lanes
-# matching; see lavasec-infra/docs/engineering/release-and-propagation.md §1.2.
-#
-# Cost split (public Actions minutes are free; private macOS minutes are billed).
-# Three levers keep the private lane cheap WITHOUT forking this byte-identical file —
-# all keyed on `github.repository` so the public lane is unaffected:
-#   1. `ios-simulator-build` (full ~30-min xcodebuild) is gated to the PUBLIC repo only;
-#      the private lane gets app-compile coverage from light-build.yml on owned hardware.
-#   2. `swift-package-tests` (the `swift test` core suite) runs on BOTH lanes, but its
-#      macOS RUNNER is chosen per-lane: GitHub-hosted (macos-26) on public, self-hosted
-#      (lava-mac-vm-ios-internal) on private — so the private lane's billed macOS minutes
-#      drop to $0 while keeping identical test coverage.
-#   3. `repo-checks` (cheap Linux) stays GitHub-hosted on both lanes.
-#
-# Runners: the PUBLIC lane is GitHub-hosted only — it runs untrusted fork code, which
-# must never touch owned hardware. The PRIVATE lane routes only its trusted, internal
-# macOS work to self-hosted, and every self-hosted job is fork-guarded as defence in
-# depth. The signed TestFlight/release pipeline lives in the private infra/runner
-# tooling, not here.
+# Linux jobs use ephemeral Ubicloud runners; Xcode jobs use owned Macs.
+# Runner labels are fixed: no GitHub-hosted fallback or variable override.
 
 jobs:
   changes:
@@ -51,14 +32,9 @@ jobs:
     # above). Cheap Linux; the mac jobs `needs:` it. Manual/unknown events and
     # anything that can't be classified fall through to docs_only=false → jobs run fully.
     name: Detect docs-only diff
-    # Linux runner is per-repo swappable WITHOUT forking this byte-identical file — the same
-    # lever swift-package-tests uses for its macOS runner (IOS_CI_MAC_RUNNER). On the PRIVATE
-    # repo (non-fork events) it defaults to Ubicloud (ubicloud-standard-2) to keep Linux CI off
-    # the shared GitHub Pro minute cap; override with the LINUX_CI_RUNNER var (e.g.
-    # '["ubuntu-latest"]' to fall back). The repo+fork gate keeps the public lane and any fork
-    # PR on free GitHub-hosted ubuntu-latest — see
-    # lavasec-infra/plans/2026-07-08-linux-ci-runner-cost-plan.md.
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
+    # Linux jobs use ephemeral Ubicloud runners; Xcode jobs use owned Macs.
+    # Runner labels are fixed: no GitHub-hosted fallback or variable override.
+    runs-on: ubicloud-standard-2
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
@@ -88,12 +64,16 @@ jobs:
 
   repo-checks:
     name: Repo Checks
-    # Same per-repo Linux runner swap as the `changes` job above (LINUX_CI_RUNNER; private
-    # non-fork defaults to ubicloud-standard-2, plan cited there). Public/fork stays on
-    # GitHub-hosted ubuntu-latest. Ubicloud provides Docker (SwiftLint container) + Node.
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
+    # Linux jobs use ephemeral Ubicloud runners; Xcode jobs use owned Macs.
+    # Runner labels are fixed: no GitHub-hosted fallback or variable override.
+    runs-on: ubicloud-standard-2
     timeout-minutes: 10
     steps:
+      - name: Require trusted branch for native validation
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          echo "::error::Native validation requires a reviewed branch in this repository. Fork code cannot run on persistent Macs, and GitHub-hosted runners are disabled."
+          exit 1
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -243,22 +223,14 @@ jobs:
   swift-package-tests:
     name: Swift Package Tests
     needs: changes
-    # Per-lane runner WITHOUT forking this byte-identical file (same trick as
-    # ios-simulator-build's gate). Self-hosted is ALLOWLISTED to the exact private repo
-    # (it owns lava-mac-vm-ios-internal). EVERY other repo — the public lavasec-ios AND
-    # any OSS fork of either lane — uses GitHub-hosted macos-26: a fork has no access to
-    # the VM (a denylist on the public name would strand `someone/lavasec-ios` forks on
-    # the self-hosted default), and public minutes are free anyway. A fork PR opened
-    # against the private repo is also routed to macos-26: its semantic package-boundary
-    # check must still run, but untrusted code must never execute on the owned VM.
-    # Override the private trusted runner via IOS_CI_MAC_RUNNER if the VM is offline.
+    # Xcode jobs use owned Macs only. Fork code must never run on persistent hosts.
     # `!cancelled()` forces this REQUIRED job to run even if the `changes` prerequisite FAILED
     # (transient checkout/git-diff/outage) instead of being skipped by `needs` — a skipped-after-
     # failed-dependency required check may not block the PR, so a code PR could merge without this
     # macOS check (Codex P1 #232). On a `changes` failure `docs_only` is '' so the step-level guard
     # runs the suite fully (fail-safe).
-    if: ${{ !cancelled() }}
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: [self-hosted, macOS]
     # 30, not this lane's natural ~5: VM jobs hold only the SHARED maintenance lock, so a
     # co-scheduled production release archive core-starves this REQUIRED lane instead of
     # queueing it (same failure shape that cancelled PR #347's compile at its timeout —
@@ -309,14 +281,10 @@ jobs:
   ios-simulator-build:
     name: iOS Simulator Build
     needs: changes
-    # Gated to the public repo: the full xcodebuild compile burns billed macOS
-    # minutes, which are free on public but cost real money on the private lane.
-    # The private lane gets app-compile coverage from light-build.yml on owned
-    # hardware instead, so it skips this job for $0.
-    # `!cancelled()` so a FAILED `changes` prerequisite doesn't skip this required job (see
-    # swift-package-tests' note — Codex P1 #232); the public-repo gate is preserved.
-    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' }}
-    runs-on: macos-26
+    # Linux jobs use ephemeral Ubicloud runners; Xcode jobs use owned Macs.
+    # Runner labels are fixed: no GitHub-hosted fallback or variable override.
+    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: [self-hosted, macOS]
     timeout-minutes: 30
     steps:
       - name: Checkout

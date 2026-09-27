@@ -98,17 +98,19 @@ final class MissingDocsGuardrailSourceTests: XCTestCase {
             "the blocking lane must select the dedicated config without a positional Sources path"
         )
 
+        XCTAssertFalse(workflow.contains("vars.IOS_CI_MAC_RUNNER"))
+        XCTAssertFalse(workflow.contains("runs-on: macos-"))
         let packageTestJob = try sourceBlock(
             in: workflow,
             startingAt: "  swift-package-tests:\n",
             endingBefore: "  ios-simulator-build:\n"
         )
-        XCTAssertTrue(packageTestJob.contains("if: ${{ !cancelled() }}"))
+        XCTAssertTrue(packageTestJob.contains("if: ${{ !cancelled() &&"))
         XCTAssertTrue(
             packageTestJob.contains(
-                "github.event.pull_request.head.repo.fork == false)) && fromJSON"
+                "github.event.pull_request.head.repo.full_name == github.repository"
             ),
-            "trusted internal events use the owned runner while fork PRs fall back to macos-26"
+            "only trusted same-repository events may execute code on owned Macs"
         )
         XCTAssertTrue(
             sourceContainsInOrder(

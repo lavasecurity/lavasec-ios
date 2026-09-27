@@ -15,6 +15,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: lavasecurity/.github/.github/workflows/code-review.yml@main
+    uses: lavasecurity/.github/.github/workflows/code-review.yml@bbba4b6150d8b2674453e8fe47a835fd423b6b4c
     secrets:
       llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
