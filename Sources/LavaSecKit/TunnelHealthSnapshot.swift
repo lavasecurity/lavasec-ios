@@ -206,6 +206,260 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
     /// window existed but carried no classified traffic.
     public var lockedBootWindowEndedAt: Date?
 
+    // MARK: Chained-upstream health (Slice 3)
+    //
+    // The user-facing DNS-health surfaces read these instead of the physical counters above when
+    // `isChainedUpstreamActive` is true, because while chained the physical resolver is not the
+    // path in use and its counters stay stale. Source: `ChainedOutageDriver.snapshotCounters()`.
+    //
+    // `isChainedUpstreamActive` is false in DNS-only mode (and is cleared on stop); the COUNTERS
+    // are not zeroed there — they retain the last chained session's final values, which is
+    // harmless because the surfaces hide them while the flag is false, and the flag disambiguates
+    // them anywhere the whole snapshot is read (a bug report).
+
+    /// Whether the tunnel is running the chained WireGuard upstream data path right now. This is
+    /// the RUNTIME latch, not the configured preference — the app's `chainedUpstreamEnabled`
+    /// reflects intent, only the provider knows the live latch — so it is the honest signal the
+    /// health surfaces switch on.
+    public var isChainedUpstreamActive: Bool
+    /// Tunnelled DNS resolutions reported answered (a valid response, TC included) while chained.
+    public var chainedTunnelDNSAnsweredCount: Int
+    /// Tunnelled DNS resolutions sent and left unanswered while chained.
+    public var chainedTunnelDNSUnansweredCount: Int
+    /// Times the chained outage supervisor declared a tunnel-DNS outage (surrendered to dns-only).
+    public var chainedTunnelDNSOutageCount: Int
+    /// Times the chained tunnel's network path went offline (link connectivity lost) — distinct
+    /// from a DNS-answer outage (`chainedTunnelDNSOutageCount`, itself a subset of the driver's
+    /// total outage count), so link liveness is not conflated with a resolver that stopped
+    /// answering. There is no matching "recovered from offline" counter to pair it with — the
+    /// driver's `pathRecoveryCount` also counts routine interface handoffs — so none is surfaced.
+    public var chainedLinkOutageCount: Int
+
+    /// In-tunnel destinations under sustained demand with nothing coming back, and the longest such
+    /// wait in seconds — the per-destination reachability reading
+    /// (`ChainedDestinationReachabilityPolicy`). Zero and zero is the healthy reading.
+    ///
+    /// THE SIGNAL A SPLIT-TUNNEL CHAIN HAD NO WAY TO PRODUCE, and every other field here reads
+    /// healthy in the case it catches. In the 2026-08-27 capture the chain had a handshake, zero
+    /// outages, and `forwardedNonDNSByteCount` equal to `receivedByteCount` to the byte — because
+    /// in split tunnel the resolver sits inside the claimed range and its replies land in that
+    /// counter (PR #558) — while the one host the user wanted answered nothing.
+    ///
+    /// A DURATION AND A COUNT, NEVER AN ADDRESS. This snapshot reaches a bug report, and a tailnet
+    /// address names the user's network as surely as a resolver address does — the lesson
+    /// `redactingChainedFallbackAddresses()` exists for (PR #575, PR #592). Keeping addresses out
+    /// entirely means there is nothing here for that fold to reach, and no further road into a
+    /// report.
+    public var chainedUnansweredDestinationCount: Int
+    /// The longest current unanswered wait in seconds, or zero when no destination is unanswered.
+    public var chainedLongestUnansweredDestinationSeconds: Int
+
+    /// The chained data path's transmit/receive plaintext byte volume over the last focus-tick
+    /// window (~60 s), sampled from the WireGuard engine while chained. Surface-only telemetry: a
+    /// window where transmit far outruns receive is a peer that stays reachable but stops forwarding
+    /// replies (see `DataPathHealth`), but nothing acts on it. Both are 0 in DNS-only mode and
+    /// before the first full window (no prior sample to difference against).
+    public var chainedDataPathTransmitWindowBytes: UInt64
+    public var chainedDataPathReceiveWindowBytes: UInt64
+    /// Whether the chained engine had an established session at the last sample — byte deltas are
+    /// only forwarding evidence while true.
+    public var chainedDataPathHasHandshake: Bool
+
+    // The T1 DNS fallback's observed state, so the settings surface can say whether it is
+    // actually doing anything instead of only that it is switched on. See
+    // ``ChainedFallbackStatus`` for the two invisible failures these distinguish and why neither
+    // is derivable from configuration alone.
+    //
+    // COUNTS AND FLAGS, never the resolver ADDRESS. The address is already the app's own setting,
+    // so carrying it here would be a second source for one fact — and this snapshot reaches bug
+    // reports, where a private internal resolver (`10.x`) is a detail about the user's network
+    // that the status does not need.
+
+    /// Whether a chained session has actually evaluated the fallback selection. False before the
+    /// first chained start and in DNS-only mode — without it, "enabled but idle" and "never
+    /// checked" are the same all-zero reading.
+    public var chainedFallbackEvaluated: Bool
+    /// The fallback addresses the live chained session LATCHED — the raw selection as it stood at
+    /// session start, in the user's own terms.
+    ///
+    /// Its only job is the staleness comparison. The provider keeps this latch for the session's
+    /// life, so a mid-session change leaves every counter below describing the OLD selection:
+    /// enabling from an off session could label a fresh address unusable on the previous latch's
+    /// verdict, and switching providers could credit the new one with the old one's rescues
+    /// (Codex, PR #575). The app compares this against its own current selection — the same raw
+    /// list, so the comparison is exact — and reports "awaiting restart" rather than showing one
+    /// resolver's evidence under another's name.
+    ///
+    /// The RAW list rather than the effective one, deliberately: the effective set is a subset
+    /// after the gates and the T0 dedup, so comparing it against the user's selection would
+    /// read as stale forever.
+    public var chainedFallbackLatchedAddresses: [String]
+    /// A TRANSPORT-AWARE identity for the T1 selection this session latched
+    /// (`AppConfiguration.chainedTierOneResolverIdentity`), or empty before one is published.
+    ///
+    /// THE FRESHNESS COMPARISON READS THIS, not the addresses beside it. Endpoints alone cannot
+    /// tell one transport of a provider from another whenever both reach the same host, so the
+    /// panel reported "current" for a session running the other one — the collision the coerced
+    /// `plainDNSVariant` array made unavoidable and this replaces (the plan's S4 obligation).
+    ///
+    /// REDACTED FROM BUG REPORTS by ``redactingChainedFallbackAddresses()``, in full: a Custom
+    /// entry puts the user's own resolver address or DoH URL inside this string, which is exactly
+    /// the disclosure the addresses beside it are cleared for.
+    public var chainedFallbackLatchedIdentity: String
+    /// The identifiers a T1 attempt is RECORDED under — `AppConfiguration.chainedTierOneResolverAttemptKeys`
+    /// — which is what keys ``resolverAttemptCounts`` and its siblings.
+    ///
+    /// SEPARATE FROM ``chainedFallbackLatchedAddresses``, because for an encrypted selection the
+    /// two genuinely differ: the latched list carries the endpoint's HOST so the panel can name it,
+    /// while `ResolverOrchestrator.resolveEndpoints` records under the endpoint's `cacheIdentifier`
+    /// — the complete `doh:<absolute URL>`. ``redactingChainedFallbackAddresses()`` folds resolver
+    /// counters onto placeholders by matching those keys, so a host-only map matched nothing and a
+    /// Custom DoH endpoint travelled into the report intact (Codex P1, PR #591).
+    ///
+    /// Identical to the latched list for a plain selection, which is why this was invisible until
+    /// an encrypted resolver could become the rung.
+    public var chainedFallbackAttemptKeys: [String]
+    /// `ChainedUpstreamConfiguration.resolverSelectionFingerprint` for the configuration THIS
+    /// session latched.
+    ///
+    /// The fallback addresses are only half of "does the live session match the settings":
+    /// admission also depends on the upstream's `AllowedIPs`, `DNS =` and client address, so
+    /// replacing a full-tunnel configuration with a split one reverses the verdict while leaving
+    /// the chosen resolver untouched. Empty when no chained session has published one
+    /// (Codex, PR #575).
+    public var chainedFallbackLatchedConfigurationFingerprint: String
+    /// The stored-upstream GENERATION this session latched its chained data path against, or
+    /// `0` when no chained upstream is latched.
+    ///
+    /// WHY A SECOND IDENTITY, beside the fingerprint above. That one is
+    /// `resolverSelectionFingerprint` — `AllowedIPs`, the conf's `DNS =`, the client address —
+    /// so it answers "would admission decide differently". It deliberately does NOT move when a
+    /// rotation replaces only the endpoint and the keys, which is the common rotation and the
+    /// one whose staleness the user feels: the session keeps handshaking against a peer the
+    /// stored configuration no longer names, and every surface reports agreement.
+    ///
+    /// So the two are not redundant and neither subsumes the other: the fingerprint answers
+    /// "is the SELECTION still the one in effect", this answers "is the ROTATION still the one
+    /// in effect". A stale session moves this and leaves that untouched.
+    ///
+    /// `0` IS "NONE OR UNKNOWN", never "generation zero" — a DNS-only latch publishes it, as
+    /// does a session that predates this field in a decoded snapshot. Consumers must treat it
+    /// as no answer rather than as disagreement, or a freshness panel appears on every
+    /// DNS-only session claiming a change nobody made.
+    ///
+    /// AN OPAQUE IDENTITY, NOT A COUNTER, and consumers must compare it rather than order it.
+    /// `ChainedUpstreamGenerationMint.mint` draws eight random bytes and excludes only `0` and
+    /// the currently committed value, so the next rotation is routinely numerically LOWER than
+    /// the one it replaces. Anything that reasoned "newer means greater" would call a fresh
+    /// rotation stale roughly half the time (Codex P3, PR #613).
+    ///
+    /// `0` is a safe sentinel precisely because the mint refuses to draw it.
+    ///
+    /// SAFE IN A BUG REPORT, unlike most of this neighbourhood: an opaque identifier naming a
+    /// rotation discloses no key, endpoint or address, so `redactingChainedFallbackAddresses()`
+    /// leaves it alone on purpose.
+    /// pinned: TunnelHealthSnapshotTests.testTheLatchedUpstreamGenerationSurvivesRedaction
+    public var runningChainedUpstreamGeneration: UInt64
+    /// The fallback addresses actually IN EFFECT — the T1 set that passed every gate and was
+    /// appended to the resolver route. Empty means none was usable.
+    ///
+    /// This, not the raw latch, is what the counters below aggregate, so it is what the surface
+    /// must NAME. A built-in provider contributes two IPv4 servers (Cloudflare, Google, Quad9),
+    /// and attributing the pair's aggregate evidence to `.first` reported the wrong address
+    /// whenever the second one served — and could name a T0 address outright when the first
+    /// overlaps the configuration's own `DNS =` and is deduped out of the appended set
+    /// (Codex, PR #575).
+    ///
+    /// Every member is inside the configuration's own `AllowedIPs` — the coverage gate in
+    /// `ChainedTunnelResolverSelection` is what admits an address here — so what the panel names
+    /// and what the data path accepts are the same list, with no carve-out involved. A carve-out
+    /// was tried and reverted: accepting an off-route reply never made its query routable
+    /// (Codex, PR #575).
+    public var chainedFallbackEffectiveAddresses: [String]
+    /// T1 addresses this session HAS asked but is no longer asking — the ones a moved capture
+    /// retired — kept for one reason only: the bug report's redaction fold.
+    ///
+    /// WHY THIS FIELD EXISTS. A device-DNS rung's addresses are the tunnel's live capture, so a
+    /// roam replaces them, and `publishChainedFallbackOutcomesOnQueue` republishes the new set
+    /// over the old one. But `resolverAttemptCounts` and its siblings are SESSION-WIDE and keyed
+    /// by the address that was tried, so the retired resolver stays in them — while
+    /// ``redactedFallbackIdentities()`` builds its folding map from the CURRENT lists alone. The
+    /// old address therefore survived into a report as a verbatim dictionary key: a LAN or ISP
+    /// resolver naming the user's network, which is exactly the disclosure the lists beside it
+    /// are cleared for (Codex P1, PR #592).
+    ///
+    /// It could not be fixed by folding the counter maps at the moment of the roam. They are
+    /// owned by `ResolverHealthEvidence`'s session state and PROJECTED into this snapshot, so a
+    /// write here is overwritten by the next projection; the source of truth is in LavaSecDNS and
+    /// deleting live evidence from it to satisfy a reporting concern is the wrong trade.
+    ///
+    /// ADDRESSES *AND* ATTEMPT KEYS, despite the name. An encrypted attempt is recorded under the
+    /// endpoint's `cacheIdentifier` (`doh:https://host/path`) while the latched list carries only
+    /// the host, so a Custom DoH URL that changes its path keeps the same host on both sides of a
+    /// relatch — the address lists never move — while the old full URL is dropped from
+    /// ``chainedFallbackAttemptKeys`` and left keying the counter maps, reaching a report verbatim
+    /// (Codex P1, PR #592, second round). One list serves both because both are KEYS OF THE SAME
+    /// MAPS and both fold to the same T1 placeholder; the name is kept so archived reports
+    /// keep decoding.
+    ///
+    /// UNBOUNDED BY DESIGN, and that is not an oversight. It has to cover every key still present
+    /// in the counter maps, so any cap below their size re-opens the leak for whatever it dropped.
+    /// It grows in lockstep with the distinct resolvers one session has actually asked, which is
+    /// what those maps hold too — the same bound, not a new one. Entries are unique.
+    ///
+    /// NOT A PANEL FIELD. The settings surface names the CURRENT resolvers; this is retired
+    /// history and no UI reads it. Cleared outright by ``redactingChainedFallbackAddresses()``,
+    /// like every other address list here.
+    public var chainedFallbackRetiredAddresses: [String]
+    /// What became of EACH chosen fallback address, in the order the user chose them.
+    ///
+    /// Replaces the summary booleans this used to carry. The addresses can meet different fates
+    /// in one session — one deduped into T0, another refused by a gate — and any single claim
+    /// about the set is wrong for some arrangement of them, which is the defect four consecutive
+    /// review rounds re-found in new clothes (see ``ChainedFallbackDisposition``). Carrying the
+    /// per-address facts lets the surface enumerate instead of assert.
+    public var chainedFallbackOutcomes: [ChainedFallbackAddressOutcome]
+    /// Consecutive fallback REPLIES that did not serve the name — SERVFAIL, REFUSED, truncated —
+    /// reset by a rescue.
+    ///
+    /// The sibling of ``chainedFallbackUnansweredStreak``, and needed because that one resets on
+    /// ANY answer, soft failures included. A fallback that serves one lookup and then soft-fails
+    /// every retry keeps clearing the unanswered streak while its cumulative rescue count stays
+    /// positive, so it read `working` forever and `answeringWithoutResolving` could never surface
+    /// (Codex, PR #575). Two streaks, because "replied" and "helped" are different questions.
+    ///
+    /// Counts REPLIES rather than attempts, so it is also the honest payload for that state: a
+    /// lifetime answer total includes the rescues, and reporting it made the copy say four retries
+    /// could not resolve the name when one of them had. A silence does not reset it — a timeout is
+    /// not a reply, and forgetting the run because one datagram vanished would hide a resolver
+    /// that is steadily declining.
+    public var chainedFallbackUnhelpfulReplyStreak: Int
+    /// Fallback attempts since the last answer of ANY kind, reset by each answer.
+    ///
+    /// One of the two fallback terms that can FALL, alongside
+    /// ``chainedFallbackUnhelpfulReplyStreak``. Every COUNT here is cumulative for the session, so
+    /// once a rescue lands they can only ever make the fallback look healthier — a resolver that
+    /// served one lookup and then went dark (the exit node's forwarding changing mid-session)
+    /// would read `working` for the rest of the session. The falling terms are what let a present
+    /// failure overrule a past success (Codex, PR #575).
+    ///
+    /// This one answers "is anything coming back at all"; its sibling answers "is what comes back
+    /// helping". Both are needed because an answer that does not resolve the name resets THIS one
+    /// while leaving the fallback just as useless.
+    public var chainedFallbackUnansweredStreak: Int
+    /// Times an admitted fallback address was actually queried (the primary failed over to it).
+    public var chainedFallbackAttemptCount: Int
+    /// Times an admitted fallback address REPLIED — with anything valid, SERVFAIL/REFUSED and a
+    /// truncated answer included. A reply proves the peer forwarded and the resolver is
+    /// reachable, which is what separates "couldn't resolve it either" from "nothing is coming
+    /// back at all"; attempts alone cannot (Codex, PR #575).
+    public var chainedFallbackAnswerCount: Int
+    /// Times an admitted fallback address SERVED an answer the client received — the subset of
+    /// attempts that worked. Attempts without rescues is the peer-not-forwarding signature.
+    public var chainedFallbackRescueCount: Int
+    /// Independent, privacy-safe observations and repair status for the canonical DNS tiers.
+    public var dnsTierHealth: [DNSResolverTierHealthSnapshot]
+
     private enum CodingKeys: String, CodingKey {
         case startedAt
         case updatedAt
@@ -269,6 +523,31 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         case lockedBootAllowedQueryCount
         case lockedBootFailClosedQueryCount
         case lockedBootWindowEndedAt
+        case isChainedUpstreamActive
+        case chainedTunnelDNSAnsweredCount
+        case chainedTunnelDNSUnansweredCount
+        case chainedTunnelDNSOutageCount
+        case chainedLinkOutageCount
+        case chainedUnansweredDestinationCount
+        case chainedLongestUnansweredDestinationSeconds
+        case chainedDataPathTransmitWindowBytes
+        case chainedDataPathReceiveWindowBytes
+        case chainedDataPathHasHandshake
+        case chainedFallbackEvaluated
+        case chainedFallbackLatchedAddresses
+        case chainedFallbackLatchedIdentity
+        case chainedFallbackAttemptKeys
+        case chainedFallbackLatchedConfigurationFingerprint
+        case runningChainedUpstreamGeneration
+        case chainedFallbackEffectiveAddresses
+        case chainedFallbackRetiredAddresses
+        case chainedFallbackOutcomes
+        case chainedFallbackUnansweredStreak
+        case chainedFallbackUnhelpfulReplyStreak
+        case chainedFallbackAttemptCount
+        case chainedFallbackAnswerCount
+        case chainedFallbackRescueCount
+        case dnsTierHealth
     }
 
     /// Creates a snapshot from explicit health timestamps, counters, and status fields.
@@ -334,7 +613,32 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         lockedBootBlockedQueryCount: Int = 0,
         lockedBootAllowedQueryCount: Int = 0,
         lockedBootFailClosedQueryCount: Int = 0,
-        lockedBootWindowEndedAt: Date? = nil
+        lockedBootWindowEndedAt: Date? = nil,
+        isChainedUpstreamActive: Bool = false,
+        chainedTunnelDNSAnsweredCount: Int = 0,
+        chainedTunnelDNSUnansweredCount: Int = 0,
+        chainedTunnelDNSOutageCount: Int = 0,
+        chainedLinkOutageCount: Int = 0,
+        chainedUnansweredDestinationCount: Int = 0,
+        chainedLongestUnansweredDestinationSeconds: Int = 0,
+        chainedDataPathTransmitWindowBytes: UInt64 = 0,
+        chainedDataPathReceiveWindowBytes: UInt64 = 0,
+        chainedDataPathHasHandshake: Bool = false,
+        chainedFallbackEvaluated: Bool = false,
+        chainedFallbackLatchedAddresses: [String] = [],
+        chainedFallbackLatchedIdentity: String = "",
+        chainedFallbackAttemptKeys: [String] = [],
+        chainedFallbackLatchedConfigurationFingerprint: String = "",
+        runningChainedUpstreamGeneration: UInt64 = 0,
+        chainedFallbackEffectiveAddresses: [String] = [],
+        chainedFallbackRetiredAddresses: [String] = [],
+        chainedFallbackOutcomes: [ChainedFallbackAddressOutcome] = [],
+        chainedFallbackUnansweredStreak: Int = 0,
+        chainedFallbackUnhelpfulReplyStreak: Int = 0,
+        chainedFallbackAttemptCount: Int = 0,
+        chainedFallbackAnswerCount: Int = 0,
+        chainedFallbackRescueCount: Int = 0,
+        dnsTierHealth: [DNSResolverTierHealthSnapshot] = []
     ) {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
@@ -398,6 +702,32 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
         self.lockedBootAllowedQueryCount = lockedBootAllowedQueryCount
         self.lockedBootFailClosedQueryCount = lockedBootFailClosedQueryCount
         self.lockedBootWindowEndedAt = lockedBootWindowEndedAt
+        self.isChainedUpstreamActive = isChainedUpstreamActive
+        self.chainedTunnelDNSAnsweredCount = chainedTunnelDNSAnsweredCount
+        self.chainedTunnelDNSUnansweredCount = chainedTunnelDNSUnansweredCount
+        self.chainedTunnelDNSOutageCount = chainedTunnelDNSOutageCount
+        self.chainedLinkOutageCount = chainedLinkOutageCount
+        self.chainedUnansweredDestinationCount = chainedUnansweredDestinationCount
+        self.chainedLongestUnansweredDestinationSeconds = chainedLongestUnansweredDestinationSeconds
+        self.chainedDataPathTransmitWindowBytes = chainedDataPathTransmitWindowBytes
+        self.chainedDataPathReceiveWindowBytes = chainedDataPathReceiveWindowBytes
+        self.chainedDataPathHasHandshake = chainedDataPathHasHandshake
+        self.chainedFallbackEvaluated = chainedFallbackEvaluated
+        self.chainedFallbackLatchedAddresses = chainedFallbackLatchedAddresses
+        self.chainedFallbackLatchedIdentity = chainedFallbackLatchedIdentity
+        self.chainedFallbackAttemptKeys = chainedFallbackAttemptKeys
+        self.chainedFallbackLatchedConfigurationFingerprint =
+            chainedFallbackLatchedConfigurationFingerprint
+        self.runningChainedUpstreamGeneration = runningChainedUpstreamGeneration
+        self.chainedFallbackEffectiveAddresses = chainedFallbackEffectiveAddresses
+        self.chainedFallbackRetiredAddresses = chainedFallbackRetiredAddresses
+        self.chainedFallbackOutcomes = chainedFallbackOutcomes
+        self.chainedFallbackUnansweredStreak = chainedFallbackUnansweredStreak
+        self.chainedFallbackUnhelpfulReplyStreak = chainedFallbackUnhelpfulReplyStreak
+        self.chainedFallbackAttemptCount = chainedFallbackAttemptCount
+        self.chainedFallbackAnswerCount = chainedFallbackAnswerCount
+        self.chainedFallbackRescueCount = chainedFallbackRescueCount
+        self.dnsTierHealth = dnsTierHealth
     }
 
     /// Decodes a snapshot, defaulting health fields absent from older payloads.
@@ -591,6 +921,64 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             Date.self,
             forKey: .lockedBootWindowEndedAt
         )
+        self.isChainedUpstreamActive =
+            try container.decodeIfPresent(Bool.self, forKey: .isChainedUpstreamActive) ?? false
+        self.chainedTunnelDNSAnsweredCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedTunnelDNSAnsweredCount) ?? 0
+        self.chainedTunnelDNSUnansweredCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedTunnelDNSUnansweredCount) ?? 0
+        self.chainedTunnelDNSOutageCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedTunnelDNSOutageCount) ?? 0
+        self.chainedLinkOutageCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedLinkOutageCount) ?? 0
+        self.chainedUnansweredDestinationCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedUnansweredDestinationCount) ?? 0
+        self.chainedLongestUnansweredDestinationSeconds =
+            try container.decodeIfPresent(
+                Int.self, forKey: .chainedLongestUnansweredDestinationSeconds) ?? 0
+        self.chainedDataPathTransmitWindowBytes =
+            try container.decodeIfPresent(UInt64.self, forKey: .chainedDataPathTransmitWindowBytes) ?? 0
+        self.chainedDataPathReceiveWindowBytes =
+            try container.decodeIfPresent(UInt64.self, forKey: .chainedDataPathReceiveWindowBytes) ?? 0
+        self.chainedDataPathHasHandshake =
+            try container.decodeIfPresent(Bool.self, forKey: .chainedDataPathHasHandshake) ?? false
+        // Absent from any snapshot written before the fallback status surface existed. The
+        // defaults are the honest reading of that absence: nothing evaluated, nothing admitted,
+        // nothing tried — which `ChainedFallbackStatus` reports as `.awaitingSession` rather
+        // than inventing a verdict for a session that never recorded one.
+        self.chainedFallbackEvaluated =
+            try container.decodeIfPresent(Bool.self, forKey: .chainedFallbackEvaluated) ?? false
+        self.chainedFallbackLatchedAddresses =
+            try container.decodeIfPresent([String].self, forKey: .chainedFallbackLatchedAddresses) ?? []
+        self.chainedFallbackLatchedIdentity =
+            try container.decodeIfPresent(String.self, forKey: .chainedFallbackLatchedIdentity) ?? ""
+        self.chainedFallbackAttemptKeys =
+            try container.decodeIfPresent([String].self, forKey: .chainedFallbackAttemptKeys) ?? []
+        self.chainedFallbackLatchedConfigurationFingerprint =
+            try container.decodeIfPresent(
+                String.self, forKey: .chainedFallbackLatchedConfigurationFingerprint) ?? ""
+        self.runningChainedUpstreamGeneration =
+            try container.decodeIfPresent(
+                UInt64.self, forKey: .runningChainedUpstreamGeneration) ?? 0
+        self.chainedFallbackEffectiveAddresses =
+            try container.decodeIfPresent([String].self, forKey: .chainedFallbackEffectiveAddresses) ?? []
+        self.chainedFallbackRetiredAddresses =
+            try container.decodeIfPresent([String].self, forKey: .chainedFallbackRetiredAddresses) ?? []
+        self.chainedFallbackOutcomes =
+            try container.decodeIfPresent(
+                [ChainedFallbackAddressOutcome].self, forKey: .chainedFallbackOutcomes) ?? []
+        self.chainedFallbackAttemptCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedFallbackAttemptCount) ?? 0
+        self.chainedFallbackUnansweredStreak =
+            try container.decodeIfPresent(Int.self, forKey: .chainedFallbackUnansweredStreak) ?? 0
+        self.chainedFallbackUnhelpfulReplyStreak =
+            try container.decodeIfPresent(Int.self, forKey: .chainedFallbackUnhelpfulReplyStreak) ?? 0
+        self.chainedFallbackAnswerCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedFallbackAnswerCount) ?? 0
+        self.chainedFallbackRescueCount =
+            try container.decodeIfPresent(Int.self, forKey: .chainedFallbackRescueCount) ?? 0
+        self.dnsTierHealth =
+            try container.decodeIfPresent([DNSResolverTierHealthSnapshot].self, forKey: .dnsTierHealth) ?? []
     }
 
     /// The combined cache hit and miss count.
@@ -674,5 +1062,162 @@ public struct TunnelHealthSnapshot: Codable, Equatable, Sendable {
             return false
         }
         return decisionTime <= boundary
+    }
+
+    /// This snapshot with the CHAINED FALLBACK addresses stripped, for a bug report.
+    ///
+    /// The chained fallback is the one place a user hand-enters an arbitrary IPv4 — the custom
+    /// resolver field takes anything, and a QA user pointing it at their own `10.x` names their
+    /// internal network. The panel may see those addresses (it is the user's own device showing
+    /// the user their own setting); a report they send us may not. The contract is already
+    /// written beside `chainedFallbackEvaluated` and these fields broke it three fields later
+    /// (Codex, PR #575).
+    ///
+    /// The DISPOSITIONS survive, because they are the diagnostic — which gate refused which entry
+    /// — and carry no network detail. So does
+    /// ``chainedFallbackLatchedConfigurationFingerprint``, which is opaque by construction. What
+    /// is dropped is only the addresses themselves.
+    ///
+    /// Covers the INDIRECT projections too. Resolver-health evidence keys `lastResolverAddress`
+    /// and the `resolver*Counts` maps by the address that served or was tried, and a T1 rung
+    /// lands in them like any other — so clearing only the fallback fields left the same private
+    /// address reaching the report by a longer road (Codex, PR #575).
+    ///
+    /// An earlier version of this comment claimed those fields "carry the user's DNS resolver,
+    /// which is normally a public preset". That is false in chained mode and false for exactly
+    /// the case this type introduced, which is why the leak survived the first fix. The claim is
+    /// corrected rather than deleted: it is the reason the second round was needed.
+    ///
+    /// 🔴 What this CANNOT cover, stated because the limit is structural rather than a choice:
+    /// the configuration's own `DNS =` entries also land in those maps while chained, and a
+    /// tailnet resolver names the user's network as surely as a hand-entered one. Redacting them
+    /// would require matching against the conf's resolver list, and carrying that list in this
+    /// snapshot is the very disclosure being prevented — `resolverSelectionFingerprint` exists so
+    /// it never travels. So T0 addresses remain, and that is a real gap for a separate change
+    /// with its own design, not something this helper can close.
+    ///
+    /// pinned: BugReportBundleTests.testTheReportCarriesNoChainedFallbackAddresses
+    public func redactingChainedFallbackAddresses() -> TunnelHealthSnapshot {
+        var copy = self
+        // Built BEFORE the sets are cleared: they are the only thing that identifies a chosen
+        // address elsewhere in the snapshot, AND the only thing that says what it became.
+        let identity = redactedFallbackIdentities()
+
+        copy.chainedFallbackLatchedAddresses = []
+        // CLEARED, not folded. It is a single opaque-to-us string built from the preset ID, the
+        // transport and every endpoint, and for a Custom entry those endpoints are the user's own
+        // resolver — the same disclosure the address lists above are cleared for. Nothing in a
+        // report keys off it, so there is no placeholder to keep.
+        copy.chainedFallbackLatchedIdentity = ""
+        // CLEARED like the addresses, and for the sharper reason: an encrypted attempt key is the
+        // endpoint's full `cacheIdentifier`, so a Custom DoH entry puts the user's own URL — path
+        // and query included — in this array.
+        copy.chainedFallbackAttemptKeys = []
+        copy.chainedFallbackEffectiveAddresses = []
+        // CLEARED like the rest. Its whole job is to be READ by `redactedFallbackIdentities()`
+        // above — which has already run, on the un-cleared copy — so that a resolver this session
+        // retired still folds. Shipping the list itself would hand over the very addresses the
+        // fold exists to hide.
+        copy.chainedFallbackRetiredAddresses = []
+        copy.chainedFallbackOutcomes = chainedFallbackOutcomes.map {
+            ChainedFallbackAddressOutcome(address: "", disposition: $0.disposition)
+        }
+        guard !identity.isEmpty else { return copy }
+
+        if let last = lastResolverAddress, let redacted = identity[last] {
+            // A placeholder rather than nil. WHICH TIER served the last query is exactly what a
+            // triager wants to know, and it survives without the address.
+            copy.lastResolverAddress = redacted
+        }
+        copy.resolverAttemptCounts = Self.foldingKeys(resolverAttemptCounts, onto: identity)
+        copy.resolverSuccessCounts = Self.foldingKeys(resolverSuccessCounts, onto: identity)
+        copy.resolverFailureCounts = Self.foldingKeys(resolverFailureCounts, onto: identity)
+        return copy
+    }
+
+    /// Stands in for a genuinely T1 address in a redacted report.
+    public static let redactedFallbackAddress = "<alternative-dns>"
+    /// Stands in for a chosen address the configuration's own `DNS =` ALREADY carries.
+    ///
+    /// Distinct from ``redactedFallbackAddress`` because the evidence keyed by it is ordinary
+    /// T0 traffic. A deduped address is latched and carries an `.alreadyPrimary` outcome, but
+    /// is deliberately absent from the effective set — folding it in with the T1 totals made
+    /// the report say Alternative DNS had served queries it never handled, and with a mixed
+    /// selection summed real T1 counts together with primary ones (Codex, PR #575). It is
+    /// still redacted, because a user can hand-enter their own `DNS =` address here and it names
+    /// their network either way.
+    public static let redactedDeduplicatedPrimaryAddress = "<vpn-dns>"
+    /// Stands in for a chosen address that was refused before it could be queried.
+    ///
+    /// It should never key any of these maps — a refused address is never in the resolver route,
+    /// so nothing is ever attempted through it. It exists so the mapping is TOTAL: were such a
+    /// key ever to appear, folding it into the T1 bucket would invent alternative-DNS traffic
+    /// out of an address the tunnel declined to use.
+    public static let redactedRefusedFallbackAddress = "<alternative-dns-refused>"
+
+    /// Each chosen address mapped to the placeholder that tells the truth about it.
+    ///
+    /// The per-address outcomes are the authority here — that is the question the type answers —
+    /// with any latched address lacking one defaulting to the T1 placeholder, which is the
+    /// conservative direction for privacy.
+    private func redactedFallbackIdentities() -> [String: String] {
+        var identity: [String: String] = [:]
+        // THE COUNTER KEYS FIRST, because they are what the maps below are actually keyed by and
+        // they are the only entry for an encrypted selection: the latched list carries the host
+        // (`cloudflare-dns.com`) while an attempt is recorded under `doh:https://…`, so seeding
+        // from the latched list alone folded nothing and redacted nothing for a Custom DoH
+        // endpoint (Codex P1, PR #591). Seeded with the T1 placeholder, which is the
+        // conservative direction; the per-address outcomes below overwrite where they know better,
+        // and for a plain selection they key identically so nothing changes there.
+        for key in chainedFallbackAttemptKeys where !key.isEmpty {
+            identity[key] = Self.redactedFallbackAddress
+        }
+        for address in chainedFallbackLatchedAddresses where !address.isEmpty {
+            identity[address] = Self.redactedFallbackAddress
+        }
+        // THE RETIRED SET, which the three lists above no longer name. A device-DNS rung's
+        // addresses are a live capture, so a roam republishes the new set over the old one while
+        // the counter maps keep the old address as a key — see
+        // ``chainedFallbackRetiredAddresses`` (Codex P1, PR #592). Seeded with the T1
+        // placeholder and BEFORE the effective list below, so a re-seen address is overwritten by
+        // its current, better-known disposition rather than the other way round.
+        for address in chainedFallbackRetiredAddresses where !address.isEmpty {
+            identity[address] = Self.redactedFallbackAddress
+        }
+        for address in chainedFallbackEffectiveAddresses where !address.isEmpty {
+            identity[address] = Self.redactedFallbackAddress
+        }
+        for outcome in chainedFallbackOutcomes where !outcome.address.isEmpty {
+            switch outcome.disposition {
+            case .admitted:
+                identity[outcome.address] = Self.redactedFallbackAddress
+            case .alreadyPrimary:
+                identity[outcome.address] = Self.redactedDeduplicatedPrimaryAddress
+            // `unavailableInFullTunnel` joins the refused placeholder rather than getting its
+            // own: this map exists to redact addresses and fold their counters, and an address
+            // that was never attempted has no counters to keep apart from one that was refused.
+            // The DISPOSITION itself is published unredacted alongside, so a report still says
+            // which of the two happened (PR #590).
+            case .unusable, .unusableIPv6, .notRoutedBySplitTunnel, .unavailableInFullTunnel:
+                identity[outcome.address] = Self.redactedRefusedFallbackAddress
+            }
+        }
+        return identity
+    }
+
+    /// Chosen addresses folded onto their placeholders, SUMMING rather than dropping.
+    ///
+    /// The totals are the diagnostic — this tier was tried this many times and served that many —
+    /// and they say nothing about which address did it. Dropping the entries instead would make a
+    /// working fallback and an untried one look identical in a report.
+    private static func foldingKeys(
+        _ counts: [String: Int], onto identity: [String: String]
+    ) -> [String: Int] {
+        guard counts.keys.contains(where: { identity[$0] != nil }) else { return counts }
+        var folded: [String: Int] = [:]
+        for (address, count) in counts {
+            folded[identity[address] ?? address, default: 0] += count
+        }
+        return folded
     }
 }

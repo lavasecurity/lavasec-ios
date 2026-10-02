@@ -13,7 +13,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     // MARK: App — publish paths
 
     func testPersistSharedStateVetoesOverBudgetArtifactFlip() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "// INV-TIER-1 flip veto",
@@ -21,15 +21,31 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
         )
         // The veto is co-gated with the coverage condition on the SAME
         // didRewriteArtifacts chain — no flip can skip it.
-        XCTAssertTrue(block.contains("let didRewriteArtifacts = rewritesRuleArtifacts"))
-        XCTAssertTrue(block.contains("&& snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)"))
-        XCTAssertTrue(block.contains("&& FilterRuleBudget.fitsTierBudget("))
+        //
+        // 🔴 NORMALIZED rather than three independent `contains`. Three separate checks
+        // cannot establish SAMENESS: a refactor hoisting the two veto terms into their own
+        // `let gate = … && coversEnabledBlocklists && fitsTierBudget` and leaving
+        // `didRewriteArtifacts` ungated satisfies all three while breaking the very contract
+        // this pin is the record of. Collapsing whitespace keeps the reflow-immunity without
+        // giving that up.
+        let normalized = block
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: " ")
+        XCTAssertTrue(
+            normalized.contains(
+                "let didRewriteArtifacts = rewritesRuleArtifacts && coversEnabledBlocklists "
+                    + "&& fitsTierBudget"),
+            "INV-TIER-1: coverage AND the tier budget must gate the SAME didRewriteArtifacts "
+                + "chain — no flip can skip either.")
+        XCTAssertTrue(block.contains("let coversEnabledBlocklists = snapshotToPersist.summary.coversEnabledBlocklists("))
+        XCTAssertTrue(block.contains("let fitsTierBudget = FilterRuleBudget.fitsTierBudget("))
         XCTAssertTrue(block.contains("recordedTotal: snapshotToPersist.summary.tierBudgetRuleCount"))
         XCTAssertTrue(block.contains("maxFilterRules: configuration.limits.maxFilterRules"))
     }
 
     func testBackgroundPublishVetoesOverBudgetArtifacts() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func publishBackgroundRefreshArtifacts(",
@@ -41,7 +57,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testForegroundSyncSurfacesTierMessageInsteadOfFalseRefreshed() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func performCatalogSyncTransaction(",
@@ -54,11 +70,11 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     // MARK: App — reuse & turn-on paths
 
     func testProtectionStartupReuseEnforcesTierBudget() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func loadReusablePreparedSnapshotForProtectionStartup(",
-            endingBefore: "private func hasReusableArtifactForCurrentConfiguration("
+            endingBefore: "func hasReusableArtifactForCurrentConfiguration("
         )
         XCTAssertTrue(block.contains("FilterRuleBudget.fitsTierBudget("))
         XCTAssertTrue(block.contains("recordedTotal: preparedSnapshot.summary.tierBudgetRuleCount"))
@@ -66,10 +82,10 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testProtectionStartupCurrentSnapshotBranchFallsToGatedPrepareWhenOverBudget() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private func preparedSnapshotForProtectionStartup(",
+            startingAt: "func preparedSnapshotForProtectionStartup(",
             endingBefore: "private func loadReusablePreparedSnapshotForProtectionStartup("
         )
         // The wrap-in-memory branch returns ONLY inside the tier check; the
@@ -80,7 +96,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testCachedInPlaceEnableChecksExactUnionAndRevertsWhenOverBudget() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func toggleBlocklist(",
@@ -97,7 +113,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testKnownCatalogURLEnableChecksExactUnionAndRevertsWhenOverBudget() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func addCustomBlocklist(",
@@ -113,11 +129,11 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testLaunchReconcileSurfacesTierErrorInsteadOfSwallowingIt() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private func reconcileTunnelSnapshotAfterLaunch(",
-            endingBefore: "private var hasCompletedOnboarding: Bool"
+            startingAt: "func reconcileTunnelSnapshotAfterLaunch(",
+            endingBefore: "var hasCompletedOnboarding: Bool"
         )
         // The lapsed-Plus cohort's tunnel cold-starts fail-closed BEFORE any user action;
         // this catch is their first app-side signal and must not stay a debug-only log.
@@ -128,7 +144,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     // MARK: App — compile-free budget changes (downgrade, restore)
 
     func testPlanFlagPersistReconcilesTierBudgetStatus() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func persistPaidPlanFlag(",
@@ -138,10 +154,10 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testBackupRestoreReconcilesTierBudgetStatus() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "func applyRestoredBackupPayload(",
+            startingAt: "func applyReviewedBackup(",
             endingBefore: "// MARK: - LavaSecurity+ hub bridge"
         )
         // The count refresh must precede the reconcile: without it the check reads the
@@ -153,26 +169,26 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testReconcileHelperUsesTheSharedGateAndExistingSurface() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private func reconcileTierBudgetStatusAfterPlanOrRestoreChange(",
+            startingAt: "func reconcileTierBudgetStatusAfterPlanOrRestoreChange(",
             endingBefore: "/// Compact filter-rule count for tight UI"
         )
         XCTAssertTrue(block.contains("FilterRuleBudget.fitsTierBudget("))
         XCTAssertTrue(block.contains("compiledTotal: liveCompiledTierBudgetRuleCount"))
         // Single writer for the over-budget status (the funnel records the exact message)…
-        XCTAssertTrue(block.contains("private func surfaceTierBudgetStatusMessage()"))
+        XCTAssertTrue(block.contains("func surfaceTierBudgetStatusMessage()"))
         XCTAssertTrue(block.contains("lastSurfacedTierBudgetMessage = message"))
         // …so an upgrade that makes the selection fit clears ITS OWN stale message.
         XCTAssertTrue(block.contains("if let surfaced = lastSurfacedTierBudgetMessage, catalogStatusMessage == surfaced {"))
     }
 
     func testLiveTierBudgetTotalMirrorsPreparedSummaryFormula() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private var liveCompiledTierBudgetRuleCount: Int",
+            startingAt: "var liveCompiledTierBudgetRuleCount: Int",
             endingBefore: "private func preparedBlocklistRuleCount("
         )
         // Same four addends preparedSummary records as tierBudgetRuleCount —
@@ -191,7 +207,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     // fails closed via the shared helper.
 
     func testTunnelCompactReuseEnforcesTierBudget() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func reusableCompactSnapshot(",
@@ -208,7 +224,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testTunnelPreparedReuseEnforcesTierBudgetOnManifestAndDecodedBytes() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func reusablePreparedSnapshot(",
@@ -223,7 +239,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testTunnelInExtensionCompileRoutesOverTierResultsToLastKnownGood() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "let compiledRuleCount = compiled.blockRuleCount",
@@ -244,10 +260,10 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testTunnelSkipsCompileDoomedByTierBudget() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private func loadCompiledSnapshot(",
+            startingAt: "func loadCompiledSnapshot(",
             endingBefore: "private struct SnapshotCompileSuperseded"
         )
         // An identity-valid artifact tier-rejected at load must SHORT-CIRCUIT the
@@ -264,7 +280,7 @@ final class TierBudgetEnforcementSourceTests: XCTestCase {
     }
 
     func testTunnelLastKnownGoodEnforcesTierBudget() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func lastKnownGoodCompactSnapshot(",

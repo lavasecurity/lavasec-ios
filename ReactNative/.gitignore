@@ -1,0 +1,10 @@
+node_modules/
+.artifacts/
+coverage/
+
+.bundle/
+ios/Pods/
+ios/build/
+ios/*.xcodeproj/
+ios/*.xcworkspace/
+ios/.xcode.env.local

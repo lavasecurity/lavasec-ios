@@ -64,7 +64,7 @@ const internalPromotionWorkflowPath = path.resolve(
 
 const policies = new Map([
   ["LavaSec", ["com.apple.product-type.application", ["GoogleSignIn", "LavaSecAppServices", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecKit", "LavaSecNetworking", "LavaSecPresentation"], ["LavaSecIntents", "LavaSecTunnel", "LavaSecWidget"]]],
-  ["LavaSecTunnel", ["com.apple.product-type.app-extension", ["LavaSecDNS", "LavaSecFilterPipeline", "LavaSecKit", "LavaSecNetworking"], []]],
+  ["LavaSecTunnel", ["com.apple.product-type.app-extension", ["LavaSecChainedUpstream", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecKit", "LavaSecNetworking"], []]],
   ["LavaSecWidget", ["com.apple.product-type.app-extension", ["LavaSecKit", "LavaSecPresentation"], []]],
   ["LavaSecIntents", ["com.apple.product-type.extensionkit-extension", ["LavaSecFilterPipeline", "LavaSecKit"], []]],
   ["LavaSecUITests", ["com.apple.product-type.bundle.ui-testing", ["LavaSecCore"], ["LavaSec"]]],
@@ -76,6 +76,7 @@ const approvedResources = new Map([
       "LavaSecApp/AppIcon-QA.icon",
       "LavaSecApp/AppIcon.icon",
       "LavaSecApp/AppIconAmethyst.icon",
+      "LavaSecApp/AppIconAquamarine.icon",
       "LavaSecApp/AppIconCherryQuartz.icon",
       "LavaSecApp/AppIconEmerald.icon",
       "LavaSecApp/AppIconFireOpal.icon",
@@ -84,6 +85,7 @@ const approvedResources = new Map([
       "LavaSecApp/Assets.xcassets",
       "LavaSecApp/InfoPlist.xcstrings",
       "LavaSecApp/Localizable.xcstrings",
+      "LavaSecApp/THIRD-PARTY-NOTICES.txt",
     ],
   ],
   ["LavaSecIntents", ["LavaSecIntents/Localizable.xcstrings"]],
@@ -91,6 +93,7 @@ const approvedResources = new Map([
 const trackedXCConfigs = {
   "Config/Lava.xcconfig": `MARKETING_VERSION = 1.2.1
 LAVA_SOURCE_REVISION =
+LAVA_DNS_PATCH_DOWNLOAD_URL =
 DEVELOPMENT_TEAM =
 LAVASEC_APP_PROFILE =
 LAVASEC_TUNNEL_PROFILE =

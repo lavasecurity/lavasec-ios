@@ -55,7 +55,8 @@ public enum DNSResolverSmokeProbe {
     /// The probe's acceptance verdict for a response whose query identity was already
     /// verified at the transport layer (organic forwarding traffic): a genuine NOERROR
     /// answer carrying records. Shares `acceptsResolutionResponse`'s exact rcode/answer
-    /// semantics minus the transaction-ID/question match, so the periodic probe skip
+    /// semantics — the FULL 12-bit RCODE, not the header nibble — minus the
+    /// transaction-ID/question match, so the periodic probe skip
     /// (NRG-3a) keys on the SAME evidence class as an accepted probe — a REFUSED,
     /// SERVFAIL, NXDOMAIN, or answerless reply never counts, which is what keeps a
     /// hijacking resolver from suppressing routine probes (LAV-87 fail-closed).
@@ -69,9 +70,13 @@ public enum DNSResolverSmokeProbe {
 
         let responseFlags = readUInt16(response, at: 2)
         let isResponse = responseFlags & 0x8000 != 0
-        let responseCode = responseFlags & 0x000F
         let answerCount = readUInt16(response, at: 6)
-        guard isResponse, responseCode == 0, answerCount > 0 else {
+        guard isResponse, answerCount > 0 else {
+            return false
+        }
+        // An extended error can have a zero header nibble (BADVERS is 16). All health
+        // predicates use the full RCODE so an error cannot suppress recovery probes.
+        guard DNSEDNS0.fullRCode(of: response) == 0 else {
             return false
         }
         // Match the forwarding path's client-facing bar (`completeForward`): a NOERROR reply
@@ -83,31 +88,15 @@ public enum DNSResolverSmokeProbe {
         return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
-    /// Whether the primary delivered a USABLE answer to the client — i.e. `completeForward`
-    /// forwards this reply as-is instead of downgrading it to a synthesized SERVFAIL. That is
-    /// exactly: a well-formed reply (ALL RR sections parse — the same
-    /// `DNSWireMessage.hasWellFormedResourceRecords` bar `completeForward` applies over answer +
-    /// authority + additional) whose rcode is NOT SERVFAIL/REFUSED. A well-formed NOERROR answer
-    /// AND a well-formed authoritative NXDOMAIN/NODATA both qualify (the primary is proven
-    /// serving). A SERVFAIL/REFUSED rcode, OR any malformed reply — including a malformed
-    /// NEGATIVE reply whose authority/additional section is truncated — does NOT: the client
-    /// sees a SERVFAIL, so the primary is misbehaving now.
-    ///
-    /// This is the shared bar for BOTH crediting primary recovery (`lastPrimaryUpstreamSuccessAt`
-    /// + the smoke-failure-streak clear) and revoking probe-skip evidence
-    /// (`lastAcceptedPrimaryEvidenceAt`): a client-facing SERVFAIL by ANY of those routes must
-    /// not count as the primary serving. It intentionally does NOT touch
-    /// `indicatesResolverFailure`, which additionally gates encrypted-fallback engagement.
+    /// Whether a structurally valid reply provides NOERROR/NODATA or authoritative NXDOMAIN.
+    /// This service-quality bar is shared by primary/fallback health evidence and cache admission. Other RCODEs
+    /// may prove transport reachability, but must not clear a serving failure or earn recovery credit.
     public static func indicatesServedAnswer(_ response: Data?) -> Bool {
         guard let response = response.map({ zeroBased($0) }), response.count >= 12 else {
             return false
         }
-        // Must be a RESPONSE (QR=1), matching the sibling classifiers `indicatesAcceptedAnswer`
-        // and `indicatesResolverFailure`. A query (QR=0) with a well-formed question but no RRs
-        // would otherwise pass both `hasWellFormedResourceRecords` and `!indicatesResolverFailure`
-        // (the latter is itself QR-gated) and be misclassified as a served answer. The only call
-        // site passes an upstream reply, so this does not manifest today — it is a defensive
-        // consistency guard.
+        // Query packets cannot provide service evidence or a reusable cached answer.
+        // pinned: DNSResponseCacheTests.testCacheRefusesRepliesTheSharedServiceValidatorCannotAccept
         guard readUInt16(response, at: 2) & 0x8000 != 0 else {
             return false
         }
@@ -132,9 +121,15 @@ public enum DNSResolverSmokeProbe {
 
         let responseFlags = readUInt16(response, at: 2)
         let isResponse = responseFlags & 0x8000 != 0
-        let responseCode = responseFlags & 0x000F
         let answerCount = readUInt16(response, at: 6)
-        guard isResponse, responseCode == 0, answerCount > 0 else {
+        guard isResponse, answerCount > 0 else {
+            return false
+        }
+        // THE FULL 12-bit RCODE, for the reason given on ``indicatesAcceptedAnswer`` — this is
+        // the direct-probe half of the same bar, and it decides whether a probe CLEARS the smoke
+        // failure streak. Left on the header nibble it would let an extended error retire the
+        // very streak that escalation depends on (Codex P1, PR #587).
+        guard DNSEDNS0.fullRCode(of: response) == 0 else {
             return false
         }
 
@@ -156,32 +151,78 @@ public enum DNSResolverSmokeProbe {
         return DNSWireMessage.hasWellFormedResourceRecords(response)
     }
 
-    /// Forwarding-path classifier (NOT for smoke probes): does this resolver reply
-    /// indicate the resolver itself failed, rather than a legitimate answer?
-    ///
-    /// A reachable-but-stale resolver (e.g. an off-network captured Device-DNS
-    /// address) answers queries with SERVFAIL/REFUSED instead of dropping them, so
-    /// the wire outcome is `.success` and a non-nil packet comes back. That packet
-    /// is useless to the client, but the forwarding fallback guard keys off
-    /// `response == nil`, so without this check the failing reply is handed back and
-    /// the encrypted fallback never engages (the stale off-network wedge).
-    ///
-    /// Only server-side failure rcodes count: NOERROR (incl. NODATA) and NXDOMAIN
-    /// are authoritative answers that MUST pass through untouched — we must not
-    /// reroute every "does not exist" reply to the fallback resolver.
-    package static func indicatesResolverFailure(_ response: Data?) -> Bool {
-        guard let response = response.map({ zeroBased($0) }) else {
-            return false
-        }
-        guard response.count >= 12 else {
-            return false
-        }
+    /// A well-formed NOERROR reply; unlike a served answer, this excludes NXDOMAIN.
+    package static func indicatesResolvedAnswer(_ response: Data?) -> Bool {
+        guard let response, DNSWireMessage.hasWellFormedResourceRecords(response) else { return false }
+        return DNSAnswerDisposition.disposition(ofResponse: response) == .resolved
+    }
 
-        let responseFlags = readUInt16(response, at: 2)
-        let isResponse = responseFlags & 0x8000 != 0
-        let responseCode = responseFlags & 0x000F
-        // SERVFAIL (2) and REFUSED (5): the resolver could not / would not serve.
-        return isResponse && (responseCode == 2 || responseCode == 5)
+    /// How a NOERROR reply carrying NO answer records is SHAPED — a description of the wire, and
+    /// deliberately not a verdict about the resolver. `nil` for every reply that is not an empty
+    /// NOERROR.
+    ///
+    /// ## What this is NOT, and why the distinction cost a revert
+    ///
+    /// This type was introduced (PR #588) to drive a T1 failover, on the claim that RFC 2308
+    /// §2.2 REQUIRES a legitimate negative to carry the zone's SOA in the authority section — so
+    /// an empty authority section would prove the resolver did not serve the zone. **§2.2 states
+    /// no such requirement.** Its definition reads "the authority section will contain an SOA
+    /// record, OR there will be no NS records there", and it goes on to enumerate a TYPE 3 NODATA
+    /// whose authority section is empty. Type 3 is *discouraged* for authoritative servers, not
+    /// invalid, and real resolvers emit it (Codex, PR #589).
+    ///
+    /// So ``EmptyAnswer/unbacked`` means exactly "no answer records and no authority records", and
+    /// nothing more. It does NOT mean the resolver is broken, does not serve the zone, or should
+    /// be failed over past — `TunnelledPlainDNSResolution` records it and acts on none of it, and
+    /// the comment there carries the failure mode that reading it as a verdict produced.
+    ///
+    /// It survives the revert because the SHAPE is still worth counting: a resolver completing
+    /// every lookup without ever resolving one is the cheapest thing to read off a field capture,
+    /// and it moved no other counter (`chainedDNSEmptyAnswer` / `chainedDNSUnbackedEmptyAnswer`).
+    /// pinned: DNSResolverSmokeProbeTests.testAnEmptyAnswerIsSplitByItsAuthoritySection
+    package enum EmptyAnswer: Equatable, Sendable {
+        /// NOERROR, no answers, and a non-empty authority section — RFC 2308's type 1 / type 2.
+        /// The arm is WIDER than "carries an SOA" on purpose: it holds for any authority record,
+        /// because this type reports a section count and does not adjudicate the contents.
+        case backedByAuthority
+        /// NOERROR, no answers, and an empty authority section — RFC 2308's type 3. A legitimate
+        /// negative, merely one whose shape carries no cacheable SOA.
+        case unbacked
+    }
+
+    /// Classifies an empty NOERROR reply per ``EmptyAnswer``; `nil` when the reply is not one.
+    ///
+    /// The full 12-bit RCODE, for the reason ``indicatesResolvedAnswer`` states: an extended
+    /// error presents a ZERO header nibble and keeps its value in the OPT TTL (RFC 6891
+    /// §6.1.3), so a nibble test reads BADVERS (16) as a NOERROR with no answers — which is
+    /// precisely the shape this would otherwise report as an ordinary empty NOERROR.
+    /// pinned: TunnelledPlainDNSResolutionTests.testAnUnbackedEmptyAnswerIsReturnedNotFailedOverOn
+    package static func emptyAnswer(in response: Data?) -> EmptyAnswer? {
+        guard let response = response.map({ zeroBased($0) }), response.count >= 12 else {
+            return nil
+        }
+        guard readUInt16(response, at: 2) & 0x8000 != 0 else { return nil }
+        guard DNSEDNS0.fullRCode(of: response) == 0 else { return nil }
+        guard readUInt16(response, at: 6) == 0 else { return nil }
+        // Same well-formedness bar as every sibling classifier: a reply whose records do not
+        // parse is `completeForward`'s problem (it becomes a SERVFAIL downstream), not a shape
+        // this predicate reports on.
+        guard DNSWireMessage.hasWellFormedResourceRecords(response) else { return nil }
+        return readUInt16(response, at: 8) == 0 ? .unbacked : .backedByAuthority
+    }
+
+    /// Whether a response declined service. Full RCODE and wire structure share the existing
+    /// classifier; unwalkable responses also fail, while QR=0 packets are never failure replies.
+    /// Callers retain their tier, wedge, and egress gates before engaging fallback.
+    /// pinned: DNSResolverSmokeProbeTests.testFailureAndServingUseTheWholeResponseCode
+    package static func indicatesResolverFailure(_ response: Data?) -> Bool {
+        guard let response = response.map({ zeroBased($0) }), response.count >= 4,
+              readUInt16(response, at: 2) & 0x8000 != 0 else { return false }
+        guard DNSWireMessage.hasWellFormedResourceRecords(response) else { return true }
+        switch DNSAnswerDisposition.disposition(ofResponse: response) {
+        case .resolved, .nameDoesNotExist: return false
+        case .resolverFailure, nil: return true
+        }
     }
 
     private static func questionSectionRange(in data: Data) -> Range<Int>? {

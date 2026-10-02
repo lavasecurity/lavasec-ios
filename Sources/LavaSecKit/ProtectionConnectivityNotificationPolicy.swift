@@ -1,10 +1,12 @@
 import Foundation
 
-public enum ProtectionConnectivityNotificationKind: String, Equatable, Sendable {
+public enum ProtectionConnectivityNotificationKind: String, Equatable, Codable, Sendable {
     case deviceDNSFallback = "device-dns-fallback"
     case networkUnavailable = "network-unavailable"
     case dnsSlow = "dns-slow"
     case reconnectNeeded = "reconnect-needed"
+    /// Artifact triage identified a necessary user action while client DNS remains blocked.
+    case filteringUnavailable = "filtering-unavailable"
 
     /// Every notification kind is a "problem" (we only ever notify about problems
     /// now; a recovery clears the standing banner silently rather than posting an
@@ -12,7 +14,7 @@ public enum ProtectionConnectivityNotificationKind: String, Equatable, Sendable 
     /// intent-fully and to leave room for a future non-problem kind.
     public var isProblem: Bool {
         switch self {
-        case .deviceDNSFallback, .networkUnavailable, .dnsSlow, .reconnectNeeded:
+        case .deviceDNSFallback, .networkUnavailable, .dnsSlow, .reconnectNeeded, .filteringUnavailable:
             return true
         }
     }
@@ -40,23 +42,27 @@ public struct ProtectionConnectivityNotification: Equatable, Sendable {
     }
 }
 
-public struct ProtectionConnectivityNotificationHistory: Equatable, Sendable {
+public struct ProtectionConnectivityNotificationHistory: Equatable, Codable, Sendable {
     public static let empty = ProtectionConnectivityNotificationHistory()
 
     public let lastDeliveredNotificationID: String?
     public let lastDeliveredAt: Date?
     public let unresolvedProblemNotificationID: String?
+    /// Logical incident identity used for recovery timing, separate from the owned OS request.
+    public let unresolvedProblemIncidentID: String?
     public let unresolvedProblemKind: ProtectionConnectivityNotificationKind?
 
     public init(
         lastDeliveredNotificationID: String? = nil,
         lastDeliveredAt: Date? = nil,
         unresolvedProblemNotificationID: String? = nil,
+        unresolvedProblemIncidentID: String? = nil,
         unresolvedProblemKind: ProtectionConnectivityNotificationKind? = nil
     ) {
         self.lastDeliveredNotificationID = lastDeliveredNotificationID
         self.lastDeliveredAt = lastDeliveredAt
         self.unresolvedProblemNotificationID = unresolvedProblemNotificationID
+        self.unresolvedProblemIncidentID = unresolvedProblemIncidentID
         self.unresolvedProblemKind = unresolvedProblemKind
     }
 }
@@ -64,58 +70,72 @@ public struct ProtectionConnectivityNotificationHistory: Equatable, Sendable {
 public enum ProtectionConnectivityNotificationPolicy {
     public static let freshnessWindow: TimeInterval = 120
     public static let minimumProblemDeliveryInterval: TimeInterval = 600
+    /// Debounces client impact after triage establishes a necessary user action.
+    public static let filteringUnavailableGraceInterval: TimeInterval = 30
     /// After the encrypted-fallback coverage silently clears a `reconnectNeeded` banner, the
     /// delivery cooldown is back-dated so a lapse re-posts after this grace rather than the full
     /// 600s — short enough that a genuine uncovered wedge re-notifies promptly, long enough that a
     /// flapping cover<->uncover wedge is bounded to one banner per grace instead of one per lapse.
     public static let reFlapGraceInterval: TimeInterval = 60
 
+    /// Proposes a fresh, deduplicated problem notice. Only the tunnel confirms failed filter recovery; nil is unknown.
+    /// `filteringUnavailableSince` is the first blocked client query in that continuous failure window.
     public static func notification(
         for assessment: ProtectionConnectivityAssessment,
         health: TunnelHealthSnapshot,
         history: ProtectionConnectivityNotificationHistory,
+        filteringUnavailable: Bool? = nil,
+        filteringUnavailableSince: Date? = nil,
+        filteringIntervention: FilterArtifactIntervention? = nil,
         now: Date = Date(),
         languageCode: String? = nil
     ) -> ProtectionConnectivityNotification? {
-        // We only push a NOTIFICATION when Lava needs the user to act — the two
-        // "Tap to reconnect" banners (`reconnectNeeded`, `dnsSlow`). Everything
-        // else is handled silently: a self-recovery clears the standing banner
-        // (see `resolvedProblemNotificationIdentifiers`) WITHOUT a "reconnected"
-        // ping, and the informational states (`usingDeviceDNSFallback`,
-        // `networkUnavailable`) still drive the in-app Guard UI / Live Activity but
-        // post no banner. This keeps Notification Center from filling with
-        // self-resolving "reconnected" / "switched to Device DNS" noise on flaky
-        // networks — the user is interrupted only when a tap is genuinely required.
-
+        // Resolver problems and an observed block-all failure share one cooldown and banner.
+        // Only the tunnel can assert current filtering posture; historical health is not enough.
         let candidate: (kind: ProtectionConnectivityNotificationKind, eventAt: Date?, title: String, body: String)?
 
-        switch assessment.severity {
-        case .usingDeviceDNSFallback, .networkUnavailable:
-            // Informational, non-actionable — Lava keeps filtering (Device DNS) or
-            // will auto-resume (no network). Surfaced in-app, not as a notification.
-            candidate = nil
-        case .needsReconnect:
+        if filteringUnavailable == true {
+            guard let filteringIntervention, let filteringUnavailableSince,
+                  now.timeIntervalSince(filteringUnavailableSince) >= filteringUnavailableGraceInterval,
+                  health.lastFailClosedReason == "snapshot-unavailable",
+                  let lastBlockedAt = health.lastFailClosedAt,
+                  lastBlockedAt >= filteringUnavailableSince else { return nil }
             candidate = (
-                .reconnectNeeded,
-                health.lastDNSSmokeProbeAt ?? health.lastUpstreamFailureAt,
-                // Localized against the package catalog (Bundle.module) — these post from the app AND the NE
-                // tunnel, whose bundles lack the app's string catalog. `languageCode` pins the pinned app
-                // language so the tunnel matches the app UI, not the (possibly different) system language.
-                LavaNotificationLocalizer.string("notif.body.reconnectTitle", languageCode: languageCode),
-                LavaNotificationLocalizer.string("notif.body.reconnectMessage", languageCode: languageCode)
+                .filteringUnavailable,
+                health.failClosedServedQueryCount > 0 ? health.lastFailClosedAt : nil,
+                LavaNotificationLocalizer.string("notif.body.filteringUnavailableTitle", languageCode: languageCode),
+                LavaNotificationLocalizer.string(filteringIntervention == .refreshCustomSources
+                    ? "notif.body.customFilterRefreshMessage" : "notif.body.filteringUnavailableMessage", languageCode: languageCode)
             )
-        case .dnsSlow:
-            candidate = (
-                .dnsSlow,
-                health.lastSlowUpstreamResponseAt,
-                LavaNotificationLocalizer.string("notif.body.dnsSlowTitle", languageCode: languageCode),
-                LavaNotificationLocalizer.string("notif.body.dnsSlowMessage", languageCode: languageCode)
-            )
-        case .healthy, .recovering, .usingEncryptedFallback:
-            // No banner for the encrypted-fallback handoff: it is brief and self-recovering
-            // (DNS stays up via DoH while the primary un-masks), so a notification would be
-            // noise — the very disruption this state exists to avoid.
-            candidate = nil
+        } else {
+            switch assessment.severity {
+            case .usingDeviceDNSFallback, .networkUnavailable:
+                // Informational, non-actionable — Lava keeps filtering (Device DNS) or
+                // will auto-resume (no network). Surfaced in-app, not as a notification.
+                candidate = nil
+            case .needsReconnect:
+                candidate = (
+                    .reconnectNeeded,
+                    health.lastDNSSmokeProbeAt ?? health.lastUpstreamFailureAt,
+                    // Localized against the package catalog (Bundle.module) — these post from the app AND the NE
+                    // tunnel, whose bundles lack the app's string catalog. `languageCode` pins the pinned app
+                    // language so the tunnel matches the app UI, not the (possibly different) system language.
+                    LavaNotificationLocalizer.string("notif.body.reconnectTitle", languageCode: languageCode),
+                    LavaNotificationLocalizer.string("notif.body.reconnectMessage", languageCode: languageCode)
+                )
+            case .dnsSlow:
+                candidate = (
+                    .dnsSlow,
+                    health.lastSlowUpstreamResponseAt,
+                    LavaNotificationLocalizer.string("notif.body.dnsSlowTitle", languageCode: languageCode),
+                    LavaNotificationLocalizer.string("notif.body.dnsSlowMessage", languageCode: languageCode)
+                )
+            case .healthy, .recovering, .usingEncryptedFallback:
+                // No banner for the encrypted-fallback handoff: it is brief and self-recovering
+                // (DNS stays up via DoH while the primary un-masks), so a notification would be
+                // noise — the very disruption this state exists to avoid.
+                candidate = nil
+            }
         }
 
         guard let candidate,
@@ -125,33 +145,24 @@ public enum ProtectionConnectivityNotificationPolicy {
             return nil
         }
 
-        let identifier = "\(candidate.kind.rawValue):\(Int(eventAt.timeIntervalSince1970))"
+        let identifier: String
+        if candidate.kind == .filteringUnavailable, let filteringUnavailableSince, let filteringIntervention {
+            // Client activity proves freshness; the outage start and remedy own pending delivery.
+            identifier = "\(candidate.kind.rawValue):\(filteringIntervention.rawValue):\(Int(filteringUnavailableSince.timeIntervalSince1970))"
+        } else {
+            identifier = "\(candidate.kind.rawValue):\(Int(eventAt.timeIntervalSince1970))"
+        }
 
         // Never re-emit the exact notification we last delivered.
         guard identifier != history.lastDeliveredNotificationID else {
             return nil
         }
 
-        // Escalation: a strictly more-urgent problem supersedes a lower-ranked banner
-        // that's still outstanding, bypassing both the "a problem is already outstanding"
-        // guard and the min-delivery throttle. Without this, a wedge that follows a
-        // Device-DNS fallback leaves the user staring at a reassuring "switched to Device
-        // DNS — filtering on" banner while DNS is actually down, never surfacing the
-        // actionable "Reconnect" prompt for up to the full 600s cooldown.
-        //
-        // Only a real reconnect-needed outage (`reconnectNeeded`) outranks the rest.
-        // `deviceDNSFallback`, `networkUnavailable`, and the soft `dnsSlow` degradation
-        // are equal-rank peers that never supersede one another — none warrants stealing
-        // a standing banner. Crucially `dnsSlow` is a distinct kind from `reconnectNeeded`
-        // (the slow-DNS severity used to reuse `reconnectNeeded`), so when DNS progresses
-        // from slow to a hard outage the `reconnectNeeded` candidate genuinely outranks
-        // the outstanding `dnsSlow` banner and upgrades the user from "DNS is slow" to the
-        // actionable "Reconnect" copy. Escalation is upward-only and the ladder has a
-        // single step, so at most one supersede per problem episode — no flapping spam,
-        // and the recovery path still clears whatever ends up outstanding.
+        // A harder failure may replace a softer outstanding banner once. Equal-rank
+        // repeats remain suppressed; recovery retains the shared anti-flap cooldown.
         if let outstandingKind = history.unresolvedProblemKind,
            let outstandingID = history.unresolvedProblemNotificationID,
-           problemRank(candidate.kind) > problemRank(outstandingKind) {
+           canEscalate(from: outstandingKind, to: candidate.kind) {
             return ProtectionConnectivityNotification(
                 kind: candidate.kind,
                 identifier: identifier,
@@ -175,14 +186,13 @@ public enum ProtectionConnectivityNotificationPolicy {
         )
     }
 
-    /// Relative urgency of a problem notification. A strictly higher rank may supersede a
-    /// lower-ranked outstanding banner (see `notification(for:…)`). The informational
-    /// `deviceDNSFallback`/`networkUnavailable` kinds no longer post, so a marker for one
-    /// can only be a STALE leftover that survived an upgrade — rank them at 0, BELOW every
-    /// actionable banner, so ANY real banner (the soft `dnsSlow` or a hard `reconnectNeeded`)
-    /// supersedes the leftover instead of being suppressed by it. The two actionable banners
-    /// ladder above: `dnsSlow` (1) for the soft degradation, `reconnectNeeded` (2) for a hard
-    /// outage (which also supersedes an outstanding `dnsSlow`).
+    /// Whether a more serious incident may replace an outstanding notice or failed retry.
+    public static func canEscalate(from outstanding: ProtectionConnectivityNotificationKind,
+                                   to candidate: ProtectionConnectivityNotificationKind) -> Bool {
+        problemRank(candidate) > problemRank(outstanding)
+    }
+
+    /// Escalation order: retired informational kinds, slow DNS, resolver outage, unavailable filter.
     private static func problemRank(_ kind: ProtectionConnectivityNotificationKind) -> Int {
         switch kind {
         case .deviceDNSFallback, .networkUnavailable:
@@ -191,15 +201,28 @@ public enum ProtectionConnectivityNotificationPolicy {
             return 1
         case .reconnectNeeded:
             return 2
+        case .filteringUnavailable:
+            return 3
         }
     }
 
+    /// Clears resolver incidents from health evidence, and filter incidents only from explicit current tunnel posture.
     public static func resolvedProblemNotificationIdentifiers(
         for assessment: ProtectionConnectivityAssessment,
         health: TunnelHealthSnapshot,
         history: ProtectionConnectivityNotificationHistory,
+        filteringUnavailable: Bool? = nil,
         now: Date = Date()
     ) -> [String] {
+        // A healthy resolver cannot prove that filtering recovered. The app leaves this
+        // banner alone; the tunnel clears it only after observing usable filtering or a pause.
+        if history.unresolvedProblemKind == .filteringUnavailable {
+            return filteringUnavailable == false ? history.unresolvedProblemNotificationID.map { [$0] } ?? [] : []
+        }
+        // Filtering still blocks DNS. Preserve the lower-priority incident so an actionable
+        // filter notice can escalate after its grace period instead of inheriting cooldown.
+        guard filteringUnavailable != true else { return [] }
+
         if let unresolvedProblemNotificationID = resolvedProblemNotificationID(
             for: assessment,
             health: health,
@@ -209,19 +232,9 @@ public enum ProtectionConnectivityNotificationPolicy {
             return [unresolvedProblemNotificationID]
         }
 
-        // Silently supersede whatever single problem banner is outstanding once the encrypted
-        // fallback covers the wedge. These appear in the rough-handoff edge case (a banner was
-        // delivered before coverage engaged — e.g. DoH was slow enough that the smoke streak
-        // crossed the reconnect threshold, or DNS was flagged slow first); leaving ANY of them
-        // standing is HARMFUL, not merely cosmetic — tapping a Lava notification routes through
-        // `performProtectionPrimaryAction`, which keys off the CURRENT assessment, and
-        // `.usingEncryptedFallback` is `.turnOff`, so following a stale "Tap to reconnect" prompt
-        // (or even an informational banner) would turn protection OFF. So clear it silently
-        // (no acknowledgement is ever posted — recoveries clear the banner quietly).
-        // The matching cooldown handling lives in `deliveryCooldownAnchorAfterClear`, which
-        // back-dates `lastDeliveredAt` so a lapse back to a real problem re-posts promptly (no
-        // 600s gap) while a sustained cover<->uncover flap is bounded to one banner per
-        // `reFlapGraceInterval`.
+        // Encrypted fallback makes a resolver-problem banner stale. Clear it quietly;
+        // notification taps only navigate to Guard and never mutate protection.
+        // The shared cooldown helper bounds a subsequent coverage lapse.
         if let silentlyClearedID = encryptedFallbackSilentlyClearedProblemID(
             for: assessment,
             history: history
@@ -232,20 +245,14 @@ public enum ProtectionConnectivityNotificationPolicy {
         return []
     }
 
-    /// The outstanding PROBLEM notification id that the encrypted-fallback coverage silently
-    /// supersedes, or nil when this is not that case. NOT limited to `reconnectNeeded`: during
-    /// `.usingEncryptedFallback` the covered state is silent (it posts no banner of its own), yet
-    /// EVERY Lava notification tap routes through `performProtectionPrimaryAction`, whose action
-    /// is now `.turnOff` — so ANY problem banner left standing turns protection OFF if tapped.
-    /// That includes the actionable `reconnectNeeded`/`dnsSlow` "Tap to reconnect" prompts AND a
-    /// stale informational `deviceDNSFallback`/`networkUnavailable` one. Clear whichever single
-    /// problem is outstanding. Shared by `resolvedProblemNotificationIdentifiers` (what to clear)
-    /// and `deliveryCooldownAnchorAfterClear` (whether to lift the cooldown) so the two can't drift.
+    /// Shares resolver-banner cleanup with its cooldown adjustment. Filter failures need
+    /// their own current-posture proof and cannot be cleared by resolver fallback coverage.
     private static func encryptedFallbackSilentlyClearedProblemID(
         for assessment: ProtectionConnectivityAssessment,
         history: ProtectionConnectivityNotificationHistory
     ) -> String? {
-        guard assessment.severity == .usingEncryptedFallback,
+        guard history.unresolvedProblemKind != .filteringUnavailable,
+              assessment.severity == .usingEncryptedFallback,
               history.unresolvedProblemKind?.isProblem == true,
               let outstandingProblemID = history.unresolvedProblemNotificationID
         else {
@@ -292,7 +299,7 @@ public enum ProtectionConnectivityNotificationPolicy {
               // downstream traffic) paired with that stale success would falsely clear
               // the banner. Must reach the threshold derived from the problem's
               // encoded event time.
-              let recoveryThreshold = recoveryThresholdAfterProblem(unresolvedProblemNotificationID),
+              let recoveryThreshold = recoveryThresholdAfterProblem(history.unresolvedProblemIncidentID ?? unresolvedProblemNotificationID),
               recoveredAt >= recoveryThreshold
         else {
             return nil
@@ -357,10 +364,115 @@ public enum ProtectionConnectivityNotificationPolicy {
     }
 }
 
-/// Persistence-layer migration for the connectivity-notification policy. Lives next to
-/// the policy because it exists only to keep persisted history compatible with changes
-/// to the notification-kind vocabulary.
+/// Shared notification history, atomic delivery claims, and migration from legacy defaults.
 public enum ProtectionConnectivityNotificationStore {
+    /// A scheduling snapshot after atomic recovery cleanup.
+    public struct Reconciliation: Sendable {
+        /// History used to evaluate this scheduling pass.
+        public let history: ProtectionConnectivityNotificationHistory
+        /// System request IDs whose problem has recovered.
+        public let resolvedIdentifiers: [String]
+        /// A candidate that still needs successful submission and a delivery claim.
+        public let notification: ProtectionConnectivityNotification?
+    }
+
+    /// Outcome of claiming a successfully submitted notification.
+    public enum DeliveryClaim: Equatable, Sendable {
+        /// This submission owns the banner; these older IDs can be removed.
+        case recorded(supersededIdentifiers: [String])
+        /// Another producer already recorded this same system request.
+        case alreadyOwned
+        /// Current history or posture no longer permits this submission.
+        case refused
+    }
+
+    /// Reads the atomic file, using legacy defaults only before the first file write.
+    public static func load(at url: URL?, legacyHistory: ProtectionConnectivityNotificationHistory) -> ProtectionConnectivityNotificationHistory? {
+        guard let url else { return nil }
+        return try? read(at: url, legacyHistory: legacyHistory)
+    }
+
+    /// Clears recovered ownership and proposes a notice under the shared nonblocking lock.
+    public static func reconcile(
+        at url: URL?, legacyHistory: ProtectionConnectivityNotificationHistory,
+        assessment: ProtectionConnectivityAssessment, health: TunnelHealthSnapshot,
+        filteringUnavailable: Bool? = nil, filteringUnavailableSince: Date? = nil,
+        filteringIntervention: FilterArtifactIntervention? = nil,
+        now: Date = Date(), languageCode: String? = nil
+    ) -> Reconciliation? {
+        transact(at: url, legacyHistory: legacyHistory) { history in
+            let previous = history
+            let resolved = ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+                for: assessment, health: health, history: previous, filteringUnavailable: filteringUnavailable, now: now)
+            if !resolved.isEmpty {
+                let anchor = ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+                    for: assessment, history: previous, now: now)
+                history = ProtectionConnectivityNotificationHistory(
+                    lastDeliveredNotificationID: anchor == nil ? previous.lastDeliveredNotificationID : nil,
+                    lastDeliveredAt: anchor ?? previous.lastDeliveredAt)
+            } else if assessment.severity == .usingEncryptedFallback, previous.unresolvedProblemKind != .filteringUnavailable {
+                history = ProtectionConnectivityNotificationHistory(
+                    lastDeliveredAt: previous.lastDeliveredAt,
+                    unresolvedProblemNotificationID: previous.unresolvedProblemNotificationID,
+                    unresolvedProblemIncidentID: previous.unresolvedProblemIncidentID,
+                    unresolvedProblemKind: previous.unresolvedProblemKind)
+            }
+            return Reconciliation(history: previous, resolvedIdentifiers: resolved,
+                notification: ProtectionConnectivityNotificationPolicy.notification(
+                    for: assessment, health: health, history: previous, filteringUnavailable: filteringUnavailable,
+                    filteringUnavailableSince: filteringUnavailableSince, filteringIntervention: filteringIntervention,
+                    now: now, languageCode: languageCode))
+        }
+    }
+
+    /// Rechecks and records successful delivery in one cross-process transaction.
+    public static func claimDelivery(
+        _ notification: ProtectionConnectivityNotification,
+        requestIdentifier: String? = nil,
+        at url: URL?, legacyHistory: ProtectionConnectivityNotificationHistory,
+        assessment: ProtectionConnectivityAssessment, health: TunnelHealthSnapshot,
+        filteringUnavailable: Bool? = nil, filteringUnavailableSince: Date? = nil,
+        filteringIntervention: FilterArtifactIntervention? = nil, now: Date = Date()
+    ) -> DeliveryClaim? {
+        transact(at: url, legacyHistory: legacyHistory) { history in
+            let requestID = requestIdentifier ?? notification.identifier
+            if history.unresolvedProblemNotificationID == requestID { return .alreadyOwned }
+            guard let current = ProtectionConnectivityNotificationPolicy.notification(
+                for: assessment, health: health, history: history, filteringUnavailable: filteringUnavailable,
+                filteringUnavailableSince: filteringUnavailableSince, filteringIntervention: filteringIntervention,
+                now: now), current.identifier == notification.identifier else { return .refused }
+            history = ProtectionConnectivityNotificationHistory(lastDeliveredNotificationID: notification.identifier,
+                lastDeliveredAt: now, unresolvedProblemNotificationID: requestID,
+                unresolvedProblemIncidentID: notification.identifier, unresolvedProblemKind: notification.kind)
+            return .recorded(supersededIdentifiers: current.supersededNotificationIdentifiers)
+        }
+    }
+
+    // A single atomically replaced file avoids UserDefaults' per-process caches and partial
+    // multi-key writes. OS submission and cleanup run outside this lock. Each attempt owns a
+    // unique request ID, so late cleanup cannot remove another producer's request.
+    // pinned: ProtectionConnectivityNotificationPolicyTests.testAtomicHistoryClaimCannotOverwriteAHigherPriorityProducer
+    private static func transact<Result>(at url: URL?, legacyHistory: ProtectionConnectivityNotificationHistory,
+                                        _ mutation: (inout ProtectionConnectivityNotificationHistory) -> Result) -> Result? {
+        guard let url else { return nil }
+        return try? FilterPublishLock.withTryExclusiveLock(at: url.appendingPathExtension("lock")) {
+            var history = try read(at: url, legacyHistory: legacyHistory)
+            let previous = history
+            let result = mutation(&history)
+            if history != previous || !FileManager.default.fileExists(atPath: url.path) {
+                try JSONEncoder().encode(history).write(to: url, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
+            }
+            return result
+        }
+    }
+
+    private static func read(at url: URL, legacyHistory: ProtectionConnectivityNotificationHistory) throws -> ProtectionConnectivityNotificationHistory {
+        guard FileManager.default.fileExists(atPath: url.path) else { return legacyHistory }
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard data.count <= 4_096 else { throw CocoaError(.fileReadCorruptFile) }
+        return try JSONDecoder().decode(ProtectionConnectivityNotificationHistory.self, from: data)
+    }
+
     /// Bump when a change to the persisted notification-kind vocabulary can wedge the
     /// escalation logic against state written by an older build.
     public static let currentKindSchemaVersion = 2

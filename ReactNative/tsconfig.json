@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleSuffixes": [
+      ".ios",
+      ""
+    ],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": [
+      "jest",
+      "react-native"
+    ],
+    "noEmit": true
+  },
+  "include": [
+    "src",
+    "gallery",
+    "review",
+    "specs",
+    "tests/*.test.tsx",
+    "tests/*.test.ts"
+  ]
+}

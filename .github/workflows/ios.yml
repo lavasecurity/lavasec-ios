@@ -6,6 +6,17 @@ on:
     branches:
       - main
   pull_request:
+    # Drafts are exempt from CI and run only when the PR is flipped to ready. Every job
+    # below carries `github.event.pull_request.draft != true` (the same guard the other
+    # PR workflows use), and `ready_for_review` is what re-triggers them: without that
+    # type, marking a draft ready would leave the previously-skipped contexts stale with
+    # no new run — the failure shape Codex caught on the `full-build` label (PR #784).
+    # Cost: a WIP PR iterated over ten pushes used to queue ten Mac runs behind the
+    # required lanes of every ready PR; now it queues none. `converted_to_draft` is
+    # the other half: marking a running PR as draft fires a new run in the same
+    # concurrency group, which cancels the in-flight Mac jobs instead of letting them
+    # finish work nobody is waiting on (Codex P2 on PR #784).
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 # NB: intentionally NO event-level `paths-ignore` (REL-6). A docs filter means a docs-only PR never
 # TRIGGERS this workflow, so its required contexts (Repo Checks, Swift Package Tests,
@@ -22,27 +33,8 @@ concurrency:
   group: ios-ci-${{ github.event_name == 'push' && github.run_id || github.ref }}
   cancel-in-progress: true
 
-# Shared CI lane — kept BYTE-IDENTICAL in the private dev repo (lavasec-ios-internal)
-# and the public OSS repo (lavasec-ios). The export pipeline ships this file
-# verbatim and the Merge-up contamination guard (below) depends on the two lanes
-# matching; see lavasec-infra/docs/engineering/release-and-propagation.md §1.2.
-#
-# Cost split (public Actions minutes are free; private macOS minutes are billed).
-# Three levers keep the private lane cheap WITHOUT forking this byte-identical file —
-# all keyed on `github.repository` so the public lane is unaffected:
-#   1. `ios-simulator-build` (full ~30-min xcodebuild) is gated to the PUBLIC repo only;
-#      the private lane gets app-compile coverage from light-build.yml on owned hardware.
-#   2. `swift-package-tests` (the `swift test` core suite) runs on BOTH lanes, but its
-#      macOS RUNNER is chosen per-lane: GitHub-hosted (macos-26) on public, self-hosted
-#      (lava-mac-vm-ios-internal) on private — so the private lane's billed macOS minutes
-#      drop to $0 while keeping identical test coverage.
-#   3. `repo-checks` (cheap Linux) stays GitHub-hosted on both lanes.
-#
-# Runners: the PUBLIC lane is GitHub-hosted only — it runs untrusted fork code, which
-# must never touch owned hardware. The PRIVATE lane routes only its trusted, internal
-# macOS work to self-hosted, and every self-hosted job is fork-guarded as defence in
-# depth. The signed TestFlight/release pipeline lives in the private infra/runner
-# tooling, not here.
+# Trusted ios-internal work uses ephemeral Ubicloud runners and owned Macs.
+# Public exports use GitHub-hosted runners; public and fork code never reaches owned Macs.
 
 jobs:
   changes:
@@ -50,15 +42,11 @@ jobs:
     # completing (their required contexts must report — see the no-paths-ignore note
     # above). Cheap Linux; the mac jobs `needs:` it. Manual/unknown events and
     # anything that can't be classified fall through to docs_only=false → jobs run fully.
+    # Draft PRs skip every job (see `on.pull_request.types`); `ready_for_review` re-runs.
     name: Detect docs-only diff
-    # Linux runner is per-repo swappable WITHOUT forking this byte-identical file — the same
-    # lever swift-package-tests uses for its macOS runner (IOS_CI_MAC_RUNNER). On the PRIVATE
-    # repo (non-fork events) it defaults to Ubicloud (ubicloud-standard-2) to keep Linux CI off
-    # the shared GitHub Pro minute cap; override with the LINUX_CI_RUNNER var (e.g.
-    # '["ubuntu-latest"]' to fall back). The repo+fork gate keeps the public lane and any fork
-    # PR on free GitHub-hosted ubuntu-latest — see
-    # lavasec-infra/plans/2026-07-08-linux-ci-runner-cost-plan.md.
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
+    if: ${{ github.event.pull_request.draft != true }}
+    # Keep the private runner fixed while public exports use hosted Linux.
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && 'ubicloud-standard-2' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
@@ -88,12 +76,17 @@ jobs:
 
   repo-checks:
     name: Repo Checks
-    # Same per-repo Linux runner swap as the `changes` job above (LINUX_CI_RUNNER; private
-    # non-fork defaults to ubicloud-standard-2, plan cited there). Public/fork stays on
-    # GitHub-hosted ubuntu-latest. Ubicloud provides Docker (SwiftLint container) + Node.
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.LINUX_CI_RUNNER || '["ubicloud-standard-2"]') || fromJSON('["ubuntu-latest"]') }}
+    # Draft PRs are inert (see `on.pull_request.types`); `ready_for_review` re-runs.
+    if: ${{ github.event.pull_request.draft != true }}
+    # Keep the private runner fixed while public exports use hosted Linux.
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && 'ubicloud-standard-2' || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
+      - name: Require trusted branch for native validation
+        if: ${{ github.repository == 'lavasecurity/lavasec-ios-internal' && github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') }}
+        run: |
+          echo "::error::Internal native validation requires a reviewed branch in this repository. Fork and unreviewed dependency-bot code cannot run on persistent Macs."
+          exit 1
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -102,8 +95,37 @@ jobs:
       - name: Check GPL blocklist distribution guardrails
         run: scripts/check-gpl-blocklist-distribution.sh
 
+      - name: Set up Node.js for repository checks
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Verify adopted filter catalog against its canonical commit
+        env:
+          CATALOG_BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          CATALOG_HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+        run: |
+          # Only catalog adoption depends on upstream availability; unrelated PRs stay local.
+          if [ -n "$CATALOG_BASE" ] && [ -n "$CATALOG_HEAD" ] &&
+             git diff --quiet "$CATALOG_BASE" "$CATALOG_HEAD" -- Catalog/blocklist-catalog.json Catalog/blocklist-catalog.json.source.json scripts/sync-filter-catalog.mjs; then
+            echo "Catalog snapshot unchanged"
+          else
+            node scripts/sync-filter-catalog.mjs Catalog/blocklist-catalog.json --check
+          fi
+
       - name: Check blocklist catalog codegen is in sync with the canonical spec
         run: node scripts/generate-blocklist-catalog.mjs --check
+
+      # Runs HERE, in the always-on Linux lane that fires on every repo and on forks —
+      # deliberately not alongside the full --check, which needs the pinned Rust toolchain
+      # and therefore only ever ran on the internal, self-hosted engine lane. The public
+      # mirror is where the binary redistribution creating the attribution obligation
+      # actually happens, so a gate that skipped it protected the one place that did not
+      # need protecting. This mode is cargo-free: it cannot see a crate JOINING the graph
+      # (only the toolchain lane can) but it catches every way the committed notices can be
+      # edited, diverge from each other, or disagree with the index.
+      - name: Check the committed third-party notices are self-consistent
+        run: node scripts/generate-wireguard-core-notices.mjs --verify-committed
 
       - name: Check localization completeness (all locales present + nothing left untranslated)
         run: node scripts/check-localization.mjs
@@ -113,6 +135,26 @@ jobs:
 
       - name: Test repository guardrail fixtures
         run: node --test scripts/tests/*.test.mjs
+
+      # Internal-only: these carry the retired-endpoint denylist, which is why they are on the
+      # export denylist and cannot run from the public tree. See scripts/export-public-source.sh.
+      #
+      # 🔴 THIS FILE SHIPS BYTE-IDENTICALLY TO THE PUBLIC REPO — `ios.yml` is deliberately not
+      # denylisted, so the contamination guard can compare the two lanes. An unguarded
+      # `node --test scripts/internal-tests/*.test.mjs` therefore breaks the public lane, where
+      # that directory cannot exist (Kilo, PR #653).
+      #
+      # The lane is detected by a DENYLISTED file, not by a repository name or an input: if
+      # `internal-promotion.yml` is present this is the internal tree, and the suite must run. That
+      # way the public lane skips loudly while the internal lane cannot skip silently — if the
+      # directory were ever lost internally, node fails on the missing glob rather than passing.
+      - name: Test internal-only guardrail fixtures
+        run: |
+          if [ -f .github/workflows/internal-promotion.yml ]; then
+            node --test scripts/internal-tests/*.test.mjs
+          else
+            echo "public lane: scripts/internal-tests/ is denylisted from the export — skipped"
+          fi
 
       - name: Check XcodeGen source membership
         run: node scripts/check-xcodegen-sources.mjs
@@ -243,22 +285,15 @@ jobs:
   swift-package-tests:
     name: Swift Package Tests
     needs: changes
-    # Per-lane runner WITHOUT forking this byte-identical file (same trick as
-    # ios-simulator-build's gate). Self-hosted is ALLOWLISTED to the exact private repo
-    # (it owns lava-mac-vm-ios-internal). EVERY other repo — the public lavasec-ios AND
-    # any OSS fork of either lane — uses GitHub-hosted macos-26: a fork has no access to
-    # the VM (a denylist on the public name would strand `someone/lavasec-ios` forks on
-    # the self-hosted default), and public minutes are free anyway. A fork PR opened
-    # against the private repo is also routed to macos-26: its semantic package-boundary
-    # check must still run, but untrusted code must never execute on the owned VM.
-    # Override the private trusted runner via IOS_CI_MAC_RUNNER if the VM is offline.
+    # Only trusted private work uses owned Macs; public exports use hosted macOS.
     # `!cancelled()` forces this REQUIRED job to run even if the `changes` prerequisite FAILED
     # (transient checkout/git-diff/outage) instead of being skipped by `needs` — a skipped-after-
     # failed-dependency required check may not block the PR, so a code PR could merge without this
     # macOS check (Codex P1 #232). On a `changes` failure `docs_only` is '' so the step-level guard
-    # runs the suite fully (fail-safe).
-    if: ${{ !cancelled() }}
-    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) && fromJSON(vars.IOS_CI_MAC_RUNNER || '["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
+    # runs the suite fully (fail-safe). Draft PRs skip the Mac job entirely (see
+    # `on.pull_request.types`); `ready_for_review` re-runs it.
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && (github.repository != 'lavasecurity/lavasec-ios-internal' || github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) }}
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && fromJSON('["self-hosted","macOS"]') || fromJSON('["macos-26"]') }}
     # 30, not this lane's natural ~5: VM jobs hold only the SHARED maintenance lock, so a
     # co-scheduled production release archive core-starves this REQUIRED lane instead of
     # queueing it (same failure shape that cancelled PR #347's compile at its timeout —
@@ -305,19 +340,22 @@ jobs:
             --scratch-path "$SCRATCH"
             --cache-path "$SPMCACHE")
           ci/run-with-maintenance-lock.sh -- "${cmd[@]}"
+          # Native backup lifecycle semantics run with isolated Keychain/storage/session I/O.
+          # This does not contact Supabase or use a simulator/account.
+          ci/run-with-maintenance-lock.sh -- python3 Tests/NativeBackupDeletionCompatibilityTests.py
+          ci/run-with-maintenance-lock.sh -- python3 Tests/NativeProtectedPreferenceRecoveryTests.py
 
   ios-simulator-build:
     name: iOS Simulator Build
     needs: changes
-    # Gated to the public repo: the full xcodebuild compile burns billed macOS
-    # minutes, which are free on public but cost real money on the private lane.
-    # The private lane gets app-compile coverage from light-build.yml on owned
-    # hardware instead, so it skips this job for $0.
+    # Public source builds run on hosted macOS, including public fork PRs.
     # `!cancelled()` so a FAILED `changes` prerequisite doesn't skip this required job (see
-    # swift-package-tests' note — Codex P1 #232); the public-repo gate is preserved.
-    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' }}
+    # swift-package-tests' note — Codex P1 #232); draft PRs skip it too.
+    if: ${{ !cancelled() && github.repository == 'lavasecurity/lavasec-ios' && github.event.pull_request.draft != true }}
     runs-on: macos-26
-    timeout-minutes: 30
+    # Full RN preparation (npm tests, JS bundle, Pods and workspace generation) runs before
+    # the ~30-minute Xcode compile, so allow room for both on a cold runner.
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -325,13 +363,27 @@ jobs:
       - name: Show Xcode Version
         run: xcodebuild -version
 
+      - uses: actions/setup-node@v6
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        with:
+          node-version: '24'
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        with:
+          ruby-version: '3.3.12'
+          bundler: '4.0.16'
+          working-directory: ReactNative
+      - name: Prepare canonical RN app workspace
+        if: ${{ needs.changes.outputs.docs_only != 'true' }}
+        run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/prepare-full-app.sh "$RUNNER_TEMP/lava-rn-prepare" "$RUNNER_TEMP/lava-rn-evidence"
+
       - name: Build LavaSec
         # Docs-only PRs skip the ~30-min compile (REL-6); the job still reports its
         # required "iOS Simulator Build" context green.
         if: ${{ needs.changes.outputs.docs_only != 'true' }}
         run: |
-          xcodebuild \
-            -project LavaSec.xcodeproj \
+          ci/run-with-maintenance-lock.sh -- xcodebuild \
+            -workspace ReactNative/native-app/LavaSecRN.xcworkspace \
             -scheme LavaSec \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \

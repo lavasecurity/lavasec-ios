@@ -3,6 +3,25 @@ import XCTest
 @testable import LavaSecKit
 
 final class GuardStepHealthPolicyTests: XCTestCase {
+    func testOwnedMissingHealthDoesNotRevivePersistedAssessment() {
+        let projection = ChainedConnectLifecyclePolicy.Projection(ownsHealth: true)
+        for fallback: ProtectionConnectivitySeverity in [.healthy, .usingDeviceDNSFallback, .usingEncryptedFallback] {
+            let severity = projection.effectiveConnectivity(fallback: fallback)
+            XCTAssertNil(severity)
+            XCTAssertEqual(GuardStepHealthPolicy.dnsStatus(
+                isProtectionActive: true, configuredResolver: .googleDoH,
+                health: TunnelHealthSnapshot(), connectivitySeverity: severity), .inactive)
+            XCTAssertEqual(GuardStepHealthPolicy.dnsDetail(
+                configuredResolver: .googleDoH, health: TunnelHealthSnapshot(),
+                connectivitySeverity: severity), "Status unavailable")
+            XCTAssertFalse(severity == .usingDeviceDNSFallback)
+            XCTAssertFalse(severity == .usingEncryptedFallback)
+        }
+        XCTAssertEqual(ChainedConnectLifecyclePolicy.Projection().effectiveConnectivity(fallback: .healthy), .healthy)
+        XCTAssertEqual(ChainedConnectLifecyclePolicy.Projection(connectivity: .dnsSlow, ownsHealth: true)
+            .effectiveConnectivity(fallback: .healthy), .dnsSlow)
+    }
+
     func testDNSIsInactiveWhenProtectionIsOff() {
         let status = GuardStepHealthPolicy.dnsStatus(
             isProtectionActive: false,

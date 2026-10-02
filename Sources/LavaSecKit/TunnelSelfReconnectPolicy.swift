@@ -1,16 +1,13 @@
 import Foundation
 
-/// Decides whether the tunnel should restart *itself* to recover from a wedged
-/// resolver — the case where DNS stays broken after a network handoff because the
-/// device-DNS resolver addresses captured while the tunnel is active are stale
-/// (a full restart re-captures them, since startup reads system DNS before
-/// applying the tunnel's own DNS settings).
+/// Admits a tunnel restart for a sustained resolver wedge or an explicitly
+/// evidenced Device DNS recapture requirement. Startup reads system DNS before
+/// applying the tunnel's settings, so restarting can recover stale network DNS.
 ///
-/// This is the last-resort escalation after the in-place recovery (connection
-/// teardown, settle re-probe, device-DNS fallback) has failed to restore DNS.
-/// It is deliberately conservative:
-///   - only when the connectivity assessment is `.needsReconnect` (a sustained,
-///     restart-worthy failure — never for mere slowness or an active fallback),
+/// The tier recovery owner supplies the requirement; this policy admits the
+/// shared process restart resource. It is deliberately conservative:
+///   - an ordinary wedge requires `.needsReconnect`; a Device DNS requirement
+///     comes from that tier's own evidence, which another tier's rescue cannot erase,
 ///   - only when protection is enabled *and* Connect-On-Demand is confirmed armed,
 ///     so the restart actually brings the tunnel back (otherwise self-cancelling
 ///     would just strand the user offline with no automatic recovery),
@@ -19,21 +16,19 @@ import Foundation
 ///     process, so the attempt history is persisted by the caller and passed back
 ///     in to survive across restarts.
 public enum TunnelSelfReconnectPolicy {
-    /// Minimum gap between self-reconnects.
+    /// Minimum gap between self-reconnects, including restarts credited as productive.
     public static let cooldown: TimeInterval = 90
     /// Sliding window over which `maxAttemptsPerWindow` is counted.
     public static let attemptWindow: TimeInterval = 600
     /// Hard cap on self-reconnects within `attemptWindow`; once reached we stop
     /// restarting and leave the "reconnect needed" notification as the signal.
     public static let maxAttemptsPerWindow = 2
-    /// Cap for the device-DNS *recapture* restart (Track 4) — the no-fallback
-    /// resolver-changing handoff where a cold restart is the ONLY thing that
-    /// re-captures the new network's resolver (Phase 0). Slightly higher than the
+    /// Cap for a Device DNS recapture restart — a cold restart reads the network's
+    /// resolver before tunnel settings mask system DNS. Slightly higher than the
     /// wedge cap: the +1 headroom absorbs one in-flight, not-yet-credited restart
-    /// during a legitimate network-switch flurry (a productive restart is credited
-    /// back on the next launch's confirmed recovery, so genuine switching nets ~0),
-    /// while still bounding a genuinely-dead resolver at 3 restarts/window before
-    /// falling back to the in-place wedge-recovery probe (anti restart-loop).
+    /// during a legitimate network-switch flurry. Confirmed recovery credits the
+    /// attempt against this cap; the committed-restart marker retains the cooldown.
+    /// An unrecovered resolver remains bounded at 3 restarts per window.
     public static let maxDeviceDNSRecaptureAttemptsPerWindow = 3
 
     /// Why a self-reconnect is being considered. Selects the per-window ceiling; the
@@ -43,7 +38,16 @@ public enum TunnelSelfReconnectPolicy {
     public enum RestartReason: Equatable, Sendable {
         /// The sustained connectivity wedge (the original escalation).
         case wedge
-        /// Device-DNS capture-retry exhaustion on a no-fallback config (Track 4).
+        /// Device DNS requires fresh network resolver capture.
+        case deviceDNSRecapture
+    }
+
+    /// The recovery owner's evidenced reason to request the shared restart resource.
+    public enum RecoveryRequirement: Equatable, Sendable {
+        /// Aggregate DNS health has established a sustained reconnect-worthy wedge.
+        case sustainedWedge(ProtectionConnectivityAssessment)
+        /// A Device DNS tier has established that its network resolver must be recaptured.
+        /// The caller must enforce tier admission, egress, and current lifecycle evidence.
         case deviceDNSRecapture
     }
 
@@ -69,13 +73,14 @@ public enum TunnelSelfReconnectPolicy {
             .filter { now.timeIntervalSince($0) < attemptWindow }
     }
 
-    /// Chooses a reconnect outcome after checking severity, on-demand recovery, cooldown, and window limits.
+    /// Preserves aggregate-health admission for existing callers before applying shared restart limits.
     public static func decision(
         assessment: ProtectionConnectivityAssessment,
         protectionEnabled: Bool,
         onDemandEnabled: Bool,
         recentReconnectTimes: [Date],
         reason: RestartReason = .wedge,
+        lastCommittedReconnectAt: Date? = nil,
         now: Date = Date()
     ) -> Decision {
         // Only the genuine wedge — not `.dnsSlow` (also `.reconnect`, but working)
@@ -84,6 +89,44 @@ public enum TunnelSelfReconnectPolicy {
               assessment.primaryAction == .reconnect
         else {
             return .noAction
+        }
+
+        let requirement: RecoveryRequirement = reason == .deviceDNSRecapture
+            ? .deviceDNSRecapture
+            : .sustainedWedge(assessment)
+        return decision(
+            requirement: requirement,
+            protectionEnabled: protectionEnabled,
+            onDemandEnabled: onDemandEnabled,
+            recentReconnectTimes: recentReconnectTimes,
+            lastCommittedReconnectAt: lastCommittedReconnectAt,
+            now: now
+        )
+    }
+
+    /// Admits an evidenced requirement after checking recovery intent and shared restart limits.
+    /// `lastCommittedReconnectAt` retains cooldown after productive credit removes an attempt from the cap store.
+    public static func decision(
+        requirement: RecoveryRequirement,
+        protectionEnabled: Bool,
+        onDemandEnabled: Bool,
+        recentReconnectTimes: [Date],
+        lastCommittedReconnectAt: Date? = nil,
+        now: Date = Date()
+    ) -> Decision {
+        let ceiling: Int
+        switch requirement {
+        case .sustainedWedge(let assessment):
+            guard assessment.severity == .needsReconnect,
+                  assessment.primaryAction == .reconnect
+            else {
+                return .noAction
+            }
+            ceiling = maxAttemptsPerWindow
+        case .deviceDNSRecapture:
+            // DNS tiers own their evidence (docs/architecture/dns-tiers.md). A
+            // rescue by another tier says nothing about the failed Device DNS tier.
+            ceiling = maxDeviceDNSRecaptureAttemptsPerWindow
         }
 
         // A self-cancel only recovers if Connect-On-Demand is actually armed to
@@ -98,13 +141,15 @@ public enum TunnelSelfReconnectPolicy {
 
         let recent = prunedAttemptTimes(recentReconnectTimes, now: now)
 
-        if let mostRecent = recent.max(), now.timeIntervalSince(mostRecent) < cooldown {
+        // Productive credit can remove an attempt from the cap store, but cannot
+        // erase the time of the actual process restart. Normalize a future marker
+        // the same way as persisted attempts so a clock regression fails closed.
+        let committedAt = lastCommittedReconnectAt.map { min($0, now) }
+        let latest = [recent.max(), committedAt].compactMap { $0 }.max()
+        if let latest, now.timeIntervalSince(latest) < cooldown {
             return .throttled
         }
 
-        let ceiling = reason == .deviceDNSRecapture
-            ? maxDeviceDNSRecaptureAttemptsPerWindow
-            : maxAttemptsPerWindow
         if recent.count >= ceiling {
             return .throttled
         }

@@ -14,6 +14,11 @@ import LavaSecKit
 struct LavaFilterEntity: AppEntity {
     let id: String
     let name: String
+    let emoji: String
+
+    var displayName: String {
+        FilterIdentityPolicy.displayName(name: name, emoji: emoji)
+    }
 
     // Both `static let` (not `var`): the AppIntents metadata processor emits the AppEntity record —
     // and from it the parameter→query type link — only from CONST bindings. A mutable `static var`
@@ -23,7 +28,7 @@ struct LavaFilterEntity: AppEntity {
     static let defaultQuery = LavaFilterEntityQuery()
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)")
+        DisplayRepresentation(title: "\(displayName)")
     }
 }
 
@@ -41,7 +46,7 @@ struct LavaFilterEntityQuery: EntityQuery {
     /// Populates the filter picker shown in Settings › Focus › Focus Filters.
     func suggestedEntities() async throws -> [LavaFilterEntity] {
         LavaFilterEntityQuery.loadHostedFilters().map {
-            LavaFilterEntity(id: $0.id, name: $0.name)
+            LavaFilterEntity(id: $0.id, name: $0.name, emoji: $0.emoji)
         }
     }
 

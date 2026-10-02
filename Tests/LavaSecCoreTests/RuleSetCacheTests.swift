@@ -6,6 +6,15 @@ import XCTest
 final class RuleSetCacheTests: XCTestCase {
     private let sampleHash = String(repeating: "ab", count: 32)
 
+    func testLegacyBroadGoogleExceptionCacheIsRejected() throws {
+        var rules = DomainRuleSet()
+        try rules.insert(domain: "blocked.example", matchesSubdomains: true)
+        var bytes = RuleSetCache.encode(rules, contentSHA256: "abc", parseFormat: .plainDomains, payloadByteSize: 20)
+        // Header: six-byte magic, UInt16 schema, then the little-endian parser version.
+        bytes.replaceSubrange(8..<12, with: [3, 0, 0, 0])
+        XCTAssertNil(RuleSetCache.decode(bytes, contentSHA256: "abc", parseFormat: .plainDomains))
+    }
+
     func testStoreThenLoadRoundTripsRuleSetAndPayloadSize() throws {
         try withTemporaryDirectory { directory in
             let cache = RuleSetCache(cacheDirectoryURL: directory)

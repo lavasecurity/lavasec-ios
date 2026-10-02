@@ -10,92 +10,101 @@
 
 **The internet is lava — so I made a blocklist app even my dad can use.**
 
-Lava blocks known-bad domains right on your iPhone — no account, and nothing
-routed through us. Core protection is free, it's live on the App Store now,
-and this iOS client is fully open source.
+Lava blocks known-bad domains on your iPhone — no account, and nothing routed
+through us. Core protection is free, it's live on the App Store, and the client
+is fully open source.
 
-This repo is the open-source iOS client for [Lava Security](https://lavasecurity.app).
-The backend, marketing site, and operational infrastructure live in separate
+This repo is that client for [Lava Security](https://lavasecurity.app); the
+backend, marketing site, and operational infrastructure live in separate
 (private) repositories.
 
-> **Status:** Live on the App Store. Actively developed — app surfaces, APIs,
-> and configuration may still change between releases. Issues and discussion
-> are welcome — see [CONTRIBUTING](CONTRIBUTING.md).
+> **Status:** Live and actively developed — surfaces, APIs, and configuration can
+> still change between releases. Issues and discussion are welcome; see
+> [CONTRIBUTING](CONTRIBUTING.md).
 
 ## How it works
 
 Lava runs a local `NEPacketTunnelProvider` that resolves DNS over an encrypted
-transport (DoH/DoT/DoQ) and filters domains against on-device blocklists —
-your browsing domains are not routinely uploaded anywhere.
+transport (DoH/DoT/DoQ) and filters domains against on-device blocklists. Your
+browsing domains are not routinely uploaded anywhere.
 
 ## Highlights
 
 - **On-device filtering** — DNS resolution and blocklist matching happen inside
   the Network Extension; no per-request domain upload.
-- **Encrypted DNS** — DoH / DoT / DoQ transports.
+- **Encrypted DNS** — DoH / DoT / DoQ, with the resolver you choose.
 - **Memory-bounded** — blocklists are mmap'd to stay within the Network
   Extension memory budget.
-- **Optional account features** — encrypted backup via Supabase: zero-knowledge
-  with your recovery phrase, plus an optional Passkey for server-assisted restore
-  (entirely optional; the core filter works with no account).
+- **Optional account** — encrypted, zero-knowledge backup via Supabase with your
+  recovery phrase, plus an optional Passkey for server-assisted restore. The core
+  filter works with no account.
 
 ## Repository layout
 
 | Path | What it is |
 |------|------------|
-| `LavaSecApp/` | The main SwiftUI app |
+| `ReactNative/` | React Native screens, navigation, and the generated iOS workspace — the supported app entry point |
+| `LavaSecApp/` | Native app host, services, and native views used by RN |
 | `LavaSecTunnel/` | `NEPacketTunnelProvider` network extension (the filter engine) |
-| `LavaSecWidget/` | Home-screen / Live Activity widget |
+| `LavaSecWidget/`, `LavaSecIntents/` | Widget / Live Activity and App Intents extensions |
 | `Shared/` | Code shared across the app and extensions (App Group, guardian, command service) |
-| `Sources/`, `Tests/` | SwiftPM core library + unit tests |
+| `Sources/`, `Tests/` | Layered SwiftPM core library (`LavaSecKit` through `LavaSecCore`) + unit tests |
 | `LavaSecUITests/` | UI tests |
-| `Config/` | Build configuration templates (`Lava.local.xcconfig.example`) |
-| `docs/legal/` | Third-party notices and license-compliance decisions |
+| `Catalog/`, `Config/` | Blocklist catalog inputs and build configuration templates |
+| `docs/` | Architecture, invariants, testing, and license notes |
+
+See [RN app ownership and native retention](docs/architecture/rn-only-app.md) for
+the React Native / native split.
 
 ## Building
 
-Requirements: Xcode 26 or newer, an iOS 18+ device or simulator.
+Install Xcode 26+, Node matching `ReactNative/package.json` engines
+(`^22.13 || ^24.3 || >=26`, with npm), Ruby 3.3.12 with Bundler 4.0.16, and
+Python 3 on your `PATH`. The first preparation installs the locked npm and
+CocoaPods dependencies, downloads the pinned XcodeGen, runs the RN checks, and
+generates the workspace — so it needs network access. The DNS-filtering core
+builds with no account configuration; a **physical device** needs a Developer
+team and a Network Extension provisioning profile.
 
 ```sh
 git clone https://github.com/lavasecurity/lavasec-ios
 cd lavasec-ios
 cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig   # then fill in your team / Supabase
-open LavaSec.xcodeproj
+bash ReactNative/scripts/prepare-full-app.sh /tmp/lava-rn-build /tmp/lava-rn-evidence
+open ReactNative/native-app/LavaSecRN.xcworkspace
 ```
 
-- The **local DNS-filtering core** builds and runs with no account configuration.
-- To run on a **physical device** you need your own Apple Developer team and a
-  Network Extension provisioning profile (set `DEVELOPMENT_TEAM` and the profile
-  names in `Config/Lava.local.xcconfig`).
-- The optional **account / backup** features require your own Supabase project
+- Set `DEVELOPMENT_TEAM` and the profile names in
+  `Config/Lava.local.xcconfig` to run on a device.
+- The optional **account / backup** features need your own Supabase project
   (`LAVA_SUPABASE_URL` / `LAVA_SUPABASE_ANON_KEY`).
 
 ### Schemes & tests
 
 - **Scheme:** `LavaSec` (builds the app, Network Extension, and widget).
-- **Run the core library tests:**
+- **Core library tests:**
 
   ```sh
   swift test --package-path . -Xswiftc -warnings-as-errors
   ```
 
-- **Build for the simulator (no signing required):**
+- **Simulator build (no signing required):**
 
   ```sh
-  xcodebuild -project LavaSec.xcodeproj -scheme LavaSec \
+  xcodebuild -workspace ReactNative/native-app/LavaSecRN.xcworkspace -scheme LavaSec \
     -configuration Debug -destination 'generic/platform=iOS Simulator' \
     CODE_SIGNING_ALLOWED=NO build
   ```
 
-The simulator build exercises the app and the filter core. The VPN / Network
-Extension itself only runs on a **physical device** — select your Apple
-Developer team in `Config/Lava.xcconfig` and run the `LavaSec` scheme from Xcode.
-These same checks run in CI (`.github/workflows/ios.yml`).
+The simulator build exercises the app and the filter core; the VPN / Network
+Extension itself only runs on a physical device. CI runs these same checks
+(`.github/workflows/ios.yml`).
 
 ## License
 
-[GNU Affero General Public License v3.0](LICENSE). See [`docs/legal/third-party-notices.md`](docs/legal/third-party-notices.md)
-for third-party dependencies and blocklist data attribution.
+[GNU Affero General Public License v3.0](LICENSE). See
+[`docs/legal/third-party-notices.md`](docs/legal/third-party-notices.md) for
+third-party dependencies and blocklist data attribution.
 
 ## Security
 

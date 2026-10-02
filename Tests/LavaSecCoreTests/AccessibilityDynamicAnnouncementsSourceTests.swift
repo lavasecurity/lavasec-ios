@@ -26,7 +26,7 @@ final class AccessibilityDynamicAnnouncementsSourceTests: XCTestCase {
             "The prepare screen must announce a terminal state already set at mount (fail-before-present)."
         )
         XCTAssertTrue(
-            block.contains(".onChange(of: viewModel.filterPreparationState)"),
+            block.contains(".onChange(of: drafts.preparationState)"),
             "The prepare screen must announce terminal states reached after presentation."
         )
         // Helper defined once + called from both .onAppear and .onChange → three occurrences.
@@ -47,46 +47,21 @@ final class AccessibilityDynamicAnnouncementsSourceTests: XCTestCase {
 
     // MARK: S6 — Privacy & Data clear completion
 
-    func testPrivacyDataClearAnnouncesPerTargetCompletion() throws {
-        let source = try readSource(.privacySecuritySettingsView)
-        XCTAssertTrue(
-            source.contains("var clearedConfirmation: String"),
-            "The clear target must expose a localized past-tense confirmation string."
-        )
-        let clearBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func clear(_ target: LocalLogClearTarget) {",
-            endingBefore: "private func exportLocalLogs()"
-        )
-        // The clear methods swallow write failures internally, so the announcement must be gated on
-        // the VM reporting a durable clear — never spoken unconditionally.
-        XCTAssertTrue(
-            clearBlock.contains("if didClear {"),
-            "The clear announcement must be gated on the mutation durably succeeding."
-        )
-        XCTAssertTrue(
-            clearBlock.contains("LavaAccessibilityAnnouncer.announce(target.clearedConfirmation.lavaLocalized)"),
-            "A successful Privacy & Data clear must announce a per-target completion confirmation."
-        )
-    }
-
     // MARK: S7 — backup restore + setup completion
 
     func testBackupRestoreAnnouncesSettledOutcome() throws {
         let source = try readSource(.backupRestoreView)
-        // Both the success and the failure/cancelled paths announce their settled outcome — the
-        // status panel updates in place, so neither would otherwise be spoken.
-        XCTAssertEqual(
-            source.components(separatedBy: "LavaAccessibilityAnnouncer.announce(").count - 1, 2,
-            "Both the restore success and failure paths must announce their settled outcome."
-        )
+        // Each in-place transition is announced, including the new mandatory review step.
+        XCTAssertTrue(source.contains("LavaAccessibilityAnnouncer.announce(RestoreStatus.reviewing.title.lavaLocalized)"))
+        XCTAssertTrue(source.contains("restoreStatus.title.lavaLocalized + \" \" + restoreStatus.detail.lavaLocalized"))
+        XCTAssertTrue(source.contains("LavaAccessibilityAnnouncer.announce(status.title.lavaLocalized + \" \" + status.detail.lavaLocalized)"))
     }
 
     func testBackupSetupAnnouncesCompletion() throws {
         let source = try readSource(.backupSetupView)
         XCTAssertTrue(
-            source.contains("LavaAccessibilityAnnouncer.announce(\"Encrypted backup is ready\".lavaLocalized)"),
-            "Turning on encrypted backup must announce completion before the sheet dismisses."
+            source.contains("LavaAccessibilityAnnouncer.announce(\"Backup is ready\".lavaLocalized)"),
+            "Turning on encrypted backup must announce the confirmed completion shown in the success screen."
         )
     }
 }

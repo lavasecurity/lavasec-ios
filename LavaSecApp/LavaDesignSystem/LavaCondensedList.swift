@@ -1,10 +1,25 @@
 import SwiftUI
 import LavaSecKit
 
+/// A row owns its content insets once, regardless of first/last position or refresh.
+struct LavaTableRow<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, LavaRowHeight.horizontalInset)
+            .padding(.vertical, LavaRowHeight.verticalInset)
+            .frame(minHeight: LavaRowHeight.standard)
+    }
+}
+
 struct LavaCondensedList<Content: View>: View {
     let content: Content
+    let surface: LavaSurface.Role
 
-    init(@ViewBuilder content: () -> Content) {
+    init(surface: LavaSurface.Role = .card, @ViewBuilder content: () -> Content) {
+        self.surface = surface
         self.content = content()
     }
 
@@ -13,12 +28,12 @@ struct LavaCondensedList<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.card)
+        .lavaSurface(surface)
     }
 }
 
 /// Placeholder row shown inside a card list whose data collection is empty. ONE scaffold —
-/// the 15pt row-title face on `.primary` plus fixed 16pt insets — so every empty list renders
+/// the shared 15pt row-title role on `.primary` and standard row geometry — so every empty list renders
 /// at the same height as the Filters shelves' empty rows. Screens must not hand-roll their own
 /// placeholder `Text` with per-screen font/padding: that is exactly how the Network Activity
 /// empty row drifted shorter (and grayer) than its siblings.
@@ -39,9 +54,7 @@ struct LavaEmptyListRow: View {
                     .lavaRowSubtitleText()
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, LavaRowHeight.horizontalInset)
-        .padding(.vertical, 16)
+        .lavaRow()
     }
 }
 
@@ -52,6 +65,81 @@ struct LavaCondensedDivider: View {
         Divider()
             .padding(.leading, leadingInset)
             .padding(.trailing, 16)
+    }
+}
+
+/// Which side of a filter a content row belongs to. The row owns the mark so the
+/// blocked/allowed outline cannot drift between the filter detail and the import
+/// review; see `LavaOutcomeSymbol.blockedOutline`.
+enum LavaFilterContentOutcome {
+    case blocked
+    case allowed
+
+    var symbol: String {
+        switch self {
+        case .blocked: LavaOutcomeSymbol.blockedOutline
+        case .allowed: LavaOutcomeSymbol.allowedOutline
+        }
+    }
+}
+
+/// Shared blocklist/domain text row for View filter and import review. Reading a
+/// shared setup uses the same type, insets and content height as reading a filter.
+/// The accessory is supplied by edit mode; its absence never changes the row floor.
+/// An optional `outcome` leads the row with the outcome's stroke-only mark.
+struct LavaFilterContentRow<Accessory: View>: View {
+    let title: String
+    var metadata: String? = nil
+    var isInactive = false
+    var verbatimTitle = false
+    var verbatimMetadata = false
+    var outcome: LavaFilterContentOutcome? = nil
+    @ViewBuilder var accessory: () -> Accessory
+
+    var body: some View {
+        HStack(alignment: .center, spacing: LavaSpacing.md) {
+            // Stroke-only and untinted, matching the numbered marks on the DNS
+            // and WireGuard list rows; the mark is decorative (the row label
+            // carries the meaning for VoiceOver).
+            if let outcome {
+                Image(systemName: outcome.symbol)
+                    .accessibilityHidden(true)
+                    .padding(.vertical, LavaRowHeight.verticalInset)
+            }
+
+            VStack(alignment: .leading, spacing: LavaSpacing.xs) {
+                Text(verbatimTitle ? title : title.lavaLocalized)
+                    .lavaRowTitleText()
+                    .foregroundStyle(isInactive ? LavaStyle.secondaryText : LavaStyle.primaryText)
+                    .strikethrough(isInactive, color: LavaStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let metadata, !metadata.isEmpty {
+                    Text(verbatimMetadata ? metadata : metadata.lavaLocalized)
+                        .lavaMetadataText()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            .padding(.vertical, LavaRowHeight.verticalInset)
+
+            // Reserve the same width and height before an edit control appears,
+            // so neither title wrapping nor the row floor changes with edit mode.
+            // The 44pt hit area shares the content inset instead of adding to it.
+            ZStack { accessory() }
+                .frame(width: LavaToolbarMetrics.buttonSize)
+                .frame(minHeight: LavaToolbarMetrics.buttonSize)
+        }
+        .padding(.horizontal, LavaRowHeight.horizontalInset)
+        .frame(minHeight: LavaRowHeight.standard)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(isInactive ? 0.68 : 1)
+    }
+}
+
+extension LavaFilterContentRow where Accessory == EmptyView {
+    init(title: String, metadata: String? = nil, verbatimTitle: Bool = false, verbatimMetadata: Bool = false, outcome: LavaFilterContentOutcome? = nil) {
+        self.init(title: title, metadata: metadata, verbatimTitle: verbatimTitle, verbatimMetadata: verbatimMetadata, outcome: outcome, accessory: { EmptyView() })
     }
 }
 
@@ -135,13 +223,13 @@ struct LavaCondensedListItem<Leading: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             leading
+                .padding(.vertical, LavaRowHeight.verticalInset)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title.lavaLocalized)
                     .font(titleFont)
                     .lavaInactiveText(isInactive)
                     .lineLimit(titleLineLimit)
-                    .minimumScaleFactor(0.82)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let subtitle {
@@ -167,23 +255,17 @@ struct LavaCondensedListItem<Leading: View>: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             .layoutPriority(1)
+            .padding(.vertical, LavaRowHeight.verticalInset)
 
             Spacer(minLength: 6)
 
             if let trailingAction {
-                Button(action: trailingAction.action) {
-                    Image(systemName: trailingAction.systemImage)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(trailingAction.tint)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(trailingAction.title.lavaLocalized)
+                LavaToolbarIconButton(systemName: trailingAction.systemImage,
+                                      accessibilityLabel: trailingAction.title,
+                                      tint: trailingAction.tint, action: trailingAction.action)
             }
         }
         .padding(.horizontal, LavaRowHeight.horizontalInset)
-        .padding(.vertical, 11)
         .frame(minHeight: LavaRowHeight.standard)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())

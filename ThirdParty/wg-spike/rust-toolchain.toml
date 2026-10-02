@@ -1,0 +1,5 @@
+# Pinned so every spike measurement builds the same engine bits. 1.94.0 is a published
+# stable release installable on a fresh machine; the spike uses no newer-patch features.
+[toolchain]
+channel = "1.94.0"
+targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"]

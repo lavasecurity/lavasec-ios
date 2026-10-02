@@ -15,18 +15,20 @@
 import Foundation
 import LavaSecKit
 
-/// State machine for the bounded device-DNS capture retry: schedule gating (incl.
-/// the wake-suppression cooldown), attempt counting, exhaustion stamping, and the
-/// pending-attempt handle. Time and delayed execution are injected so tests can
-/// replay field timelines deterministically. The actor executes on the owner's
-/// serial queue itself (custom executor), so already-on-queue callers use the
-/// synchronous `assumeIsolated` path with zero hops — exactly the pre-actor call
-/// shape, now checked by the runtime instead of a comment.
+/// State machine for the SINGLE-SHOT device-DNS capture: schedule gating (incl.
+/// the wake-suppression cooldown), exhaustion stamping, and the pending-attempt
+/// handle. A scheduled capture reads once — there is no attempt loop (see
+/// `DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval`). Time and delayed
+/// execution are injected so tests can replay field timelines deterministically.
+/// The actor executes on the owner's serial queue itself (custom executor), so
+/// already-on-queue callers use the synchronous `assumeIsolated` path with zero
+/// hops — exactly the pre-actor call shape, now checked by the runtime instead of
+/// a comment.
 public actor DeviceDNSCaptureRetryCycle {
     /// Outcome of a schedule request; the provider maps these to its existing
     /// log events (`device-dns-capture-retry-suppressed` on `.suppress(logOnce: true)`).
     public enum ScheduleDecision: Equatable, Sendable {
-        /// Start a fresh cycle (attempts reset to zero, first attempt armed).
+        /// Start a fresh single-shot capture (the one attempt is armed by the caller).
         case start
         /// Wake within the exhaustion cooldown — do not restart. `logOnce` is true
         /// exactly the first time per suppression period, mirroring the provider's
@@ -41,7 +43,6 @@ public actor DeviceDNSCaptureRetryCycle {
     private let scheduleAfter: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> DispatchWorkItem
 
     private var pendingAttempt: DispatchWorkItem?
-    private var attempts = 0
     private var lastMaskedExhaustionAt: Date?
     private var didLogWakeSuppression = false
 
@@ -92,14 +93,14 @@ public actor DeviceDNSCaptureRetryCycle {
             didLogWakeSuppression = false
         }
 
-        attempts = 0
         return .start
     }
 
-    /// Arms the next attempt after `interval`; the provider's `body` performs the
-    /// actual capture work and reports back via `noteAttemptRan` and the outcome
-    /// calls. `body` is `@Sendable` — it crosses isolation into the injected
-    /// scheduler and back onto the queue when the attempt fires.
+    /// Arms the single capture attempt after `interval`; the provider's `body`
+    /// performs the actual capture work and reports the outcome back via
+    /// `noteCaptureSucceeded`/`noteExhausted`. `body` is `@Sendable` — it crosses
+    /// isolation into the injected scheduler and back onto the queue when the
+    /// attempt fires.
     public func armAttempt(after interval: TimeInterval, body: @escaping @Sendable () -> Void) {
         let item = scheduleAfter(interval) { [weak self] in
             // The scheduleAfter contract delivers this body on `queue`, which IS the
@@ -111,21 +112,6 @@ public actor DeviceDNSCaptureRetryCycle {
             body()
         }
         pendingAttempt = item
-    }
-
-    /// Records one executed attempt and returns its 1-based number.
-    public func noteAttemptRan() -> Int {
-        attempts += 1
-        return attempts
-    }
-
-    /// Whether the cycle should arm another attempt (policy bound), given the last
-    /// capture's emptiness.
-    public func shouldContinue(capturedNonEmpty: Bool) -> Bool {
-        DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-            attemptsMade: attempts,
-            capturedNonEmpty: capturedNonEmpty
-        )
     }
 
     /// The mask lifted and the cycle ends. Whether the cooldown evidence clears
@@ -159,10 +145,5 @@ public actor DeviceDNSCaptureRetryCycle {
     public func cancelPendingAttempt() {
         pendingAttempt?.cancel()
         pendingAttempt = nil
-    }
-
-    /// Current attempt count — for the provider's exhaustion log detail.
-    public var attemptsMade: Int {
-        attempts
     }
 }

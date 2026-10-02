@@ -10,15 +10,12 @@ import UIKit
 ///
 /// Documented divergences / improvement opportunities (deferred — keep the current sales
 /// layout for now, per product):
-///   - The nav title stays a raw `.navigationTitle("Lava Security Plus")` literal (NOT
-///     `.lavaLocalized`). It is the one Settings title left untranslated; localize it when the
-///     sales copy is finalized.
+///   - The nav title is `.navigationTitle("Lava Plus".lavaLocalized)` so every entry path (the
+///     upgrade sheet, the DNS page, and the VPN-chaining page) shows the shortened product name
+///     in every locale.
 ///   - The plan-pitch strings + the "…and a pitch for your parent" subtitle are jokey
 ///     marketing copy, now localized (pitch via .lavaLocalized; subtitle via a literal Text).
 ///     Swap in finalized marketing copy when ready.
-///   - The Restore Purchase / Manage Subscription rows are hand-rolled with
-///     `.padding(16).lavaSurface(.card)` instead of the shared `lavaControlRowCard()`; they
-///     could adopt the shared row card pending visual QA that it preserves the sales look.
 struct UpgradeSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var plus: LavaSecurityPlusController
@@ -46,6 +43,10 @@ struct UpgradeSettingsView: View {
                 purchaseOptions
             }
 
+            UpgradeLegalFooter(
+                showsYearlyPaidMonthly: displayedOffers.contains { $0.plan.kind == .yearlyPaidMonthly }
+            )
+
             if let message = plus.lavaSecurityPlusMessage {
                 Text(message)
                     .font(.footnote.weight(.medium))
@@ -54,7 +55,7 @@ struct UpgradeSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .navigationTitle("Lava Security Plus")
+        .navigationTitle("Lava Plus".lavaLocalized)
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
             plus.clearLavaSecurityPlusMessage()
@@ -127,14 +128,14 @@ struct UpgradeSettingsView: View {
                 .padding(16)
                 .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
             }
-
-            UpgradeLegalFooter(
-                showsYearlyPaidMonthly: displayedOffers.contains { $0.plan.kind == .yearlyPaidMonthly }
-            )
         }
     }
 
     private var displayedOffers: [LavaSecurityPlusOffer] {
+        Self.displayedOffers(for: plus)
+    }
+
+    static func displayedOffers(for plus: LavaSecurityPlusController) -> [LavaSecurityPlusOffer] {
         if !plus.lavaSecurityPlusOffers.isEmpty {
             return plus.lavaSecurityPlusOffers
         }
@@ -155,6 +156,10 @@ struct UpgradeSettingsView: View {
     // otherwise it falls back to number-free copy so we never show a hard-coded
     // percentage that isn't true in the customer's currency.
     private func planPitch(for offer: LavaSecurityPlusOffer) -> String {
+        Self.planPitch(for: offer)
+    }
+
+    static func planPitch(for offer: LavaSecurityPlusOffer) -> String {
         switch offer.plan.kind {
         case .yearly:
             if let savingsPercent = offer.savingsPercent {
@@ -192,10 +197,14 @@ struct UpgradeSettingsView: View {
 
     @ViewBuilder
     private var subscriberManagementSection: some View {
-        VStack(spacing: 10) {
-            // Manage / cancel is shown only with an active auto-renewable subscription
-            // (non-nil expiry); hidden when there is no entitlement.
-            if plus.lavaSecurityPlusExpiresAt != nil {
+        LavaCondensedList {
+            // Manage / cancel is shown to any Plus subscriber, gated on the DURABLE paid flag — NOT the
+            // in-memory `lavaSecurityPlusExpiresAt`, which is nil until the first entitlement read
+            // populates it and is not persisted across launches. Gating on the expiry hid this control on
+            // a cold-launch transient-empty read that KEEPS Plus (EntitlementApplicationPolicy), leaving a
+            // paying subscriber unable to manage their subscription until StoreKit warmed (Codex, PR #560).
+            // Every plan is an auto-renewable subscription, so a Plus user can always manage.
+            if viewModel.configuration.hasLavaSecurityPlus {
                 Button {
                     manageSubscription()
                 } label: {
@@ -203,11 +212,12 @@ struct UpgradeSettingsView: View {
                         Image(systemName: "creditcard.circle")
                             .font(.title3.weight(.semibold))
                     }
+                    .lavaRow()
                 }
                 .buttonStyle(.plain)
                 .disabled(plus.isPurchasingLavaSecurityPlus)
-                .padding(16)
-                .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
+
+                LavaCondensedDivider()
             }
 
             // Restore — relevant for any plan after a reinstall or device switch.
@@ -223,22 +233,21 @@ struct UpgradeSettingsView: View {
                             .font(.title3.weight(.semibold))
                     }
                 }
+                .lavaRow()
             }
             .buttonStyle(.plain)
             .disabled(plus.isPurchasingLavaSecurityPlus)
-            .padding(16)
-            .lavaSurface(.card, cornerRadius: LavaSurface.compactCornerRadius)
         }
     }
 
     private func manageSubscription() {
         performAppSettingsMutation(reason: "Manage Lava Security Plus") {
-            await presentManageSubscriptions()
+            await Self.presentManageSubscriptions(plus: plus)
         }
     }
 
     @MainActor
-    private func presentManageSubscriptions() async {
+    static func presentManageSubscriptions(plus: LavaSecurityPlusController) async {
         // Prefer Apple's in-app manage sheet; fall back to the App Store subscriptions
         // page when no foreground scene is available or the sheet can't present (e.g. the
         // Simulator, where showManageSubscriptions often no-ops).
@@ -276,17 +285,27 @@ private struct UpgradeLegalFooter: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 6) {
-                Link("Terms of Use", destination: LavaWebLinks.terms)
-                Text("•")
-                    .foregroundStyle(LavaStyle.secondaryText)
-                Link("Privacy Policy", destination: LavaWebLinks.privacy)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { termsLink; privacyLink }
+                VStack(spacing: 0) { termsLink; privacyLink }
             }
             .font(.footnote.weight(.semibold))
-            .tint(LavaStyle.secondaryText)
+            .tint(LavaStyle.safeGreen)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 4)
+    }
+
+    private var termsLink: some View {
+        Link(destination: LavaWebLinks.terms) {
+            Text("Terms of Use").frame(minHeight: 44).contentShape(Rectangle())
+        }
+    }
+
+    private var privacyLink: some View {
+        Link(destination: LavaWebLinks.privacy) {
+            Text("Privacy Policy").frame(minHeight: 44).contentShape(Rectangle())
+        }
     }
 
     // Two fully-localized variants: the with-commitment paragraph is used only when the
@@ -304,11 +323,12 @@ private struct UpgradeLegalFooter: View {
 
 private struct UpgradeThankYouView: View {
     @EnvironmentObject private var plus: LavaSecurityPlusController
+    @EnvironmentObject private var customization: CustomizationController
 
     var body: some View {
         LavaPlainCard {
             VStack(spacing: 14) {
-                UpgradeThankYouMascot()
+                GuardianThankYouAnimation(size: 96, shieldStyle: customization.lavaGuardLook)
 
                 VStack(spacing: 6) {
                     Text("Thank you for your support")
@@ -332,28 +352,6 @@ private struct UpgradeThankYouView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
         }
-    }
-}
-
-private struct UpgradeThankYouMascot: View {
-    @EnvironmentObject private var customization: CustomizationController
-    @State private var mascotState: GuardianMascotState = .awake
-
-    var body: some View {
-        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)
-            .task {
-                mascotState = .awake
-                try? await Task.sleep(nanoseconds: 650_000_000)
-                guard !Task.isCancelled else {
-                    return
-                }
-                mascotState = .grateful
-                try? await Task.sleep(nanoseconds: 900_000_000)
-                guard !Task.isCancelled else {
-                    return
-                }
-                mascotState = .awake
-            }
     }
 }
 

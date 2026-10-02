@@ -1,0 +1,9 @@
+# Build outputs only — the crate source, vendored boringtun/, Cargo.lock, and the
+# committed xcframework under build/ are all tracked. target/ is cargo's scratch space.
+/target/
+
+# The repo-root .gitignore excludes any `build/` (Xcode output). Re-include this
+# crate's build/ — the committed engine xcframework is the deliberate exception
+# (D4 provenance: byte-compared against a from-source rebuild by the drift gate).
+!build/
+!build/**

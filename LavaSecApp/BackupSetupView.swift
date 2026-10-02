@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct BackupSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var backup: BackupController
 
     @State private var step: BackupSetupStep = .overview
@@ -14,21 +15,30 @@ struct BackupSetupView: View {
     @State private var navDirection: LavaFlowDirection = .forward
     @State private var selectedPasskeyMode: BackupSetupPasskeyMode?
     @State private var recoveryPhrase = ""
-    @State private var copiedRecoveryPhrase = false
-    @State private var savedRecoveryPhrase = false
-    @State private var understandsNoRecovery = false
+    @State private var consent = BackupSetupConsent()
+    @State private var setupAttemptID: UUID?
+    @State private var setupFeedbackID: UUID?
+    @State private var didClose = false
     @State private var isPreparingPasskey = false
     @State private var isValidatingPasskey = false
     @State private var isFinishingSetup = false
+    @State private var setupComplete = false
     @State private var errorMessage: String?
 
     var body: some View {
-        LavaSheetScaffold {
-            header
-        } content: {
-            // The chevron-back header and footer actions stay put on the sheet
-            // while the step body slides, mirroring a native push/pop (the title
-            // bar and toolbar holding still as the page underneath moves).
+        if setupComplete {
+            LavaSuccessScreen(title: "Backup is ready",
+                              message: "Your encrypted backup is set up on this device.",
+                              done: dismiss.callAsFunction)
+        } else {
+            setupPage
+        }
+    }
+
+    private var setupPage: some View {
+        LavaTaskSheet(title: step.title, back: sheetBackAction,
+                      actionsDisabled: isStepActionInFlight, scrolls: step != .complete, close: closeFlow) {
+            // Native task chrome stays fixed while the step body changes.
             ZStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 14) {
                     // The landing step leads with a boxed intro panel (matching
@@ -40,7 +50,7 @@ struct BackupSetupView: View {
                             description: step.subtitle,
                             systemImage: "lock.shield.fill"
                         )
-                    } else {
+                    } else if step != .complete {
                         Text(step.subtitle.lavaLocalized)
                             .lavaSupportingText()
                     }
@@ -57,38 +67,32 @@ struct BackupSetupView: View {
         // registered-but-unvalidated passkey that only the Cancel/Back path
         // (cancelPasskeyValidation) cleans up, so a drag-dismiss there would
         // leave orphaned pending passkey state in the backup controller. The
-        // disabled chevron only covers the button; without this the gesture
+        // disabled toolbar only covers the buttons; without this the gesture
         // reintroduces the same race.
         .interactiveDismissDisabled(blocksInteractiveDismiss)
         .onAppear {
             ensureRecoveryPhrase()
         }
+        .onChange(of: backup.setupUploadProgress) { _, _ in updateUploadProgress() }
         .lavaTier(.calm)
     }
 
-    // Mirror the import-filters sheet chrome: a chevron-back / centered-title bar on
-    // the sheet's material header instead of a pushed navigation bar, so the flow
-    // covers the tab bar.
-    private var header: some View {
-        HStack {
-            // Disabled while a passkey/setup task is awaiting, matching the footer
-            // buttons — otherwise Back could fire cancelPasskeyValidation() mid
-            // validation and let the in-flight task still advance the flow.
-            LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: headerBack)
-                .disabled(isStepActionInFlight)
+    private var sheetBackAction: (() -> Void)? {
+        guard step != .overview, step != .complete, step != .upload else { return nil }
+        return { headerBack() }
+    }
 
-            Spacer()
-
-            Text(step.title.lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-                .multilineTextAlignment(.center)
-                .accessibilityAddTraits(.isHeader)
-
-            Spacer()
-
-            Color.clear.frame(width: 44, height: 44)
+    private func closeFlow() {
+        guard !isStepActionInFlight, !didClose else { return }
+        didClose = true
+        if let setupFeedbackID {
+            LavaFeedbackCoordinator.shared.finish("backup.setup", setupFeedbackID, .failed, cancelled: true)
+            self.setupFeedbackID = nil
         }
+        consent.reset()
+        backup.clearPendingBackupPasskey()
+        recoveryPhrase = ""
+        dismiss()
     }
 
     private var isStepActionInFlight: Bool {
@@ -109,8 +113,10 @@ struct BackupSetupView: View {
             dismiss()
         case .validatePasskey:
             cancelPasskeyValidation()
-        case .recoveryPhrase, .confirm:
+        case .recoveryPhrase:
             go(to: step.previous)
+        case .upload, .complete:
+            break
         }
     }
 
@@ -123,8 +129,10 @@ struct BackupSetupView: View {
             validatePasskeyStep
         case .recoveryPhrase:
             recoveryPhraseStep
-        case .confirm:
-            confirmStep
+        case .upload:
+            uploadStep
+        case .complete:
+            completionStep
         }
     }
 
@@ -135,7 +143,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "key.fill",
                         title: "This device",
-                        detail: "A local unlock key is kept safe on this phone. Lava never sees it."
+                        detail: "A local unlock key stays on this device."
                     )
 
                     Divider()
@@ -143,7 +151,7 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "person.badge.key.fill",
                         title: "Passkey",
-                        detail: "Optional (iOS 18+). Saved in your password manager to restore on a new device. Your phone makes the key itself, so Lava still can't read your backup."
+                        detail: "Restore with your password manager."
                     )
 
                     Divider()
@@ -151,13 +159,13 @@ struct BackupSetupView: View {
                     BackupSetupFactRow(
                         systemImage: "text.badge.checkmark",
                         title: "Recovery phrase",
-                        detail: "Use it with your signed-in account to restore on a new device."
+                        detail: "Keep it safe to restore with your account."
                     )
                 }
             }
 
             if let errorMessage {
-                Text(errorMessage)
+                Text(errorMessage.lavaLocalized)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -178,7 +186,7 @@ struct BackupSetupView: View {
             }
 
             if let errorMessage {
-                Text(errorMessage)
+                Text(errorMessage.lavaLocalized)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -191,7 +199,7 @@ struct BackupSetupView: View {
             LavaPlainCard {
                 VStack(alignment: .leading, spacing: 12) {
                     LazyVGrid(
-                        columns: [
+                        columns: dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : [
                             GridItem(.flexible(), spacing: 8),
                             GridItem(.flexible(), spacing: 8)
                         ],
@@ -211,10 +219,10 @@ struct BackupSetupView: View {
                                 UIPasteboard.OptionsKey.expirationDate: expirationDate
                             ]
                         )
-                        copiedRecoveryPhrase = true
+                        consent.recordCopy()
                         ProtectionHapticFeedback.play(.selectionConfirmed)
                     } label: {
-                        Label((copiedRecoveryPhrase ? "Copied" : "Copy phrase").lavaLocalized, systemImage: copiedRecoveryPhrase ? "checkmark" : "doc.on.doc")
+                        Label((consent.copiedRecoveryPhrase ? "Copied" : "Copy phrase").lavaLocalized, systemImage: consent.copiedRecoveryPhrase ? "checkmark" : "doc.on.doc")
                     }
                     .buttonStyle(LavaPanelActionButtonStyle())
                     .disabled(recoveryPhrase.isEmpty)
@@ -223,41 +231,70 @@ struct BackupSetupView: View {
                     // entry), then append the *current* visible label so a user reading "Copied" can
                     // still say "tap Copied" to re-copy. Pre-tap the label is already "Copy phrase",
                     // so only the "Copied" state needs appending.
-                    .accessibilityInputLabels(["Copy phrase".lavaLocalized, "Copy".lavaLocalized] + (copiedRecoveryPhrase ? ["Copied".lavaLocalized] : []))
+                    .accessibilityInputLabels(["Copy phrase".lavaLocalized, "Copy".lavaLocalized] + (consent.copiedRecoveryPhrase ? ["Copied".lavaLocalized] : []))
                 }
             }
-        }
-    }
-
-    private var confirmStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            LavaInfoPanel(
-                title: "Encrypted backup is ready",
-                description: "New-device restore can use a Passkey or this recovery phrase with your signed-in Lava account",
-                systemImage: "lock.shield.fill"
-            )
-
-            LavaPlainCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    BackupConfirmationToggle(
-                        title: "I saved the recovery phrase",
-                        isOn: $savedRecoveryPhrase
-                    )
-
-                    BackupConfirmationToggle(
-                        title: "I understand that if I lose every unlock method, I may not be able to restore my backup",
-                        isOn: $understandsNoRecovery
-                    )
-                }
+            LavaCondensedList {
+                LavaToggleRow(
+                    title: "I have saved my recovery phrase in a secure, accessible place",
+                    isOn: $consent.savedRecoveryPhrase
+                )
+                LavaCondensedDivider()
+                LavaToggleRow(
+                    title: "I understand that if I lose every unlock method, I may not be able to restore my backup",
+                    isOn: $consent.understandsNoRecovery
+                )
             }
-
+            .disabled(isFinishingSetup)
             if let errorMessage {
-                Text(errorMessage)
+                Text(errorMessage.lavaLocalized)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(LavaStyle.lavaOrangeText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var completionStep: some View {
+        LavaCompletionContent(title: "Encrypted backup is ready", message: "Your encrypted backup is saved online.")
+    }
+
+    private var uploadStep: some View {
+        VStack(spacing: 18) {
+            if isUploadingSetup { ProgressView().controlSize(.large) }
+            Text("Set up on this device. Your online backup is pending.".lavaLocalized)
+                .lavaSupportingText()
+            if let uploadError {
+                Text(uploadError.lavaLocalized).lavaQuietNoteText()
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var isUploadingSetup: Bool {
+        backup.setupUploadProgress?.id == setupAttemptID && backup.setupUploadProgress?.state == .uploading
+    }
+
+    private var uploadError: String? {
+        guard backup.setupUploadProgress?.id == setupAttemptID else {
+            return "Backup upload paused. Return to Account & Backup to continue."
+        }
+        switch backup.setupUploadProgress?.state {
+        case .failed(let message): return message
+        case .unavailable: return "Backup upload paused. Return to Account & Backup to continue."
+        default: return nil
+        }
+    }
+
+    private func updateUploadProgress() {
+        guard !didClose, step == .upload, let setupAttemptID,
+              backup.isSetupUploadConfirmed(attemptID: setupAttemptID) else { return }
+        if let setupFeedbackID {
+            LavaFeedbackCoordinator.shared.finish("backup.setup", setupFeedbackID, .succeeded)
+            self.setupFeedbackID = nil
+        }
+        LavaAccessibilityAnnouncer.announce("Backup is ready".lavaLocalized)
+        setupComplete = true
     }
 
     // Every step's actions live on the sheet's grey footer bar (back is the header
@@ -269,12 +306,26 @@ struct BackupSetupView: View {
             overviewActions
         case .validatePasskey:
             validatePasskeyActions
-        case .recoveryPhrase, .confirm:
+        case .recoveryPhrase:
             Button(step.primaryButtonTitle.lavaLocalized) {
                 advance()
             }
             .buttonStyle(LavaStandaloneActionButtonStyle())
             .disabled(!canAdvance || isFinishingSetup)
+        case .upload:
+            VStack(spacing: 10) {
+                Button("Retry upload".lavaLocalized) {
+                    guard let setupAttemptID else { return }
+                    Task { await backup.retrySetupUpload(attemptID: setupAttemptID) }
+                }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(isUploadingSetup)
+                Button("Return to Account & Backup".lavaLocalized, action: closeFlow)
+                    .buttonStyle(LavaPanelActionButtonStyle())
+            }
+        case .complete:
+            Button("Done".lavaLocalized, action: closeFlow)
+                .buttonStyle(LavaStandaloneActionButtonStyle())
         }
     }
 
@@ -286,7 +337,6 @@ struct BackupSetupView: View {
             // that sets up the device + recovery-phrase backup.
             if #available(iOS 18.0, *) {
                 Button {
-                    selectedPasskeyMode = .withPasskey
                     beginSetup(with: .withPasskey)
                 } label: {
                     Label(
@@ -298,7 +348,6 @@ struct BackupSetupView: View {
                 .disabled(isPreparingPasskey)
 
                 Button {
-                    selectedPasskeyMode = .withoutPasskey
                     beginSetup(with: .withoutPasskey)
                 } label: {
                     Text("Set up without Passkey".lavaLocalized)
@@ -307,7 +356,6 @@ struct BackupSetupView: View {
                 .disabled(isPreparingPasskey)
             } else {
                 Button {
-                    selectedPasskeyMode = .withoutPasskey
                     beginSetup(with: .withoutPasskey)
                 } label: {
                     Text("Begin Setup".lavaLocalized)
@@ -353,13 +401,20 @@ struct BackupSetupView: View {
         case .validatePasskey:
             false
         case .recoveryPhrase:
-            !recoveryPhrase.isEmpty
-        case .confirm:
-            savedRecoveryPhrase && understandsNoRecovery
+            selectedPasskeyMode != nil && !recoveryPhrase.isEmpty && consent.canFinish
+        case .upload, .complete:
+            false
         }
     }
 
     private func beginSetup(with mode: BackupSetupPasskeyMode) {
+        // A cancelled/failed ceremony clears the selected method. Unknown
+        // provenance is a new attempt too, never permission to reuse consent.
+        if selectedPasskeyMode != mode {
+            recoveryPhrase = ""
+            consent.reset()
+            ensureRecoveryPhrase()
+        }
         selectedPasskeyMode = mode
         errorMessage = nil
 
@@ -420,38 +475,46 @@ struct BackupSetupView: View {
             go(to: .recoveryPhrase)
         case .validatePasskey:
             break
+        case .upload, .complete:
+            break
         case .recoveryPhrase:
-            go(to: .confirm)
-        case .confirm:
-            guard !isFinishingSetup else {
+            guard canAdvance, !isFinishingSetup else {
                 return
             }
 
             isFinishingSetup = true
+            let feedbackID = LavaFeedbackCoordinator.shared.begin("backup.setup")
+            setupFeedbackID = feedbackID
             Task {
                 do {
                     try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
-                    ProtectionHapticFeedback.play(.actionSucceeded)
-                    // Success dismisses the sheet immediately, so there is no on-screen
-                    // confirmation for VoiceOver to land on — announce that backup is on.
-                    LavaAccessibilityAnnouncer.announce("Encrypted backup is ready".lavaLocalized)
-                    dismiss()
+                    setupAttemptID = backup.setupUploadProgress?.id
+                    recoveryPhrase = ""
+                    consent.reset()
+                    isFinishingSetup = false
+                    go(to: .upload)
+                    updateUploadProgress()
                 } catch {
                     errorMessage = error.localizedDescription
                     isFinishingSetup = false
-                    ProtectionHapticFeedback.play(.actionFailed)
+                    let cancelled: Bool
+                    if let passkeyError = error as? BackupPasskeyError, case .canceled = passkeyError { cancelled = true }
+                    else { cancelled = error is CancellationError }
+                    LavaFeedbackCoordinator.shared.finish("backup.setup", feedbackID, .failed, cancelled: cancelled)
+                    setupFeedbackID = nil
                 }
             }
         }
     }
 
     private func ensureRecoveryPhrase() {
-        guard recoveryPhrase.isEmpty else {
+        guard step != .complete, step != .upload, recoveryPhrase.isEmpty else {
             return
         }
 
         do {
             recoveryPhrase = try BackupRecoveryPhrase.generate()
+            consent.reset()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -472,7 +535,8 @@ private enum BackupSetupStep {
     case overview
     case validatePasskey
     case recoveryPhrase
-    case confirm
+    case upload
+    case complete
 
     var title: String {
         switch self {
@@ -482,30 +546,36 @@ private enum BackupSetupStep {
             "Confirm your passkey"
         case .recoveryPhrase:
             "Save your recovery phrase"
-        case .confirm:
-            "Turn on encrypted backup"
+        case .upload:
+            "Uploading backup"
+        case .complete:
+            "Backup is ready"
         }
     }
 
     var subtitle: String {
         switch self {
         case .overview:
-            "Your lists are encrypted on your device before upload. Only you can unlock them — with your recovery phrase or a Passkey. Lava only ever stores encrypted data."
+            "Encrypted on this device. Only you can unlock your backup."
         case .validatePasskey:
             "Use your passkey once more so Lava can confirm it unlocks this backup, then save your recovery phrase."
         case .recoveryPhrase:
-            "Save these eight words outside Lava. Copying is optional."
-        case .confirm:
-            "Setup finishes after the recovery phrase is saved."
+            "Copy these eight words, then save them somewhere safe outside Lava."
+        case .upload, .complete:
+            ""
         }
     }
 
     var primaryButtonTitle: String {
         switch self {
-        case .overview, .validatePasskey, .recoveryPhrase:
+        case .overview, .validatePasskey:
             "Continue"
-        case .confirm:
+        case .recoveryPhrase:
             "Turn On Backup"
+        case .upload:
+            "Retry upload"
+        case .complete:
+            "Done"
         }
     }
 
@@ -513,7 +583,7 @@ private enum BackupSetupStep {
         switch self {
         case .overview, .validatePasskey, .recoveryPhrase:
             .overview
-        case .confirm:
+        case .upload, .complete:
             .recoveryPhrase
         }
     }
@@ -526,7 +596,8 @@ private enum BackupSetupStep {
         case .overview: 0
         case .validatePasskey: 1
         case .recoveryPhrase: 2
-        case .confirm: 3
+        case .upload: 3
+        case .complete: 4
         }
     }
 }
@@ -562,42 +633,21 @@ private struct BackupSetupFactRow: View {
 private struct BackupRecoveryPhraseWord: View {
     let number: Int
     let word: String
+    @ScaledMetric(relativeTo: .caption) private var numberWidth = 18.0
 
     var body: some View {
         HStack(spacing: 7) {
             Text("\(number)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.secondary)
-                .frame(width: 18, alignment: .trailing)
+                .frame(width: numberWidth, alignment: .trailing)
 
             Text(word)
-                .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct BackupConfirmationToggle: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            Text(title.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(.body, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .tint(LavaStyle.safeControlGreen)
+        .lavaRecoveryWordSurface()
+        .accessibilityElement(children: .combine)
     }
 }

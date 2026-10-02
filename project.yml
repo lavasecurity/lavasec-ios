@@ -1,3 +1,5 @@
+# Native target manifest for the canonical ReactNative/native-app/LavaSecRN.xcworkspace.
+# The generated base project is used for membership/entitlement comparison, not app launches.
 # LavaSec.xcodeproj — XcodeGen source of truth.
 #
 # `LavaSec.xcodeproj/project.pbxproj` is GENERATED from this file and committed;
@@ -107,6 +109,14 @@ settings:
     GCC_WARN_UNINITIALIZED_AUTOS: "YES_AGGRESSIVE"
     GCC_WARN_UNUSED_FUNCTION: "YES"
     GCC_WARN_UNUSED_VARIABLE: "YES"
+    # The vendored WireGuard engine ships an arm64-only simulator slice (scripts/
+    # build-wireguard-core.sh builds aarch64-apple-ios{,-sim} and aarch64-apple-darwin —
+    # there is no x86_64 target), so an x86_64 simulator link drops every engine object
+    # with "found architecture 'arm64', required architecture 'x86_64'" and fails. Every
+    # dev machine and CI runner here is Apple Silicon, so an Intel simulator slice would
+    # be built for nobody. Declared project-wide rather than passed as ARCHS=arm64 on the
+    # command line so local builds and CI cannot disagree about it.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     IPHONEOS_DEPLOYMENT_TARGET: "18.0"
     SDKROOT: iphoneos
     SWIFT_EMIT_CONST_VALUE_PROTOCOLS: ""
@@ -155,34 +165,63 @@ targets:
       - path: LavaSecApp/AccountAuthService.swift
       - path: LavaSecApp/AccountController.swift
       - path: LavaSecApp/AccountSessionKeychainStore.swift
+      - path: LavaSecApp/ActivityViewController.swift
       - path: LavaSecApp/AdminQAView.swift
       - path: LavaSecApp/AppViewModel.swift
+      - path: LavaSecApp/LavaAppPlatformServices.swift
+      - path: LavaSecApp/QAMetricKitCollector.swift
+      - path: LavaSecApp/ProtectionUserNotificationController.swift
+      - path: LavaSecApp/ProtectionHapticFeedback.swift
+      - path: LavaSecApp/LavaFeedbackCoordinator.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FilterRulesBudget.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FilterEditingDrafts.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FilterDraftApply.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FilterLibrary.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FilterSwitching.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ShareableFilters.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ProtectionPause.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+LiveActivity.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+Onboarding.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ResolverSettings.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+QATooling.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ChainedDNSFallback.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+LocalLogExport.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ReportSurfaces.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+Diagnostics.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+CatalogSync.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+WarmArtifacts.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ProtectionLifecycle.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ChainedConnectLifecycle.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+ReviewPrompt.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+LavaGuardProgress.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+FocusAutoSwitch.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+Persistence.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+Sudoku.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+TunnelHealth.swift
+      - path: LavaSecApp/AppViewModel/AppViewModelSupport.swift
+      - path: LavaSecApp/AppViewModel/AppViewModel+HubBridges.swift
+      - path: LavaSecApp/BootstrapHostResolveBroker.swift
       - path: LavaSecApp/BackupController.swift
       - path: LavaSecApp/BackupKeychainStore.swift
       - path: LavaSecApp/BackupPasskeyCoordinator.swift
       - path: LavaSecApp/BackupRestoreView.swift
       - path: LavaSecApp/BackupSetupView.swift
       - path: LavaSecApp/BackupSyncService.swift
+      - path: LavaSecApp/FilterDraftController.swift
+      - path: LavaSecApp/FilterLibraryController.swift
       - path: LavaSecApp/CatalogController.swift
       - path: LavaSecApp/CustomizationController.swift
       - path: LavaSecApp/DarwinNotificationObserver.swift
       - path: LavaSecApp/DeveloperPreviewViews.swift
       - path: LavaSecApp/DiagnosticsController.swift
       - path: LavaSecApp/DiagnosticsDateControls.swift
-      - path: LavaSecApp/DiagnosticsDomainHistory.swift
       - path: LavaSecApp/DiagnosticsLocalLogSupport.swift
       - path: LavaSecApp/DiagnosticsNetworkActivity.swift
-      - path: LavaSecApp/DiagnosticsTopDomains.swift
-      - path: LavaSecApp/DiagnosticsView.swift
       - path: LavaSecApp/BlocklistPickerView.swift
-      - path: LavaSecApp/FilterDomainSheets.swift
       - path: LavaSecApp/FilterLibraryView.swift
-      - path: LavaSecApp/FilterMyListView.swift
       - path: LavaSecApp/FilterPreparationPresentation.swift
       - path: LavaSecApp/FilterReviewFlowView.swift
       - path: LavaSecApp/FilterSharedViews.swift
-      - path: LavaSecApp/FiltersView.swift
-      - path: LavaSecApp/GuardView.swift
       - path: LavaSecApp/LavaDesignSystem/LavaCondensedList.swift
       - path: LavaSecApp/LavaDesignSystem/LavaComponents.swift
       - path: LavaSecApp/LavaDesignSystem/LavaConfirmationDialog.swift
@@ -199,6 +238,7 @@ targets:
       - path: LavaSecApp/ProtectionConnectivityPresentation.swift
       - path: LavaSecApp/ProtectionPlatformSeams.swift
       - path: LavaSecApp/RageShakeDetector.swift
+      - path: LavaSecApp/QALocalDNSBridge.swift
       - path: LavaSecApp/RootView.swift
       - path: LavaSecApp/SecurityController.swift
       - path: LavaSecApp/AccountBackupSettingsView.swift
@@ -209,8 +249,15 @@ targets:
       - path: LavaSecApp/PrivacySecuritySettingsView.swift
       - path: LavaSecApp/SettingsCommon.swift
       - path: LavaSecApp/SettingsView.swift
+      # Own file, like AdminQAView, so the gated page stays OUT of the settings source
+      # aggregate the production tier/subpage pins read.
+      - path: LavaSecApp/VPNChainingSettingsView.swift
       - path: LavaSecApp/UpgradeSettingsView.swift
+      - path: LavaSecApp/ShareableFilterCard.swift
+      - path: LavaSecApp/ShareableFilterImageDecoder.swift
       - path: LavaSecApp/ShareableFiltersUI.swift
+      - path: LavaSecApp/SudokuEasterEggView.swift
+      - path: LavaSecApp/ProtectionShortcuts.swift
       - path: LavaSecApp/SwitchFilterShortcut.swift
       - path: LavaSecApp/TemporaryProtectionPauseController.swift
       # Shared/ files compiled into the app process (each Shared file lists every
@@ -225,6 +272,12 @@ targets:
       - path: Shared/LavaProtectionCommandService.swift
       - path: Shared/SoftShieldGuardian.swift
       # Resources.
+      # Emitted by scripts/generate-wireguard-core-notices.mjs, which writes this copy and
+      # the ThirdParty/ one together and verifies both. The app target cannot reference
+      # ThirdParty/ (check-xcodegen-sources forbids that root), but the licenses require the
+      # notice text to ship with the binary — so the generator emits it here instead of the
+      # app reaching across. Never hand-edit; regenerate.
+      - path: LavaSecApp/THIRD-PARTY-NOTICES.txt
       - path: LavaSecApp/Assets.xcassets
       - path: LavaSecApp/Localizable.xcstrings
       - path: LavaSecApp/InfoPlist.xcstrings
@@ -235,6 +288,7 @@ targets:
       - path: LavaSecApp/AppIconCherryQuartz.icon
       - path: LavaSecApp/AppIconEmerald.icon
       - path: LavaSecApp/AppIconKiwiCreme.icon
+      - path: LavaSecApp/AppIconAquamarine.icon
       - path: LavaSecApp/AppIcon-QA.icon
       # Project-browser reference only (signed at build via CODE_SIGN_ENTITLEMENTS).
       - path: LavaSecApp/LavaSecApp.entitlements
@@ -271,16 +325,32 @@ targets:
         product: GoogleSignIn
     settings:
       base:
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconFireOpal AppIconAmethyst AppIconObsidian AppIconCherryQuartz AppIconEmerald AppIconKiwiCreme AppIconAquamarine
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "NO"
         CODE_SIGN_ENTITLEMENTS: LavaSecApp/LavaSecApp.entitlements
+        # Chained upstream (Phase 4). The app WRITES the upstream configuration + private key
+        # and the tunnel READS them; they are separate processes, so the key item must live in a
+        # keychain access group both are entitled to. App groups do NOT share keychain items —
+        # that is a separate entitlement — and the two targets' bundle IDs differ, so their
+        # DEFAULT groups differ and an item written by one is invisible to the other.
+        # Deliberately NOT `group.com.lavasec`: the widget and the App Intents extension carry
+        # that group too, and neither has any business with a VPN private key.
+        # Config-scoped so a QA build and a production build on one device cannot share an
+        # upstream record. `_ID` is the RUNTIME string (Info.plist expansion of an ordinary
+        # build setting); the entitlement uses `$(AppIdentifierPrefix)`, which is injected from
+        # the provisioning profile and does NOT expand in an Info.plist. If a legacy App ID's
+        # prefix ever differs from DEVELOPMENT_TEAM, override `_PREFIX` in the gitignored
+        # Config/Lava.local.xcconfig rather than editing this.
+        LAVA_KEYCHAIN_SHARING_GROUP: com.lavasec.app.chained-upstream
+        LAVA_KEYCHAIN_SHARING_GROUP_PREFIX: "$(DEVELOPMENT_TEAM)"
+        LAVA_KEYCHAIN_SHARING_GROUP_ID: "$(LAVA_KEYCHAIN_SHARING_GROUP_PREFIX).$(LAVA_KEYCHAIN_SHARING_GROUP)"
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: "$(inherited)"
         GENERATE_INFOPLIST_FILE: "NO"
         INFOPLIST_FILE: LavaSecApp/Info.plist
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
-        LAVA_DISPLAY_NAME: Lava Security
+        LAVA_DISPLAY_NAME: Lava
         LAVA_GOOGLE_IOS_CLIENT_ID: "$(inherited)"
         LAVA_GOOGLE_REVERSED_CLIENT_ID: "$(inherited)"
         LAVA_GOOGLE_SERVER_CLIENT_ID: "$(inherited)"
@@ -307,12 +377,42 @@ targets:
         QA:
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-QA
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_APP_PROFILE)"
+          LAVA_KEYCHAIN_SHARING_GROUP: com.lavasec.dev.qa.chained-upstream
 
   LavaSecTunnel:
     type: app-extension
     platform: iOS
     sources:
       - path: LavaSecTunnel/PacketTunnelProvider.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+Lifecycle.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+AppMessaging.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+PacketLoop.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+UpstreamForwarding.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+ResolverTransports.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+EncryptedBootstrap.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+BootstrapBroker.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+FocusConfigPoll.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+RecoveryProbes.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+DeviceDNSCapture.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+SmokeProbes.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+NetworkPath.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+StartupState.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+BootRecovery.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+TransientBootstrapWait.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+Diagnostics.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+Notifications.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+SelfReconnect.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+Configuration.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+SnapshotReload.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+ProtectionPause.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+ResidentSnapshot.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+FilterDecision.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+SnapshotCompile.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+ChainedDataPath.swift
+      - path: LavaSecTunnel/Provider/ChainedTunnelRuntime.swift
+      - path: LavaSecTunnel/Provider/PacketTunnelProvider+ChainedSeamHost.swift
+      - path: LavaSecTunnel/Provider/TunnelProviderSupportTypes.swift
       - path: LavaSecTunnel/DeviceDNSResolver.c
       - path: Shared/AppGroup.swift
       - path: Shared/EnergySignpost.swift
@@ -330,10 +430,28 @@ targets:
         product: LavaSecDNS
       - package: LavaSecPackage
         product: LavaSecFilterPipeline
+      - package: LavaSecPackage
+        product: LavaSecChainedUpstream
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: "YES"
         CODE_SIGN_ENTITLEMENTS: LavaSecTunnel/LavaSecTunnel.entitlements
+        # Chained upstream (Phase 4). The app WRITES the upstream configuration + private key
+        # and the tunnel READS them; they are separate processes, so the key item must live in a
+        # keychain access group both are entitled to. App groups do NOT share keychain items —
+        # that is a separate entitlement — and the two targets' bundle IDs differ, so their
+        # DEFAULT groups differ and an item written by one is invisible to the other.
+        # Deliberately NOT `group.com.lavasec`: the widget and the App Intents extension carry
+        # that group too, and neither has any business with a VPN private key.
+        # Config-scoped so a QA build and a production build on one device cannot share an
+        # upstream record. `_ID` is the RUNTIME string (Info.plist expansion of an ordinary
+        # build setting); the entitlement uses `$(AppIdentifierPrefix)`, which is injected from
+        # the provisioning profile and does NOT expand in an Info.plist. If a legacy App ID's
+        # prefix ever differs from DEVELOPMENT_TEAM, override `_PREFIX` in the gitignored
+        # Config/Lava.local.xcconfig rather than editing this.
+        LAVA_KEYCHAIN_SHARING_GROUP: com.lavasec.app.chained-upstream
+        LAVA_KEYCHAIN_SHARING_GROUP_PREFIX: "$(DEVELOPMENT_TEAM)"
+        LAVA_KEYCHAIN_SHARING_GROUP_ID: "$(LAVA_KEYCHAIN_SHARING_GROUP_PREFIX).$(LAVA_KEYCHAIN_SHARING_GROUP)"
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: "1"
         DEVELOPMENT_TEAM: "$(inherited)"
@@ -360,6 +478,8 @@ targets:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
         QA:
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.tunnel
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_TUNNEL_PROFILE)"
+          LAVA_KEYCHAIN_SHARING_GROUP: com.lavasec.dev.qa.chained-upstream
 
   LavaSecWidget:
     type: app-extension
@@ -412,6 +532,7 @@ targets:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
         QA:
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.widget
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_WIDGET_PROFILE)"
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE LAVA_QA_TOOLS
 
   LavaSecIntents:
@@ -469,6 +590,7 @@ targets:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
         QA:
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa.intents
+          PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_INTENTS_PROFILE)"
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE LAVA_QA_TOOLS
 
   LavaSecUITests:

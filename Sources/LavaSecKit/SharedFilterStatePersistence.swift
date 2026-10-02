@@ -30,8 +30,8 @@ import Foundation
 ///
 /// LOCK ORDERING (Kilo #29): a Focus/App Intents commit acquires locks in this strict order —
 /// `focusSwitchLock` (HeadlessFocusFilterSwitchEngine.withFocusSwitchLock) → the cross-process
-/// configuration-write flock (`crossProcessLockURL`, taken here in `writeConfigurationAndLibrary`) →
-/// the artifact `publishLock` (FilterPublishLock, taken in `FilterSnapshotPreparationService.persistArtifacts`).
+/// configuration-write flock (`crossProcessLockURL`, taken here or by a surrounding publication
+/// transaction that passes nil to avoid reacquisition) → the artifact `publishLock` (FilterPublishLock, taken in `FilterSnapshotPreparationService.persistArtifacts`).
 /// The FOREGROUND publisher takes only the latter two and NEVER `focusSwitchLock`, so the two contexts
 /// can't form a cycle and there is no deadlock today. Any future change that makes a holder of a LATER
 /// lock acquire an EARLIER one (e.g. taking `focusSwitchLock` while holding the write flock or publish
@@ -61,6 +61,24 @@ public enum SharedFilterStatePersistence {
     /// Data Protection before first unlock, or a transient I/O failure (INV-PERSIST-1). A caller in
     /// that state loaded "defaults" from a failed read; letting the write proceed would stamp them at
     /// a winning generation over the user's real data (the 2026-07-14 reboot filter-library wipe).
+    /// Thrown by `writeConfigurationAndLibrary(refusesIfOnDiskActiveFilterIs:)` when the filter the
+    /// caller is about to overwrite is, at write time, the one PERSISTED as active.
+    ///
+    /// The in-memory `activeFilterID` is not sufficient to decide this. A headless Focus or Shortcut
+    /// switch commits from another process and the foreground adopts it asynchronously off a Darwin
+    /// notification, so `AppViewModel.library` can still name the previous filter while disk names
+    /// the new one. A caller that checked only its own snapshot could therefore replace the filter
+    /// that is protecting the device, and overwrite the newer switch, believing it had picked an
+    /// idle one. Evaluated under the same lock as the write so the answer cannot change in between.
+    public struct ActiveFilterChangedError: Error {
+        /// The filter that turned out to be active on disk.
+        public let activeFilterID: String
+
+        public init(activeFilterID: String) {
+            self.activeFilterID = activeFilterID
+        }
+    }
+
     public struct ExistingStateUnreadableError: Error {
         /// Creates the marker error used when the on-disk pair exists but is unreadable.
         public init() {}
@@ -94,9 +112,18 @@ public enum SharedFilterStatePersistence {
         //     ONLY its own write; if a foreground writer advanced the on-disk generation past that in the gap
         //     between the config write and the rollback, the rollback aborts and leaves the newer state (it
         //     would otherwise re-bump the generation and clobber the user's update).
-        // `nil` (foreground / restore callers) SKIPS the fence — they are the single-owner @MainActor writer
-        // (restore deliberately writes from a LOWER base via the monotonic bump, which a fence would reject).
-        rejectsAdvancedBeyond: Int? = nil
+        // `nil` skips the fence. Reviewed restores retain the current device's generation and pass
+        // the reviewed basis here. Foreground library-only writers pass their loaded generation so
+        // a newer headless switch cannot be replaced by their stale whole pair; foreground active/config
+        // publishers keep their existing explicit ownership and publication reconciliation semantics.
+        rejectsAdvancedBeyond: Int? = nil,
+        // In-lock active-filter precondition: when non-nil, ABORT (throw `ActiveFilterChangedError`) if
+        // the filter PERSISTED as active is this id. Used by callers that may only touch an IDLE filter
+        // — the shared-filter import's library-only replace — where the in-memory `activeFilterID` is an
+        // asynchronously-reconciled snapshot and can lag a headless Focus/Shortcut commit. Checked here,
+        // atomically with the write, because a caller-side check is a different question answered at a
+        // different time. `nil` (every other caller) skips it and behaves exactly as before.
+        refusesIfOnDiskActiveFilterIs: String? = nil
     ) throws -> (configuration: AppConfiguration, library: FilterLibrary) {
         // The ENTIRE generation read + bump + both-file writes must be one critical section across
         // processes — splitting the read from the write would let a second process bump in between.
@@ -117,6 +144,12 @@ public enum SharedFilterStatePersistence {
             if let rejectsAdvancedBeyond,
                onDiskConfigurationGeneration(at: configurationURL) > rejectsAdvancedBeyond {
                 throw StaleBaseGenerationError()
+            }
+            // Active-filter precondition UNDER the lock, for the same reason as the fence above: a
+            // concurrent cross-process switch must not be discoverable only after the write.
+            if let refusesIfOnDiskActiveFilterIs,
+               onDiskActiveFilterID(at: filterLibraryURL) == refusesIfOnDiskActiveFilterIs {
+                throw ActiveFilterChangedError(activeFilterID: refusesIfOnDiskActiveFilterIs)
             }
             var nextConfiguration = configuration
             // Trapping `+ 1` (not `&+`): a generation overflow is a real bug worth trapping, not silently

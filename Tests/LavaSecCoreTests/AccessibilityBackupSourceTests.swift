@@ -8,16 +8,9 @@ final class AccessibilityBackupSourceTests: XCTestCase {
 
     // MARK: BackupSetupView — step chrome + card rows
 
-    func testBackupSetupHeaderTitleIsHeader() throws {
-        let block = try sourceBlock(
-            in: try readSource(.backupSetupView),
-            startingAt: "private var header: some View {",
-            endingBefore: "private var isStepActionInFlight"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(.isHeader)"),
-            "The backup-setup step title must carry the VoiceOver header trait so the rotor can jump to it."
-        )
+    func testBackupSetupUsesSharedAccessibleTaskTitle() throws {
+        XCTAssertTrue(try readSource(.backupSetupView).contains("LavaTaskSheet(title: step.title"))
+        XCTAssertTrue(try readSource(.lavaScaffold).contains(".lavaFullSheetHeader(title, leading:"))
     }
 
     func testBackupSetupFactRowHidesIconAndCombines() throws {
@@ -40,7 +33,7 @@ final class AccessibilityBackupSourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.backupSetupView),
             startingAt: "private struct BackupRecoveryPhraseWord",
-            endingBefore: "private struct BackupConfirmationToggle"
+            endingBefore: "\n}\n"
         )
         XCTAssertTrue(
             block.contains(".accessibilityElement(children: .combine)"),
@@ -50,16 +43,9 @@ final class AccessibilityBackupSourceTests: XCTestCase {
 
     // MARK: BackupRestoreView — sheet chrome + editable word grid
 
-    func testBackupRestoreHeaderTitleIsHeader() throws {
-        let block = try sourceBlock(
-            in: try readSource(.backupRestoreView),
-            startingAt: "private var header: some View {",
-            endingBefore: "private var recoveryPhraseFields"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(.isHeader)"),
-            "The restore sheet title must carry the VoiceOver header trait."
-        )
+    func testBackupRestoreUsesSharedAccessibleTaskTitle() throws {
+        XCTAssertTrue(try readSource(.backupRestoreView).contains("LavaTaskSheet(title: \"Restore Backup\""))
+        XCTAssertTrue(try readSource(.lavaScaffold).contains(".lavaFullSheetHeader(title, leading:"))
     }
 
     func testBackupRestoreWordFieldHidesRedundantNumber() throws {

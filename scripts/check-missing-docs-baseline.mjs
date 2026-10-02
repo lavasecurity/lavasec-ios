@@ -14,6 +14,7 @@ const approvedIncludedRoots = [
   "Sources/LavaSecFilterPipeline",
   "Sources/LavaSecPresentation",
   "Sources/LavaSecAppServices",
+  "Sources/LavaSecChainedUpstream",
 ];
 const approvedExcludedPaths = new Set([
   "Sources/LavaSecKit/Generated/DefaultCatalog+Generated.swift",
@@ -615,6 +616,10 @@ function rejectWorkingTreeMissingDocsSuppressions(protectedFiles) {
 }
 
 function rejectAddedMissingDocsSuppressions(base, head) {
+  // A full source promotion also carries binary engine archives and images.
+  // Diff only the protected roots so --text cannot expand unrelated assets past
+  // the bounded output buffer. Keep --text and --no-renames so a binary-marked
+  // Swift file or a suppression moved into these roots still gets inspected.
   const result = git([
     "diff",
     "--text",
@@ -623,6 +628,8 @@ function rejectAddedMissingDocsSuppressions(base, head) {
     "--no-renames",
     base,
     head,
+    "--",
+    ...approvedIncludedRoots,
   ]);
   if (result.status !== 0) {
     const detail = result.error?.message || result.stderr.trim() || `exit status ${result.status}`;

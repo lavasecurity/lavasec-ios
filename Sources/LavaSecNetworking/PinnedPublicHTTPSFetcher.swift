@@ -36,7 +36,7 @@ import Darwin
 /// address's scope (reusing `IPAddressScope` via `NetworkEndpointValidator`) and to PIN an
 /// `NWConnection` directly to it, so the transport never performs a second, unvalidated DNS
 /// resolution.
-struct ResolvedIPAddress: Equatable, Sendable {
+package struct ResolvedIPAddress: Equatable, Sendable {
     enum Family: Equatable, Sendable {
         case ipv4
         case ipv6
@@ -64,6 +64,14 @@ struct ResolvedIPAddress: Equatable, Sendable {
         case .ipv6:
             return NetworkEndpointValidator.isPublicResolvedIPv6(bytes: bytes)
         }
+    }
+
+    /// The all-zero address (`0.0.0.0` / `::`) — what the tunnel's own `FailClosedRuntimeSnapshot`
+    /// answers with for every query while filtering is unavailable. Distinguished from the rest
+    /// of the non-public scopes because it means "did not resolve", not "resolved somewhere it
+    /// should not"; see the sinkhole branch in `pinnedAddresses`.
+    var isUnspecifiedAddress: Bool {
+        bytes.allSatisfy { $0 == 0 }
     }
 
     /// An EXPLICIT IP endpoint (never a name) — this is what guarantees the connection binds
@@ -139,12 +147,58 @@ struct ResolvedIPAddress: Equatable, Sendable {
 
 /// Resolves a hostname to its A/AAAA addresses. Injected so tests can map a hostname to a
 /// private address (or an empty answer) without touching real DNS.
-typealias HostAddressResolver = @Sendable (_ host: String) throws -> [ResolvedIPAddress]
+package typealias HostAddressResolver = @Sendable (_ host: String) throws -> [ResolvedIPAddress]
 
-enum SystemHostResolver {
+/// Builds resolvers that answer from addresses obtained somewhere other than `getaddrinfo`.
+///
+/// The one production caller is the fail-closed bootstrap ladder: while the tunnel sinkholes
+/// every query, the addresses come from the tunnel itself. Everything downstream is unchanged —
+/// a fixed resolver feeds the SAME public-scope gate and the SAME pinning as the system one, so
+/// supplying addresses cannot widen what the fetcher will connect to.
+package enum HostAddressResolverFactory {
+    /// A resolver that answers with `ipv4` + `ipv6` FOR ONE HOST, and refuses every other.
+    ///
+    /// 🔴 THE HOST SCOPE IS THE POINT. `fetch` follows redirects and calls its resolver again
+    /// for each hop, so a resolver that ignored the queried host would hand the ORIGINAL
+    /// host's addresses to a redirect target — connecting to one server while presenting
+    /// another's SNI and Host header. That is wrong twice: the connection fails or lands
+    /// somewhere it should not, and it does so while the repair believes it brokered
+    /// correctly.
+    ///
+    /// A different host gets `cannotFindHost` rather than a fall-through to the system
+    /// resolver, because the caller only installs this resolver while the tunnel is
+    /// fail-closed — where the system resolver returns the block-all sinkhole. An honest
+    /// failure lets the fetch fail cleanly; a fall-through would look like a resolution.
+    ///
+    /// Known limit, stated rather than hidden: this REFUSES a redirect to another host, it
+    /// does not re-broker for it. A blocklist URL that redirects cross-host still fails
+    /// while fail-closed. Failing is the safe half; re-entering the broker per hop needs the
+    /// broker plumbed through the fetcher and is not done here.
+    ///
+    /// Returns `nil` when nothing parses, so a caller cannot accidentally install a resolver
+    /// that answers empty — which `pinnedAddresses` would refuse anyway, but as an SSRF
+    /// refusal rather than the honest "no addresses to try".
+    package static func fixed(
+        host: String,
+        ipv4: [String],
+        ipv6: [String]
+    ) -> HostAddressResolver? {
+        let addresses = (ipv4 + ipv6).compactMap(ResolvedIPAddress.init(literal:))
+        guard !addresses.isEmpty else { return nil }
+        let brokeredHost = host.lowercased()
+        return { queriedHost in
+            guard queriedHost.lowercased() == brokeredHost else {
+                throw URLError(.cannotFindHost)
+            }
+            return addresses
+        }
+    }
+}
+
+package enum SystemHostResolver {
     /// `getaddrinfo` over `AF_UNSPEC` + `SOCK_STREAM`, i.e. exactly the A/AAAA set the system
     /// resolver (honoring the device's DNS and any NAT64 synthesis) would hand a TCP client.
-    static func resolve(_ host: String) throws -> [ResolvedIPAddress] {
+    package static func resolve(_ host: String) throws -> [ResolvedIPAddress] {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_STREAM
@@ -214,6 +268,23 @@ package enum PinnedPublicHTTPSFetcher {
     /// *policy* is the caller's domain — the catalog sync's 2xx gate lives engine-side with
     /// its `BlocklistCatalogSyncError` vocabulary (`fetch(url:maximumByteCount:)` in
     /// LavaSecFilterPipeline), which this transport layer must not depend on.
+    /// Cross-target entry for the fail-closed bootstrap ladder: the catalog sync lives in a
+    /// different target and must be able to supply a resolver. Deliberately does NOT expose
+    /// `Configuration`, which stays an internal tuning detail — widening the transport's whole
+    /// surface to pass one closure would be the wrong trade. Still not `public`: the app target
+    /// is outside the package and must not reach the transport seam directly.
+    package static func fetchResponse(
+        url: URL,
+        maximumByteCount: Int,
+        resolver: @escaping HostAddressResolver
+    ) async throws -> (status: Int, body: Data) {
+        try await fetchResponse(
+            url: url,
+            maximumByteCount: maximumByteCount,
+            resolver: resolver,
+            configuration: .default)
+    }
+
     static func fetchResponse(
         url: URL,
         maximumByteCount: Int,
@@ -312,6 +383,30 @@ package enum PinnedPublicHTTPSFetcher {
             // No usable address to confirm as public — fail closed rather than hand an
             // unvalidated host to a transport that would resolve it itself.
             throw NetworkEndpointValidationError.privateNetworkNotAllowed
+        }
+        // OUR OWN SINKHOLE IS NOT AN SSRF ATTEMPT. When the resident snapshot is
+        // fail-closed the tunnel answers every A with 0.0.0.0 and every AAAA with ::
+        // (`FailClosedRuntimeSnapshot`), so `getaddrinfo` SUCCEEDS and hands this gate the
+        // block-all answer. `0.0.0.0` classifies `.unspecified`, so the loop below refused
+        // it as `privateNetworkNotAllowed` — surfacing "Custom blocklist URLs must use a
+        // public host" for a perfectly ordinary CDN hostname, and blaming the user's
+        // configuration for the app's own fail-closed state.
+        //
+        // That misclassification is what made the outage unrecoverable AND undiagnosable:
+        // the artifact download needs DNS, DNS is blocked because the artifact is missing,
+        // and the error named the wrong cause. Observed on device (S9): a device stuck
+        // fail-closed logged `NetworkEndpointValidationError` code 2 on every launch.
+        //
+        // An all-unspecified answer means "this host did not resolve", so report exactly
+        // that. `.cannotFindHost` mirrors the deliberate downgrade already made above for a
+        // resolver failure, so a caller's cache fallback behaves as it does for any other
+        // unresolvable host. Nothing becomes reachable: 0.0.0.0 is unconnectable either way.
+        //
+        // MIXED answers keep the strict refusal. A public decoy alongside an unspecified or
+        // private address is the rebinding shape this gate exists to catch, and it is not
+        // what a sinkhole produces — the sinkhole answers uniformly.
+        if resolved.allSatisfy({ $0.isUnspecifiedAddress }) {
+            throw URLError(.cannotFindHost)
         }
         for address in resolved where !address.isPublic {
             throw NetworkEndpointValidationError.privateNetworkNotAllowed
@@ -450,7 +545,7 @@ package enum PinnedPublicHTTPSFetcher {
     /// Unicode. So any non-ASCII result is re-wrapped through a fresh `URL` to force Foundation's
     /// IDNA-ASCII encoding (the same engine `URLSession` used); a host that still can't be
     /// rendered ASCII fails closed rather than being handed to `getaddrinfo`/SNI as Unicode.
-    static func asciiHost(from url: URL) -> String? {
+    package static func asciiHost(from url: URL) -> String? {
         guard let decoded = url.host(percentEncoded: false)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !decoded.isEmpty
@@ -901,7 +996,7 @@ struct BlocklistDownloadSizeLimitExceeded: LocalizedError {
     let maximumByteCount: Int
 
     var errorDescription: String? {
-        "The download exceeded the \(maximumByteCount / (1024 * 1024)) MB size limit (\(byteSize) bytes)."
+        LavaCoreStrings.localizedFormat("The download exceeded the %lld MB size limit (%lld bytes).", maximumByteCount / (1024 * 1024), byteSize)
     }
 }
 

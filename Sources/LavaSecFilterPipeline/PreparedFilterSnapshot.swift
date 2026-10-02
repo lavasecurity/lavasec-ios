@@ -41,7 +41,8 @@ public struct PreparedFilterSnapshot: Codable, Sendable {
             // Preserve the persisted budget total: like blocklistRuleCount it cannot be re-derived
             // from the snapshot (it needs the FULL guardrail set), so the snapshot-recomputed summary
             // would otherwise drop it and a warm reuse would always cold-compile.
-            tierBudgetRuleCount: decodedSummary?.tierBudgetRuleCount
+            tierBudgetRuleCount: decodedSummary?.tierBudgetRuleCount,
+            quarantinedBlocklistIDs: decodedSummary?.quarantinedBlocklistIDs
         )
     }
 
@@ -99,6 +100,21 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
     /// Optional so legacy artifacts predating this field decode to `nil`; a reuse path that needs it
     /// then falls back to a cold compile.
     public let tierBudgetRuleCount: Int?
+    /// Enabled blocklists this artifact DELIBERATELY does not contain, because the source
+    /// could not be fetched and never will be as configured (a 404, a list past a cap,
+    /// or an identity explicitly withdrawn by the admitted catalog).
+    ///
+    /// 🔴 THIS IS WHAT MAKES A PARTIAL ARTIFACT HONEST RATHER THAN A LIE. Coverage exists so
+    /// the resolver never serves a snapshot while believing it enforces a list it does not
+    /// hold. Simply relaxing that check to survive one dead source would turn it into a
+    /// tautology — the artifact would publish clean, pass every reuse gate and
+    /// last-known-good, permanently, with nothing recording what was dropped.
+    ///
+    /// So the omission is not INFERRED from an absence, it is DECLARED. `coversEnabledBlocklists`
+    /// accepts an enabled source only if the artifact either holds its rules or names it here.
+    /// An empty or nil set means the strict old behaviour, which is the safe default for every
+    /// artifact written before this field existed and for every writer that forgets it.
+    public let quarantinedBlocklistIDs: Set<String>?
 
     private enum CodingKeys: String, CodingKey {
         case blocklistRuleCount
@@ -108,6 +124,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         case allowRuleCount
         case guardrailRuleCount
         case tierBudgetRuleCount
+        case quarantinedBlocklistIDs
     }
 
     /// Creates a summary from explicit rule counts and optional source coverage.
@@ -118,7 +135,8 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         blockedDomainRuleCount: Int? = nil,
         allowRuleCount: Int,
         guardrailRuleCount: Int,
-        tierBudgetRuleCount: Int? = nil
+        tierBudgetRuleCount: Int? = nil,
+        quarantinedBlocklistIDs: Set<String>? = nil
     ) {
         self.blocklistRuleCount = blocklistRuleCount
         self.blocklistSourceRuleCounts = blocklistSourceRuleCounts
@@ -127,6 +145,7 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         self.allowRuleCount = allowRuleCount
         self.guardrailRuleCount = guardrailRuleCount
         self.tierBudgetRuleCount = tierBudgetRuleCount
+        self.quarantinedBlocklistIDs = quarantinedBlocklistIDs
     }
 
     /// Decodes current and legacy summaries, defaulting a missing protected count to block count.
@@ -143,6 +162,10 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         allowRuleCount = try container.decode(Int.self, forKey: .allowRuleCount)
         guardrailRuleCount = try container.decode(Int.self, forKey: .guardrailRuleCount)
         tierBudgetRuleCount = try container.decodeIfPresent(Int.self, forKey: .tierBudgetRuleCount)
+        // Legacy artifacts decode as nil, which reads as "nothing quarantined" — the strict
+        // predicate. An old artifact can never gain coverage it did not have.
+        quarantinedBlocklistIDs = try container.decodeIfPresent(
+            Set<String>.self, forKey: .quarantinedBlocklistIDs)
     }
 
     /// Creates a summary from the rule tables in a runtime snapshot.
@@ -150,7 +173,8 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
         snapshot: FilterSnapshot,
         blocklistRuleCount: Int? = nil,
         blocklistSourceRuleCounts: [String: Int]? = nil,
-        tierBudgetRuleCount: Int? = nil
+        tierBudgetRuleCount: Int? = nil,
+        quarantinedBlocklistIDs: Set<String>? = nil
     ) {
         self.init(
             blocklistRuleCount: blocklistRuleCount,
@@ -162,11 +186,13 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
             ),
             allowRuleCount: snapshot.allowRules.count,
             guardrailRuleCount: snapshot.nonAllowableThreatRules.count,
-            tierBudgetRuleCount: tierBudgetRuleCount
+            tierBudgetRuleCount: tierBudgetRuleCount,
+            quarantinedBlocklistIDs: quarantinedBlocklistIDs
         )
     }
 
-    /// Returns whether a source count is recorded for every enabled blocklist.
+    /// Returns whether every enabled blocklist is ACCOUNTED FOR — either its rules are in
+    /// this artifact, or it is declared quarantined.
     public func coversEnabledBlocklists(in configuration: AppConfiguration) -> Bool {
         guard !configuration.enabledBlocklistIDs.isEmpty else {
             return true
@@ -176,7 +202,10 @@ public struct PreparedFilterSnapshotSummary: Codable, Equatable, Sendable {
             return false
         }
 
-        return configuration.enabledBlocklistIDs.allSatisfy { blocklistSourceRuleCounts[$0] != nil }
+        let quarantined = quarantinedBlocklistIDs ?? []
+        return configuration.enabledBlocklistIDs.allSatisfy {
+            blocklistSourceRuleCounts[$0] != nil || quarantined.contains($0)
+        }
     }
 }
 
@@ -222,6 +251,8 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
     // as 0, which never equals a real version (≥1), so they are always regenerated.
     /// Parser-rules version used to compile the snapshot.
     public let parserRulesVersion: Int
+    /// Overlap semantics used by threat exceptions; legacy artifacts must recompile.
+    public let threatOverlapVersion: Int
 
     private enum CodingKeys: String, CodingKey {
         case enabledBlocklistIDs
@@ -236,6 +267,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         case guardrailVersionIDs
         case guardrailHashes
         case parserRulesVersion
+        case threatOverlapVersion
     }
 
     package init(
@@ -250,7 +282,8 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         customBlocklistFingerprints: [String: String] = [:],
         guardrailVersionIDs: [String: String],
         guardrailHashes: [String: String],
-        parserRulesVersion: Int = BlocklistParsingRules.rulesVersion
+        parserRulesVersion: Int = BlocklistParsingRules.rulesVersion,
+        threatOverlapVersion: Int = 1
     ) {
         self.enabledBlocklistIDs = enabledBlocklistIDs
         self.blockedDomains = blockedDomains
@@ -264,6 +297,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         self.guardrailVersionIDs = guardrailVersionIDs
         self.guardrailHashes = guardrailHashes
         self.parserRulesVersion = parserRulesVersion
+        self.threatOverlapVersion = threatOverlapVersion
     }
 
     /// Decodes current and legacy identities with compatibility defaults for added fields.
@@ -292,6 +326,7 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         // 0 = artifact compiled before this field existed (genuinely a pre-v2 parser).
         // It never equals a real rules version, so such artifacts are regenerated.
         self.parserRulesVersion = try container.decodeIfPresent(Int.self, forKey: .parserRulesVersion) ?? 0
+        self.threatOverlapVersion = try container.decodeIfPresent(Int.self, forKey: .threatOverlapVersion) ?? 0
     }
 
     /// Builds the canonical identity for a configuration and optional catalog.
@@ -352,7 +387,81 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         if guardrailVersionIDs != other.guardrailVersionIDs { mismatches.append("guardrailVersionIDs") }
         if guardrailHashes != other.guardrailHashes { mismatches.append("guardrailHashes") }
         if parserRulesVersion != other.parserRulesVersion { mismatches.append("parserRulesVersion") }
+        if threatOverlapVersion != other.threatOverlapVersion { mismatches.append("threatOverlapVersion") }
         return mismatches
+    }
+
+    /// Snapshot-input fields that decide WHICH RULES THE USER ASKED FOR.
+    ///
+    /// A difference in any of these means the artifact is a DIFFERENT FILTER — the wrong enabled
+    /// set, the wrong manual rules, custom lists whose content the user supplied, or rules a
+    /// different parser produced. Serving it would enforce something the user did not choose, so
+    /// these are never tolerable and no caller may weaken them.
+    public static let selectionInputFieldNames: Set<String> = [
+        "enabledBlocklistIDs",
+        "blockedDomains",
+        "allowedDomains",
+        "qaProbeSet",
+        "customBlocklistFingerprints",
+        "parserRulesVersion",
+        "threatOverlapVersion"
+    ]
+
+    /// Snapshot-input fields that decide only HOW FRESH the catalog-managed content is.
+    ///
+    /// These name the version and content hash of the very same sources the selection already
+    /// pins. A difference means the artifact is a STALE COPY OF THE RIGHT FILTER — the lists the
+    /// user chose, compiled from content that has since moved. `canServeAsLastKnownGood` has
+    /// always treated exactly this set as tolerable, on the reasoning that serving the user's own
+    /// previously-verified rules a few hours stale beats having no filter at all.
+    public static let freshnessInputFieldNames: Set<String> = [
+        "catalogVersion",
+        "selectedSourceVersionIDs",
+        "selectedSourceHashes",
+        "guardrailVersionIDs",
+        "guardrailHashes"
+    ]
+
+    /// The mismatching fields that change WHICH rules were asked for, ignoring freshness drift.
+    ///
+    /// Every snapshot input belongs to exactly one of the two sets above, and this partition is
+    /// asserted by `PreparedFilterSnapshotIdentityClassificationTests` against
+    /// `snapshotInputMismatches` itself — a new input field fails that test until it is classified,
+    /// rather than silently defaulting into "tolerable".
+    public func selectionMismatches(against other: PreparedFilterSnapshotIdentity) -> [String] {
+        snapshotInputMismatches(against: other).filter {
+            !Self.freshnessInputFieldNames.contains($0)
+        }
+    }
+
+    /// Whether the two identities ask for the SAME rules and differ only in catalog freshness.
+    ///
+    /// Read this as "this artifact is the user's filter, just not the newest copy of it". It is
+    /// deliberately NOT a licence to skip a fresh compile — it ranks a stale-but-correct artifact
+    /// ABOVE a fresh-but-wrong one, which is the ordering a filter switch needs and the ordering
+    /// the reload path lacked (field 2026-09-01: a switch to a lighter preset was rejected on
+    /// these two fields alone, so the tunnel kept a heavier preset resident for 40 minutes and
+    /// went on enforcing a filter the user had turned off).
+    public func differsOnlyInCatalogFreshness(from other: PreparedFilterSnapshotIdentity) -> Bool {
+        let mismatches = snapshotInputMismatches(against: other)
+        return !mismatches.isEmpty && mismatches.allSatisfy(Self.freshnessInputFieldNames.contains)
+    }
+
+    /// `nil` when nothing differs, else a privacy-safe reason naming the CLASS of the difference
+    /// and the fields in it (e.g. `freshness:selectedSourceHashes+catalogVersion`).
+    ///
+    /// The class is the part a capture could not previously act on. `inputs:` covered two opposite
+    /// outcomes: an artifact for a DIFFERENT filter, which is never serviceable, and a stale copy
+    /// of the RIGHT one, which `canServeAsLastKnownGood` accepts and which
+    /// `serveLastKnownGoodOrFailClosed` now prefers over a superseded resident. The 2026-09-01
+    /// filter-switch wedge was the second and read exactly like the first.
+    ///
+    /// Field NAMES only, never domain or host values, so it is safe to log.
+    public func reuseMismatchReason(against other: PreparedFilterSnapshotIdentity) -> String? {
+        let mismatches = snapshotInputMismatches(against: other)
+        guard !mismatches.isEmpty else { return nil }
+        let kind = differsOnlyInCatalogFreshness(from: other) ? "freshness" : "inputs"
+        return "\(kind):\(mismatches.joined(separator: "+"))"
     }
 
     /// Returns whether configuration-derived inputs and the current parser version match.
@@ -360,7 +469,8 @@ public struct PreparedFilterSnapshotIdentity: Codable, Equatable, Sendable {
         // The no-cached-catalog warm-start branch compares against the running
         // binary's parser rules version (configuration carries no artifact version),
         // so an artifact compiled under an older parser is rejected and regenerated.
-        parserRulesVersion == BlocklistParsingRules.rulesVersion
+        threatOverlapVersion == 1
+            && parserRulesVersion == BlocklistParsingRules.rulesVersion
             && enabledBlocklistIDs == configuration.enabledBlocklistIDs.sorted()
             && blockedDomains == configuration.blockedDomains.sorted()
             && allowedDomains == configuration.allowedDomains.sorted()

@@ -1,5 +1,6 @@
 import Foundation
 import LavaSecFilterPipeline
+import LavaSecKit
 import SwiftUI
 
 // The LavaSecurity+ paywall & billing feature, peeled out of AppViewModel (Phase D2,
@@ -116,9 +117,9 @@ private enum LavaSecurityPlusEntitlementSyncError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            "The subscription sync server response was not valid."
+            "The subscription sync server response was not valid.".lavaLocalized
         case .requestFailed(let statusCode, let message):
-            "Subscription sync returned HTTP \(statusCode): \(message)"
+            "Subscription sync returned HTTP %lld: %@".lavaLocalizedFormat(statusCode, message)
         }
     }
 }
@@ -204,8 +205,10 @@ final class LavaSecurityPlusController: ObservableObject {
             isRefreshingLavaSecurityPlusEntitlements = false
         }
 
-        let entitlement = await lavaSecurityPlusStore.refreshEntitlements()
-        applyLavaSecurityPlusEntitlement(entitlement)
+        // `.unconfirmed`: this is the bare `currentEntitlements` read (startup + Upgrade screen) with no
+        // preceding `AppStore.sync()`, so a negative result must not demote a previously-entitled user.
+        let entitlement = await lavaSecurityPlusStore.refreshEntitlements(confidence: .unconfirmed)
+        applyLavaSecurityPlusEntitlement(entitlement, confidence: .unconfirmed)
         hasCheckedLavaSecurityPlusEntitlements = true
         await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
     }
@@ -216,6 +219,7 @@ final class LavaSecurityPlusController: ObservableObject {
         }
 
         isPurchasingLavaSecurityPlus = true
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("plus.purchase")
         lavaSecurityPlusMessage = nil
         lavaSecurityPlusMessageIsError = false
         defer {
@@ -232,7 +236,8 @@ final class LavaSecurityPlusController: ObservableObject {
 
             switch result {
             case .purchased(let entitlement):
-                applyLavaSecurityPlusEntitlement(entitlement)
+                LavaFeedbackCoordinator.shared.finish("plus.purchase", feedbackID, entitlement.isActive ? .succeeded : .attentionRequired)
+                applyLavaSecurityPlusEntitlement(entitlement, confidence: .confirmed)
                 await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
                 if entitlement.isActive {
                     // The subscriber thank-you section already announces the
@@ -256,6 +261,7 @@ final class LavaSecurityPlusController: ObservableObject {
             }
         } catch {
             lavaSecurityPlusMessage = "Could not complete purchase: %@".lavaLocalizedFormat(error.localizedDescription)
+            LavaFeedbackCoordinator.shared.finish("plus.purchase", feedbackID, .failed, cancelled: error is CancellationError)
             lavaSecurityPlusMessageIsError = true
         }
     }
@@ -266,6 +272,7 @@ final class LavaSecurityPlusController: ObservableObject {
         }
 
         isPurchasingLavaSecurityPlus = true
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("plus.restore")
         lavaSecurityPlusMessage = "Checking the App Store for purchases.".lavaLocalized
         lavaSecurityPlusMessageIsError = false
         defer {
@@ -274,7 +281,8 @@ final class LavaSecurityPlusController: ObservableObject {
 
         do {
             let entitlement = try await lavaSecurityPlusStore.restorePurchases()
-            applyLavaSecurityPlusEntitlement(entitlement)
+            LavaFeedbackCoordinator.shared.finish("plus.restore", feedbackID, entitlement.isActive ? .succeeded : .attentionRequired)
+            applyLavaSecurityPlusEntitlement(entitlement, confidence: .confirmed)
             await syncLavaSecurityPlusEntitlementIfPossible(entitlement)
             lavaSecurityPlusMessage = entitlement.isActive
                 ? "Lava Security Plus is restored.".lavaLocalized
@@ -282,6 +290,7 @@ final class LavaSecurityPlusController: ObservableObject {
             lavaSecurityPlusMessageIsError = !entitlement.isActive
         } catch {
             lavaSecurityPlusMessage = "Could not restore purchases: %@".lavaLocalizedFormat(error.localizedDescription)
+            LavaFeedbackCoordinator.shared.finish("plus.restore", feedbackID, .failed, cancelled: error is CancellationError)
             lavaSecurityPlusMessageIsError = true
         }
     }
@@ -308,13 +317,13 @@ final class LavaSecurityPlusController: ObservableObject {
     /// product-load + entitlement refresh.
     func startLavaSecurityPlusStore() {
         lavaSecurityPlusOffers = lavaSecurityPlusStore.offers
-        lavaSecurityPlusStore.entitlementChanged = { [weak self] entitlement in
+        lavaSecurityPlusStore.entitlementChanged = { [weak self] entitlement, confidence in
             Task { @MainActor [weak self] in
                 guard let self else {
                     return
                 }
 
-                self.applyLavaSecurityPlusEntitlement(entitlement)
+                self.applyLavaSecurityPlusEntitlement(entitlement, confidence: confidence)
                 await self.syncLavaSecurityPlusEntitlementIfPossible(entitlement)
             }
         }
@@ -330,17 +339,51 @@ final class LavaSecurityPlusController: ObservableObject {
         }
     }
 
-    private func applyLavaSecurityPlusEntitlement(_ entitlement: LavaSecurityPlusEntitlement) {
-        // Surface the auto-renewable expiry (nil when there is no active entitlement)
-        // before the early-return below, so the subscriber UI stays current even when the
-        // active flag itself is unchanged (e.g. a renewal that only moves the expiry date).
-        let nextExpiresAt = entitlement.isActive ? entitlement.expiresAt : nil
-        if lavaSecurityPlusExpiresAt != nextExpiresAt {
-            lavaSecurityPlusExpiresAt = nextExpiresAt
+    private func applyLavaSecurityPlusEntitlement(
+        _ entitlement: LavaSecurityPlusEntitlement,
+        confidence: EntitlementReadingConfidence
+    ) {
+        var hasLavaSecurityPlus = entitlement.isActive
+        #if DEBUG || LAVA_QA_TOOLS
+        // A locally built QA app has no App Store receipt, so `entitlement.isActive` is false
+        // and this sync REVOKES a plan the operator deliberately forced with
+        // `-LavaQAForcePaidPlan`. It fired seven times in one device session, each logged only
+        // as `chained-upstream-disabled {cause: notEntitled}` from the downstream reconcile —
+        // so chaining kept switching itself off mid-test and the cause was two hops away from
+        // the symptom. Honour the override rather than fight it.
+        //
+        // QA-gated and opt-in: without the launch argument this is byte-for-byte the old
+        // behaviour, and a Release build cannot reach it at all.
+        if !hasLavaSecurityPlus, UserDefaults.standard.bool(forKey: "LavaQAForcePaidPlan") {
+            hasLavaSecurityPlus = true
+        }
+        #endif
+        // Only an authoritative (`.confirmed`) reading may demote a previously-entitled user. A bare
+        // `currentEntitlements` pass (`.unconfirmed`) that comes back empty is treated as "unknown, keep
+        // what's stored", so a cold/unsynced StoreKit cache cannot silently strip a paying subscriber's
+        // tier (freezing over-cap filters, dropping Plus UI to Free) or — post-Phase-4 — destructively
+        // clear their chaining preference. Mirrors the transient-false guard in
+        // `reconcileChainedUpstreamAfterEligibilityChange`. See `EntitlementApplicationPolicy`.
+        // pinned: EntitlementApplicationPolicyTests.testAnUnconfirmedEmptyReadingKeepsAPaidUser
+        let resolvedHasLavaSecurityPlus = EntitlementApplicationPolicy.resolvedHasLavaSecurityPlus(
+            computed: hasLavaSecurityPlus,
+            persisted: hub.hasLavaSecurityPlus,
+            confidence: confidence)
+
+        // Surface the auto-renewable expiry (before the early-return, so the subscriber UI stays current
+        // even when the active flag is unchanged — e.g. a renewal that only moves the expiry date). An
+        // active reading sets it; a real demote clears it; but an UNCONFIRMED empty read we are KEEPING as
+        // Plus must NOT blank the expiry — that would flash "Plus, no renewal date" on the exact transient
+        // this guard exists to absorb — so leave the last-known value untouched.
+        if entitlement.isActive {
+            if lavaSecurityPlusExpiresAt != entitlement.expiresAt {
+                lavaSecurityPlusExpiresAt = entitlement.expiresAt
+            }
+        } else if !resolvedHasLavaSecurityPlus, lavaSecurityPlusExpiresAt != nil {
+            lavaSecurityPlusExpiresAt = nil
         }
 
-        let hasLavaSecurityPlus = entitlement.isActive
-        guard hub.hasLavaSecurityPlus != hasLavaSecurityPlus else {
+        guard hub.hasLavaSecurityPlus != resolvedHasLavaSecurityPlus else {
             return
         }
 
@@ -348,7 +391,7 @@ final class LavaSecurityPlusController: ObservableObject {
         // the rationale lives on the LavaSecurityPlusHubBridging conformance in
         // AppViewModel.swift, with the persist code.
         do {
-            try hub.persistPaidPlanFlag(hasLavaSecurityPlus)
+            try hub.persistPaidPlanFlag(resolvedHasLavaSecurityPlus)
         } catch {
             lavaSecurityPlusMessage = "Could not save plan state: %@".lavaLocalizedFormat(error.localizedDescription)
             lavaSecurityPlusMessageIsError = true

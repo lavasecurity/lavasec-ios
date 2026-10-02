@@ -100,7 +100,7 @@ final class RepositoryTopologySourceTests: XCTestCase {
             "the packet tunnel must not link the compatibility façade"
         )
 
-        for sourceFile in [SourceFile.guardView, .developerPreviewViews, .softShieldGuardian] {
+        for sourceFile in [SourceFile.developerPreviewViews, .softShieldGuardian] {
             XCTAssertTrue(
                 try readSource(sourceFile).contains("import LavaSecPresentation"),
                 "\(sourceFile.rawValue) must import the narrow presentation product"

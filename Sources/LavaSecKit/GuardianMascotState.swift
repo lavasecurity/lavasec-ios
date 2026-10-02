@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GuardianMascotState: Equatable, Sendable {
+public enum GuardianMascotState: String, Equatable, Sendable {
     case sleeping
     case waking
     case awake

@@ -1,74 +1,67 @@
 import XCTest
 import LavaSecDNS
 @testable import LavaSecCore
-@testable import LavaSecKit
 
 final class InFlightDNSQueryCoalescerTests: XCTestCase {
-    private func makeKey(_ domain: String) throws -> DNSCacheKey {
-        var payload = Data([0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        payload.append(Data(domain.utf8))
-        return try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:test", dnsPayload: payload))
+    private func key(_ name: String = "example.com") throws -> DNSCacheKey {
+        var payload = Data(repeating: 0, count: 12)
+        payload.append(Data(name.utf8))
+        return try XCTUnwrap(DNSCacheKey(resolverIdentifier: "test", dnsPayload: payload))
     }
 
-    func testFirstWaiterStartsAndDuplicatesJoin() throws {
-        let coalescer = InFlightDNSQueryCoalescer<String>()
-        let key = try makeKey("example.com")
-
-        XCTAssertEqual(coalescer.enqueue("first", for: key), .startedResolution)
-        XCTAssertEqual(coalescer.enqueue("second", for: key), .joinedExistingResolution)
-        XCTAssertEqual(coalescer.enqueue("third", for: key), .joinedExistingResolution)
-        XCTAssertEqual(coalescer.inFlightKeyCount, 1)
+    func testDuplicatesJoinInOrderAndOnlyTheOwnerCanDrain() throws {
+        let owner = InFlightDNSQueryCoalescer<Int>()
+        let key = try key()
+        XCTAssertEqual(owner.enqueue(1, for: key, retainedBytes: 10), .startedResolution(1))
+        XCTAssertEqual(owner.enqueue(2, for: key, retainedBytes: 20), .joinedExistingResolution)
+        XCTAssertEqual(owner.drain(key, resolutionID: 9), [])
+        XCTAssertEqual(owner.drain(key, resolutionID: 1), [1, 2])
+        XCTAssertEqual(owner.drain(key, resolutionID: 1), [])
+        XCTAssertEqual(owner.retainedByteCount, 0)
+        XCTAssertEqual(owner.waiterCount, 0)
     }
 
-    func testDrainReturnsWaitersInEnqueueOrderExactlyOnce() throws {
-        let coalescer = InFlightDNSQueryCoalescer<String>()
-        let key = try makeKey("example.com")
-        _ = coalescer.enqueue("first", for: key)
-        _ = coalescer.enqueue("second", for: key)
-
-        XCTAssertEqual(coalescer.drain(key), ["first", "second"])
-        XCTAssertEqual(coalescer.drain(key), [], "One drain per started resolution — a second drain finds nothing.")
-        XCTAssertEqual(coalescer.inFlightKeyCount, 0)
+    func testLateCompletionCannotDrainSuccessorAfterResetOrExpiry() throws {
+        let owner = InFlightDNSQueryCoalescer<Int>()
+        let key = try key()
+        _ = owner.enqueue(1, for: key, retainedBytes: 1)
+        XCTAssertEqual(owner.drainAll(), [1])
+        XCTAssertEqual(owner.enqueue(2, for: key, retainedBytes: 1), .startedResolution(2))
+        XCTAssertEqual(owner.drain(key, resolutionID: 1), [])
+        XCTAssertEqual(owner.drain(key, resolutionID: 2), [2])
+        XCTAssertEqual(owner.enqueue(3, for: key, retainedBytes: 1), .startedResolution(3))
+        XCTAssertEqual(owner.drain(key, resolutionID: 2), [])
+        XCTAssertEqual(owner.drain(key, resolutionID: 3), [3])
     }
 
-    func testEnqueueAfterDrainStartsANewResolution() throws {
-        let coalescer = InFlightDNSQueryCoalescer<String>()
-        let key = try makeKey("example.com")
-        _ = coalescer.enqueue("first", for: key)
-        _ = coalescer.drain(key)
-
-        XCTAssertEqual(
-            coalescer.enqueue("fresh", for: key), .startedResolution,
-            "After the in-flight resolution completes, the next identical query starts a new one."
-        )
+    func testDuplicateBurstAndDistinctBurstStayWithinIndependentBudgets() throws {
+        let owner = InFlightDNSQueryCoalescer<Int>(
+            maximumWaiterCount: 32, maximumWaitersPerKey: 4, maximumRetainedBytes: 100)
+        let same = try key()
+        for value in 0..<10_000 {
+            let result = owner.enqueue(value, for: same, retainedBytes: 10)
+            if value >= 4 { XCTAssertEqual(result, .rejected) }
+        }
+        XCTAssertEqual(owner.waiterCount, 4)
+        for value in 0..<10_000 {
+            _ = owner.enqueue(value, for: try key("q\(value)"), retainedBytes: 10)
+            XCTAssertLessThanOrEqual(owner.retainedByteCount, 100)
+        }
+        XCTAssertEqual(owner.waiterCount, 10)
+        XCTAssertEqual(owner.inFlightKeyCount, 7)
+        XCTAssertEqual(owner.drainAll().count, 10)
+        XCTAssertEqual(owner.retainedByteCount, 0)
     }
 
-    func testIndependentKeysCoalesceIndependently() throws {
-        let coalescer = InFlightDNSQueryCoalescer<String>()
-        let keyA = try makeKey("a.example.com")
-        let keyB = try makeKey("b.example.com")
-
-        XCTAssertEqual(coalescer.enqueue("a1", for: keyA), .startedResolution)
-        XCTAssertEqual(coalescer.enqueue("b1", for: keyB), .startedResolution)
-        XCTAssertEqual(coalescer.enqueue("a2", for: keyA), .joinedExistingResolution)
-
-        XCTAssertEqual(coalescer.drain(keyA), ["a1", "a2"])
-        XCTAssertEqual(coalescer.drain(keyB), ["b1"])
-    }
-
-    func testDrainAllReturnsEveryWaiterAndClears() throws {
-        let coalescer = InFlightDNSQueryCoalescer<String>()
-        let keyA = try makeKey("a.example.com")
-        let keyB = try makeKey("b.example.com")
-        _ = coalescer.enqueue("a1", for: keyA)
-        _ = coalescer.enqueue("a2", for: keyA)
-        _ = coalescer.enqueue("b1", for: keyB)
-
-        let drained = coalescer.drainAll()
-
-        XCTAssertEqual(drained.count, 3)
-        XCTAssertEqual(Set(drained), ["a1", "a2", "b1"])
-        XCTAssertEqual(coalescer.inFlightKeyCount, 0)
-        XCTAssertEqual(coalescer.enqueue("fresh", for: keyA), .startedResolution)
+    func testTotalCountLimitAndCapacityRecovery() throws {
+        let owner = InFlightDNSQueryCoalescer<Int>(
+            maximumWaiterCount: 2, maximumWaitersPerKey: 2, maximumRetainedBytes: 100)
+        let a = try key("a"), b = try key("b")
+        _ = owner.enqueue(1, for: a, retainedBytes: 1)
+        _ = owner.enqueue(2, for: b, retainedBytes: 1)
+        XCTAssertEqual(owner.enqueue(3, for: b, retainedBytes: 1), .rejected)
+        XCTAssertEqual(owner.drain(a, resolutionID: 1), [1])
+        XCTAssertEqual(owner.enqueue(3, for: b, retainedBytes: 1), .joinedExistingResolution)
+        XCTAssertEqual(owner.drain(b, resolutionID: 2), [2, 3])
     }
 }

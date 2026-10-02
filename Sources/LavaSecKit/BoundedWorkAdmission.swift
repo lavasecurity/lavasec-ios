@@ -1,104 +1,136 @@
 import Foundation
 
-// Bounded-concurrency admission for resolver work, extracted from
-// PacketTunnelProvider. It caps how many work items may run concurrently at a
-// fixed bound while parking NO threads: a submission that fits under the bound
-// is admitted immediately, otherwise it waits INERT in a FIFO of pending work
-// until an active item finishes and releases its slot. This replaces a
-// DispatchSemaphore whose `.wait()` parked one libdispatch worker thread per
-// waiting query (CON-4) — an outage burst could accumulate parked threads
-// toward the constrained-pool cap. The observable bound (max concurrent work)
-// is IDENTICAL; only the mechanism changes.
-//
-// Generic over the work payload — the tunnel keeps its own resolver closures
-// out of core. NOT internally synchronized: access is confined to the caller's
-// serial admission queue, matching the InFlightDNSQueryCoalescer it sits
-// beside. The caller admits/dequeues under that confinement and dispatches the
-// returned work to its concurrent execution queue; when a work item finishes it
-// calls `release()` on the same serial queue to free the slot and hand back the
-// next pending item to start (or nil).
-
-/// A FIFO admission queue that limits concurrently active work without blocking waiting threads.
+/// Queue-confined FIFO admission with separate client expiry and underlying-work retirement.
+/// An expired active item keeps its slot until its lease is completed; it cannot admit more I/O.
 public final class BoundedWorkAdmission<Work> {
-    /// Maximum number of work items that may be active (running) concurrently.
+    /// Identity and payload of one active item; only this identity may release its slot.
+    public struct Lease {
+        /// Monotonic identity, retained when pending work becomes active.
+        public let id: UInt64
+        /// The work to execute outside the admission queue.
+        public let work: Work
+    }
+
+    /// Whether submission retained work, and whether it can begin immediately.
+    public struct Submission {
+        /// False for overload or an already-expired deadline.
+        public let accepted: Bool
+        /// A claimed slot, or nil when queued/rejected.
+        public let started: Lease?
+    }
+
+    /// Work to notify of expiry and the next claimed slot after a completion.
+    public struct Retirement {
+        /// Expired clients to settle without releasing still-active work.
+        public let expired: [Work]
+        /// The oldest unexpired pending item, if a slot became available.
+        public let started: Lease?
+    }
+
+    private struct Entry {
+        let lease: Lease
+        let retainedBytes: Int
+        let deadline: MonotonicDeadline
+        var expiryReported = false
+    }
+
+    /// Maximum simultaneously active items.
     public let bound: Int
+    /// Maximum inert pending items.
+    public let maximumPendingCount: Int
+    /// Maximum declared payload bytes retained by pending items.
+    public let maximumPendingBytes: Int
+    private var active: [UInt64: Entry] = [:]
+    private var pending: [Entry] = []
+    private var nextID: UInt64 = 0
+    /// Bytes retained in the pending FIFO, excluding the separately bounded active slots.
+    public private(set) var pendingByteCount = 0
 
-    private var activeCount = 0
-    // FIFO of pending work as a head-indexed buffer: dequeue advances `pendingHead` instead of
-    // Array.removeFirst() (which is O(n) — draining an outage backlog of N would cost O(N²) on the
-    // serial admission queue, Codex #224). Dequeued slots are niled to release the work's captures
-    // immediately, and the consumed prefix is compacted once it dominates, so storage stays bounded
-    // by the live pending count.
-    private var pending: [Work?] = []
-    private var pendingHead = 0
-
-    /// - Parameter bound: the concurrency ceiling. A non-positive bound is
-    ///   clamped to 1 so the primitive always makes forward progress.
-    public init(bound: Int) {
+    /// Creates a bounded owner; callers must supply the retained payload size of each submission.
+    public init(bound: Int, maximumPendingCount: Int = 128, maximumPendingBytes: Int = 512 * 1024) {
         self.bound = max(1, bound)
+        self.maximumPendingCount = max(0, maximumPendingCount)
+        self.maximumPendingBytes = max(0, maximumPendingBytes)
     }
 
-    /// Number of work items currently running (admitted but not yet released).
-    /// Exposed read-only for diagnostics/tests.
-    public var activeWorkCount: Int {
-        activeCount
+    /// Active slots, including work whose client deadline has already elapsed.
+    public var activeWorkCount: Int { active.count }
+    /// Inert queued work, bounded by both item count and declared payload bytes.
+    public var pendingWorkCount: Int { pending.count }
+    /// Earliest unreported client deadline, for one owner-managed expiry timer.
+    public var nextDeadline: MonotonicDeadline? {
+        (pending.map(\.deadline) + active.values.filter { !$0.expiryReported }.map(\.deadline))
+            .min { $0.instant < $1.instant }
     }
 
-    /// Number of work items waiting inert in the FIFO for a free slot. Exposed
-    /// read-only for diagnostics/tests.
-    public var pendingWorkCount: Int {
-        pending.count - pendingHead
-    }
-
-    /// Admit `work` if a slot is free, otherwise enqueue it FIFO.
-    ///
-    /// - Returns: `work` itself when it may start immediately (a slot was free
-    ///   and has now been claimed); `nil` when it was enqueued and must wait.
-    ///   The caller dispatches the returned work to its execution queue and, for
-    ///   an enqueued item, does nothing — a later ``release()`` hands it back.
-    public func admit(_ work: Work) -> Work? {
-        guard activeCount < bound else {
-            pending.append(work)
-            return nil
+    /// Starts or queues one item; a rejected submission retains no payload and owns no slot.
+    /// Call `expire` before submitting when expired clients need immediate settlement.
+    public func submit(
+        _ work: Work, retainedBytes: Int, deadline: MonotonicDeadline,
+        now: ContinuousClock.Instant = ContinuousClock().now
+    ) -> Submission {
+        let cost = max(0, retainedBytes)
+        guard !deadline.hasExpired(now: now) else { return Submission(accepted: false, started: nil) }
+        if active.count >= bound {
+            guard pending.count < maximumPendingCount,
+                  cost <= maximumPendingBytes - pendingByteCount
+            else { return Submission(accepted: false, started: nil) }
         }
-
-        activeCount += 1
-        return work
+        nextID &+= 1
+        let lease = Lease(id: nextID, work: work)
+        let entry = Entry(lease: lease, retainedBytes: cost, deadline: deadline)
+        if active.count < bound {
+            active[lease.id] = entry
+            return Submission(accepted: true, started: lease)
+        }
+        pending.append(entry)
+        pendingByteCount += cost
+        return Submission(accepted: true, started: nil)
     }
 
-    /// Release the slot held by a completed work item and hand back the next
-    /// pending item to start, if any.
-    ///
-    /// The active count nets out unchanged when a pending item is dequeued (the
-    /// freed slot is immediately re-claimed by the next item), so the concurrency
-    /// bound is never exceeded. When the FIFO is empty the count simply drops.
-    ///
-    /// - Returns: the next work item to start (its slot already claimed), or
-    ///   `nil` when nothing is waiting.
-    public func release() -> Work? {
-        if pendingHead < pending.count {
-            guard let next = pending[pendingHead] else {
-                // Unreachable: a slot is niled only AFTER pendingHead advances past it. Keep the
-                // FIFO consistent (skip the empty slot) rather than trap if it ever happens.
-                pendingHead += 1
-                return release()
-            }
-            // Dequeue in O(1): drop this slot's captures immediately, advance the head, and compact
-            // the consumed prefix once it dominates so the buffer tracks the live pending count.
-            pending[pendingHead] = nil
-            pendingHead += 1
-            if pendingHead > pending.count / 2 {
-                pending.removeFirst(pendingHead)
-                pendingHead = 0
-            }
-            // Re-use the just-freed slot for this waiter: activeCount is left unchanged (one out,
-            // one in) so the bound holds exactly.
-            return next
+    /// Removes expired pending work and reports active expiry once, retaining active slot ownership.
+    public func expire(now: ContinuousClock.Instant = ContinuousClock().now) -> [Work] {
+        var expired: [Work] = []
+        pending.removeAll { entry in
+            guard entry.deadline.hasExpired(now: now) else { return false }
+            pendingByteCount -= entry.retainedBytes
+            expired.append(entry.lease.work)
+            return true
         }
+        for id in Array(active.keys) {
+            guard var entry = active[id], !entry.expiryReported,
+                  entry.deadline.hasExpired(now: now) else { continue }
+            entry.expiryReported = true
+            active[id] = entry
+            expired.append(entry.lease.work)
+        }
+        return expired
+    }
 
-        if activeCount > 0 {
-            activeCount -= 1
+    /// Retires only the matching active lease and promotes one unexpired FIFO item.
+    /// Duplicate or stale completions cannot release another item's slot.
+    public func complete(
+        _ id: UInt64, now: ContinuousClock.Instant = ContinuousClock().now
+    ) -> Retirement {
+        let expired = expire(now: now)
+        guard active.removeValue(forKey: id) != nil else {
+            return Retirement(expired: expired, started: nil)
         }
-        return nil
+        guard !pending.isEmpty else { return Retirement(expired: expired, started: nil) }
+        // The production FIFO is capped at 128 items; this bounded shift avoids a second sparse-buffer owner.
+        let next = pending.removeFirst()
+        pendingByteCount -= next.retainedBytes
+        active[next.lease.id] = next
+        return Retirement(expired: expired, started: next.lease)
+    }
+
+    /// Purges queued payloads on runtime invalidation without pretending active I/O has ended.
+    public func discardPending() -> [Work] {
+        let discarded = pending.map { $0.lease.work }
+        pending.removeAll(keepingCapacity: true)
+        pendingByteCount = 0
+        return discarded
     }
 }
+
+extension BoundedWorkAdmission.Lease: Sendable where Work: Sendable {}

@@ -126,10 +126,10 @@ struct SwitchFilterIntent: AppIntent {
         switch outcome {
         case .committed:
             dialog = IntentDialog(stringLiteral:
-                LavaCoreStrings.localizedFormat("dialog.filterSwitchedTo", languageCode: languageCode, filter.name))
+                LavaCoreStrings.localizedFormat("dialog.filterSwitchedTo", languageCode: languageCode, filter.displayName))
         case .alreadyActive:
             dialog = IntentDialog(stringLiteral:
-                LavaCoreStrings.localizedFormat("dialog.filterAlreadyActive", languageCode: languageCode, filter.name))
+                LavaCoreStrings.localizedFormat("dialog.filterAlreadyActive", languageCode: languageCode, filter.displayName))
         case .deferred:
             // The headless path only commits a WARM switch. Warm-all (LAV-100 Phase 1) keeps every non-frozen
             // filter compiled on disk, so a switch to a built-in like Balanced normally COMMITS and the tunnel
@@ -149,7 +149,7 @@ struct SwitchFilterIntent: AppIntent {
             // plan.md; founder 2026-07-16, superseding the interim "next time you open Lava" condition from
             // the Codex PR #410 P2 round).
             dialog = IntentDialog(stringLiteral:
-                LavaCoreStrings.localizedFormat("dialog.filterWillApplyAutomatically", languageCode: languageCode, filter.name))
+                LavaCoreStrings.localizedFormat("dialog.filterWillApplyAutomatically", languageCode: languageCode, filter.displayName))
         case .disallowed:
             // Auth-to-edit gate on (or the impossible container-unavailable case). A headless intent can't
             // prompt for auth, so the engine safely no-ops — and the switch DID NOT HAPPEN, so this is an
@@ -161,7 +161,7 @@ struct SwitchFilterIntent: AppIntent {
             // read in the Shortcuts process, which is not in the app group and cannot read the pin.
             throw SwitchFilterDisallowedError(
                 localizedMessage: LavaCoreStrings.localizedFormat(
-                    "dialog.filterSwitchDisallowed", languageCode: languageCode, filter.name))
+                    "dialog.filterSwitchDisallowed", languageCode: languageCode, filter.displayName))
         }
         return .result(dialog: dialog)
     }
@@ -185,11 +185,37 @@ struct SwitchFilterDisallowedError: Error, CustomLocalizedStringResourceConverti
 
 // MARK: - App Shortcuts provider (Siri phrases)
 
-/// Registers `SwitchFilterIntent` as an App Shortcut so Siri and the Shortcuts gallery surface it with
-/// spoken phrases. Lives in the APP target because App Shortcuts register from the app bundle (see the
-/// file header). One shortcut only — switching is the sole intent this app vends (founder decision).
+/// Registers the protection controls and filter switch with Spotlight, Siri, and Shortcuts.
+/// These intents live in the app target; none is exposed through Lava URL routing.
 struct LavaShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: ConnectLavaIntent(),
+            phrases: [
+                "Connect \(.applicationName)",
+                "Turn on \(.applicationName)"
+            ],
+            shortTitle: "Connect",
+            systemImageName: "checkmark.shield.fill"
+        )
+        AppShortcut(
+            intent: DisconnectLavaIntent(),
+            phrases: [
+                "Disconnect \(.applicationName)",
+                "Turn off \(.applicationName)"
+            ],
+            shortTitle: "Disconnect",
+            systemImageName: "shield.slash.fill"
+        )
+        AppShortcut(
+            intent: GetLavaStatusIntent(),
+            phrases: [
+                "Get \(.applicationName) status",
+                "Check \(.applicationName) status"
+            ],
+            shortTitle: "Get Status",
+            systemImageName: "info.circle"
+        )
         AppShortcut(
             intent: SwitchFilterIntent(),
             phrases: [

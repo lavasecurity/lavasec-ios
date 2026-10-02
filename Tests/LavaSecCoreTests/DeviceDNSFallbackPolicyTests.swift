@@ -109,47 +109,6 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
         )
     }
 
-    func testCaptureRetryContinuesWhileMaskedUnderAttemptCap() {
-        XCTAssertTrue(
-            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-                attemptsMade: 1,
-                capturedNonEmpty: false
-            )
-        )
-        XCTAssertTrue(
-            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts - 1,
-                capturedNonEmpty: false
-            )
-        )
-    }
-
-    func testCaptureRetryStopsAtAttemptCap() {
-        XCTAssertFalse(
-            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts,
-                capturedNonEmpty: false
-            )
-        )
-        XCTAssertFalse(
-            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-                attemptsMade: DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts + 1,
-                capturedNonEmpty: false
-            )
-        )
-    }
-
-    func testCaptureRetryStopsImmediatelyOnceCaptureSucceeds() {
-        // A non-empty capture means the mask lifted — adopt it and stop, even with
-        // attempts still left in the window.
-        XCTAssertFalse(
-            DeviceDNSFallbackPolicy.shouldRetryDeviceDNSCapture(
-                attemptsMade: 1,
-                capturedNonEmpty: true
-            )
-        )
-    }
-
     func testWakeRestartAllowedWithNoPriorMaskedExhaustion() {
         // nil stamp = no cycle has exhausted while masked since the last real
         // change signal — a wake may always start the retry cycle.
@@ -206,16 +165,14 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
         )
     }
 
-    func testWakeRestartCooldownOutlastsRetryCycleButNotRoutineProbe() {
-        // The cooldown must be longer than one full retry cycle (else it never
-        // actually suppresses a repeat) and shorter than the 300 s routine probe
-        // cadence so a genuinely-recoverable mask is still retried well before the
-        // routine backstop.
-        let cycleWindow = DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
-            * Double(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts)
+    func testWakeRestartCooldownOutlastsSingleCaptureButNotRoutineProbe() {
+        // The cooldown must be longer than the single-shot capture's arm interval
+        // (else it never actually suppresses a repeat) and shorter than the 300 s
+        // routine probe cadence so a genuinely-recoverable mask is still sampled
+        // well before the routine backstop.
         XCTAssertGreaterThan(
             DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown,
-            cycleWindow
+            DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
         )
         XCTAssertLessThan(
             DeviceDNSFallbackPolicy.deviceDNSCaptureRetryExhaustionCooldown,
@@ -223,14 +180,14 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
         )
     }
 
-    func testCaptureRetryWindowIsBoundedAndShorterThanRoutineProbe() {
-        XCTAssertGreaterThan(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts, 0)
+    func testCaptureArmIntervalIsPositiveAndShorterThanRoutineProbe() {
         XCTAssertGreaterThan(DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval, 0)
-        // The whole retry window must resolve well inside the 300s routine cadence
-        // so a masked handoff recovers promptly, not on the next routine probe.
-        let totalWindow = DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval
-            * Double(DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts)
-        XCTAssertLessThan(totalWindow, DeviceDNSFallbackPolicy.routineSmokeProbeInterval)
+        // The single armed capture must land well inside the 300s routine cadence so
+        // a masked handoff is re-sampled promptly, not on the next routine probe.
+        XCTAssertLessThan(
+            DeviceDNSFallbackPolicy.deviceDNSCaptureRetryInterval,
+            DeviceDNSFallbackPolicy.routineSmokeProbeInterval
+        )
     }
 
     func testUsableResolverAddressAcceptsRealResolvers() {
@@ -518,4 +475,5 @@ final class DeviceDNSFallbackPolicyTests: XCTestCase {
             .probe
         )
     }
+
 }

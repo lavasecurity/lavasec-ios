@@ -1,0 +1,82 @@
+name: Catalog Health
+
+# Watches the blocklist catalog for upstream rot.
+#
+# On 2026-08-10 a QA device sat in a total DNS outage for five hours because 12 of the
+# catalog's 34 sources had silently become unfetchable: `github.com/hagezi/dns-blocklists`
+# had gone to 404 (11 entries) and `blocklistproject-malware` had grown past the 45 MB
+# per-source cap (1 entry). Either fault wedges any device that enables that source — the
+# snapshot prepare throws, the artifact is never rewritten, coverage never holds again,
+# and the tunnel serves fail-closed block-all. Nothing was watching, so nothing noticed.
+#
+# NOT a pull_request trigger, deliberately. This job talks to the live internet; as a
+# required check it would let one upstream's bad afternoon block every unrelated PR in the
+# repo. Scheduled + manual, and a human reads the failure.
+
+on:
+  schedule:
+    # 07:20 UTC daily. Off the hour so it does not pile onto the top-of-hour rush that
+    # these same upstreams serve to every other blocklist consumer.
+    - cron: "20 7 * * *"
+  workflow_dispatch:
+  # Guard the checker against itself: if someone edits the script or the catalog, run it
+  # on that PR so a broken checker is not discovered by a silent scheduled run.
+  pull_request:
+    # Drafts are exempt from CI: the `sources` job skips while the PR is a draft, and
+    # `ready_for_review` re-runs it (the type is load-bearing — without it, flipping
+    # to ready would leave the skipped context stale with no new run).
+    # `converted_to_draft` cancels an in-flight run on the way back (Codex P2, PR #784).
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    paths:
+      - "scripts/check-catalog-sources.mjs"
+      - "scripts/tests/catalog-consistency.test.mjs"
+      - "scripts/tests/catalog-source-url.test.mjs"
+      - ".github/workflows/catalog-health.yml"
+      - "Catalog/blocklist-catalog.json"
+      # The checker reads three limits OUT of Swift rather than copying them: the per-source
+      # byte cap (BlocklistCatalogSync.swift), the rule cap (SubscriptionPolicy.swift), and the
+      # 8 MiB catalog-document ceiling (BlocklistCatalogRepository.swift). A change to any of
+      # these files can break an anchor or move a limit, so each must trigger this job.
+      - "Sources/LavaSecFilterPipeline/BlocklistCatalogSync.swift"
+      - "Sources/LavaSecFilterPipeline/BlocklistCatalogRepository.swift"
+      - "Sources/LavaSecKit/SubscriptionPolicy.swift"
+      # Required source/hash fields are mirrored by the schema validator.
+      - "Sources/LavaSecKit/CatalogSourceModels.swift"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Added with the draft exemption: `converted_to_draft` can only cancel an in-flight
+  # run if there IS a shared group to cancel into (Kilo WARNING, PR #784). One run
+  # per ref; a newer scheduled/dispatch/PR run supersedes the older one.
+  group: catalog-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sources:
+    # Draft PRs are inert (see `on.pull_request.types`); `ready_for_review` re-runs.
+    if: ${{ github.event.pull_request.draft != true }}
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && 'ubicloud-standard-2' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Catalog consistency and request-boundary regression tests
+        run: node --test scripts/tests/catalog-consistency.test.mjs scripts/tests/catalog-source-url.test.mjs
+      # On a pull request the interesting catalog is the PROPOSED one. Checking the served
+      # catalog here would report the health of production data the PR does not touch, and
+      # would happily pass a PR that introduces an unfetchable or oversized source — which
+      # is precisely the rot this job exists to stop, arriving through the one door that is
+      # actually reviewable.
+      - name: The proposed catalog fetches and fits
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-catalog-sources.mjs --vendored
+
+      # Off a pull request, the served catalog is what devices actually receive, and it can
+      # rot without any commit at all — that is how the 2026-08-10 outage happened.
+      - name: Every served catalog source fetches and fits
+        if: github.event_name != 'pull_request'
+        run: node scripts/check-catalog-sources.mjs

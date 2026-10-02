@@ -4,7 +4,9 @@
 # `.swiftlint-missing-docs.yml` and committed baseline, so only new undocumented public API
 # fails.
 #
-# The dedicated config scopes the blocking ratchet to exactly the six real package layers.
+# The dedicated config scopes the blocking ratchet to exactly the real package source
+# modules: the six layers plus LavaSecChainedUpstream (the WireGuard engine wrapper — not
+# a layer, but its public API is package API and carries the same obligation).
 # Their nested .swiftlint.yml files keep missing_docs enabled in the general warning-only
 # lane, matching the CLAUDE.md rule: new public API there carries /// docs; pre-split code
 # is retrofitted opportunistically, never in bulk.

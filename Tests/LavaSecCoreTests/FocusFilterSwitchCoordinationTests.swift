@@ -85,7 +85,7 @@ final class FocusFilterSwitchCoordinationTests: XCTestCase {
         let record = FocusSwitchDiagnosticRecord(
             outcome: "committed", targetFilterID: "filter-extra", at: Date(timeIntervalSinceReferenceDate: 4_242)
         )
-        FocusSwitchDiagnostics.record(record, in: defaults)
+        FocusSwitchDiagnostics.record(record, keepingLocalRecords: true, in: defaults)
         XCTAssertEqual(FocusSwitchDiagnostics.last(in: defaults), record)
     }
 
@@ -93,10 +93,11 @@ final class FocusFilterSwitchCoordinationTests: XCTestCase {
         let defaults = makeDefaults()
         FocusSwitchDiagnostics.record(
             FocusSwitchDiagnosticRecord(outcome: "deferred", targetFilterID: "a", at: Date(timeIntervalSinceReferenceDate: 1)),
+            keepingLocalRecords: true,
             in: defaults
         )
         let latest = FocusSwitchDiagnosticRecord(outcome: "committed", targetFilterID: "b", at: Date(timeIntervalSinceReferenceDate: 2))
-        FocusSwitchDiagnostics.record(latest, in: defaults)
+        FocusSwitchDiagnostics.record(latest, keepingLocalRecords: true, in: defaults)
         XCTAssertEqual(FocusSwitchDiagnostics.last(in: defaults), latest)
     }
 

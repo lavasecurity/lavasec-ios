@@ -29,15 +29,12 @@ final class AccessibilityTabCueSourceTests: XCTestCase {
 
     // MARK: Both tabs drive the cue off the live selection
 
-    func testRootTabsUseSelectionDrivenSymbol() throws {
-        let source = try readSource(.rootView)
-        XCTAssertTrue(
-            source.contains("LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel)"),
-            "The Guard tab item must pick its glyph from whether Guard is the selected tab."
-        )
-        XCTAssertTrue(
-            source.contains("LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings)"),
-            "The Settings tab item must pick its glyph from whether Settings is the selected tab."
-        )
+    func testProductTabsAreOwnedByReactNative() throws {
+        let root = try readSource(.rootView)
+        let navigation = try readSource(.reactNativeReviewNavigation)
+        XCTAssertFalse(root.contains("TabView(selection: guardedRootTabSelection)"))
+        XCTAssertTrue(root.contains("LavaAppHost()"))
+        XCTAssertTrue(navigation.contains("<Tabs.Screen name=\"GuardTab\""))
+        XCTAssertTrue(navigation.contains("<Tabs.Screen name=\"SettingsTab\""))
     }
 }

@@ -59,63 +59,13 @@ final class CustomizationTextSizeSourceTests: XCTestCase {
     /// The first time Match System is turned off with no saved Lava size, the slider is seeded from
     /// the current system size so the app doesn't jump for users whose iOS text size isn't `.large`.
     func testFirstOptOutSeedsFromSystemSize() throws {
-        let controllerSource = try readSource(.customizationController)
-        XCTAssertTrue(controllerSource.contains("static func matching(_ dynamicTypeSize: DynamicTypeSize) -> LavaTextSize"),
-                      "There must be a system-size → LavaTextSize mapping to seed from.")
-        XCTAssertTrue(controllerSource.contains("if !matchesSystem, defaults.object(forKey: textSizeDefaultsKeyName) == nil"),
-                      "The seed must run only on opt-out and only when no Lava size was ever saved (a saved size wins).")
-
-        let settingsSource = try readSource(.customizationSettingsView)
-        XCTAssertTrue(settingsSource.contains("@Environment(\\.dynamicTypeSize) private var systemDynamicTypeSize"),
-                      "Customization must read the current system Dynamic Type size.")
-        XCTAssertTrue(settingsSource.contains("seedingFrom: LavaTextSize.matching(systemDynamicTypeSize)"),
-                      "The Match System toggle must seed the size from the current system size.")
+        let source = try readSource(.reactNativeAppSettings)
+        XCTAssertTrue(source.contains("seedingFrom: Self.systemTextSize"))
+        XCTAssertTrue(source.contains("c.setTextSizeMatchesSystem"))
     }
 
     // MARK: Customization UI + slider gating
 
-    func testTextSizeSectionControlsAndGrey() throws {
-        let source = try readSource(.customizationSettingsView)
-
-        XCTAssertTrue(source.contains("Toggle(\"Match System\", isOn: textSizeMatchesSystemBinding)"),
-                      "The Text Size section needs a Match System toggle.")
-        XCTAssertTrue(source.contains("value: textSizeSliderBinding"),
-                      "The Text Size section needs a slider bound to the text size.")
-
-        // The slider greys out (opacity) and is disabled while matching the system — reads as
-        // inactive without relying on color, and VoiceOver skips a knob that would do nothing.
-        XCTAssertTrue(source.contains(".disabled(customization.textSizeMatchesSystem)"),
-                      "The Text Size slider must be disabled while Match System is on.")
-        XCTAssertTrue(source.contains(".opacity(customization.textSizeMatchesSystem ? 0.4 : 1)"),
-                      "The Text Size slider must grey out while Match System is on.")
-        XCTAssertTrue(source.contains(".accessibilityLabel(\"Text Size\")"),
-                      "The slider needs a meaningful accessibility label.")
-        XCTAssertTrue(source.contains(".accessibilityValue(customization.textSize.displayName.lavaLocalized)"),
-                      "The slider must announce the selected size (Small, Large, …) to VoiceOver, not a raw 0–6 value.")
-    }
-
     // MARK: Section order (the reorder)
 
-    func testCustomizationSectionOrder() throws {
-        let source = try readSource(.customizationSettingsView)
-
-        func offset(of marker: String) throws -> Int {
-            let range = try XCTUnwrap(source.range(of: marker), "missing section marker: \(marker)")
-            return source.distance(from: source.startIndex, to: range.lowerBound)
-        }
-
-        // Guard → Appearance → Text Size → Notifications → Live Activities → Haptics.
-        let guardSection = try offset(of: "LavaSectionGroup(\"Lava Guard\")")
-        let appearance = try offset(of: "LavaSectionGroup(\"Appearance\")")
-        let textSize = try offset(of: "LavaSectionGroup(\"Text Size\")")
-        let notifications = try offset(of: "LavaSectionGroup(\"Notifications\")")
-        let liveActivities = try offset(of: "LavaSectionGroup(\"Live Activities\")")
-        let haptics = try offset(of: "LavaSectionGroup(\"Haptics\")")
-
-        XCTAssertLessThan(guardSection, appearance, "Lava Guard must stay first.")
-        XCTAssertLessThan(appearance, textSize, "Text Size must sit directly after Appearance (the Display cluster).")
-        XCTAssertLessThan(textSize, notifications, "Notifications must follow the Display cluster.")
-        XCTAssertLessThan(notifications, liveActivities, "Live Activities must move below Notifications.")
-        XCTAssertLessThan(liveActivities, haptics, "Haptics stays near the bottom.")
-    }
 }

@@ -23,6 +23,9 @@ public enum LavaSecAPI {
 /// Versioned metadata describing available blocklist and guardrail sources.
 public struct BlocklistCatalog: Equatable, Codable, Sendable {
     internal static let builtInSourceURLCatalogVersion = "built-in-source-url-catalog-v1"
+    // A rule needs at least one input byte. Bound unresolved estimates by the existing
+    // download ceiling so later additions of local rules and warm-pass totals have headroom.
+    private static let maximumSourceEntryCount = BlocklistParseResourceBudget.default.maximumBlocklistBytes
 
     package let schemaVersion: Int
     /// Identifier for the catalog revision.
@@ -32,19 +35,74 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
     /// Selectable blocklist sources in this catalog.
     public let sources: [CatalogBlocklistSource]
     package let guardrails: [CatalogBlocklistSource]
+    package let authorization: CatalogAuthorization?
+    package let withdrawnSources: [String]
+
+    /// Builds a renewal using the prior catalog's artifact inputs. Disabled sources may
+    /// retain locally resolved observations absent from a network response; preserve those
+    /// bytes rather than treating advisory drift as a definition change or artifact update.
+    public func authorizationRenewal(preserving prior: BlocklistCatalog) -> BlocklistCatalog? {
+        guard authorization != nil, authorization != prior.authorization,
+              schemaVersion == prior.schemaVersion, catalogVersion == prior.catalogVersion,
+              sources.map(CatalogSourceDefinition.init).sorted(by: { $0.id < $1.id })
+                == prior.sources.map(CatalogSourceDefinition.init).sorted(by: { $0.id < $1.id }),
+              guardrails.map(CatalogSourceDefinition.init).sorted(by: { $0.id < $1.id })
+                == prior.guardrails.map(CatalogSourceDefinition.init).sorted(by: { $0.id < $1.id }),
+              withdrawnSources.sorted() == prior.withdrawnSources.sorted()
+        else { return nil }
+        return BlocklistCatalog(schemaVersion: prior.schemaVersion, catalogVersion: prior.catalogVersion,
+            generatedAt: generatedAt, sources: prior.sources, guardrails: prior.guardrails,
+            authorization: authorization, withdrawnSources: prior.withdrawnSources)
+    }
+
+    /// Selected catalog identities retired by a locally verified authorization. Custom
+    /// sources remain user-owned even if their identifiers overlap a catalog tombstone.
+    public func withdrawnBlocklistIDs(in configuration: AppConfiguration) -> Set<String> {
+        withdrawnBlocklistIDs(in: configuration, trustPolicy: .production)
+    }
+
+    internal func withdrawnBlocklistIDs(in configuration: AppConfiguration, trustPolicy: CatalogTrustPolicy) -> Set<String> {
+        verifiedWithdrawnSourceIDs(using: trustPolicy).intersection(configuration.enabledBlocklistIDs)
+            .subtracting(configuration.customBlocklists.map(\.id))
+    }
+
+    // Compatibility mode deliberately ignores envelopes; it must not turn an unsigned
+    // omission into permission to stop enforcing a selected list.
+    // pinned: CatalogAuthorizationTests.testWithdrawalsRequireConfiguredVerifiedAuthorization
+    internal func verifiedWithdrawnSourceIDs(using policy: CatalogTrustPolicy) -> Set<String> {
+        guard let manifest = try? verifyAuthorization(using: policy) else { return [] }
+        return Set(manifest.withdrawnSources)
+    }
+
+    /// Summed entry counts of this catalog's guardrail sources — an upper bound on the guardrail
+    /// rules a compile will process, since overlapping guardrail sources are not deduplicated here.
+    ///
+    /// The `guardrails` array itself stays `package`: it is the structural source of truth for the
+    /// safety-critical tier (see `CatalogBlocklistSource.markedAsGuardrail`) and nothing outside the
+    /// package should enumerate or present it. The app needs only the SIZE, to budget background
+    /// warm compiles — every such compile loads the full guardrail union whatever the filter enables,
+    /// and the figure it later charges against that budget
+    /// (`PreparedFilterSnapshot.summary.tierBudgetRuleCount`) includes it (PR #646).
+    public var guardrailEntryCount: Int {
+        guardrails.reduce(0) { $0 + $1.entryCount }
+    }
 
     package init(
         schemaVersion: Int,
         catalogVersion: String,
         generatedAt: Date,
         sources: [CatalogBlocklistSource],
-        guardrails: [CatalogBlocklistSource]
+        guardrails: [CatalogBlocklistSource],
+        authorization: CatalogAuthorization? = nil,
+        withdrawnSources: [String] = []
     ) {
         self.schemaVersion = schemaVersion
         self.catalogVersion = catalogVersion
         self.generatedAt = generatedAt
         self.sources = sources
         self.guardrails = guardrails
+        self.authorization = authorization
+        self.withdrawnSources = withdrawnSources
     }
 
     enum CodingKeys: String, CodingKey {
@@ -53,9 +111,11 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
         case generatedAt = "generated_at"
         case sources
         case guardrails
+        case authorization = "catalog_authorization"
+        case withdrawnSources = "withdrawn_sources"
     }
 
-    /// Decodes the supported catalog schema and marks decoded guardrail entries.
+    /// Decodes bounded catalog metadata and marks decoded guardrail entries.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
@@ -70,12 +130,75 @@ public struct BlocklistCatalog: Equatable, Codable, Sendable {
         self.schemaVersion = schemaVersion
         catalogVersion = try container.decode(String.self, forKey: .catalogVersion)
         generatedAt = try container.decode(Date.self, forKey: .generatedAt)
-        sources = try container.decode([CatalogBlocklistSource].self, forKey: .sources)
+        sources = try Self.decodeBoundedArray(CatalogBlocklistSource.self, from: container, key: .sources, maximum: 512)
         // Stamp the guardrail tier from STRUCTURAL array membership, not the server-supplied
         // `category` string: guardrail strictness (no rotation acceptance) must not hinge on a
-        // freeform field arriving over the unsigned, TLS-only catalog channel.
-        guardrails = try container.decode([CatalogBlocklistSource].self, forKey: .guardrails)
+        // freeform category field. Catalog authorization is checked separately by the
+        // repository; structural tier marking also applies during the legacy rollout.
+        guardrails = try Self.decodeBoundedArray(CatalogBlocklistSource.self, from: container, key: .guardrails, maximum: 512 - sources.count)
             .map { $0.markedAsGuardrail() }
+        authorization = try container.decodeIfPresent(CatalogAuthorization.self, forKey: .authorization)
+        withdrawnSources = try Self.decodeBoundedArray(String.self, from: container, key: .withdrawnSources, maximum: 4096, optional: true)
+        try validateDecodedMetadata()
+    }
+
+    // Enforce collection limits before allocating Swift element arrays, including in the
+    // pre-pin rollout. The outer byte ceiling alone permits millions of tiny withdrawals.
+    // pinned: CatalogAuthorizationTests.testWithdrawalDecodeLimitAppliesBeforeAuthorization
+    private static func decodeBoundedArray<Element: Decodable>(
+        _ type: Element.Type, from container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys, maximum: Int, optional: Bool = false
+    ) throws -> [Element] {
+        if optional {
+            if !container.contains(key) { return [] }
+            if try container.decodeNil(forKey: key) { return [] }
+        }
+        var values = try container.nestedUnkeyedContainer(forKey: key)
+        if let count = values.count, count > maximum { throw BlocklistCatalogSyncError.invalidCatalog }
+        var result: [Element] = []
+        while !values.isAtEnd {
+            guard result.count < maximum else { throw BlocklistCatalogSyncError.invalidCatalog }
+            result.append(try values.decode(type))
+        }
+        return result
+    }
+
+    // All remote and cached readers share this boundary. These checks protect cache paths,
+    // dictionary construction and budget arithmetic; they do not authenticate unsigned content.
+    // pinned: BlocklistCatalogSyncTests.testCatalogRejectsDuplicateAndUnsafeSourceIdentities
+    private func validateDecodedMetadata() throws {
+        let entries = sources + guardrails
+        guard entries.count <= 512 else { throw BlocklistCatalogSyncError.invalidCatalog }
+        let identifierCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        var identifiers = Set<String>()
+        for source in entries {
+            guard !source.id.isEmpty, source.id.utf8.count <= 128,
+                  source.id != ".", source.id != "..",
+                  source.id.unicodeScalars.allSatisfy({ identifierCharacters.contains($0) }),
+                  identifiers.insert(source.id.lowercased()).inserted,
+                  // The cache filename adds a hyphen, 12 hash digits and .txt (17 bytes).
+                  source.versionID.utf8.count <= 238,
+                  source.entryCount >= 0, source.entryCount <= Self.maximumSourceEntryCount, source.byteSize >= 0,
+                  source.acceptedSourceHashes.allSatisfy({
+                      (0...Self.maximumSourceEntryCount).contains($0.entryCount ?? 0) && ($0.byteSize ?? 0) >= 0
+                  }),
+                  source.sourceURL.scheme?.lowercased() == "https",
+                  let host = source.sourceURL.host, !host.isEmpty else {
+                throw BlocklistCatalogSyncError.invalidCatalog
+            }
+            do {
+                try NetworkEndpointValidator.validatePublicSourceURL(source.sourceURL)
+            } catch {
+                throw BlocklistCatalogSyncError.invalidCatalog
+            }
+        }
+        for id in withdrawnSources {
+            guard !id.isEmpty, id.utf8.count <= 128, id != ".", id != "..",
+                  id.unicodeScalars.allSatisfy({ identifierCharacters.contains($0) }),
+                  identifiers.insert(id.lowercased()).inserted else {
+                throw BlocklistCatalogSyncError.invalidCatalog
+            }
+        }
     }
 
     internal static func builtInSourceURLCatalog() -> BlocklistCatalog {
@@ -131,25 +254,43 @@ public struct BlocklistCatalogSyncResult: Sendable {
     public let catalog: BlocklistCatalog
     /// Parsed rule sets keyed by selected source identifier.
     public let sourceRuleSets: [String: DomainRuleSet]
+    /// Local custom counts bound to the URL and parser used for this result.
+    public let localCustomRuleCounts: [String: LocalFilterRuleCount]
     /// Combined rules supplied by catalog guardrail sources.
     public let guardrailRuleSet: DomainRuleSet
     /// Snapshot metadata keyed by selected source identifier.
     public let metadataBySourceID: [String: SourceSnapshotMetadata]
     /// Source identifiers whose payloads were loaded from cache.
     public let usedCachedSourceIDs: Set<String>
+    /// Enabled sources dropped because they are PERMANENTLY unusable, keyed to a stable log
+    /// reason. Empty in every ordinary sync.
+    ///
+    /// The KEYS are load-bearing: the artifact must DECLARE them (see
+    /// `PreparedFilterSnapshotSummary.quarantinedBlocklistIDs`) or coverage will refuse it.
+    ///
+    /// The REASONS are not read by anything yet — every consumer does `Set(…keys)`. They are
+    /// carried because the surface that tells the user WHICH list stopped being enforced, and
+    /// why, is the next slice; recording the reason at the point it is known is cheaper than
+    /// reconstructing it later. Until that lands this map is a set with extra columns, and
+    /// saying otherwise would overstate it. (Kilo, #535.)
+    public let quarantinedSourceIDs: [String: String]
 
     package init(
         catalog: BlocklistCatalog,
         sourceRuleSets: [String: DomainRuleSet],
         guardrailRuleSet: DomainRuleSet,
         metadataBySourceID: [String: SourceSnapshotMetadata],
-        usedCachedSourceIDs: Set<String>
+        usedCachedSourceIDs: Set<String>,
+        quarantinedSourceIDs: [String: String] = [:],
+        localCustomRuleCounts: [String: LocalFilterRuleCount] = [:]
     ) {
         self.catalog = catalog
         self.sourceRuleSets = sourceRuleSets
+        self.localCustomRuleCounts = localCustomRuleCounts
         self.guardrailRuleSet = guardrailRuleSet
         self.metadataBySourceID = metadataBySourceID
         self.usedCachedSourceIDs = usedCachedSourceIDs
+        self.quarantinedSourceIDs = quarantinedSourceIDs
     }
 }
 
@@ -157,6 +298,8 @@ public struct BlocklistCatalogSyncResult: Sendable {
 public struct CustomBlocklistSyncResult: Sendable {
     /// Parsed rule sets keyed by custom source identifier.
     public let sourceRuleSets: [String: DomainRuleSet]
+    /// Local custom counts bound to the URL and parser used for this result.
+    public let localCustomRuleCounts: [String: LocalFilterRuleCount]
     /// Accepted payload hashes keyed by custom source identifier.
     public let sourceHashes: [String: String]
     /// Custom source identifiers whose payloads were loaded from cache.
@@ -165,9 +308,11 @@ public struct CustomBlocklistSyncResult: Sendable {
     package init(
         sourceRuleSets: [String: DomainRuleSet],
         sourceHashes: [String: String],
-        usedCachedSourceIDs: Set<String>
+        usedCachedSourceIDs: Set<String>,
+        localCustomRuleCounts: [String: LocalFilterRuleCount] = [:]
     ) {
         self.sourceRuleSets = sourceRuleSets
+        self.localCustomRuleCounts = localCustomRuleCounts
         self.sourceHashes = sourceHashes
         self.usedCachedSourceIDs = usedCachedSourceIDs
     }
@@ -202,9 +347,9 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidHTTPStatus(let statusCode):
-            "The Lava Security catalog server returned HTTP \(statusCode)."
+            LavaCoreStrings.localizedFormat("The Lava Security catalog server returned HTTP %lld.", statusCode)
         case .invalidCatalog:
-            "The Lava Security catalog could not be read."
+            LavaCoreStrings.localized("The Lava Security catalog could not be read.")
         case .invalidBlocklistEncoding(let sourceID):
             LavaCoreStrings.localizedFormat("core.catalogSync.invalidBlocklistEncoding", sourceID)
         case .blocklistTooLarge(let sourceID, let byteSize):
@@ -212,13 +357,13 @@ public enum BlocklistCatalogSyncError: LocalizedError, Equatable {
         case .blocklistExceedsRuleLimit(let sourceID, let ruleLimit):
             LavaCoreStrings.localizedFormat("core.catalogSync.blocklistExceedsRuleLimit", sourceID, ruleLimit)
         case .checksumMismatch(let sourceID):
-            "The downloaded blocklist checksum did not match for \(sourceID)."
+            LavaCoreStrings.localizedFormat("The downloaded blocklist checksum did not match for %@.", sourceID)
         case .noAcceptedSourceHashes(let sourceID):
-            "No accepted blocklist checksum is available for \(sourceID)."
+            LavaCoreStrings.localizedFormat("No accepted blocklist checksum is available for %@.", sourceID)
         case .missingEnabledBlocklistSource(let sourceID):
-            "No enabled blocklist source is available for \(sourceID)."
+            LavaCoreStrings.localizedFormat("No enabled blocklist source is available for %@.", sourceID)
         case .noCachedCatalog:
-            "No saved Lava Security catalog is available yet."
+            LavaCoreStrings.localized("No saved Lava Security catalog is available yet.")
         case .noRulesAvailable:
             LavaCoreStrings.localized("core.catalogSync.noRulesAvailable")
         case .customBlocklistUnavailable(let displayName, let reason):
@@ -240,8 +385,13 @@ extension PinnedPublicHTTPSFetcher {
     /// same boundary rule as the `CatalogParseFormat.blocklistFormat` bridge (#302).
     /// Interim (1xx) responses and redirects are already consumed by `fetchResponse`;
     /// what reaches this guard is the final status.
-    static func fetch(url: URL, maximumByteCount: Int) async throws -> Data {
-        let (status, body) = try await fetchResponse(url: url, maximumByteCount: maximumByteCount)
+    static func fetch(
+        url: URL,
+        maximumByteCount: Int,
+        resolver: @escaping HostAddressResolver = SystemHostResolver.resolve
+    ) async throws -> Data {
+        let (status, body) = try await fetchResponse(
+            url: url, maximumByteCount: maximumByteCount, resolver: resolver)
         guard (200..<300).contains(status) else {
             throw BlocklistCatalogSyncError.invalidHTTPStatus(status)
         }
@@ -249,10 +399,70 @@ extension PinnedPublicHTTPSFetcher {
     }
 }
 
+/// Resolves one hostname through something other than the system resolver, for the single
+/// case where the system resolver cannot answer. Returns `nil` when no help is available.
+///
+/// The app supplies the concrete implementation (it owns the tunnel session); this package
+/// only knows there is a fallback it may ask. Keeping the closure here is what lets the
+/// ladder live inside the package, where the pinned transport's `package` seam is reachable,
+/// without the package taking a dependency on NetworkExtension.
+public typealias BootstrapAddressBroker =
+    @Sendable (_ hostname: String) async -> (ipv4: [String], ipv6: [String])?
+
+extension BlocklistCatalogSynchronizer {
+    /// The default fetcher, plus ONE retry through `broker` when — and only when — the host
+    /// did not resolve.
+    ///
+    /// THE DEADLOCK. With no adoptable artifact the tunnel serves `FailClosedRuntimeSnapshot`,
+    /// which answers every query with the block-all address. The download that would END that
+    /// state then cannot resolve its own sources, so the outage is permanent: on device (S9)
+    /// the only exit was toggling protection off and on. The tunnel can still reach the device
+    /// resolvers, so it brokers this one lookup.
+    ///
+    /// 🔴 The trigger is deliberately narrow: `URLError.cannotFindHost`, which the pinned
+    /// fetcher now reports for an ALL-UNSPECIFIED answer — i.e. exactly the sinkhole shape.
+    /// A private, loopback or mixed answer still raises `privateNetworkNotAllowed` and is NOT
+    /// retried: those are SSRF signals, and retrying them through a second resolver is how a
+    /// rebinding attempt gets a second chance.
+    ///
+    /// 🔴 Brokered addresses are NOT trusted. They go back through the same
+    /// `PinnedPublicHTTPSFetcher` gate as any other resolution, so every one must still
+    /// classify as public before anything connects. The broker can help or fail to help; it
+    /// cannot widen what is reachable.
+    public static func bootstrapAwareDataFetcher(
+        broker: @escaping BootstrapAddressBroker
+    ) -> BlocklistCatalogDataFetcher {
+        { url in
+            do {
+                return try await defaultDataFetcher(url: url)
+            } catch let error as URLError where error.code == .cannotFindHost {
+                // 🔴 The ASCII form, matching what the fetcher will query the resolver with.
+                // `url.host` yields the PERCENT-ENCODED host for an IDN URL, while
+                // `pinnedAddresses` normalizes to IDNA-ASCII — so brokering under one form and
+                // scoping the resolver to it would refuse the very host it was brokered for
+                // (Kilo, #529).
+                guard let host = PinnedPublicHTTPSFetcher.asciiHost(from: url), !host.isEmpty,
+                    let brokered = await broker(host),
+                    // Scoped to the host we brokered FOR. `fetch` follows redirects and
+                    // re-resolves each hop, so an unscoped resolver would hand this host's
+                    // addresses to a redirect target — connecting to one server under
+                    // another's SNI and Host.
+                    let resolver = HostAddressResolverFactory.fixed(
+                        host: host, ipv4: brokered.ipv4, ipv6: brokered.ipv6)
+                else {
+                    throw error
+                }
+                return try await PinnedPublicHTTPSFetcher.fetch(
+                    url: url, maximumByteCount: maximumBlocklistBytes, resolver: resolver)
+            }
+        }
+    }
+}
+
 /// Per-context budget for parsing blocklist sources. The app process has ample
 /// memory and admits larger single lists; the packet-tunnel extension's fallback
 /// compile runs under a ~50 MiB jetsam budget where the parser's dirty `Set<String>`
-/// intermediate (~tens of bytes per rule, an order of magnitude above the 9 B/rule
+/// intermediate (~tens of bytes per rule, an order of magnitude above the 5 B/rule
 /// mapped compact form) dominates, so it parses smaller and serially, and rejects
 /// (fail-closed) a source too big to parse safely there — the app re-prepares the
 /// full snapshot.
@@ -366,6 +576,12 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
+    /// Checks current publication without reading/writing the catalog or payload caches.
+    /// Imports use this admission check; an offline fallback cannot authorize a new list.
+    public func fetchPublishedCatalog() async throws -> BlocklistCatalog {
+        try await catalogRepository.loadNetworkCatalog().catalog
+    }
+
     /// `commitsLatestCatalog: false` performs the full fetch + compile (writing the
     /// content-addressed, additive payloads to the cache) but does NOT write `catalog/latest.json`.
     /// The background refresh uses this so the latest.json commit can land ATOMICALLY with the
@@ -391,23 +607,23 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     /// pinned: BlocklistCatalogFreshnessRefreshTests.testCacheFallbackNeverRestampsFreshness
     public func sync(
         enabledSourceIDs: Set<String>,
-        commitsLatestCatalog: Bool = true
+        commitsLatestCatalog: Bool = true,
+        failsWhenNoCatalogSourceSurvives: Bool = true
     ) async throws -> BlocklistCatalogSyncResult {
         let loadedCatalog = try await catalogRepository.loadRemoteCatalog()
-        if commitsLatestCatalog, loadedCatalog.shouldCache {
-            try catalogRepository.saveLatestCatalog(loadedCatalog.data)
-        }
         let result = try await compile(
             catalog: loadedCatalog.catalog,
             enabledSourceIDs: enabledSourceIDs,
             allowsNetwork: true,
-            includesGuardrails: true
+            includesGuardrails: true,
+            failsWhenNoCatalogSourceSurvives: failsWhenNoCatalogSourceSurvives
         )
 
-        if commitsLatestCatalog, !loadedCatalog.shouldCache || result.catalog != loadedCatalog.catalog {
+        if commitsLatestCatalog {
             // Persisting the RESOLVED catalog records rotated versionIDs and
             // hashes, which keeps RuleSetCache's predicted-hash lookups valid
-            // on the next run.
+            // on the next run. Commit only after compilation succeeds; a failed refresh
+            // must not advance catalog authorization beyond the last usable catalog.
             try catalogRepository.saveLatestCatalog(Self.makeJSONEncoder().encode(result.catalog))
         }
 
@@ -431,17 +647,49 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     }
 
     /// Compiles selected sources from cached catalog and payload data without network access.
+    ///
+    /// PERSISTS THE RESOLVED CATALOG on a real change, mirroring ``sync``. The app stamps an
+    /// artifact's identity from the catalog this resolve produced, while the tunnel re-derives the
+    /// identity it will accept from the PERSISTED `latest.json` (`loadCachedCatalogMetadata`). When
+    /// a cache-only resolve selects a payload whose version/hash differs from the cached entry — a
+    /// rotation already on disk that `latest.json` has not recorded — the two sides diverge inside
+    /// one `catalogVersion`, and the tunnel refuses EVERY reload of the artifact on
+    /// `freshness:selectedSourceHashes` while the app still reports `published` (the 2026-09-02 and
+    /// 2026-09-20 field cases; `PublishedArtifactAdoptability` is the diagnostic half). Writing the
+    /// resolved catalog back makes the persisted basis the one actually compiled, so the tunnel's
+    /// expectation and the app's stamp agree. Only writes on a real change, so an unchanged cache
+    /// is untouched.
+    ///
+    /// The write is a compare-and-swap: the compile can run for seconds, so a concurrent `sync`
+    /// that advanced `latest.json` in that window is authoritative and must not be clobbered with
+    /// a catalog built from the stale snapshot. And the write PRESERVES the previous mtime —
+    /// content is corrected to match the on-disk payloads, but nothing was verified upstream, so
+    /// the freshness clock must not move (see the repository methods for both contracts).
+    ///
+    /// Best-effort: the correction is an adoptability improvement, not part of the resolve, so a
+    /// failed write (disk full, app-group/sandbox write error) must not fail an otherwise-successful
+    /// offline load and push callers into a network `sync` that also fails offline. On failure the
+    /// persisted catalog simply stays as it was, and the next successful write reconciles it.
     public func loadCached(
         enabledSourceIDs: Set<String>,
-        includesGuardrails: Bool = true
+        includesGuardrails: Bool = true,
+        failsWhenNoCatalogSourceSurvives: Bool = true
     ) async throws -> BlocklistCatalogSyncResult {
-        let catalog = try loadLatestCatalog()
-        return try await compile(
-            catalog: catalog,
+        let snapshot = try catalogRepository.cachedCatalogSnapshot()
+        let result = try await compile(
+            catalog: snapshot.catalog,
             enabledSourceIDs: enabledSourceIDs,
             allowsNetwork: false,
-            includesGuardrails: includesGuardrails
+            includesGuardrails: includesGuardrails,
+            failsWhenNoCatalogSourceSurvives: failsWhenNoCatalogSourceSurvives
         )
+        if result.catalog != snapshot.catalog {
+            try? catalogRepository.saveLatestCatalogIfUnchanged(
+                Self.makeJSONEncoder().encode(result.catalog),
+                matching: snapshot.data
+            )
+        }
+        return result
     }
 
     /// Loads cached catalog metadata without compiling source payloads.
@@ -534,7 +782,9 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             catalogVersion: catalog.catalogVersion,
             generatedAt: catalog.generatedAt,
             sources: catalog.sources.map { resolvedSourcesByID[$0.id] ?? $0 },
-            guardrails: catalog.guardrails.map { resolvedGuardrailsByID[$0.id] ?? $0 }
+            guardrails: catalog.guardrails.map { resolvedGuardrailsByID[$0.id] ?? $0 },
+            authorization: catalog.authorization,
+            withdrawnSources: catalog.withdrawnSources
         )
 
         return StreamingInExtensionCompileLoad(
@@ -644,11 +894,8 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         maxAge: TimeInterval,
         now: Date = Date()
     ) -> Bool {
-        guard let age = cachedCatalogAge(in: cacheDirectoryURL, now: now) else {
-            return false
-        }
-
-        return age >= 0 && age < maxAge
+        BlocklistCatalogRepository(cacheDirectoryURL: cacheDirectoryURL)
+            .hasFreshCachedCatalog(maxAge: maxAge, now: now)
     }
 
     // Temporary launch holds for GPL catalog sources that must be purged from
@@ -661,14 +908,23 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         in cacheDirectoryURL: URL,
         requiredSourceIDs: Set<String>
     ) -> Bool {
-        guard let catalog = try? BlocklistCatalogSynchronizer(
-            cacheDirectoryURL: cacheDirectoryURL
-        ).loadCachedCatalogMetadata() else {
+        cachedCatalogRequiresLowRiskLaunchRefresh(in: cacheDirectoryURL,
+            requiredSourceIDs: requiredSourceIDs, trustPolicy: .production)
+    }
+
+    internal static func cachedCatalogRequiresLowRiskLaunchRefresh(
+        in cacheDirectoryURL: URL, requiredSourceIDs: Set<String>, trustPolicy: CatalogTrustPolicy
+    ) -> Bool {
+        guard let catalog = try? BlocklistCatalogRepository(
+            cacheDirectoryURL: cacheDirectoryURL, trustPolicy: trustPolicy).cachedCatalog() else {
             return false
         }
 
         let cachedSources = catalog.sources + catalog.guardrails
-        let cachedSourceIDs = Set(catalog.sources.map(\.id))
+        // An admitted withdrawal satisfies the launch inventory requirement. Purging it
+        // would resurrect a bundled source offline (or discard the only enforcing cache).
+        // pinned: CatalogAuthorizationTests.testWithdrawalsRequireConfiguredVerifiedAuthorization
+        let cachedSourceIDs = Set(catalog.sources.map(\.id)).union(catalog.verifiedWithdrawnSourceIDs(using: trustPolicy))
         let hasInactiveGPLSource = cachedSources.contains { source in
             inactiveGPLLaunchSourceIDs.contains(source.id)
         }
@@ -772,7 +1028,8 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         catalog: BlocklistCatalog,
         enabledSourceIDs: Set<String>,
         allowsNetwork: Bool,
-        includesGuardrails: Bool
+        includesGuardrails: Bool,
+        failsWhenNoCatalogSourceSurvives: Bool
     ) async throws -> BlocklistCatalogSyncResult {
         // Each source's fetch + parse is independent and writes only to its own
         // per-source cache directory, so they run with bounded concurrency to
@@ -782,7 +1039,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         let enabledSources = catalog.sources.filter { enabledSourceIDs.contains($0.id) }
         let guardrailSources = includesGuardrails ? catalog.guardrails : []
 
-        let sourceResults = try await mapBounded(
+        let sourceOutcomes = try await mapBoundedOutcomes(
             enabledSources,
             maxConcurrent: parseBudget.maxConcurrentSources
         ) { source in
@@ -791,6 +1048,52 @@ public struct BlocklistCatalogSynchronizer: Sendable {
                 allowsNetwork: allowsNetwork,
                 usesPredictedHashShortCircuit: true
             )
+        }
+
+        // Split the failures. A PERMANENT one (a 404, a list past a cap) is quarantined: no
+        // number of retries changes it, and throwing here is what left the device with no
+        // artifact at all and therefore no DNS. A TRANSIENT one still throws, deliberately —
+        // a timeout or a 5xx must fail the prepare so the existing retry path runs, because
+        // dropping a list over a blip would under-block for a reason that fixes itself.
+        var quarantinedSourceIDs: [String: String] = [:]
+        var firstTransientFailure: (any Error)?
+        var firstPermanentFailure: (any Error)?
+        for index in sourceOutcomes.failures.keys.sorted() {
+            let error = sourceOutcomes.failures[index]!
+            let source = enabledSources[index]
+            if let reason = BlocklistSourceFailureClassification.classify(error).logReason {
+                quarantinedSourceIDs[source.id] = reason
+                if firstPermanentFailure == nil { firstPermanentFailure = error }
+            } else if firstTransientFailure == nil {
+                firstTransientFailure = error
+            }
+        }
+        if let firstTransientFailure {
+            throw firstTransientFailure
+        }
+
+        // 🔴 NOTHING SURVIVED — but only refuse when nothing ELSE could supply rules.
+        //
+        // This function sees CATALOG sources only; custom sources are compiled separately and
+        // afterwards. An unconditional guard here fails a configuration whose catalog list is
+        // dead but whose custom lists are healthy and hold rules — the same wedge, one source
+        // kind over (Kilo, #535). So the caller says whether a fallback exists, and the
+        // combined check lives in `FilterSnapshotPreparationService.prepare`.
+        //
+        // When there IS nothing else, rethrowing the ORIGINAL error matters: it names the
+        // source and the limit, which is what the tier messaging reads to tell the user WHICH
+        // list is too big, and a device that can compile nothing is when that name matters
+        // most.
+        if failsWhenNoCatalogSourceSurvives,
+            !quarantinedSourceIDs.isEmpty,
+            sourceOutcomes.outputs.isEmpty,
+            !enabledSources.isEmpty
+        {
+            throw firstPermanentFailure ?? BlocklistCatalogSyncError.noRulesAvailable
+        }
+
+        let sourceResults = sourceOutcomes.outputs.keys.sorted().compactMap {
+            sourceOutcomes.outputs[$0]
         }
 
         let guardrailResults = try await mapBounded(
@@ -833,7 +1136,9 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             catalogVersion: catalog.catalogVersion,
             generatedAt: catalog.generatedAt,
             sources: catalog.sources.map { resolvedSourcesByID[$0.id] ?? $0 },
-            guardrails: catalog.guardrails.map { resolvedGuardrailsByID[$0.id] ?? $0 }
+            guardrails: catalog.guardrails.map { resolvedGuardrailsByID[$0.id] ?? $0 },
+            authorization: catalog.authorization,
+            withdrawnSources: catalog.withdrawnSources
         )
 
         return BlocklistCatalogSyncResult(
@@ -841,7 +1146,8 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             sourceRuleSets: sourceRuleSets,
             guardrailRuleSet: guardrailRuleSet,
             metadataBySourceID: metadataBySourceID,
-            usedCachedSourceIDs: usedCachedSourceIDs
+            usedCachedSourceIDs: usedCachedSourceIDs,
+            quarantinedSourceIDs: quarantinedSourceIDs
         )
     }
 
@@ -914,27 +1220,174 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         }
 
         let limit = max(1, min(maxConcurrent, items.count))
-        return try await withThrowingTaskGroup(of: (Int, Output).self) { group in
+        // The CHILDREN no longer throw — each one catches and hands its failure back as a
+        // value. The group itself still has to be a throwing one (its body throws at the
+        // end), but that is not where the cancellation came from.
+        //
+        // 🔴 WHY. A task group cancels its in-flight siblings the moment one CHILD throws.
+        // For blocklist sources that costs two things that matter:
+        //
+        //   1. CACHE. A source only writes its `latest.txt` after a COMPLETE fetch. Cancelled
+        //      siblings write nothing, so one unfetchable list denied every other list its
+        //      cache entry — and the next cold compile, which could have run from cache, had
+        //      nothing to run from. The failure reproduced itself on every launch.
+        //   2. ATTRIBUTION. The surviving error was whichever source lost the race, not the
+        //      source that is actually broken. A device log full of
+        //      `latest.txt … no such file` named a RACE LOSER, and any repair keyed on that
+        //      signal — "disable the failing list" — could disable an innocent one while the
+        //      real culprit stayed enabled.
+        //
+        // Every source now runs to completion. The error thrown is the first BY ITEM INDEX,
+        // not by arrival time, so the same broken configuration reports the same source every
+        // run instead of a different one each time.
+        return try await withThrowingTaskGroup(of: (Int, Output?, SendableErrorBox?).self) { group in
             var nextIndex = 0
-            while nextIndex < limit {
-                let index = nextIndex
+            func addTask(at index: Int) {
                 let item = items[index]
-                group.addTask { (index, try await transform(item)) }
+                group.addTask {
+                    do {
+                        return (index, try await transform(item), nil)
+                    } catch {
+                        return (index, nil, SendableErrorBox(error))
+                    }
+                }
+            }
+
+            while nextIndex < limit {
+                addTask(at: nextIndex)
                 nextIndex += 1
             }
 
             var outputs = [Output?](repeating: nil, count: items.count)
-            while let (index, output) = try await group.next() {
-                outputs[index] = output
+            var failures: [Int: any Error] = [:]
+            var stoppedEarlyForCancellation = false
+
+            while let (index, output, failure) = try await group.next() {
+                if let failure {
+                    // Cancellation is the ONE failure that must still be prompt. The caller
+                    // is going away; grinding through the remaining sources to be thorough
+                    // would spend radio on results nobody will read. Throwing here DOES
+                    // cancel the siblings — which is exactly right for this case and exactly
+                    // wrong for every other one.
+                    if failure.error is CancellationError {
+                        throw failure.error
+                    }
+                    if let urlError = failure.error as? URLError, urlError.code == .cancelled {
+                        throw failure.error
+                    }
+                    failures[index] = failure.error
+                } else {
+                    outputs[index] = output
+                }
                 if nextIndex < items.count {
-                    let nextItemIndex = nextIndex
-                    let item = items[nextItemIndex]
-                    group.addTask { (nextItemIndex, try await transform(item)) }
+                    if Task.isCancelled {
+                        stoppedEarlyForCancellation = true
+                    } else {
+                        addTask(at: nextIndex)
+                        nextIndex += 1
+                    }
+                }
+            }
+
+            // A SHORT RESULT MUST NOT LOOK LIKE A COMPLETE ONE. Stopping the enqueue on
+            // cancellation is right; returning what happened to finish would report a
+            // successful sync containing only the first concurrency batch, and a caller that
+            // trusts it compiles an artifact missing every source never attempted.
+            //
+            // 🔴 DEFENCE IN DEPTH, NOT A FIX FOR AN OBSERVED DEFECT — and deliberately
+            // untested, because I could not build a test that distinguishes its presence.
+            // Three attempts (suspending fetcher, self-cancelling fetcher, asserting on the
+            // result's SHAPE rather than on throwing) all passed with this block deleted: in
+            // every arrangement some enqueued child hits its own leading `checkCancellation`
+            // and the carve-out above rethrows first. So the escape may well be unreachable
+            // today. The guard is kept because it is free and the invariant is worth stating
+            // structurally, but nobody should read it as verified. A vacuous test asserting
+            // otherwise would be worse than none.
+            if stoppedEarlyForCancellation || Task.isCancelled {
+                throw CancellationError()
+            }
+
+            if let firstFailedIndex = failures.keys.min() {
+                throw failures[firstFailedIndex]!
+            }
+
+            return outputs.compactMap { $0 }
+        }
+    }
+
+    /// `mapBounded`, but handing the per-item failures BACK instead of throwing the first.
+    ///
+    /// The caller that needs this is source compilation: it has to look at each failure and
+    /// decide whether the source is retryably broken or permanently unusable, which is a
+    /// judgement `mapBounded` cannot make for it. Everything else about the execution is the
+    /// same, cancellation included.
+    private func mapBoundedOutcomes<Item: Sendable, Output: Sendable>(
+        _ items: [Item],
+        maxConcurrent: Int,
+        _ transform: @escaping @Sendable (Item) async throws -> Output
+    ) async throws -> (outputs: [Int: Output], failures: [Int: any Error]) {
+        guard !items.isEmpty else {
+            return ([:], [:])
+        }
+
+        let limit = max(1, min(maxConcurrent, items.count))
+        return try await withThrowingTaskGroup(of: (Int, Output?, SendableErrorBox?).self) { group in
+            var nextIndex = 0
+            func addTask(at index: Int) {
+                let item = items[index]
+                group.addTask {
+                    do {
+                        return (index, try await transform(item), nil)
+                    } catch {
+                        return (index, nil, SendableErrorBox(error))
+                    }
+                }
+            }
+
+            while nextIndex < limit {
+                addTask(at: nextIndex)
+                nextIndex += 1
+            }
+
+            var outputs: [Int: Output] = [:]
+            var failures: [Int: any Error] = [:]
+
+            while let (index, output, failure) = try await group.next() {
+                if let failure {
+                    // Same carve-out as `mapBounded`: cancellation stays prompt.
+                    if failure.error is CancellationError {
+                        throw failure.error
+                    }
+                    if let urlError = failure.error as? URLError, urlError.code == .cancelled {
+                        throw failure.error
+                    }
+                    failures[index] = failure.error
+                } else if let output {
+                    outputs[index] = output
+                }
+                if !Task.isCancelled, nextIndex < items.count {
+                    addTask(at: nextIndex)
                     nextIndex += 1
                 }
             }
 
-            return outputs.compactMap { $0 }
+            return (outputs, failures)
+        }
+    }
+
+    /// Carries a per-item failure out of a non-throwing task group.
+    ///
+    /// A task group's element type must be `Sendable`, and `Result<Output, any Error>` is
+    /// not — an existential `Error` carries no such guarantee. Every error this pipeline
+    /// actually produces IS a Sendable value type (`BlocklistCatalogSyncError`, `URLError`,
+    /// `CancellationError`, `BlocklistDownloadSizeLimitExceeded`), so the box asserts what
+    /// the call sites already satisfy rather than widening anything. It is deliberately
+    /// private and single-purpose so that assertion cannot travel.
+    private struct SendableErrorBox: @unchecked Sendable {
+        let error: any Error
+
+        init(_ error: any Error) {
+            self.error = error
         }
     }
 
@@ -1093,7 +1546,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         //
         // This Set-building parse backs the foreground app's `loadCached` path. The per-source
         // cap is `parseBudget.maxRulesPerSource` (app `.default`: the Plus ceiling, 2M) — the
-        // tier ceiling, not the higher device memory budget (~3.26M), on purpose, since the
+        // tier ceiling, not the higher device memory budget (~5.87M), on purpose, since the
         // parsed intermediate is a dirty `Set<String>` (~tens of bytes/rule). The
         // subscription-tier aggregate (Free 500K / Plus 2M) and the device budget are enforced
         // on the deduped union: FilterSnapshotPreparationService is the cold-compile gate
@@ -1151,9 +1604,11 @@ public struct BlocklistCatalogSynchronizer: Sendable {
 
         var sourceRuleSets: [String: DomainRuleSet] = [:]
         var sourceHashes: [String: String] = [:]
+        var localCustomRuleCounts: [String: LocalFilterRuleCount] = [:]
         var usedCachedSourceIDs = Set<String>()
         for result in results {
             sourceRuleSets[result.sourceID] = result.ruleSet
+            localCustomRuleCounts[result.sourceID] = result.localRuleCount
             sourceHashes[result.sourceID] = result.checksumSHA256
             if result.usedCache {
                 usedCachedSourceIDs.insert(result.sourceID)
@@ -1163,13 +1618,15 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return CustomBlocklistSyncResult(
             sourceRuleSets: sourceRuleSets,
             sourceHashes: sourceHashes,
-            usedCachedSourceIDs: usedCachedSourceIDs
+            usedCachedSourceIDs: usedCachedSourceIDs,
+            localCustomRuleCounts: localCustomRuleCounts
         )
     }
 
     private struct CompiledCustomSourceResult: Sendable {
         let sourceID: String
         let ruleSet: DomainRuleSet
+        let localRuleCount: LocalFilterRuleCount
         let checksumSHA256: String
         let usedCache: Bool
     }
@@ -1211,6 +1668,7 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         return CompiledCustomSourceResult(
             sourceID: source.id,
             ruleSet: ruleSet,
+            localRuleCount: LocalFilterRuleCount(source: source, count: ruleSet.count),
             checksumSHA256: payload.checksumSHA256,
             usedCache: payload.usedCache
         )

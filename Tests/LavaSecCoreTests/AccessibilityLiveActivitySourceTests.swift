@@ -56,7 +56,7 @@ final class AccessibilityLiveActivitySourceTests: XCTestCase {
             endingBefore: "private func resumeButton(languageCode: String?)"
         )
         XCTAssertTrue(
-            block.contains("Button(intent: PauseLavaProtectionIntent())"),
+            block.contains("Button(intent: PauseLavaProtectionIntent(activityID: activityID))"),
             "Canary: the pause affordance must stay a Button(intent:) so labeling it is meaningful."
         )
         XCTAssertTrue(

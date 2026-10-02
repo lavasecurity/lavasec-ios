@@ -98,11 +98,55 @@ final class PinnedPublicHTTPSFetcherTests: XCTestCase {
     func testRefusesHostResolvingToOtherNonPublicScopes() {
         assertRefused(host: "h", resolvedTo: [address("169.254.10.10")], "link-local")
         assertRefused(host: "h", resolvedTo: [address("100.64.0.1")], "CGNAT shared space")
-        assertRefused(host: "h", resolvedTo: [address("0.0.0.0")], "unspecified")
+        // `0.0.0.0` moved to its own contract — see
+        // `testAnAllUnspecifiedAnswerReportsHostNotFoundRatherThanAnSSRFRefusal`.
         assertRefused(host: "h", resolvedTo: [address("224.0.0.1")], "multicast")
         assertRefused(host: "h", resolvedTo: [address("192.0.2.5")], "TEST-NET-1 reserved")
         assertRefused(host: "h", resolvedTo: [address("fe80::1")], "IPv6 link-local")
         assertRefused(host: "h", resolvedTo: [address("fc00::1")], "IPv6 ULA")
+    }
+
+    func testAnAllUnspecifiedAnswerReportsHostNotFoundRatherThanAnSSRFRefusal() {
+        // THE SELF-POISONING CASE. While the resident snapshot is fail-closed the tunnel
+        // answers every A with 0.0.0.0 (`FailClosedRuntimeSnapshot`), so `getaddrinfo`
+        // SUCCEEDS and hands this gate the app's own sinkhole. Classified as an SSRF attempt,
+        // that surfaced "Custom blocklist URLs must use a public host" for an ordinary CDN
+        // hostname — blaming the user's configuration for the app's own state, and making a
+        // total DNS outage undiagnosable (observed on device, S9).
+        //
+        // An all-unspecified answer means the host did not resolve, so it reports exactly
+        // that. Still refused — nothing is pinned, nothing connects; 0.0.0.0 is unconnectable.
+        let sinkhole = address("0.0.0.0")
+        let resolver = StubResolver { _ in [sinkhole] }
+        XCTAssertThrowsError(
+            try PinnedPublicHTTPSFetcher.pinnedAddresses(
+                forHost: "lists.example.com", resolver: resolver.resolver)
+        ) { error in
+            XCTAssertNil(
+                error as? NetworkEndpointValidationError,
+                "the sinkhole answer must not be reported as an SSRF refusal")
+            XCTAssertEqual((error as? URLError)?.code, .cannotFindHost)
+        }
+    }
+
+    func testAnAllUnspecifiedIPv6AnswerIsTreatedTheSameWay() {
+        let sinkhole = address("::")
+        let resolver = StubResolver { _ in [sinkhole] }
+        XCTAssertThrowsError(
+            try PinnedPublicHTTPSFetcher.pinnedAddresses(
+                forHost: "lists.example.com", resolver: resolver.resolver)
+        ) { error in
+            XCTAssertEqual((error as? URLError)?.code, .cannotFindHost)
+        }
+    }
+
+    func testAPublicAnswerMixedWithUnspecifiedKeepsTheSSRFRefusal() {
+        // A sinkhole answers UNIFORMLY. A public decoy alongside an unspecified address is
+        // the rebinding shape this gate exists to catch, so the downgrade must not reach it.
+        assertRefused(
+            host: "h",
+            resolvedTo: [address("93.184.216.34"), address("0.0.0.0")],
+            "public decoy mixed with unspecified")
     }
 
     func testRefusesMixedPublicAndPrivateAnswers() {

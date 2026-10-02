@@ -50,7 +50,7 @@ final class QAInternetScenarioTests: XCTestCase {
         XCTAssertEqual(QAInternetDNSSetup.deviceNoEncryptedFallback.resolverPresetID, DNSResolverPreset.device.id)
         XCTAssertFalse(QAInternetDNSSetup.deviceNoEncryptedFallback.usesEncryptedDeviceDNSFallback)
         XCTAssertTrue(QAInternetDNSSetup.deviceEncryptedDoHFallback.usesEncryptedDeviceDNSFallback)
-        XCTAssertEqual(QAInternetDNSSetup.deviceEncryptedDoHFallback.fallbackResolverPresetID, DNSResolverPreset.mullvadDoH.id)
+        XCTAssertEqual(QAInternetDNSSetup.deviceEncryptedDoHFallback.fallbackResolverPresetID, DNSResolverPreset.quad9UnfilteredDoH.id)
         XCTAssertFalse(QAInternetDNSSetup.plainWithoutDeviceFallback.fallbackToDeviceDNS)
         XCTAssertTrue(QAInternetDNSSetup.plainWithDeviceFallback.fallbackToDeviceDNS)
         XCTAssertFalse(QAInternetDNSSetup.dohWithoutDeviceFallback.fallbackToDeviceDNS)
@@ -99,7 +99,7 @@ final class QAInternetScenarioTests: XCTestCase {
         XCTAssertEqual(QAInternetScenarioSuite.handoverSmoke.totalCombinationCount, 8)
         XCTAssertEqual(QAInternetScenarioSuite.airplaneElevatorRecovery.totalCombinationCount, 12)
         XCTAssertEqual(QAInternetScenarioSuite.deprioritizedCellular.totalCombinationCount, 12)
-        XCTAssertEqual(QAInternetScenarioSuite.fullNetworkSweep.totalCombinationCount, 520)
+        XCTAssertEqual(QAInternetScenarioSuite.fullNetworkSweep.totalCombinationCount, 488)
         XCTAssertEqual(QAInternetScenarioSuite.fullNetworkSweep.networkConditions, QAInternetNetworkCondition.allCases)
         XCTAssertEqual(QAInternetScenarioSuite.fullNetworkSweep.dnsSetups, QAInternetDNSSetup.allCases)
         XCTAssertEqual(QAInternetScenarioSuite.fullNetworkSweep.blocklistLoads, QAInternetBlocklistLoad.allCases)
@@ -129,4 +129,13 @@ final class QAInternetScenarioTests: XCTestCase {
         XCTAssertEqual(QAInternetScenarioSuite.handoverSmoke.startingScenario.id,
                        "wifi-to-cellular-switch__device-no-encrypted-fallback__recommended")
     }
+    func testQUICLossChecksNeverRunAgainstAnIncompatibleTransport() {
+        let scenarios = QAInternetScenarioSuite.fullNetworkSweep.scenarios
+        let quicLoss = scenarios.filter { $0.networkCondition == .mtuDoQFragmentation }
+        XCTAssertFalse(quicLoss.isEmpty)
+        XCTAssertTrue(quicLoss.allSatisfy { $0.dnsSetup.transport == .dnsOverQUIC })
+        XCTAssertEqual(Set(scenarios.map(\.id)).count, scenarios.count)
+        XCTAssertEqual(Set(scenarios.map(\.networkCondition)), Set(QAInternetNetworkCondition.allCases))
+    }
+
 }

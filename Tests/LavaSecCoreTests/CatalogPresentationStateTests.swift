@@ -42,7 +42,7 @@ final class CatalogPresentationStateTests: XCTestCase {
     }
 
     func testAppMapsCatalogFactsThroughPureStateAndPreservesMissingCacheAcceptance() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let stateBlock = try sourceBlock(
             in: source,
             startingAt: "private var catalogPresentationState: CatalogPresentationState",

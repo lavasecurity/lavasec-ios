@@ -14,6 +14,16 @@ final class DNSEventLogTests: XCTestCase {
     private let block = FilterDecision(action: .block, reason: .blocklist)
     private let allow = FilterDecision.defaultAllow
 
+    func testAllActionSearchFiltersBeforeTakingThePageLimit() throws {
+        let log = try makeLog()
+        try log.append(domain: "ads.example.com", decision: block, timestamp: at(100))
+        try log.append(domain: "www.example.com", decision: allow, timestamp: at(101))
+        try log.append(domain: "other.test", decision: allow, timestamp: at(102))
+        let rows = log.pageAllActions(searchText: "example.com", limit: 2)
+        XCTAssertEqual(rows.map(\.domain), ["www.example.com", "ads.example.com"])
+        XCTAssertEqual(log.pageAllActions(searchText: "example.com", since: 101000, limit: 2).map(\.domain), ["www.example.com"])
+    }
+
     func testAppendAndCount() throws {
         let log = try makeLog()
         try log.append(domain: "ads.example.com", decision: block, timestamp: at(100))
@@ -418,8 +428,15 @@ final class DNSEventLogTests: XCTestCase {
         try withTemporaryDirectory(prefix: "dns-event-log-retry-resurrect") { directory in
             let url = directory.appendingPathComponent("dns-events.sqlite")
             let log = try DNSEventLog(url: url, bestEffortFlushInterval: 0.05, bestEffortFlushRowCap: 1_000)
-            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
 
+            // ORDER IS LOAD-BEARING: the contending writer takes the lock BEFORE the append.
+            // The 50 ms interval is required by the retry half below, so the append also arms
+            // a 50 ms tick — appending first leaves a window in which that tick drains the
+            // buffer against a still-UNCONTENDED store, and `flush()` then reports `true` for
+            // an empty buffer instead of the contended failure under test. That window exceeds
+            // 50 ms whenever the runner is loaded (spurious CI failure on PR #653). Taking the
+            // lock first makes every commit attempt in the window — the tick's and `flush()`'s
+            // own — fail and re-retain the batch, so the assertion below is deterministic.
             var blockerHandle: OpaquePointer?
             XCTAssertEqual(
                 sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
@@ -429,7 +446,13 @@ final class DNSEventLogTests: XCTestCase {
             defer { sqlite3_close_v2(blocker) }
             XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
 
+            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
+
             XCTAssertFalse(log.flush(), "contended drain retains the batch and arms the retry")
+            // Pins that the drain committed NOTHING, so the row counted after the rollback can
+            // only have come from the armed retry — without this the closing assertion would
+            // still pass if `flush()` had somehow committed the batch itself.
+            XCTAssertEqual(log.count(), 0, "the contended drain must not have committed the batch")
             XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
 
             let deadline = Date().addingTimeInterval(5)
@@ -449,8 +472,11 @@ final class DNSEventLogTests: XCTestCase {
         try withTemporaryDirectory(prefix: "dns-event-log-terminal-drop") { directory in
             let url = directory.appendingPathComponent("dns-events.sqlite")
             let log = try DNSEventLog(url: url, bestEffortFlushInterval: 0.05, bestEffortFlushRowCap: 1_000)
-            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
 
+            // Lock before append, for the reason spelled out in
+            // testRetainedBatchArmedRetryCommitsOnceTheLockReleases: appending first lets the
+            // 50 ms tick drain the buffer uncontended, and `flushOrDiscard()` then reports
+            // `true` for an empty buffer instead of the drop under test.
             var blockerHandle: OpaquePointer?
             XCTAssertEqual(
                 sqlite3_open_v2(url.path, &blockerHandle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil),
@@ -459,6 +485,8 @@ final class DNSEventLogTests: XCTestCase {
             let blocker = try XCTUnwrap(blockerHandle)
             defer { sqlite3_close_v2(blocker) }
             XCTAssertEqual(sqlite3_exec(blocker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK)
+
+            log.appendBestEffort(domain: "cleared.example.com", decision: block, timestamp: at(100))
 
             XCTAssertFalse(log.flushOrDiscard(), "contended terminal drain reports the drop")
             XCTAssertEqual(sqlite3_exec(blocker, "ROLLBACK;", nil, nil, nil), SQLITE_OK)
@@ -735,6 +763,22 @@ final class DNSEventLogTests: XCTestCase {
             XCTAssertEqual(drained.flushes, 0)
             XCTAssertEqual(drained.flushedRows, 0)
             XCTAssertEqual(drained.walFramesWritten, 0)
+        }
+    }
+
+    func testQAWALInstrumentationPreservesAutomaticCheckpointing() throws {
+        try withTemporaryDirectory(prefix: "dns-event-log-auto-checkpoint") { directory in
+            let url = directory.appendingPathComponent("dns-events.sqlite")
+            let log = try DNSEventLog(url: url)
+            for index in 0..<1_000 {
+                try log.append(domain: "site-\(index).example", decision: block, timestamp: at(Double(index)))
+            }
+            let frames = log.writeInstrumentationSnapshotAndReset().walFramesWritten
+            XCTAssertGreaterThan(frames, 2_000, "The workload must cross the default checkpoint threshold more than once")
+            let wal = URL(fileURLWithPath: url.path + "-wal")
+            let bytes = try wal.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            XCTAssertLessThan(bytes, 5_000_000, "Counting must retain default WAL reuse, rather than accumulating every commit")
+            XCTAssertEqual(log.count(), 1_000)
         }
     }
 

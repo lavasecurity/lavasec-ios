@@ -101,8 +101,8 @@ final class AppServicesAPIAccessPolicySourceTests: XCTestCase {
             endingBefore: "    private enum CodingKeys"
         )
         assertNarrowed(
-            "package static let currentSupportedSchemaVersion = 1",
-            from: "public static let currentSupportedSchemaVersion = 1",
+            "package static let currentSupportedSchemaVersion",
+            from: "public static let currentSupportedSchemaVersion",
             in: payload
         )
     }
@@ -215,11 +215,13 @@ final class AppServicesAPIAccessPolicySourceTests: XCTestCase {
             "package let lastFailClosedAt: Date?",
             "package let lastFailClosedReason: String?",
             "package let lastFocusSwitch: FocusSwitchDiagnosticRecord?",
+            "package let lastFocusFailure: FocusSwitchDiagnosticRecord?",
             "package let selfReconnectGap: SelfReconnectGapRecord?",
             "package let hasRecentSelfReconnectGap: Bool",
             "package let recentIncidents: [IncidentLedgerRecord]",
             "package let hasRecentLedgerIncident: Bool",
             "package let hasRecentFocusSwitch: Bool",
+            "package let hasRecentFocusFailure: Bool",
             "package init(",
             "package var selfReconnectCount: Int",
             "package var lastSelfReconnectAt: Date?",
@@ -233,8 +235,8 @@ final class AppServicesAPIAccessPolicySourceTests: XCTestCase {
         }
         XCTAssertEqual(
             explicitDeclarationCount(with: "package", in: incidentSummary),
-            33,
-            "the complete incident-summary graph must keep exactly 33 explicit package declarations"
+            35,
+            "the complete incident-summary graph must keep exactly 35 explicit package declarations"
         )
 
         let bundle = try sourceBlock(

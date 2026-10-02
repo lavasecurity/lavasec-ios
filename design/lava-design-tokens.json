@@ -245,6 +245,10 @@
     "md": 12.0,
     "lg": 16.0,
     "xl": 18.0,
+    "infoPanelHorizontalInset": 16.0,
+    "infoPanelVerticalInset": 12.0,
+    "explanationToLink": 8.0,
+    "quietLinkInteractionInset": 12.0,
     "screenHorizontal": 18.0,
     "screenTop": 16.0,
     "screenBottom": 96.0

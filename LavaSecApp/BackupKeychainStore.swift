@@ -1,5 +1,6 @@
 import Foundation
 import LavaSecKit
+import LavaSecAppServices
 import Security
 
 enum BackupKeychainStoreError: Error, LocalizedError, Sendable {
@@ -9,9 +10,9 @@ enum BackupKeychainStoreError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .unexpectedItemData:
-            "The saved backup key could not be read."
+            "The saved backup key could not be read.".lavaLocalized
         case .unhandledStatus(let status):
-            "Keychain returned status \(status)."
+            "Keychain returned status %@.".lavaLocalizedFormat(String(status))
         }
     }
 }
@@ -60,6 +61,42 @@ struct BackupKeychainStore {
 
     func deleteRecoveryCode() throws {
         try delete(account: recoveryCodeAccount)
+    }
+
+    // Separate from unlock secrets: cleanup must retain the fence until every
+    // artifact is gone and the durable Off marker has been committed.
+    private var deletionIntentAccount: String { "deletion-intent-v1" }
+
+    func loadDeletionIntent() throws -> BackupDeletionIntent? {
+        guard let data = try keychain.loadData(account: deletionIntentAccount) else { return nil }
+        return try BackupDeletionIntent.decode(data)
+    }
+
+    func saveDeletionIntent(_ intent: BackupDeletionIntent) throws {
+        try keychain.saveData(JSONEncoder().encode(intent), account: deletionIntentAccount)
+        guard try loadDeletionIntent() == intent else {
+            throw BackupKeychainStoreError.unexpectedItemData
+        }
+    }
+
+    func clearCompletedDeletionIntent() throws {
+        guard try loadDeletionIntent()?.phase == .disabled else {
+            throw BackupKeychainStoreError.unexpectedItemData
+        }
+        // SecItemDelete acknowledges absence synchronously. This is the explicit
+        // enablement commit: a later read failure cannot turn that success into a
+        // failed setup with an already-removed fence. Strict validation stays before it.
+        try keychain.delete(account: deletionIntentAccount)
+    }
+
+    /// Roll back only this live account-deletion preflight. A confirmed cleanup,
+    /// ordinary Off request or another account's intent cannot be cancelled here.
+    func cancelAccountDeletionPreparation(_ expected: BackupDeletionIntent) throws {
+        guard expected.version == 3, expected.retainsEnvelopeForRecovery == true,
+              expected.phase == .remotePending, try loadDeletionIntent() == expected else {
+            throw BackupKeychainStoreError.unexpectedItemData
+        }
+        try keychain.delete(account: deletionIntentAccount)
     }
 
     private func save(_ value: String, account: String) throws {

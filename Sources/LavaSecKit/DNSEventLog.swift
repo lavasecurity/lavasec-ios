@@ -137,7 +137,7 @@ public final class DNSEventLog: @unchecked Sendable {
         /// Orphan-domain sweeps actually taken (post-#339 gate).
         public let orphanSweeps: Int
         /// WAL frames appended by every commit in the window. Frames × the 4 KB page size
-        /// approximates the store's flash-write volume — the metric behind the UR-53
+        /// measures counted WAL page payload, not physical flash-write volume — the metric behind the UR-53
         /// follow-up's 175x write-amplification finding.
         public let walFramesWritten: Int64
     }
@@ -171,8 +171,9 @@ public final class DNSEventLog: @unchecked Sendable {
     /// measured against the last observed total.
     ///
     /// A DROP is treated as a checkpoint reset (the new total IS the delta), not a 32-bit
-    /// wraparound. This connection never disables WAL autocheckpoint (default trigger ~1000
-    /// pages), so a reset drop from a small-to-moderate `qaWALLastFrames` is the only decrease
+    /// wraparound. The counting hook replaces SQLite's default autocheckpoint callback,
+    /// so it also performs that callback's passive checkpoint at the 1000-page threshold.
+    /// A reset drop from a small-to-moderate `qaWALLastFrames` is the only decrease
     /// this metric will realistically ever observe; a true `Int32` wraparound needs ~2^31
     /// frames (~8.8 TB at 4 KB/page) accumulated in a SINGLE uncheckpointed WAL, categorically
     /// outside what this app produces. An earlier version of this hook tried to distinguish the
@@ -183,7 +184,7 @@ public final class DNSEventLog: @unchecked Sendable {
     /// finding had). Delta arithmetic stays in `Int64` purely so the subtraction can never trap.
     private func installQAWALHook() {
         let context = Unmanaged.passUnretained(self).toOpaque()
-        sqlite3_wal_hook(db, { context, _, _, frames in
+        sqlite3_wal_hook(db, { context, database, name, frames in
             guard let context else {
                 return SQLITE_OK
             }
@@ -193,6 +194,13 @@ public final class DNSEventLog: @unchecked Sendable {
             let delta = frames64 >= previous ? frames64 - previous : frames64
             log.qaWALFramesTotal += delta
             log.qaWALLastFrames = frames
+            // SQLite allows a checkpoint from the WAL hook. Preserve the release
+            // default without blocking on readers or turning an already committed
+            // transaction into a failure if a passive checkpoint cannot finish.
+            // pinned: DNSEventLogTests.testQAWALInstrumentationPreservesAutomaticCheckpointing
+            if frames >= 1_000 {
+                sqlite3_wal_checkpoint_v2(database, name, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
+            }
             return SQLITE_OK
         }, context)
     }
@@ -607,6 +615,7 @@ public final class DNSEventLog: @unchecked Sendable {
     /// Network Extension must continue using point appends/prunes rather than materializing this
     /// history (INV-MEM-1). Best-effort: returns `[]` on any error.
     public func pageAllActions(
+        searchText: String = "",
         before cursor: Cursor? = nil,
         since: Int64? = nil,
         limit: Int = 1_000
@@ -619,14 +628,14 @@ public final class DNSEventLog: @unchecked Sendable {
             let pageLimit = Int(Int32(clamping: max(1, limit)))
             let allowed = try fetchPage(
                 action: .allow,
-                searchText: "",
+                searchText: searchText,
                 before: cursor,
                 since: since,
                 limit: pageLimit
             )
             let blocked = try fetchPage(
                 action: .block,
-                searchText: "",
+                searchText: searchText,
                 before: cursor,
                 since: since,
                 limit: pageLimit

@@ -16,14 +16,14 @@ package enum LocalLogTimestampFormatter {
 
     private static func dateString(from timestamp: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "MMM d"
+        formatter.locale = .autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         return formatter.string(from: timestamp)
     }
 
     private static func timeString(from timestamp: Date, uses24HourClock: Bool) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = .autoupdatingCurrent
         formatter.dateFormat = uses24HourClock ? "HH:mm" : "h:mm a"
         return formatter.string(from: timestamp)
     }

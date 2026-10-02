@@ -9,6 +9,237 @@ enum LavaProtectionCommandService {
     private static let commandCoordinator = LavaProtectionCommandCoordinator()
     private static let liveActivityUpdateCoordinator = LavaProtectionLiveActivityUpdateCoordinator()
 
+    // The lease expires only as crash recovery. Both restart and automatic restore renew it while
+    // their async operation remains live, so neither can age out underneath long filter preparation.
+    // A killed owner releases the other path after at most this short stale window.
+    private static let protectionLifecycleLeaseDuration: TimeInterval = 30
+    private static let protectionLifecycleLeaseRenewalIntervalNanoseconds: UInt64 = 5_000_000_000
+    // A peer may be suspended while holding the short shared-state flock. Direct Restart owns the
+    // longer mutation fence while reconciling that transient conflict, but it must not retain that
+    // fence indefinitely: ten busy probes give an ordinary transaction roughly one second to finish,
+    // then Restart fails closed and leaves its durable deadline/lease to expire.
+    private static let protectionLifecycleStateLockMaximumBusyAttempts = 10
+    private static let protectionLifecycleStateLockRetryDelayNanoseconds: UInt64 = 100_000_000
+
+    static func currentExternalRestartGeneration(now: Date? = nil) -> String? {
+        (try? withProtectionLifecycleTransaction(now: now) { store, _ in
+            try store.currentExternalRestartGeneration()
+        }) ?? nil
+    }
+
+    /// Strict generation capture for work that will mutate NetworkExtension only after an
+    /// asynchronous gate resolves. The wrapper preserves a legitimate initial `nil`; storage/lock
+    /// failure throws and therefore cannot be mistaken for that initial generation.
+    static func captureExternalRestartGeneration(
+        now: Date? = nil
+    ) throws -> ProtectionExternalRestartGenerationSnapshot {
+        try withProtectionLifecycleTransaction(now: now) { store, _ in
+            try store.captureExternalRestartGeneration()
+        }
+    }
+
+    static func claimAutomaticRestoreLease(
+        expectedExternalRestartGeneration: String?,
+        now: Date? = nil
+    ) -> ProtectionLifecycleLease? {
+        (try? withProtectionLifecycleTransaction(now: now) { store, _ in
+            try store.claimAutomaticRestore(
+                expectedExternalRestartGeneration: expectedExternalRestartGeneration,
+                leaseDuration: protectionLifecycleLeaseDuration
+            )
+        }) ?? nil
+    }
+
+    @discardableResult
+    static func renewProtectionLifecycleLease(
+        _ lease: ProtectionLifecycleLease,
+        now: Date? = nil
+    ) -> Bool {
+        (try? withProtectionLifecycleTransaction(now: now) { store, _ in
+            try store.renew(lease, leaseDuration: protectionLifecycleLeaseDuration)
+        }) ?? false
+    }
+
+    /// Extends a live lease while the caller already owns the long-running lifecycle fence.
+    /// A false store result is the actual owner/token CAS loss; only the short state-lock's typed
+    /// `.busy` result is retried, and its async delay remains cancellation-aware.
+    private static func renewProtectionLifecycleLeaseWithRetry(
+        _ lease: ProtectionLifecycleLease
+    ) async throws {
+        let renewal = try await ProtectionLifecycleStateTransaction.retryingBusyRenewal(
+            maximumBusyAttempts: protectionLifecycleStateLockMaximumBusyAttempts,
+            retryDelayNanoseconds: protectionLifecycleStateLockRetryDelayNanoseconds
+        ) {
+            try withProtectionLifecycleTransaction(now: nil) { store, _ in
+                try store.renew(lease, leaseDuration: protectionLifecycleLeaseDuration)
+            }
+        }
+        switch renewal {
+        case .renewed:
+            return
+        case .ownershipLost:
+            throw RestartError.lifecycleLeaseLost
+        }
+    }
+
+    @discardableResult
+    static func releaseProtectionLifecycleLease(
+        _ lease: ProtectionLifecycleLease,
+        now: Date? = nil
+    ) async -> Bool {
+        await Task.detached(priority: .utility) {
+            (try? await ProtectionLifecycleStateTransaction.retryingBusy(
+                maximumBusyAttempts: protectionLifecycleStateLockMaximumBusyAttempts,
+                retryDelayNanoseconds: protectionLifecycleStateLockRetryDelayNanoseconds
+            ) {
+                try withProtectionLifecycleTransaction(now: now) { store, _ in
+                    try store.release(lease)
+                }
+            }) ?? false
+        }.value
+    }
+
+    static func startProtectionLifecycleLeaseRenewal(
+        _ lease: ProtectionLifecycleLease
+    ) -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: protectionLifecycleLeaseRenewalIntervalNanoseconds)
+                } catch {
+                    return
+                }
+                do {
+                    try await renewProtectionLifecycleLeaseWithRetry(lease)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private static func withProtectionLifecycleTransaction<T>(
+        now: Date?,
+        _ body: (ProtectionLifecycleLeaseStore, Date) throws -> T
+    ) throws -> T {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            throw ProtectionLifecycleStateTransactionError.missingContainer
+        }
+        let lockURL = containerURL.appendingPathComponent(
+            LavaSecAppGroup.protectionCommandLockFilename
+        )
+        return try ProtectionLifecycleStateTransaction.withRequiredExclusiveLock(at: lockURL) {
+            // Production callers omit `now`, so the clock is sampled only after the nonblocking
+            // flock acquisition succeeds. Explicit values remain available for deterministic tests.
+            let transactionNow = now ?? Date()
+            let storage = try ProtectionFileKeyValueStorage(
+                fileURL: containerURL.appendingPathComponent(
+                    LavaSecAppGroup.protectionLifecycleStateFilename
+                )
+            )
+            let store = ProtectionLifecycleLeaseStore(
+                storage: storage,
+                // The required cross-process file lock already encloses the complete fresh-read /
+                // mutate / atomic-write transaction. The package store remains independently
+                // testable and must not try to acquire a second lock here.
+                lock: ProtectionNoopCriticalSectionLock(),
+                clock: LavaProtectionCommandClock(now: transactionNow)
+            )
+            let result = try body(store, transactionNow)
+            try storage.persistIfNeeded()
+            return result
+        }
+    }
+
+    private static func protectionLifecycleMutationLockURL() throws -> URL {
+        guard let containerURL = LavaSecAppGroup.containerURL else {
+            throw ProtectionLifecycleStateTransactionError.missingContainer
+        }
+        return containerURL.appendingPathComponent(
+            LavaSecAppGroup.protectionLifecycleMutationLockFilename
+        )
+    }
+
+    private static func acquireProtectionLifecycleMutationFence(
+        wait: Bool
+    ) throws -> ProtectionLifecycleMutationFenceHandle? {
+        try ProtectionLifecycleMutationFence.acquire(
+            lockFileURL: protectionLifecycleMutationLockURL(),
+            wait: wait
+        )
+    }
+
+
+    /// Holds the shared kernel fence for one complete ordinary in-app lifecycle action. Direct
+    /// Restart acquires this same fence before its generation-rotating claim, so a busy restart
+    /// performs no work and leaves the generation unchanged. Foreground actions retry with
+    /// nonblocking probes so an already-accepted Restart can finish before the user's queued action
+    /// runs; the MainActor is never blocked on `flock`.
+    @MainActor
+    static func withExclusiveProtectionLifecycleMutation<T>(
+        operation: @escaping @MainActor () async throws -> T
+    ) async throws -> T {
+        try await ProtectionLifecycleMutationFence.withExclusiveMutation(
+            lockFileURL: protectionLifecycleMutationLockURL(),
+            waitUntilAvailable: true,
+            operation: operation
+        )
+    }
+
+    /// Uses the same mutation inode for a fresh foreground on-demand read and its synchronous
+    /// cache/reducer admission. The admission can spawn an arm, but must not await it here.
+    @MainActor
+    static func refreshOnDemandStateForForegroundRepair<Snapshot>(
+        validateOwnership: @escaping @MainActor () -> Bool,
+        readState: @escaping @MainActor () async throws -> Snapshot,
+        applyState: @escaping @MainActor (Snapshot) -> Void
+    ) async throws {
+        try await ProtectionOnDemandArm.refreshForForegroundRepair(
+            lockFileURL: protectionLifecycleMutationLockURL(),
+            validateOwnership: validateOwnership,
+            readState: readState,
+            applyState: applyState
+        )
+    }
+
+    /// Runs an automatic-restore preference/tunnel mutation only while its logical lease and
+    /// non-expiring kernel fence are both owned. The fence is acquired before the lease renewal,
+    /// matching the explicit-restart lock order and preventing inversion.
+    @MainActor
+    static func withProtectionLifecyclePreferenceMutation(
+        validateOwnership: @escaping @MainActor () -> Bool,
+        operation: @escaping @MainActor () async throws -> Void
+    ) async throws {
+        try await ProtectionLifecycleMutationFence.withOwnedMutation(
+            lockFileURL: protectionLifecycleMutationLockURL(),
+            validateOwnership: validateOwnership,
+            operation: operation
+        )
+    }
+
+    /// Serializes a delayed chained-establishment terminal against direct App Intent restart.
+    /// The shared mutation fence is acquired before the strict generation comparison, matching
+    /// restart's mutation-fence → lifecycle-state lock order. Same-process foreground contention
+    /// is retried asynchronously; a stale identity, rotated/unreadable generation, or cancellation
+    /// fails closed. The complete callback remains fenced across suspension.
+    @MainActor
+    static func withProtectionLifecycleDescendantMutation<T>(
+        capturedGeneration: ProtectionExternalRestartGenerationSnapshot,
+        validateLocalOwnership: @escaping @MainActor () -> Bool,
+        operation: @escaping @MainActor () async throws -> T
+    ) async throws -> T {
+        try await ProtectionLifecycleMutationFence.withDescendantMutation(
+            lockFileURL: protectionLifecycleMutationLockURL(),
+            validateLocalOwnership: validateLocalOwnership,
+            validateExternalGeneration: {
+                try withProtectionLifecycleTransaction(now: nil) { store, _ in
+                    try store.matchesExternalRestartGeneration(capturedGeneration)
+                }
+            },
+            operation: operation
+        )
+    }
+
     // commandID threads the caller's operation id into the pause store's
     // duplicate-command dedup, so a re-delivered command (stale intent retry,
     // double-dispatched action) cannot mint a second revision.
@@ -133,9 +364,14 @@ enum LavaProtectionCommandService {
     // continuation boundary (Swift 6): each step runs a synchronous closure on a
     // freshly loaded manager and returns only Sendable values.
     enum RestartError: Error {
+        /// The shared App Group marker location is unavailable, so an explicit restart must not
+        /// stop the live tunnel without first advancing the terminal-failure retry boundary.
+        case markerUnavailable
         /// The tunnel never confirmed a full stop within the wait window, so an
         /// explicit start could not be issued safely.
         case stopTimedOut
+        /// This suspended owner expired and a newer lifecycle action took over.
+        case lifecycleLeaseLost
     }
 
     private static func performReconnect() async throws {
@@ -145,11 +381,11 @@ enum LavaProtectionCommandService {
         // NEVPNStatusDidChange, and without this the in-process reconcile would
         // recompute `.on`/end and clobber the transient. Stored as a deadline so a
         // killed background window auto-clears it.
-        let now = Date()
-        guard let claimedDeadline = claimRestartInFlight(window: Self.restartingStaleWindow, now: now) else {
+        guard let claimedRestart = try await claimRestartInFlight(window: Self.restartingStaleWindow) else {
             log("reconnect-already-in-flight")
             return
         }
+        let leaseRenewal = startProtectionLifecycleLeaseRenewal(claimedRestart.lifecycleLease)
 
         // Show transient "Restarting…" feedback for the multi-second restart. Safe
         // to push (unlike ambient status) because the Restart tap woke this app
@@ -159,26 +395,44 @@ enum LavaProtectionCommandService {
         // get stranded on "Restarting…".
         await updateLiveActivities(
             protectionState: .restarting,
-            resumeDate: now.addingTimeInterval(Self.restartingStaleWindow)
+            resumeDate: claimedRestart.deadline
         )
 
         do {
-            try await runTunnelRestart()
+            try Task.checkCancellation()
+            try await runTunnelRestart(lifecycleLease: claimedRestart.lifecycleLease)
         } catch {
+            leaseRenewal.cancel()
+            let didOwnRestart = await finishRestartInFlight(claimedRestart)
+
+            if case RestartError.lifecycleLeaseLost = error {
+                // The successor owns all tunnel/status work now. The exact-token cleanup above
+                // retried only a transient state-lock holder while our mutation fence remained held.
+                claimedRestart.mutationFence.release()
+                log("reconnect-lifecycle-lease-lost")
+                return
+            }
+
+            // The durable claim is now settled, but this Restart still owns the kernel fence
+            // through its final async status/UI tail. A foreground OFF or reconnect must not race
+            // the status sample and publish from this stale terminal path.
             // Clear the transient before propagating so a failure never leaves the
-            // Dynamic Island stuck on "Restarting…" — but only when we still own the
-            // lease. If a newer Restart took over after ours expired mid-unwind, it
-            // owns the transient and its own restore; clearing/restoring here would
-            // clobber it.
-            if clearRestartInFlight(claimedDeadline: claimedDeadline) {
+            // Dynamic Island stuck on "Restarting…" — but only when we still owned the
+            // exact deadline/token pair. A newer owner keeps its own UI state untouched.
+            if didOwnRestart {
                 await restoreLiveActivityAfterRestart()
             }
+            claimedRestart.mutationFence.release()
             throw error
         }
 
-        if clearRestartInFlight(claimedDeadline: claimedDeadline) {
+        leaseRenewal.cancel()
+        let didOwnRestart = await finishRestartInFlight(claimedRestart)
+        // Keep the same complete-operation exclusion through the final async status/UI tail.
+        if didOwnRestart {
             await restoreLiveActivityAfterRestart()
         }
+        claimedRestart.mutationFence.release()
     }
 
     /// Re-derives the honest post-restart state rather than assuming `.on`:
@@ -220,44 +474,128 @@ enum LavaProtectionCommandService {
     /// the claimed deadline, or `nil` when a restart is already in flight (its
     /// deadline is still in the future), so the caller no-ops instead of running a
     /// second parallel restart. The returned deadline is the exact value stored, so
-    /// the caller can release it by compare-and-set in `clearRestartInFlight`.
-    private static func claimRestartInFlight(window: TimeInterval, now: Date) -> Date? {
-        (try? LavaProtectionCommandFileLock.withExclusiveLock { () -> Date? in
-            let defaults = LavaSecAppGroup.sharedDefaults
-            let existing = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName)
-            guard existing <= now.timeIntervalSinceReferenceDate else {
-                return nil
-            }
-            let deadline = now.addingTimeInterval(window)
-            defaults.set(
-                deadline.timeIntervalSinceReferenceDate,
-                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
-            )
-            return deadline
-        }) ?? nil
+    /// the caller can clear the UI transient by compare-and-set. Its independent lifecycle lease is
+    /// held until the entire reconnect operation, including the post-restart status tail, exits.
+    private struct RestartInFlightClaim: Sendable {
+        let deadline: Date
+        let lifecycleLease: ProtectionLifecycleLease
+        let mutationFence: ProtectionLifecycleMutationFenceHandle
     }
 
-    /// Releases the restart-in-flight slot, but only if the stored deadline is still
-    /// the one THIS restart claimed. A newer Restart may have taken over the slot
-    /// after ours expired mid-unwind; deleting its deadline would drop the app-side
-    /// `.restarting` guard and let status reconciles clobber its feedback. Returns
-    /// whether we actually released our own lease.
-    @discardableResult
-    private static func clearRestartInFlight(claimedDeadline: Date) -> Bool {
-        (try? LavaProtectionCommandFileLock.withExclusiveLock { () -> Bool in
-            let defaults = LavaSecAppGroup.sharedDefaults
-            let stored = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName)
-            guard stored == claimedDeadline.timeIntervalSinceReferenceDate else {
-                return false
+    private static func claimRestartInFlight(
+        window: TimeInterval,
+        now: Date? = nil
+    ) async throws -> RestartInFlightClaim? {
+        guard let mutationFence = try acquireProtectionLifecycleMutationFence(wait: false) else {
+            return nil
+        }
+        var transferredFence = false
+        defer {
+            if !transferredFence {
+                mutationFence.release()
             }
-            defaults.removeObject(
-                forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
-            )
-            return true
-        }) ?? false
+        }
+
+        // A direct Restart already owns the long kernel fence. A separate process may still be
+        // completing its short state transaction, so retry only its typed nonblocking `.busy`
+        // result with the finite, cancellation-aware budget. Other storage/lock failures remain
+        // immediate errors; the defer releases this fence whenever no claim transfers it.
+        let claim = try await ProtectionLifecycleStateTransaction.retryingBusy(
+            maximumBusyAttempts: protectionLifecycleStateLockMaximumBusyAttempts,
+            retryDelayNanoseconds: protectionLifecycleStateLockRetryDelayNanoseconds
+        ) {
+            try withProtectionLifecycleTransaction(now: now) { store, transactionNow -> RestartInFlightClaim? in
+                let defaults = LavaSecAppGroup.sharedDefaults
+                let existing = defaults.double(forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName)
+                guard existing <= transactionNow.timeIntervalSinceReferenceDate else {
+                    return nil
+                }
+                guard let lifecycleLease = try store.claimExplicitRestart(
+                    leaseDuration: protectionLifecycleLeaseDuration
+                ) else {
+                    return nil
+                }
+                // Restart is an explicit user request to have protection on. Persist that direction
+                // while this mutation fence and state transaction are still ours, before exposing a
+                // deadline that another lifecycle action could observe. This sidecar intentionally
+                // does not touch the Focus-owned configuration/library generation pair.
+                guard let containerURL = LavaSecAppGroup.containerURL else {
+                    throw ProtectionLifecycleStateTransactionError.missingContainer
+                }
+                try ProtectionRestoreIntentStore.persist(
+                    isEnabled: true,
+                    containerURL: containerURL
+                )
+                let deadline = transactionNow.addingTimeInterval(window)
+                defaults.set(
+                    deadline.timeIntervalSinceReferenceDate,
+                    forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
+                )
+                return RestartInFlightClaim(
+                    deadline: deadline,
+                    lifecycleLease: lifecycleLease,
+                    mutationFence: mutationFence
+                )
+            }
+        }
+        transferredFence = claim != nil
+        return claim
     }
 
-    private static func runTunnelRestart() async throws {
+    /// Clears this Restart's exact UI deadline and releases its exact lifecycle token in one
+    /// state transaction. A cancelled App Intent still waits for a transient state-lock holder:
+    /// the detached cleanup is deliberately not cancelled, while the outer owner keeps its kernel
+    /// mutation fence until the deadline/token CAS is settled. Its state-lock retry has the same
+    /// finite budget as renewal, so a suspended peer cannot strand that fence; exhaustion fails
+    /// closed by withholding the status-tail restore and leaving the persisted deadline/lease to
+    /// expire.
+    /// - pinned: ProtectionLifecycleRestartSourceTests.testRestartCancellationCannotHotPollOrDispatchLateStartAndAlwaysUnwindsFence
+    private static func finishRestartInFlight(_ claim: RestartInFlightClaim) async -> Bool {
+        let deadline = claim.deadline
+        let lifecycleLease = claim.lifecycleLease
+        return await Task.detached(priority: .utility) { () -> Bool in
+            (try? await ProtectionLifecycleStateTransaction.retryingBusy(
+                maximumBusyAttempts: protectionLifecycleStateLockMaximumBusyAttempts,
+                retryDelayNanoseconds: protectionLifecycleStateLockRetryDelayNanoseconds
+            ) {
+                try withProtectionLifecycleTransaction(now: nil) { store, _ -> Bool in
+                    let defaults = LavaSecAppGroup.sharedDefaults
+                    let stored = defaults.double(
+                        forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
+                    )
+                    let clearedDeadline: Bool
+                    if stored == deadline.timeIntervalSinceReferenceDate {
+                        defaults.removeObject(
+                            forKey: LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName
+                        )
+                        clearedDeadline = true
+                    } else {
+                        clearedDeadline = false
+                    }
+
+                    let releasedLease = try store.release(lifecycleLease)
+                    return clearedDeadline && releasedLease
+                }
+            }) ?? false
+        }.value
+    }
+
+    private static func runTunnelRestart(
+        lifecycleLease: ProtectionLifecycleLease
+    ) async throws {
+        try Task.checkCancellation()
+        try await renewProtectionLifecycleLeaseWithRetry(lifecycleLease)
+        // A Live Activity Restart is an explicit user retry, just like the in-app Guard and
+        // reconnect actions. Advance the marker revision before stopping the tunnel so a
+        // surrendered provider's automatic-start gate cannot reject this restart. The marker
+        // uses its own lock domain because a timed-out Keychain worker may still hold the
+        // lifecycle-evidence lock while this background intent is trying to recover.
+        guard let markerURL = LavaSecAppGroup.chainedStartupFailureMarkerURL else {
+            throw RestartError.markerUnavailable
+        }
+        _ = try ChainedStartupFailureMarker.beginExplicitRetry(
+            storageURL: markerURL,
+            lockURL: LavaSecAppGroup.chainedStartupFailureMarkerLockURL)
         let didStop = try await withTunnelConnection { connection in
             connection.stopVPNTunnel()
         }
@@ -270,7 +608,9 @@ enum LavaProtectionCommandService {
         // Start only once the provider has fully gone down — a start issued while
         // it is still `.disconnecting` is silently ignored, which would log a
         // phantom restart.
-        if await waitForTunnelToStop(timeout: Self.reconnectStopWaitTimeout) {
+        if try await waitForTunnelToStop(timeout: Self.reconnectStopWaitTimeout) {
+            try Task.checkCancellation()
+            try await renewProtectionLifecycleLeaseWithRetry(lifecycleLease)
             try await withTunnelConnection { connection in
                 try connection.startVPNTunnel()
             }
@@ -280,10 +620,13 @@ enum LavaProtectionCommandService {
             // in-flight guard and let the restore/reconcile sample that pending status
             // and END the activity on a successful restart. Holding the guard until
             // it settles keeps the grace window masked as "restarting".
-            await waitForTunnelToReconnect(timeout: Self.reconnectStartWaitTimeout)
+            try await waitForTunnelToReconnect(timeout: Self.reconnectStartWaitTimeout)
             log("reconnect-restarted")
             return
         }
+
+        try await renewProtectionLifecycleLeaseWithRetry(lifecycleLease)
+        try Task.checkCancellation()
 
         // The stop did not confirm in time. If Connect-On-Demand already brought
         // the tunnel back up while we waited, the provider was still torn down and
@@ -298,7 +641,7 @@ enum LavaProtectionCommandService {
             // to .connected the same way the explicit-start path does, so the
             // restore samples a connected status instead of ending the activity on
             // a successful restart.
-            await waitForTunnelToReconnect(timeout: Self.reconnectStartWaitTimeout)
+            try await waitForTunnelToReconnect(timeout: Self.reconnectStartWaitTimeout)
             log("reconnect-restarted-by-ondemand")
         default:
             log("reconnect-stop-timeout")
@@ -319,26 +662,37 @@ enum LavaProtectionCommandService {
 
     /// Runs a synchronous op on Lava's tunnel connection. Returns `false` when no
     /// manager is configured so the caller can no-op. The non-Sendable manager
-    /// never escapes the completion handler.
+    /// never escapes the completion handler. Cancellation that races manager loading is latched
+    /// explicitly, so the later callback cannot invoke `body` after the owning Restart unwinds.
     @discardableResult
     private static func withTunnelConnection(
         _ body: @escaping @Sendable (NEVPNConnection) throws -> Void
     ) async throws -> Bool {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-            NETunnelProviderManager.loadAllFromPreferences { managers, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let manager = (managers ?? []).first else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                do {
-                    try body(manager.connection)
-                    continuation.resume(returning: true)
-                } catch {
-                    continuation.resume(throwing: error)
+        return try await ProtectionLifecycleCallbackCancellationGate.withCancellationHandler {
+            cancellationGate in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+                NETunnelProviderManager.loadAllFromPreferences { managers, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    guard let manager = (managers ?? []).first else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    do {
+                        let didRunBody = try cancellationGate.executeUnlessCancelled {
+                            try body(manager.connection)
+                            return true
+                        }
+                        guard let didRunBody else {
+                            continuation.resume(throwing: CancellationError())
+                            return
+                        }
+                        continuation.resume(returning: didRunBody)
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
         }
@@ -362,14 +716,15 @@ enum LavaProtectionCommandService {
     /// Polls the tunnel status until it is fully down. Returns `true` on a
     /// confirmed stop (or no manager), `false` if the timeout elapsed while the
     /// tunnel was still tearing down or had come back up.
-    private static func waitForTunnelToStop(timeout: TimeInterval) async -> Bool {
+    private static func waitForTunnelToStop(timeout: TimeInterval) async throws -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            try Task.checkCancellation()
             switch await currentTunnelStatus() {
             case .disconnected, .invalid, nil:
                 return true
             default:
-                try? await Task.sleep(nanoseconds: 300_000_000)
+                try await Task.sleep(nanoseconds: 300_000_000)
             }
         }
         return false
@@ -379,13 +734,14 @@ enum LavaProtectionCommandService {
     /// start, or the timeout elapses. Lets the post-start grace window (where iOS
     /// still reports `.disconnected`/`.connecting`) pass while the in-flight guard
     /// still masks it as "restarting", so the restore samples a settled status.
-    private static func waitForTunnelToReconnect(timeout: TimeInterval) async {
+    private static func waitForTunnelToReconnect(timeout: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            try Task.checkCancellation()
             if await currentTunnelStatus() == .connected {
                 return
             }
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try await Task.sleep(nanoseconds: 300_000_000)
         }
     }
 
@@ -495,7 +851,8 @@ enum LavaProtectionCommandService {
             return try currentActivityOutcome(pauseStore: pauseStore, reason: "pause-denied-no-active-session")
         }
 
-        guard !SecurityProtectedSurfaceStorage.isProtected(.protectionPause, defaults: defaults) else {
+        guard !SecurityProtectedSurfaceStorage.isProtected(.protectionPause, defaults: defaults,
+            projectionURL: LavaSecAppGroup.securityGateProjectionURL) else {
             log("pause-denied-auth-required")
             return try currentActivityOutcome(pauseStore: pauseStore, reason: "pause-denied-auth-required")
         }
@@ -644,7 +1001,7 @@ enum LavaProtectionCommandService {
         let defaults = LavaSecAppGroup.sharedDefaults
         let pauseRequiresAuthentication = SecurityProtectedSurfaceStorage.isProtected(
             .protectionPause,
-            defaults: defaults
+            defaults: defaults, projectionURL: LavaSecAppGroup.securityGateProjectionURL
         )
 
         let state = LavaActivityAttributes.ContentState(
@@ -755,6 +1112,11 @@ enum LavaProtectionCommandService {
             defer {
                 close(lockFileDescriptor)
             }
+
+            // New instances of the shared command inode must remain readable before first unlock.
+            // This path is intentionally best-effort, so a protection-class failure retains its
+            // existing fallback semantics; the safety-critical lifecycle path above fails closed.
+            _ = SharedStateFileProtection.applyControlPlaneProtection(at: lockURL)
 
             guard flock(lockFileDescriptor, LOCK_EX) == 0 else {
                 return try body()

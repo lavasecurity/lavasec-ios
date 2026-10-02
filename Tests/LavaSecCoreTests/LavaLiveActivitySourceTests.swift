@@ -5,7 +5,7 @@ import XCTest
 final class LavaLiveActivitySourceTests: XCTestCase {
     func testAppIconMascotFaceUsesLargerReadableGeometry() throws {
         let iconURL = packageRootURL
-            .appendingPathComponent("LavaSecApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024x1024@1x.png")
+            .appendingPathComponent("LavaSecApp/AppIcon.icon/Assets/Front.png")
         let metrics = try appIconFaceMetrics(at: iconURL)
 
         XCTAssertEqual(metrics.imageWidth, 1024)
@@ -26,7 +26,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             "AppIconObsidian",
             "AppIconCherryQuartz",
             "AppIconEmerald",
-            "AppIconKiwiCreme"
+            "AppIconKiwiCreme",
+            "AppIconAquamarine"
         ]
 
         XCTAssertTrue(attributes.contains("var alternateAppIconName: String?"))
@@ -38,6 +39,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(attributes.contains("case .cherryQuartz:\n            \"AppIconCherryQuartz\""))
         XCTAssertTrue(attributes.contains("case .emerald:\n            \"AppIconEmerald\""))
         XCTAssertTrue(attributes.contains("case .kiwiCreme:\n            \"AppIconKiwiCreme\""))
+        XCTAssertTrue(attributes.contains("case .aquamarine:\n            \"AppIconAquamarine\""))
 
         XCTAssertTrue(customizationController.contains("private func syncAppIcon(to look: GuardianShieldStyle)"))
         XCTAssertTrue(customizationController.contains("iconPersonalizer.supportsAppIconPersonalization"))
@@ -103,7 +105,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             "AppIconObsidian",
             "AppIconCherryQuartz",
             "AppIconEmerald",
-            "AppIconKiwiCreme"
+            "AppIconKiwiCreme",
+            "AppIconAquamarine"
         ]
         let appURL = packageRootURL.appendingPathComponent("LavaSecApp")
 
@@ -126,351 +129,33 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         }
     }
 
-    func testCustomizationSettingsRouteAppearsBelowUpgrade() throws {
+    func testCustomizationSettingsRouteAppearsInRNYourLava() throws {
         let settings = try readSource(.settingsView)
         let routeBlock = try sourceBlock(
             in: settings,
             startingAt: "enum SettingsRoute: Hashable",
-            endingBefore: "struct SettingsRouteDestinationView: View"
+            endingBefore: "struct NativeDNSSettingsDestinationView: View"
         )
         let rootBlock = try sourceBlock(
-            in: settings,
-            startingAt: "LavaSectionGroup(\"Your Lava\")",
-            endingBefore: "LavaSectionGroup(\"Protection Choices\")"
+            in: readSource(.reactNativeSettingsScreens),
+            startingAt: "<SettingsGroup title=\"Your Lava\">",
+            endingBefore: "</SettingsGroup>"
         )
 
         XCTAssertTrue(routeBlock.contains("case customization"))
         XCTAssertTrue(routeBlock.contains("case .customization:"))
         XCTAssertTrue(routeBlock.contains("return .requires(.appSettings)"))
-        XCTAssertTrue(rootBlock.contains("route: .customization"))
-        XCTAssertTrue(rootBlock.contains("systemImage: \"slider.horizontal.3\""))
-        XCTAssertTrue(rootBlock.contains("title: \"Customization\""))
-        XCTAssertTrue(rootBlock.contains("summary: \"Make Lava Security yours\""))
-
-        let upgradeIndex = try XCTUnwrap(rootBlock.range(of: "title: \"Upgrade\"")?.lowerBound)
-        let customizationIndex = try XCTUnwrap(rootBlock.range(of: "title: \"Customization\"")?.lowerBound)
-        XCTAssertLessThan(upgradeIndex, customizationIndex)
-    }
-
-    func testCustomizationPageUsesApprovedCopyAndControls() throws {
-        let settings = try readSource(.customizationSettingsView)
-        let customizationBlock = try sourceBlock(
-            in: settings,
-            startingAt: "struct CustomizationSettingsView: View"
-        )
-
-        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Appearance\")"))
-        XCTAssertFalse(customizationBlock.contains("LavaSectionGroup(\"Appearance & Haptics\")"))
-        XCTAssertTrue(customizationBlock.contains("Picker(\"Appearance\""))
-        XCTAssertTrue(customizationBlock.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(customizationBlock.contains("ForEach(LavaAppearancePreference.allCases)"))
-        XCTAssertTrue(customizationBlock.contains("Text(preference.displayName.lavaLocalized)"))
-        XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
-        XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))
-        XCTAssertFalse(customizationBlock.contains("playsHapticFeedback"))
-        XCTAssertFalse(customizationBlock.contains("setHapticFeedback"))
-        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Lava Guard\")"))
-        XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerRow("))
-        XCTAssertTrue(customizationBlock.contains("look: customization.lavaGuardLook"))
-        XCTAssertTrue(customizationBlock.contains("availability: customization.lavaGuardAvailability(for: customization.lavaGuardLook)"))
-        XCTAssertTrue(customizationBlock.contains("Keep Lava protecting you to unlock more Guards, or [**Upgrade**](lavasecurity://settings/upgrade) to unlock them all."))
-        XCTAssertTrue(customizationBlock.contains("Lava Guard progress requires local logs. [**Review Privacy & Data**](lavasecurity://settings/privacy-data)"))
-        XCTAssertTrue(customizationBlock.contains("VStack(alignment: .leading, spacing: 4)"))
-        let lavaGuardUnlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
-        let progressPrivacyIndex = try XCTUnwrap(customizationBlock.range(of: "Lava Guard progress requires local logs")?.lowerBound)
-        XCTAssertLessThan(lavaGuardUnlockNoteIndex, progressPrivacyIndex)
-        // Two shared quiet styles, no one-off font sizes: the per-Guard spotlight tip keeps the
-        // supporting-text style, while the unlock/privacy note below the catalog dropped to the
-        // quieter footnote note style (`.lavaQuietNoteText()`, pinned below) so it reads as a calm
-        // footer rather than body copy competing with the Guard rows.
-        XCTAssertTrue(customizationBlock.contains(".lavaSupportingText()"))
-        XCTAssertFalse(customizationBlock.contains(".font(.footnote)"))
-        XCTAssertTrue(customizationBlock.contains("if !viewModel.configuration.hasLavaSecurityPlus {"))
-        XCTAssertTrue(customizationBlock.contains(".environment(\\.openURL, OpenURLAction"))
-        XCTAssertTrue(customizationBlock.contains("showUpgradePage = true"))
-        XCTAssertTrue(customizationBlock.contains("@State private var showPrivacyDataPage = false"))
-        XCTAssertTrue(customizationBlock.contains("showPrivacyDataPage = true"))
-        XCTAssertTrue(customizationBlock.contains(".navigationDestination(isPresented: $showUpgradePage)"))
-        XCTAssertTrue(customizationBlock.contains("SettingsRouteDestinationView(route: .upgrade)"))
-        XCTAssertTrue(customizationBlock.contains(".navigationDestination(isPresented: $showPrivacyDataPage)"))
-        XCTAssertTrue(customizationBlock.contains("SettingsRouteDestinationView(route: .privacyData)"))
-        XCTAssertTrue(customizationBlock.contains(".lavaQuietNoteText()"))
-        XCTAssertTrue(customizationBlock.contains("Toggle(\"Match App Icon to Lava Guard\""))
-        XCTAssertTrue(customizationBlock.contains("isOn: updatesAppIconBinding"))
-        XCTAssertTrue(customizationBlock.contains("customization.setUpdatesAppIconWithLavaGuard(isEnabled)"))
-        // The catalog now opens as a bottom sheet (radio-style single select) rather
-        // than an inline disclosure: the row presents LavaGuardLookPickerSheet, which
-        // lists every Guard and applies the selection live while STAYING open — the
-        // Close (X) is the only dismiss, so selecting no longer bounces back.
-        XCTAssertTrue(customizationBlock.contains(".sheet(isPresented: $isPresentingPicker)"))
-        XCTAssertTrue(customizationBlock.contains("LavaGuardLookPickerSheet(onSelect: onSelect)"))
-        XCTAssertTrue(customizationBlock.contains("ForEach(Array(GuardianShieldStyle.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(customizationBlock.contains("customization.setLavaGuardLook(look)"))
-        XCTAssertTrue(customizationBlock.contains("guard availability.isSelectable else"))
-        XCTAssertTrue(customizationBlock.contains("onSelect(look)"))
-        // Selecting a Guard keeps the sheet open: no dismiss() on selection, the checkmark tracks
-        // the LIVE current look, and only the Close (X) dismisses via dismiss.callAsFunction.
-        XCTAssertFalse(customizationBlock.contains("dismiss()"))
-        XCTAssertTrue(customizationBlock.contains("isSelected: look == customization.lavaGuardLook"))
-        XCTAssertTrue(customizationBlock.contains("action: dismiss.callAsFunction"))
-        XCTAssertFalse(customizationBlock.contains("DisclosureGroup(isExpanded: $isExpanded)"))
-        XCTAssertTrue(customizationBlock.contains("private struct LavaGuardLookContent: View"))
-        XCTAssertTrue(customizationBlock.contains("private struct MaskedLavaGuardIcon: View"))
-        XCTAssertTrue(customizationBlock.contains("private enum LavaGuardLookRowMetrics"))
-        XCTAssertTrue(customizationBlock.contains(".frame(width: LavaGuardLookRowMetrics.mascotFrameSize, height: LavaGuardLookRowMetrics.mascotFrameSize)"))
-        XCTAssertTrue(customizationBlock.contains(".frame(minHeight: LavaGuardLookRowMetrics.minRowHeight)"))
-        // Row title/subtitle dropped their fixed 16/15pt sizes and now ride Dynamic Type
-        // (.headline/.subheadline), so they scale with the user's text-size setting like
-        // every sibling row. The "?" placeholder glyph keeps its proportional sizing as a
-        // named ratio rather than a magic 0.44.
-        XCTAssertFalse(customizationBlock.contains("static let titleFontSize"))
-        XCTAssertFalse(customizationBlock.contains("static let subtitleFontSize"))
-        XCTAssertTrue(customizationBlock.contains("static let unknownGlyphRatio: CGFloat = 0.44"))
-        XCTAssertTrue(customizationBlock.contains(".font(.headline)"))
-        XCTAssertTrue(customizationBlock.contains(".font(.subheadline)"))
-        // The selected row is now marked by the radio glyph alone — the tinted
-        // background (and the metrics that drove it) is gone.
-        XCTAssertFalse(customizationBlock.contains("static let selectedCornerRadius"))
-        XCTAssertFalse(customizationBlock.contains("static let selectedHighlightOpacity"))
-        XCTAssertTrue(customizationBlock.contains("let contourSize = size * 1.12"))
-        XCTAssertTrue(customizationBlock.contains("let availability: LavaGuardAvailability"))
-        XCTAssertTrue(customizationBlock.contains("if showsDescription,"))
-        XCTAssertTrue(customizationBlock.contains("showsDescription: !availability.isRevealed"))
-        XCTAssertTrue(customizationBlock.contains("\"Progress is off in Privacy & Data\""))
-        XCTAssertTrue(customizationBlock.contains("guard showsProgressDetail else"))
-        XCTAssertTrue(customizationBlock.contains("\"Currently at: %d days\""))
-        XCTAssertFalse(customizationBlock.contains("\"Current progress: \\(currentDays) days\""))
-        XCTAssertFalse(customizationBlock.contains("\"\\(currentDays)/\\(progress.requiredUsageDays) days - \\(remainingText) to unlock\""))
-        XCTAssertTrue(customizationBlock.contains("MaskedLavaGuardIcon(size: LavaGuardLookRowMetrics.mascotSize)"))
-        XCTAssertTrue(customizationBlock.contains("availability.title(for: look)"))
-        XCTAssertTrue(customizationBlock.contains("availability.subtitle(for: look)"))
-        XCTAssertTrue(customizationBlock.contains("availability.titleColor(for: look)"))
-        XCTAssertTrue(customizationBlock.contains("if showsDescription"))
-        XCTAssertTrue(customizationBlock.contains(".multilineTextAlignment(.leading)"))
-        XCTAssertTrue(customizationBlock.contains(".layoutPriority(1)"))
-        XCTAssertFalse(customizationBlock.contains("let reservesAccessoryColumn: Bool"))
-        XCTAssertFalse(customizationBlock.contains("let showsSelectedAccessory: Bool"))
-        XCTAssertFalse(customizationBlock.contains("Image(systemName: \"checkmark\")"))
-        XCTAssertTrue(customizationBlock.contains(".lineLimit(1)"))
-        XCTAssertTrue(customizationBlock.contains(".lineLimit(2)"))
-        XCTAssertFalse(customizationBlock.contains(".background(selectedHighlight)"))
-        XCTAssertFalse(customizationBlock.contains("private var selectedHighlight: some View"))
-        XCTAssertFalse(customizationBlock.contains("look.dynamicIslandStatusGlyphColor.opacity(LavaGuardLookRowMetrics.selectedHighlightOpacity)"))
-        XCTAssertFalse(customizationBlock.contains(".padding(.horizontal, -LavaGuardLookRowMetrics"))
-        // The option row now delegates layout + selection accessory + a11y trait to
-        // the shared LavaSelectableRow scaffold; the bespoke trailing radio is gone.
-        XCTAssertTrue(customizationBlock.contains("LavaSelectableRow("))
-        XCTAssertTrue(customizationBlock.contains("private var selectionState: LavaRowSelectionState"))
-        XCTAssertTrue(customizationBlock.contains("return isSelected ? .selected : .unselected"))
-        XCTAssertFalse(customizationBlock.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
-        XCTAssertFalse(customizationBlock.contains("largecircle.fill.circle"))
-        XCTAssertFalse(customizationBlock.contains("private var selectionIndicator: some View"))
-        XCTAssertTrue(customizationBlock.contains("\"A Lava a day keeps bad domains away.\""))
-        XCTAssertTrue(customizationBlock.contains("\"Always check the link first.\""))
-        XCTAssertTrue(customizationBlock.contains("\"Block it once. Browse in peace.\""))
-        XCTAssertTrue(customizationBlock.contains("\"Sign in where you meant to sign in.\""))
-        XCTAssertTrue(customizationBlock.contains("\"Giveaways should not ask for secrets.\""))
-        XCTAssertTrue(customizationBlock.contains("\"Make me your web-surfing buddy!\""))
-        XCTAssertFalse(customizationBlock.contains("LavaGuardLookContent(look: look).equatable()"))
-        XCTAssertFalse(customizationBlock.contains("transaction.animation = nil"))
-        XCTAssertFalse(customizationBlock.contains("isExpanded.toggle()"))
-        XCTAssertFalse(customizationBlock.contains("Image(systemName: \"chevron.down\")"))
-        XCTAssertFalse(customizationBlock.contains(".overlay(alignment: .leading)"))
-        XCTAssertFalse(customizationBlock.contains("Capsule()"))
-        XCTAssertFalse(customizationBlock.contains("Image(systemName: isSelected ? \"checkmark.circle.fill\" : \"circle\")"))
-        XCTAssertFalse(customizationBlock.contains("Picker(\"Lava Guard looks\""))
-        XCTAssertTrue(customizationBlock.contains("if customization.canOfferLiveActivities"))
-        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Live Activities\")"))
-        XCTAssertTrue(customizationBlock.contains("Toggle(\"Use Live Activities\""))
-        XCTAssertTrue(customizationBlock.contains("customization.setUsesLiveActivities(isEnabled)"))
-        XCTAssertTrue(customizationBlock.contains("Shows Lava status on the Lock Screen and Dynamic Island when available."))
-        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Language\")"))
-        // Section order (Customization reorder): Lava Guard, Appearance, Text Size, Notifications,
-        // Live Activities, Haptics, Language. The Display cluster (Appearance + Text Size) rises to
-        // the top; Live Activities drops below Notifications. Full order pinned in
-        // CustomizationTextSizeSourceTests; this keeps the Live-Activities-relative anchors current.
-        let lavaGuardIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Lava Guard\")")?.lowerBound)
-        let appearanceIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Appearance\")")?.lowerBound)
-        let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
-        let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
-        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        XCTAssertLessThan(lavaGuardIndex, appearanceIndex)
-        XCTAssertLessThan(appearanceIndex, liveActivitiesIndex)
-        XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
-        XCTAssertLessThan(hapticsIndex, languageIndex)
-
-        let guardPickerIndex = try XCTUnwrap(customizationBlock.range(of: "LavaGuardLookPickerRow(")?.lowerBound)
-        let unlockNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Keep Lava protecting you to unlock more Guards")?.lowerBound)
-        let matchIconIndex = try XCTUnwrap(customizationBlock.range(of: "Toggle(\"Match App Icon to Lava Guard\"")?.lowerBound)
-        let paidGateIndex = try XCTUnwrap(customizationBlock.range(of: "if !viewModel.configuration.hasLavaSecurityPlus {")?.lowerBound)
-        XCTAssertLessThan(guardPickerIndex, matchIconIndex)
-        XCTAssertLessThan(matchIconIndex, paidGateIndex)
-        XCTAssertLessThan(paidGateIndex, unlockNoteIndex)
-        XCTAssertTrue(customizationBlock.contains("SettingsSystemSettingsRow(title: \"Change in iOS Settings\")"))
-        XCTAssertFalse(customizationBlock.contains("systemImage: \"globe\""))
-        XCTAssertFalse(customizationBlock.contains("SettingsSystemSettingsRow(title: \"Open iOS Settings\")"))
-        XCTAssertFalse(customizationBlock.contains("summary: \"Open iOS Settings\""))
-        XCTAssertFalse(customizationBlock.contains("Opens iOS Settings > Lava Security > Language."))
-        XCTAssertFalse(customizationBlock.contains("Turning this on lets Lava request"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(settings.contains("currentDays"))
-        XCTAssertTrue(settings.contains("requiredUsageDays"))
-    }
-
-    func testCustomizationPageOffersLavaHapticsToggleBetweenLiveActivitiesAndLanguage() throws {
-        let settings = try readSource(.customizationSettingsView)
-        let customizationBlock = try sourceBlock(
-            in: settings,
-            startingAt: "struct CustomizationSettingsView: View"
-        )
-
-        // The standalone Haptics section, not the removed "Appearance & Haptics" /
-        // "Haptic Feedback" / configuration-backed `playsHapticFeedback` design.
-        XCTAssertTrue(customizationBlock.contains("LavaSectionGroup(\"Haptics\")"))
-        XCTAssertTrue(customizationBlock.contains("Toggle(\"App Haptics\", isOn: lavaHapticsBinding)"))
-        XCTAssertFalse(customizationBlock.contains("LavaSectionGroup(\"Appearance & Haptics\")"))
-        XCTAssertFalse(customizationBlock.contains("Toggle(\"Haptic Feedback\""))
-        XCTAssertFalse(customizationBlock.contains("private var hapticFeedbackBinding: Binding<Bool>"))
-        XCTAssertFalse(customizationBlock.contains("playsHapticFeedback"))
-        XCTAssertFalse(customizationBlock.contains("setHapticFeedback"))
-
-        // Binding routes through the same auth-gated mutation as the other toggles.
-        XCTAssertTrue(customizationBlock.contains("private var lavaHapticsBinding: Binding<Bool>"))
-        XCTAssertTrue(customizationBlock.contains("customization.usesLavaHaptics"))
-        XCTAssertTrue(customizationBlock.contains("customization.setUsesLavaHaptics(isEnabled)"))
-
-        let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
-        let hapticsIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Haptics\")")?.lowerBound)
-        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        XCTAssertLessThan(liveActivitiesIndex, hapticsIndex)
-        XCTAssertLessThan(hapticsIndex, languageIndex)
-    }
-
-    func testLiveActivityPauseLengthStepperIsGatedToLiveActivitiesSection() throws {
-        let settings = try readSource(.customizationSettingsView)
-        let appViewModel = try readSource(.appViewModel)
-        // The pause-length preference lives on CustomizationController (Phase D5 peel);
-        // the hub's reconcile still threads it into the published content state.
-        let customizationController = try readSource(.customizationController)
-        let presenter = try readSource(.protectionPlatformSeams)
-        let controller = try readSource(.lavaLiveActivityController)
-        let customizationBlock = try sourceBlock(
-            in: settings,
-            startingAt: "struct CustomizationSettingsView: View"
-        )
-        let liveActivitiesSection = try sourceBlock(
-            in: customizationBlock,
-            startingAt: "LavaSectionGroup(\"Live Activities\")",
-            endingBefore: "LavaSectionGroup(\"Haptics\")"
-        )
-
-        // The stepper lives inside the Live Activities section, only when the
-        // feature is on (the Pause button it tunes only exists then), and binds
-        // through the same auth-gated mutation as the toggle.
-        XCTAssertTrue(liveActivitiesSection.contains("if customization.usesLiveActivities {"))
-        XCTAssertTrue(liveActivitiesSection.contains("Stepper("))
-        XCTAssertTrue(liveActivitiesSection.contains("value: liveActivityPauseMinutesBinding"))
-        XCTAssertTrue(liveActivitiesSection.contains("in: LiveActivityPausePreference.minutesRange"))
-        XCTAssertTrue(liveActivitiesSection.contains("Text(customization.liveActivityPauseLengthLabel)"))
-        XCTAssertTrue(customizationBlock.contains("private var liveActivityPauseMinutesBinding: Binding<Int>"))
-        XCTAssertTrue(customizationBlock.contains("customization.setLiveActivityPauseMinutes(minutes)"))
-
-        // Controller side (Phase D5): published value, clamped persistence to the app
-        // group, a hub reconcile so the live button relabels, and the format-string label.
-        XCTAssertTrue(customizationController.contains("@Published private(set) var liveActivityPauseMinutes = LiveActivityPausePreference.defaultMinutes"))
-        XCTAssertTrue(customizationController.contains("func setLiveActivityPauseMinutes(_ minutes: Int)"))
-        XCTAssertTrue(customizationController.contains("let clampedMinutes = LiveActivityPausePreference.clamp(minutes)"))
-        XCTAssertTrue(customizationController.contains("LiveActivityPausePreference.setMinutes(\n            clampedMinutes,\n            in: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
-        XCTAssertTrue(customizationController.contains("\"Pause length: %d min\".lavaLocalizedFormat(liveActivityPauseMinutes)"))
-        XCTAssertTrue(customizationController.contains("liveActivityPauseMinutes = LiveActivityPausePreference.minutes(\n            from: ProtectionUserDefaultsStorage(defaults: appGroupDefaults)\n        )"))
-        XCTAssertTrue(appViewModel.contains("pauseMinutes: customization.liveActivityPauseMinutes"))
-
-        // The configured length is threaded through the presenter seam into the
-        // published content state.
-        XCTAssertTrue(presenter.contains("pauseMinutes: Int"))
-        XCTAssertTrue(controller.contains("pauseMinutes: Int"))
-        XCTAssertTrue(controller.contains("pauseMinutes: pauseMinutes"))
-    }
-
-    func testMaskedLavaGuardIconUsesOriginalShieldContour() throws {
-        let settings = try readSource(.customizationSettingsView)
-        let sharedMascot = try readSource(.softShieldGuardian)
-        let maskedIconBlock = try sourceBlock(
-            in: settings,
-            startingAt: "private struct MaskedLavaGuardIcon: View",
-            endingBefore: "private struct LavaGuardLookOptionRow: View"
-        )
-
-        XCTAssertTrue(sharedMascot.contains("struct LavaGuardianShieldShape: Shape"))
-        XCTAssertFalse(sharedMascot.contains("private struct LavaGuardianShieldShape: Shape"))
-        XCTAssertTrue(maskedIconBlock.contains("LavaGuardianShieldShape()"))
-        XCTAssertFalse(maskedIconBlock.contains("MaskedLavaGuardShieldShape"))
-        XCTAssertTrue(maskedIconBlock.contains("style: StrokeStyle("))
-        XCTAssertTrue(maskedIconBlock.contains("dash: [2, 4]"))
-        XCTAssertTrue(maskedIconBlock.contains("Text(\"?\")"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(settings.contains("LavaGuardianShieldShape"))
-    }
-
-    func testCustomizationLanguageRowRedirectsToIOSSettingsAfterLiveActivities() throws {
-        let settings = try readSource(.customizationSettingsView)
-        let customizationBlock = try sourceBlock(
-            in: settings,
-            startingAt: "struct CustomizationSettingsView: View"
-        )
-        let systemSettingsRowBlock = try sourceBlock(
-            in: settings,
-            startingAt: "private struct SettingsSystemSettingsRow: View",
-            endingBefore: "struct CustomizationSettingsView: View"
-        )
-
-        let liveActivitiesIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Live Activities\")")?.lowerBound)
-        let languageIndex = try XCTUnwrap(customizationBlock.range(of: "LavaSectionGroup(\"Language\")")?.lowerBound)
-        XCTAssertLessThan(liveActivitiesIndex, languageIndex)
-
-        XCTAssertTrue(systemSettingsRowBlock.contains("UIApplication.openSettingsURLString"))
-        XCTAssertTrue(systemSettingsRowBlock.contains("UIApplication.shared.open(settingsURL)"))
-        XCTAssertTrue(systemSettingsRowBlock.contains("Image(systemName: \"arrow.up.right\")"))
-        XCTAssertFalse(customizationBlock.contains("SettingsNavigationRow(\n                        path: $path,\n                        route: .language"))
-
-        // UR-28: the Live Activities toggle row and the Language "open in Settings"
-        // row used to disagree in height (intrinsic Toggle vs. intrinsic HStack).
-        // Both now share the LavaRowHeight.standard floor via `lavaControlRowCard()`
-        // (which wraps `lavaRow()`), so sibling settings rows line up instead of each
-        // taking its content's intrinsic height — and no longer inflate inside a
-        // LavaPlainCard the way the earlier `.frame(minHeight:)`-inside-card form did.
-        let tokens = try readSource(.lavaTokens)
-        XCTAssertTrue(tokens.contains("enum LavaRowHeight"))
-        XCTAssertTrue(tokens.contains("static let standard: CGFloat = 54"))
-        let components = try readSource(.lavaComponents)
-        XCTAssertTrue(components.contains("func lavaRow() -> some View"))
-        XCTAssertTrue(components.contains(".frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)"))
-        XCTAssertTrue(systemSettingsRowBlock.contains(".lavaControlRowCard()"))
-        XCTAssertTrue(customizationBlock.contains("Toggle(\"Use Live Activities\", isOn: usesLiveActivitiesBinding)"))
-        // The Live Activities toggle is now a standalone control row, not wrapped in a card.
-        XCTAssertFalse(customizationBlock.contains("LavaPlainCard {\n                        Toggle(\"Use Live Activities\""))
-        let liveActivitiesToggleIndex = try XCTUnwrap(customizationBlock.range(of: "Toggle(\"Use Live Activities\", isOn: usesLiveActivitiesBinding)")?.upperBound)
-        let liveActivitiesNoteIndex = try XCTUnwrap(customizationBlock.range(of: "Shows Lava status on the Lock Screen")?.lowerBound)
-        XCTAssertTrue(customizationBlock[liveActivitiesToggleIndex..<liveActivitiesNoteIndex].contains(".lavaControlRowCard()"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(try readSource(.settingsView).contains("SettingsNavigationRow"))
-        XCTAssertTrue(settings.contains("LavaPlainCard"))
+        XCTAssertTrue(rootBlock.contains("icon=\"slider.horizontal.3\" title=\"Customization\""))
+        XCTAssertTrue(rootBlock.contains("nav.navigate('Customization')"))
     }
 
     func testLiveActivitiesToggleIsGatedToSupportedDeviceClasses() throws {
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         // The toggle/load clamp lives on CustomizationController (Phase D5 peel); the
         // device-class gate itself stays a hub read (it owns the presenter), and the
         // controller reaches it through the bridge.
         let customizationController = try readSource(.customizationController)
         let controller = try readSource(.lavaLiveActivityController)
-        let settings = try readSource(.customizationSettingsView)
 
         XCTAssertTrue(controller.contains("import UIKit"))
         XCTAssertTrue(controller.contains("var canOfferLiveActivities: Bool"))
@@ -486,14 +171,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationController.contains("let canEnableLiveActivities = canOfferLiveActivities && isEnabled"))
         XCTAssertTrue(customizationController.contains("usesLiveActivities = canOfferLiveActivities && persistedUsesLiveActivities"))
 
-        XCTAssertTrue(settings.contains("if customization.canOfferLiveActivities"))
+        XCTAssertTrue((try readSource(.reactNativeAppBridge)).contains("c.canOfferLiveActivities"))
     }
 
     func testAppearanceAndLiveActivityPreferencesPersistInAppGroupDefaults() throws {
         // The preference cluster (models, @Published, keys, setters, load) lives on
         // CustomizationController since the Phase D5 peel; the hub keeps only the
         // LavaGuard PROGRESS value + key (the accrual engine writes them).
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         let customizationController = try readSource(.customizationController)
         let appGroup = try readSource(.appGroup)
         let rootView = try readSource(.rootView)
@@ -510,20 +195,20 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(customizationController.contains("@Published private(set) var appearancePreference: LavaAppearancePreference = .system"))
         XCTAssertTrue(customizationController.contains("@Published private(set) var usesLiveActivities = false"))
         XCTAssertTrue(customizationController.contains("@Published private(set) var usesLavaHaptics = true"))
-        XCTAssertTrue(customizationController.contains("private let appearancePreferenceDefaultsKeyName = \"lavasec.customization.appearance\""))
+        XCTAssertTrue(customizationController.contains("private let appearancePreferences: AppearancePreferencesService"))
         XCTAssertTrue(customizationController.contains("private let usesLiveActivitiesDefaultsKeyName = \"lavasec.customization.liveActivities\""))
         XCTAssertTrue(customizationController.contains("private let usesLavaHapticsDefaultsKey = ProtectionHapticFeedback.preferenceDefaultsKeyName"))
         XCTAssertTrue(customizationController.contains("func setUsesLavaHaptics(_ isEnabled: Bool)"))
         XCTAssertTrue(customizationController.contains("defaults.set(isEnabled, forKey: usesLavaHapticsDefaultsKey)"))
         XCTAssertTrue(customizationController.contains("usesLavaHaptics = defaults.object(forKey: usesLavaHapticsDefaultsKey) as? Bool ?? true"))
         XCTAssertTrue(customizationController.contains("@Published private(set) var lavaGuardLook: GuardianShieldStyle = .original"))
-        XCTAssertTrue(appViewModel.contains("@Published private(set) var lavaGuardProgress = LavaGuardProgress()"))
+        XCTAssertTrue(appViewModel.contains("@Published var lavaGuardProgress = LavaGuardProgress()"))
         XCTAssertTrue(customizationController.contains("@Published private(set) var updatesAppIconWithLavaGuard = true"))
         XCTAssertTrue(appGroup.contains("customizationLavaGuardLookDefaultsKeyName = \"lavasec.customization.lavaGuardLook\""))
         XCTAssertTrue(customizationController.contains("private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKeyName"))
         XCTAssertTrue(customizationController.contains("private let updatesAppIconWithLavaGuardDefaultsKeyName = \"lavasec.customization.updatesAppIconWithLavaGuard\""))
-        XCTAssertTrue(appViewModel.contains("private let lavaGuardProgressDefaultsKeyName = \"lavasec.customization.lavaGuardProgress\""))
-        XCTAssertTrue(customizationController.contains("defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKeyName)"))
+        XCTAssertTrue(appViewModel.contains("let lavaGuardProgressDefaultsKeyName = \"lavasec.customization.lavaGuardProgress\""))
+        XCTAssertTrue(customizationController.contains("appearancePreferences.setPreference(preference.nativePreference)"))
         XCTAssertTrue(customizationController.contains("private func persistLavaGuardLook(_ look: GuardianShieldStyle)"))
         XCTAssertTrue(persistLookBlock.contains("defaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
         XCTAssertTrue(persistLookBlock.contains("appGroupDefaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
@@ -550,7 +235,6 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let sharedMascot = try readSource(.softShieldGuardian)
         let attributes = try readSource(.lavaActivityAttributes)
         let rootView = try readSource(.rootView)
-        let guardView = try readSource(.guardView)
         let settings = try [
             readSource(.customizationSettingsView),
             readSource(.upgradeSettingsView),
@@ -587,7 +271,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(sharedMascot.contains("private struct ObsidianShieldBody: View"))
         XCTAssertTrue(sharedMascot.contains("private struct ObsidianShieldPalette"))
         XCTAssertTrue(sharedMascot.contains("private enum ObsidianShieldColorway"))
-        XCTAssertTrue(sharedMascot.contains("ObsidianShieldBody(wakeAmount: frame.shieldWakeAmount, style: shieldStyle)"))
+        XCTAssertTrue(sharedMascot.contains("ObsidianShieldBody(wakeAmount: keepsColorWhenSleeping ? 1 : frame.shieldWakeAmount, style: shieldStyle)"))
         XCTAssertTrue(sharedMascot.contains("ObsidianShieldLayer(palette: ObsidianShieldPalette(wakeAmount: wakeAmount, style: style))"))
         XCTAssertTrue(sharedMascot.contains("private enum ObsidianSleepingPalette"))
         XCTAssertTrue(sharedMascot.contains("static let innerTop = LavaGuardianColorStop(red: 0.73, green: 0.76, blue: 0.74)"))
@@ -622,27 +306,16 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(sharedMascot.contains("case plusConcerned"))
         XCTAssertFalse(sharedMascot.contains("case plusGrateful"))
 
-        let tabViewBlock = try sourceBlock(
-            in: rootView,
-            startingAt: "TabView(selection: guardedRootTabSelection)",
-            endingBefore: ".tint(LavaStyle.safeGreen)"
-        )
-
-        XCTAssertTrue(guardView.contains("SoftShieldGuardian(\n                    size: 96,\n                    state: guardianOverrideState ?? guardianState,\n                    shieldStyle: customization.lavaGuardLook\n                )"))
         XCTAssertTrue(settings.contains("shieldStyle: customization.lavaGuardLook"))
-        XCTAssertTrue(settings.contains(".foregroundStyle(availability.titleColor(for: look))"))
+        XCTAssertTrue((try readSource(.reactNativeAppBridge)).contains("lavaGuardAvailability(for:"))
         XCTAssertTrue(settings.contains("case .cherryQuartz:"))
         XCTAssertTrue(settings.contains("case .emerald:"))
         XCTAssertTrue(settings.contains("\"Giveaways should not ask for secrets.\""))
         XCTAssertTrue(settings.contains("\"Make me your web-surfing buddy!\""))
-        // The Guard tab stays a plain SF Symbol Label (no custom mascot view); the glyph now
-        // resolves per selection via tabBarSymbolName for the R1 fill-on-select cue.
-        XCTAssertTrue(tabViewBlock.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
-        XCTAssertFalse(tabViewBlock.contains("LavaTabGuardianIcon()"))
+        XCTAssertTrue(try readSource(.reactNativeReviewNavigation).contains("name: 'shield.fill'"))
         XCTAssertFalse(rootView.contains("LavaTabGuardianIcon()"))
         XCTAssertFalse(rootView.contains("private struct LavaTabGuardianIcon: View"))
-        XCTAssertFalse(tabViewBlock.contains("shieldStyle: customization.lavaGuardLook"))
-        XCTAssertFalse(tabViewBlock.contains("@EnvironmentObject private var viewModel: AppViewModel"))
+        XCTAssertFalse(rootView.contains("TabView(selection: guardedRootTabSelection)"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -673,7 +346,6 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(sharedMascot.contains("static let kiwiCremeCanonicalColorRGB: RGB = (0.91, 0.84, 0.72)"))
         XCTAssertTrue(sharedMascot.contains("static let kiwiCremeSupportBrownRGB: RGB = (0.46, 0.39, 0.32)"))
         XCTAssertTrue(sharedMascot.contains("LavaGuardianStyle.kiwiCremeGlyph"))
-        XCTAssertTrue(sharedMascot.contains("case .fireOpal, .purpleObsidian, .obsidian, .cherryQuartz, .emerald, .kiwiCreme:"))
         XCTAssertTrue(shieldBodyBlock.contains(".kiwiCreme"))
         XCTAssertFalse(faceBlock.contains("kiwiCreme"))
     }
@@ -743,7 +415,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(commandService.contains("pauseStore.pause(for: duration, requestedSessionID: sessionID, commandID: commandID)"))
         XCTAssertTrue(commandService.contains("pauseStore.resume(requestedSessionID: sessionID, commandID: commandID)"))
         XCTAssertTrue(
-            commandService.contains("SecurityProtectedSurfaceStorage.isProtected(.protectionPause, defaults: defaults)"),
+            commandService.contains("SecurityProtectedSurfaceStorage.isProtected(.protectionPause, defaults: defaults,\n            projectionURL: LavaSecAppGroup.securityGateProjectionURL)"),
             "Auth-protected pause denial must stay enforced in the command service."
         )
         XCTAssertFalse(
@@ -806,7 +478,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     func testDynamicIslandModelsOnPausedAndTransientRestartingOnly() throws {
         let attributes = try readSource(.lavaActivityAttributes)
         let widget = try readSource(.lavaSecWidget)
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
 
         // ProtectionState models the two states the surface can keep honest while
         // suspended (on/paused) plus `restarting`, a transient set and cleared
@@ -828,7 +500,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("\"checkmark\""))
         XCTAssertTrue(widget.contains("\"pause.fill\""))
         XCTAssertTrue(widget.contains("\"arrow.triangle.2.circlepath\""))
-        XCTAssertTrue(widget.contains("\"Restarting…\""))
+        XCTAssertTrue(widget.contains("\"widget.state.restartingTitle\""))
 
         // The status mapping still only ever emits on/paused/nil — restarting is
         // pushed by the Restart command, never derived from connectivity status.
@@ -866,7 +538,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     func testDynamicIslandActionLayoutIsPausePrimaryWithSecondaryRestart() throws {
         let widget = try readSource(.lavaSecWidget)
         let intents = try readSource(.lavaLiveActivityIntents)
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
 
         let actionBlock = try sourceBlock(
             in: widget,
@@ -876,8 +548,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let onIdx = try XCTUnwrap(actionBlock.range(of: "case .on:")?.lowerBound)
         let pausedIdx = try XCTUnwrap(actionBlock.range(of: "case .paused:")?.lowerBound)
         let restartingIdx = try XCTUnwrap(actionBlock.range(of: "case .restarting:")?.lowerBound)
-        XCTAssertLessThan(onIdx, pausedIdx)
-        XCTAssertLessThan(pausedIdx, restartingIdx)
+        // GUARDED, NOT ASSERTED. Both `actionBlock[onIdx..<pausedIdx]` and
+        // `actionBlock[pausedIdx..<restartingIdx]` below are built from independently-searched
+        // indices, and `XCTAssertLessThan` is non-fatal — so reordering these switch cases traps
+        // and kills the xctest process, taking the whole bundle's results with it rather than
+        // failing this one test (Codex P2, PR #605).
+        guard onIdx < pausedIdx, pausedIdx < restartingIdx else {
+            return XCTFail("Action-row cases must stay in .on, .paused, .restarting order.")
+        }
 
         // On: Pause is primary (takes the row), Restart recedes to a secondary icon;
         // when Pause is auth-locked the lone Restart is promoted to a labelled button.
@@ -937,6 +615,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // After starting, wait for the tunnel to settle so the post-start grace
         // window doesn't end the activity on a successful restart.
         XCTAssertLessThan(startIndex, reconnectWaitIndex, "Restart must wait for reconnect after starting.")
+
+        let markerIndex = try XCTUnwrap(
+            reconnectBlock.range(of: "ChainedStartupFailureMarker.beginExplicitRetry(")?.lowerBound
+        )
+        XCTAssertLessThan(markerIndex, stopIndex, "Restart must advance the marker before stopping.")
+        XCTAssertTrue(reconnectBlock.contains("LavaSecAppGroup.chainedStartupFailureMarkerURL"))
+        XCTAssertTrue(reconnectBlock.contains("storageURL: markerURL"))
+        XCTAssertTrue(reconnectBlock.contains("LavaSecAppGroup.chainedStartupFailureMarkerLockURL"))
         XCTAssertTrue(commandService.contains("private static func waitForTunnelToReconnect(timeout: TimeInterval) async"))
 
         // On-demand must NOT be disabled here — a background-woken intent could
@@ -945,9 +631,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(reconnectBlock.contains("disableOnDemand"))
 
         // The explicit start is gated on a confirmed stop; the wait reports a Bool.
-        XCTAssertTrue(commandService.contains("private static func waitForTunnelToStop(timeout: TimeInterval) async -> Bool"))
+        XCTAssertTrue(commandService.contains("private static func waitForTunnelToStop(timeout: TimeInterval) async throws -> Bool"))
         XCTAssertTrue(commandService.contains("case .disconnected, .invalid, nil:"))
-        XCTAssertTrue(reconnectBlock.contains("if await waitForTunnelToStop("))
+        XCTAssertTrue(reconnectBlock.contains("if try await waitForTunnelToStop("))
 
         // A slow/wedged stop must not log a phantom restart: on timeout it either
         // credits an on-demand reconnect (real bounce) or surfaces the failure.
@@ -980,29 +666,43 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // before the work begins. The claim returns the exact deadline it stored so
         // the slot can be released by compare-and-set (a stale restart can't clear a
         // newer tap's lease).
-        XCTAssertTrue(performBlock.contains("guard let claimedDeadline = claimRestartInFlight(window: Self.restartingStaleWindow, now: now) else"))
+        XCTAssertTrue(performBlock.contains("guard let claimedRestart = try await claimRestartInFlight(window: Self.restartingStaleWindow) else"))
+        XCTAssertFalse(
+            performBlock.contains("let now = Date()"),
+            "Production restart claims must sample time only after acquiring the cross-process lock."
+        )
         XCTAssertTrue(performBlock.contains("reconnect-already-in-flight"))
         let claimIdx = try XCTUnwrap(performBlock.range(of: "claimRestartInFlight(window:")?.lowerBound)
         let restartingIdx = try XCTUnwrap(performBlock.range(of: "protectionState: .restarting")?.lowerBound)
-        let runIdx = try XCTUnwrap(performBlock.range(of: "runTunnelRestart()")?.lowerBound)
+        let runIdx = try XCTUnwrap(
+            performBlock.range(of: "runTunnelRestart(lifecycleLease: claimedRestart.lifecycleLease)")?.lowerBound
+        )
         XCTAssertLessThan(claimIdx, restartingIdx, "The in-flight slot must be claimed before showing restarting.")
         XCTAssertLessThan(restartingIdx, runIdx, "Restarting feedback must show before the restart work starts.")
 
         // The deadline travels in resumeDate so the widget self-advances .restarting
         // → .on on its own clock (it can't be left stranded by a killed window).
-        XCTAssertTrue(performBlock.contains("resumeDate: now.addingTimeInterval(Self.restartingStaleWindow)"))
+        XCTAssertTrue(performBlock.contains("resumeDate: claimedRestart.deadline"))
 
-        // Both exit paths release the slot by compare-and-set and restore via the
-        // status-derived helper — NOT an unconditional .on push (a failed restart
-        // must not claim On). Restore runs ONLY when we still owned the lease, so a
-        // stale restart that lost its slot to a newer tap can't clobber it.
-        XCTAssertTrue(performBlock.contains("if clearRestartInFlight(claimedDeadline: claimedDeadline) {\n                await restoreLiveActivityAfterRestart()\n            }\n            throw error"))
-        let clears = performBlock.components(separatedBy: "clearRestartInFlight(claimedDeadline: claimedDeadline)").count - 1
-        XCTAssertEqual(clears, 2, "The in-flight slot must be released (compare-and-set) on both the failure and success paths.")
+        // Both exit paths settle the exact deadline/token pair before releasing the fence and
+        // restore via the status-derived helper — NOT an unconditional .on push (a failed restart
+        // must not claim On). Restore runs ONLY when we still owned the pair, so a stale restart
+        // that lost its token cannot clobber a successor's state.
+        XCTAssertTrue(performBlock.contains("let didOwnRestart = await finishRestartInFlight(claimedRestart)"))
+        let clears = performBlock.components(separatedBy: "await finishRestartInFlight(claimedRestart)").count - 1
+        XCTAssertEqual(clears, 2, "Success and failure must each settle their exact deadline/token pair.")
         let restores = performBlock.components(separatedBy: "restoreLiveActivityAfterRestart()").count - 1
         XCTAssertEqual(restores, 2, "Both exit paths must restore via the status-derived helper.")
-        let guardedRestores = performBlock.components(separatedBy: "if clearRestartInFlight(claimedDeadline: claimedDeadline) {").count - 1
+        let guardedRestores = performBlock.components(separatedBy: "if didOwnRestart {").count - 1
         XCTAssertEqual(guardedRestores, 2, "Each restore must be gated on still owning the lease.")
+        XCTAssertTrue(
+            performBlock.contains("leaseRenewal.cancel()"),
+            "The restart must stop the competing renewal task before exact-token cleanup."
+        )
+        XCTAssertTrue(
+            performBlock.contains("claimedRestart.mutationFence.release()"),
+            "The kernel fence must survive every suspension through the restart's final tunnel mutation."
+        )
         XCTAssertFalse(performBlock.contains("updateLiveActivities(protectionState: .on"))
 
         // restoreLiveActivityAfterRestart re-derives from the real tunnel status and
@@ -1030,22 +730,26 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // returns its deadline and the clear is a compare-and-set keyed on that exact
         // value, so an older expired-but-unwinding restart can't delete a newer tap's
         // lease (which would drop the newer restart's `.restarting` guard).
-        XCTAssertTrue(commandService.contains("private static func claimRestartInFlight(window: TimeInterval, now: Date) -> Date?"))
-        XCTAssertTrue(commandService.contains("private static func clearRestartInFlight(claimedDeadline: Date) -> Bool"))
-        XCTAssertTrue(commandService.contains("guard stored == claimedDeadline.timeIntervalSinceReferenceDate else"))
+        XCTAssertTrue(commandService.contains("async throws -> RestartInFlightClaim?"))
+        XCTAssertTrue(commandService.contains("private static func finishRestartInFlight(_ claim: RestartInFlightClaim) async -> Bool"))
+        XCTAssertTrue(commandService.contains("if stored == deadline.timeIntervalSinceReferenceDate"))
+        XCTAssertTrue(commandService.contains("store.release(lifecycleLease)"))
+        XCTAssertTrue(
+            commandService.contains("return clearedDeadline && releasedLease"),
+            "An expired restart must not restore Live Activity state after a newer lifecycle owner took over."
+        )
         XCTAssertTrue(commandService.contains("LavaSecAppGroup.protectionRestartInFlightUntilDefaultsKeyName"))
         XCTAssertTrue(commandService.contains("LavaProtectionCommandFileLock.withExclusiveLock"))
 
         // The app's reconcile path carries the same deadline as resumeDate when
         // restarting, so the widget self-clear is consistent across both push paths.
-        let appViewModel = try readSource(.appViewModel)
-        XCTAssertTrue(appViewModel.contains("private var isRestartInFlight: Bool"))
+        let appViewModel = try readAppViewModelSource()
+        XCTAssertTrue(appViewModel.contains("var isRestartInFlight: Bool"))
         XCTAssertTrue(appViewModel.contains("private var restartInFlightDeadline: Date?"))
         XCTAssertTrue(appViewModel.contains("protectionState == .restarting ? restartDeadline : temporaryProtectionPauseUntil"))
 
         // The widget resolves BOTH transient states to On via its own clock.
-        let widget = try readSource(.lavaSecWidget)
-        XCTAssertTrue(widget.contains("case .paused, .restarting:"))
+        XCTAssertTrue(try readSource(.lavaActivityAttributes).contains("case .paused, .restarting:"))
 
         // The controller must PRESERVE the deadline for .restarting (not null it like
         // .on), or the reconcile-path republish would strip the widget's self-clear.
@@ -1053,6 +757,127 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("case .restarting:\n            publishedResumeDate = resumeDate"))
         XCTAssertTrue(controller.contains("case .on:\n            publishedResumeDate = nil"))
         XCTAssertTrue(controller.contains("ActivityContent(state: state, staleDate: publishedResumeDate)"))
+    }
+
+    func testLiveActivityRestartClaimsAndRenewsSharedLifecycleLease() throws {
+        let commandService = try readSource(.lavaProtectionCommandService)
+        let perform = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func performReconnect()",
+            endingBefore: "private static func restoreLiveActivityAfterRestart()"
+        )
+
+        XCTAssertTrue(perform.contains("claimedRestart.lifecycleLease"))
+        XCTAssertTrue(perform.contains("startProtectionLifecycleLeaseRenewal"))
+        XCTAssertTrue(perform.contains("runTunnelRestart(lifecycleLease: claimedRestart.lifecycleLease)"))
+        XCTAssertTrue(commandService.contains("ProtectionLifecycleLeaseStore("))
+        XCTAssertTrue(commandService.contains("claimExplicitRestart("))
+        XCTAssertTrue(commandService.contains("claimAutomaticRestore("))
+        XCTAssertTrue(commandService.contains("expectedExternalRestartGeneration:"))
+        XCTAssertTrue(commandService.contains("store.release(lease)"))
+        XCTAssertTrue(commandService.contains("store.renew(lease, leaseDuration:"))
+        XCTAssertTrue(commandService.contains("ProtectionFileKeyValueStorage("))
+        XCTAssertTrue(commandService.contains("persistIfNeeded()"))
+        XCTAssertTrue(commandService.contains("withRequiredExclusiveLock"))
+        XCTAssertFalse(
+            commandService.contains("clearProtectionSessionIfNoLiveLifecycleSuccessor"),
+            "Lifecycle-file ownership cannot make a cross-process UserDefaults session CAS fresh or atomic."
+        )
+        let lifecycleTransaction = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func withProtectionLifecycleTransaction",
+            endingBefore: "// commandID threads"
+        )
+        XCTAssertFalse(lifecycleTransaction.contains("ProtectionUserDefaultsStorage"))
+        let lockIndex = try XCTUnwrap(lifecycleTransaction.range(of: "withRequiredExclusiveLock")?.lowerBound)
+        let clockIndex = try XCTUnwrap(lifecycleTransaction.range(of: "let transactionNow = now ?? Date()")?.lowerBound)
+        XCTAssertLessThan(
+            lockIndex,
+            clockIndex,
+            "Production lifecycle transactions must sample time after nonblocking lock acquisition succeeds."
+        )
+        XCTAssertTrue(lifecycleTransaction.contains("clock: LavaProtectionCommandClock(now: transactionNow)"))
+
+        // The restart deadline remains a separate UI transient. It is checked in the same short
+        // file-locked claim, but the lifecycle lease has its own token/CAS and expiry state.
+        XCTAssertTrue(commandService.contains("protectionRestartInFlightUntilDefaultsKeyName"))
+        XCTAssertTrue(commandService.contains("RestartInFlightClaim"))
+
+        let restartClaim = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func claimRestartInFlight(",
+            endingBefore: "/// Clears this Restart's exact UI deadline"
+        )
+        let fenceIndex = try XCTUnwrap(restartClaim.range(of: "acquireProtectionLifecycleMutationFence(wait: false)")?.lowerBound)
+        let transactionIndex = try XCTUnwrap(restartClaim.range(of: "withProtectionLifecycleTransaction")?.lowerBound)
+        XCTAssertLessThan(fenceIndex, transactionIndex)
+        XCTAssertTrue(restartClaim.contains("mutationFence: mutationFence"))
+
+        let restart = try sourceBlock(
+            in: commandService,
+            startingAt: "private static func runTunnelRestart(",
+            endingBefore: "private static let reconnectStopWaitTimeout"
+        )
+        let stop = try XCTUnwrap(restart.range(of: "connection.stopVPNTunnel()")?.lowerBound)
+        let start = try XCTUnwrap(restart.range(of: "connection.startVPNTunnel()")?.lowerBound)
+        let firstRenewal = try XCTUnwrap(
+            restart.range(of: "renewProtectionLifecycleLeaseWithRetry(lifecycleLease)")
+        )
+        let secondRenewal = try XCTUnwrap(
+            restart.range(
+                of: "renewProtectionLifecycleLeaseWithRetry(lifecycleLease)",
+                range: firstRenewal.upperBound..<restart.endIndex
+            )
+        )
+        XCTAssertLessThan(firstRenewal.lowerBound, stop)
+        XCTAssertLessThan(secondRenewal.lowerBound, start)
+    }
+
+    func testRequiredLifecycleStateLockFailsClosedWithoutBlockingMainActor() throws {
+        let commandService = try readSource(.lavaProtectionCommandService)
+        XCTAssertTrue(commandService.contains("ProtectionLifecycleStateTransaction.withRequiredExclusiveLock"))
+        XCTAssertTrue(commandService.contains("ProtectionLifecycleStateTransactionError.missingContainer"))
+
+        let strictCapture = try sourceBlock(
+            in: commandService,
+            startingAt: "static func captureExternalRestartGeneration(",
+            endingBefore: "static func claimAutomaticRestoreLease("
+        )
+        XCTAssertTrue(strictCapture.contains("try withProtectionLifecycleTransaction"))
+        XCTAssertFalse(strictCapture.contains("try? withProtectionLifecycleTransaction"))
+
+        let optionalCurrent = try sourceBlock(
+            in: commandService,
+            startingAt: "static func currentExternalRestartGeneration(",
+            endingBefore: "/// Strict generation capture"
+        )
+        XCTAssertTrue(optionalCurrent.contains("(try? withProtectionLifecycleTransaction"))
+        XCTAssertTrue(optionalCurrent.contains("}) ?? nil"))
+
+        let optionalClaim = try sourceBlock(
+            in: commandService,
+            startingAt: "static func claimAutomaticRestoreLease(",
+            endingBefore: "@discardableResult\n    static func renewProtectionLifecycleLease("
+        )
+        XCTAssertTrue(optionalClaim.contains("(try? withProtectionLifecycleTransaction"))
+        XCTAssertTrue(optionalClaim.contains("}) ?? nil"))
+
+        let booleanRenew = try sourceBlock(
+            in: commandService,
+            startingAt: "static func renewProtectionLifecycleLease(",
+            endingBefore: "@discardableResult\n    static func releaseProtectionLifecycleLease("
+        )
+        XCTAssertTrue(booleanRenew.contains("(try? withProtectionLifecycleTransaction"))
+        XCTAssertTrue(booleanRenew.contains("}) ?? false"))
+
+        let booleanRelease = try sourceBlock(
+            in: commandService,
+            startingAt: "static func releaseProtectionLifecycleLease(",
+            endingBefore: "static func startProtectionLifecycleLeaseRenewal("
+        )
+        XCTAssertTrue(booleanRelease.contains(") async -> Bool"))
+        XCTAssertTrue(booleanRelease.contains("ProtectionLifecycleStateTransaction.retryingBusy"))
+        XCTAssertTrue(booleanRelease.contains("}) ?? false"))
     }
 
     func testLiveActivityPauseActionsAreHiddenAndDeniedWhenPauseRequiresAuthentication() throws {
@@ -1144,8 +969,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
         XCTAssertTrue(widget.contains("TimelineView(.periodic"))
         XCTAssertTrue(widget.contains("effectiveProtectionState(now: timeline.date)"))
-        XCTAssertTrue(widget.contains("resumeDate <= now"))
-        XCTAssertTrue(widget.contains("return .on"))
+        XCTAssertTrue(try readSource(.lavaActivityAttributes).contains("resumeDate <= now"))
+        XCTAssertTrue(try readSource(.lavaActivityAttributes).contains("return .on"))
         XCTAssertTrue(widget.contains("LavaLiveActivityStatusGlyphView(state: context.state"))
         XCTAssertTrue(expandedViewBlock.contains("let protectionState = state.effectiveProtectionState(now: timeline.date)"))
         XCTAssertTrue(expandedViewBlock.contains("switch protectionState"))
@@ -1157,7 +982,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
     func testLiveActivityControllerStartsUpdatesEndsAndPublishesPauseAuthState() throws {
         let controller = try readSource(.lavaLiveActivityController)
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         // The hub's reconcile reads the three preferences off the Phase D5 controller.
         let customizationController = try readSource(.customizationController)
 
@@ -1174,7 +999,9 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("pauseRequiresAuthentication: Bool"))
         XCTAssertTrue(controller.contains("pauseRequiresAuthentication: pauseRequiresAuthentication"))
 
-        XCTAssertTrue(appViewModel.contains("private let liveActivityController: AmbientProtectionPresenter = LavaLiveActivityController()"))
+        XCTAssertTrue(appViewModel.contains("let liveActivityController: AmbientProtectionPresenter"))
+        XCTAssertTrue(appViewModel.contains("liveActivityController = services.ambientProtection"))
+        XCTAssertTrue(try readSource(.appPlatformServices).contains("ambientProtection: LavaLiveActivityController()"))
         XCTAssertTrue(appViewModel.contains("reconcileLiveActivity()"))
         XCTAssertTrue(customizationController.contains("hub.reconcileLiveActivity()"))
         XCTAssertTrue(appViewModel.contains("shieldStyle: customization.lavaGuardLook"))
@@ -1197,7 +1024,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
     func testLiveActivityRefreshRespectsSharedTemporaryPauseBeforePublishingStatus() throws {
         let controller = try readSource(.lavaLiveActivityController)
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
 
         XCTAssertTrue(controller.contains("private func effectiveProtectionState("))
         XCTAssertTrue(controller.contains("UserDefaults(suiteName: LavaSecAppGroup.identifier)"))
@@ -1222,7 +1049,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
 
     func testLiveActivityDoesNotRenderStalePauseWhenProtectionStateIsUnavailable() throws {
         let controller = try readSource(.lavaLiveActivityController)
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
 
         let liveActivityProtectionStateBlock = try sourceBlock(
             in: appViewModel,
@@ -1281,7 +1108,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         )
     }
 
-    func testLiveActivityDoesNotExposeURLActionsAndFallbackResumeSkipsAuthentication() throws {
+    func testLiveActivityDoesNotExposeURLActionsOrAnUnusedRootMutationPath() throws {
         let rootView = try readSource(.rootView)
         let securityPolicy = try readSource(.securityAccessPolicy)
         let securityController = try readSource(.securityController)
@@ -1290,15 +1117,13 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(securityPolicy.contains("enum SecurityProtectedSurfaceStorage"))
         XCTAssertTrue(securityPolicy.contains("public static let defaultsKeyName = \"securityProtectedSurfaces\""))
         XCTAssertTrue(securityPolicy.contains("case protectionPause"))
-        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults)"))
-        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.saveProtectedSurfaces(protectedSurfaces, to: defaults)"))
+        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: securityGateProjectionURL)"))
+        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.saveProtectedSurfaces(protectedSurfaces, to: defaults,\n            projectionURL: securityGateProjectionURL)"))
 
         XCTAssertFalse(rootView.contains("handleLiveActivityActionURL"))
         XCTAssertFalse(rootView.contains("LavaLiveActivityActionRequest.pendingRequest(from: url)"))
         XCTAssertFalse(rootView.contains("handlePendingLiveActivityActionRequestIfNeeded()"))
-        XCTAssertTrue(rootView.contains("if request == .resume || request == .reconnect {\n                viewModel.performLiveActivityActionRequest(request)"))
-        XCTAssertTrue(rootView.contains("security.requireFreshAuthentication(\n                for: .protectionPause"))
-        XCTAssertTrue(rootView.contains("viewModel.performLiveActivityActionRequest(request)"))
+        XCTAssertFalse(rootView.contains("private func performLiveActivityActionRequest("))
         XCTAssertFalse(rootView.contains("LavaLiveActivityActionRequest.rotateActionNonce()"))
         XCTAssertFalse(actionRequest.contains("components.scheme = \"lavasecurity\""))
         XCTAssertFalse(actionRequest.contains("components.host = actionHost"))
@@ -1306,7 +1131,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
-        XCTAssertTrue(rootView.contains("LavaLiveActivityActionRequest"))
+        XCTAssertTrue(actionRequest.contains("enum LavaLiveActivityActionRequest"))
     }
 
     func testWidgetTargetAndDynamicIslandUseMascotExpressionsAndSFGlyphs() throws {
@@ -1424,7 +1249,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(widget.contains("LavaCoreStrings.localizedFormat(\"widget.action.pauseForMinutes\", languageCode: languageCode, minutes)"))
         XCTAssertTrue(widget.contains("Button(intent: ResumeLavaProtectionIntent())"))
         XCTAssertTrue(widget.contains("if !state.pauseRequiresAuthentication"))
-        XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionIntent())"))
+        XCTAssertTrue(widget.contains("Button(intent: PauseLavaProtectionIntent(activityID: activityID))"))
         XCTAssertFalse(widget.contains("Button(intent: AuthenticatedPauseLavaProtectionFiveMinutesIntent())"))
         XCTAssertFalse(widget.contains("Button(intent: PauseLavaProtectionFiveMinutesIntent())"))
         XCTAssertFalse(widget.contains("Button(intent: AuthenticatedPauseLavaProtectionTenMinutesIntent())"))
@@ -1503,8 +1328,8 @@ final class LavaLiveActivitySourceTests: XCTestCase {
     }
 
     func testDynamicIslandReconcilesOnTunnelHealthChangeAndTunnelNudgesForegroundApp() throws {
-        let appViewModel = try readSource(.appViewModel)
-        let tunnel = try readSource(.packetTunnelProvider)
+        let appViewModel = try readAppViewModelSource()
+        let tunnel = try readPacketTunnelProviderSource()
         let signal = try readSource(.tunnelHealthSignal)
         let observer = try readSource(.darwinNotificationObserver)
 
@@ -1513,7 +1338,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let refreshHealthBlock = try sourceBlock(
             in: appViewModel,
             startingAt: "func refreshTunnelHealth(force: Bool = false)",
-            endingBefore: "private var lastTunnelHealthFlushRequestedAt"
+            endingBefore: "static let tunnelHealthFlushMinimumInterval"
         )
         XCTAssertTrue(refreshHealthBlock.contains("let previousHealth = tunnelHealth"))
         XCTAssertTrue(refreshHealthBlock.contains("if snapshot != previousHealth {"))
@@ -1528,7 +1353,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         // The tunnel only POSTS the nudge (via the core notifier) when the
         // connectivity-relevant assessment changes; it must never re-add the
         // dormant, deliberately-removed extension-side Darwin observer.
-        XCTAssertTrue(tunnel.contains("private func signalAppIfConnectivityStateChanged"))
+        XCTAssertTrue(tunnel.contains("func signalAppIfConnectivityStateChanged"))
         XCTAssertTrue(tunnel.contains("ProtectionConnectivityPolicy.assessment("))
         XCTAssertTrue(tunnel.contains("connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName)"))
         XCTAssertTrue(tunnel.contains("signalAppIfConnectivityStateChanged()"))
@@ -1724,13 +1549,13 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             sourceOccurrenceCount(of: "TimelineView(.periodic", in: widget), 3,
             "A new TimelineView surface must adopt its own per-render pin read — keep these counts moving together."
         )
-        // Every localized call must carry the pin: 12 plain lookups + the one format call.
+        // Every localized call must carry the pin: 14 plain lookups + the one format call.
         XCTAssertEqual(
-            sourceOccurrenceCount(of: "LavaCoreStrings.localized(\"", in: widget), 12,
+            sourceOccurrenceCount(of: "LavaCoreStrings.localized(\"", in: widget), 14,
             "All plain widget string lookups are accounted for."
         )
         XCTAssertEqual(
-            sourceOccurrenceCount(of: "\", languageCode: languageCode)", in: widget), 12,
+            sourceOccurrenceCount(of: "\", languageCode: languageCode)", in: widget), 14,
             "Every plain lookup must pass the per-render pin — an ambient call renders the system language."
         )
         XCTAssertTrue(

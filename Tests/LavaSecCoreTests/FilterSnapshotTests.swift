@@ -101,4 +101,32 @@ final class FilterSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.decision(for: "school.example").reason, .localAllowlist)
         XCTAssertEqual(snapshot.decision(for: "unlisted-danger.example").reason, .defaultAllow)
     }
+    func testAllowedParentPreservesExactAndSuffixDescendantThreats() throws {
+        let threats = DomainRuleSet(exactDomains: ["exact.example.com"], suffixDomains: ["malware.example.com"])
+        let config = AppConfiguration(allowedDomains: ["example.com"])
+        let snapshot = config.filterSnapshot(nonAllowableThreatRules: threats)
+        XCTAssertEqual(snapshot.decision(for: "safe.example.com").reason, .localAllowlist)
+        XCTAssertEqual(snapshot.decision(for: "exact.example.com").reason, .threatGuardrail)
+        XCTAssertEqual(snapshot.decision(for: "child.exact.example.com").reason, .localAllowlist)
+        XCTAssertEqual(snapshot.decision(for: "child.malware.example.com").reason, .threatGuardrail)
+        XCTAssertEqual(snapshot.decision(forNormalizedDomain: "safe.example.com", reachableAliasDomains: ["malware.example.com"]).reason, .threatGuardrail)
+    }
+
+    func testThreatOverlapCoversAllowedDescendantsWithoutUnrelatedRules() throws {
+        let threats = DomainRuleSet(
+            exactDomains: ["exact.allowed.example", "unrelated.example"],
+            suffixDomains: ["example.com", "malware.allowed.example", "other.example"]
+        )
+        let config = AppConfiguration(allowedDomains: ["allowed.example", "school.example.com"])
+        let overlap = config.nonAllowableRulesForAllowedDomains(from: threats)
+
+        XCTAssertEqual(overlap.count, 3)
+        XCTAssertTrue(overlap.contains("exact.allowed.example"))
+        XCTAssertTrue(overlap.contains("child.malware.allowed.example"))
+        XCTAssertTrue(overlap.contains("child.school.example.com"))
+        XCTAssertFalse(overlap.contains("unrelated.example"))
+        XCTAssertFalse(overlap.contains("other.example"))
+        XCTAssertFalse(overlap.contains("other.example.com"))
+    }
+
 }

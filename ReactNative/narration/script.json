@@ -1,0 +1,220 @@
+{
+  "schema": 1,
+  "approved": true,
+  "model": "qwen/qwen-audio-3.0-tts-flash",
+  "voice": "longanhuan_v3.6",
+  "voices": {
+    "zh-Hans": {
+      "model": "microsoft/mai-voice-2",
+      "voice": "zh-CN-XiaoxiaoNeural"
+    },
+    "zh-Hant": {
+      "model": "microsoft/mai-voice-2",
+      "voice": "zh-TW-HsiaoChenNeural"
+    }
+  },
+  "revision": "storytelling-rev-4",
+  "metadata": {
+    "status": "storytelling copy revised; audio regenerated",
+    "proposedProvider": "Qwen + MAI (Chinese)",
+    "audioGenerationApproved": true,
+    "review": "Storytelling copy revised by an i18n panel for concise, plain, consistent wording across all ten locales. All 130 clips (13 scenes × 10 locales) were regenerated from this revision with Qwen longanhuan_v3.6 and MAI zh-CN-XiaoxiaoNeural / zh-TW-HsiaoChenNeural for Chinese."
+  },
+  "scenes": [
+    {
+      "id": "device",
+      "locales": {
+        "en": "It all starts here, on your device. Before it opens anything, it asks one question: where does this website live?",
+        "de": "Alles beginnt hier, auf deinem Gerät. Bevor es etwas öffnet, fragt es: Wo ist diese Website zu finden?",
+        "es": "Todo empieza aquí, en tu dispositivo. Antes de abrir nada, hace una pregunta: ¿dónde está este sitio?",
+        "fr": "Tout commence ici, sur votre appareil. Avant d’ouvrir quoi que ce soit, il demande : où se trouve ce site ?",
+        "it": "Tutto inizia qui, sul tuo dispositivo. Prima di aprire qualsiasi cosa, fa una domanda: dove si trova questo sito?",
+        "ja": "すべてはここ、デバイスから始まります。何かを開く前に、「このサイトはどこにあるの？」と尋ねます。",
+        "ko": "모든 건 여기, 기기에서 시작돼요. 무엇이든 열기 전에 사이트가 어디 있는지부터 물어요.",
+        "pt-BR": "Tudo começa aqui, no seu dispositivo. Antes de abrir qualquer coisa, ele faz uma pergunta: onde fica este site?",
+        "zh-Hans": "一切都从这里开始，就在你的设备上。打开任何内容前，它会先问一个问题：这个网站在哪里？",
+        "zh-Hant": "一切都從這裡開始，就在你的裝置上。開啟任何內容前，它會先問一個問題：這個網站在哪裡？"
+      }
+    },
+    {
+      "id": "lookup-intro",
+      "locales": {
+        "en": "That question goes to DNS, the internet’s address book. It matches each website name to its address.",
+        "de": "Die Frage geht ans DNS, das Adressbuch des Internets. Es ordnet jedem Websitenamen seine Adresse zu.",
+        "es": "Esa pregunta va al DNS, la libreta de direcciones de internet. Asocia el nombre de cada sitio con su dirección.",
+        "fr": "Cette question va au DNS, l’annuaire d’Internet. Il associe chaque nom de site à son adresse.",
+        "it": "La domanda arriva al DNS, la rubrica di internet. Associa il nome di ogni sito al suo indirizzo.",
+        "ja": "その質問はDNSへ届きます。DNSはインターネットの住所録で、サイト名からアドレスを調べます。",
+        "ko": "그 질문은 인터넷의 주소록인 DNS로 가요. DNS는 사이트 이름을 주소와 짝지어 줘요.",
+        "pt-BR": "Essa pergunta vai ao DNS, a agenda de endereços da internet. Ele associa o nome de cada site ao seu endereço.",
+        "zh-Hans": "这个问题会交给 DNS，也就是互联网的通讯录。它能把每个网站名称对应到地址。",
+        "zh-Hant": "這個問題會交給 DNS，也就是網際網路的通訊錄。它能把每個網站名稱對應到位址。"
+      }
+    },
+    {
+      "id": "route",
+      "locales": {
+        "en": "Every request takes a journey along the path you set. Let’s look at each step.",
+        "de": "Jede Anfrage folgt dem Weg, den du festgelegt hast. Schauen wir uns jeden Schritt an.",
+        "es": "Toda solicitud hace un recorrido por la ruta que has configurado. Veamos cada paso.",
+        "fr": "Chaque requête suit le chemin que vous avez défini. Voyons chaque étape.",
+        "it": "Ogni richiesta segue il percorso che hai impostato. Vediamo i passaggi uno per uno.",
+        "ja": "リクエストはどれも、設定した経路をたどって進みます。ステップをひとつずつ見てみましょう。",
+        "ko": "모든 요청은 직접 설정한 경로를 따라 이동해요. 한 단계씩 살펴볼게요.",
+        "pt-BR": "Toda solicitação percorre o caminho que você definiu. Vamos ver cada etapa.",
+        "zh-Hans": "每个请求都会沿着你设置的路径走一趟。一起来看看每个步骤吧。",
+        "zh-Hant": "每個請求都會沿著你設定的路徑走一趟。一起來看看每個步驟吧。"
+      }
+    },
+    {
+      "id": "filter-policy",
+      "locales": {
+        "en": "First comes your filter. It checks each request against your lists, then lets it through or stops it here.",
+        "de": "Zuerst kommt dein Filter. Er prüft jede Anfrage anhand deiner Listen und lässt sie durch oder hält sie hier auf.",
+        "es": "Primero viene tu filtro. Compara cada solicitud con tus listas y la deja pasar o la detiene aquí.",
+        "fr": "D’abord, votre filtre. Il compare chaque requête à vos listes, puis la laisse passer ou l’arrête ici.",
+        "it": "Prima c’è il tuo filtro. Confronta ogni richiesta con le tue liste, poi la lascia passare o la ferma qui.",
+        "ja": "まずはフィルターです。リクエストをリストと照らし合わせ、通すか、ここで止めるかを決めます。",
+        "ko": "가장 먼저 필터를 만나요. 필터는 요청을 내 목록과 비교해 통과시키거나 여기서 막아요.",
+        "pt-BR": "Primeiro vem seu filtro. Ele compara cada solicitação com suas listas e a deixa passar ou a interrompe aqui.",
+        "zh-Hans": "首先是你的筛选器。它会对照你的列表检查每个请求，再决定放行，还是在这里拦下。",
+        "zh-Hant": "首先是你的篩選器。它會對照你的清單檢查每個請求，再決定放行，還是在這裡擋下。"
+      }
+    },
+    {
+      "id": "vpn",
+      "locales": {
+        "en": "Then, if VPN chaining is on, your request travels through your VPN on its way to DNS.",
+        "de": "Ist die VPN-Verkettung eingeschaltet, läuft deine Anfrage danach über dein VPN weiter zum DNS.",
+        "es": "Luego, si el encadenamiento VPN está activado, la solicitud pasa por tu VPN de camino al DNS.",
+        "fr": "Ensuite, si le chaînage VPN est activé, votre requête passe par votre VPN avant de rejoindre le DNS.",
+        "it": "Poi, se il concatenamento VPN è attivato, la richiesta passa dalla tua VPN prima di arrivare al DNS.",
+        "ja": "次に、VPNチェーンがオンなら、リクエストはVPNを通ってDNSへ向かいます。",
+        "ko": "그다음, VPN 체이닝이 켜져 있으면 요청은 VPN을 거쳐 DNS로 가요.",
+        "pt-BR": "Depois, se o encadeamento de VPN estiver ativado, a solicitação passa pela sua VPN a caminho do DNS.",
+        "zh-Hans": "接着，如果 VPN 串联已开启，请求会先经过你的 VPN，再前往 DNS。",
+        "zh-Hant": "接著，如果 VPN 串接已開啟，請求會先經過你的 VPN，再前往 DNS。"
+      }
+    },
+    {
+      "id": "dns-choice",
+      "locales": {
+        "en": "And last comes DNS. You get to choose who answers your device’s questions.",
+        "de": "Zuletzt kommt das DNS. Du entscheidest, wer die Fragen deines Geräts beantwortet.",
+        "es": "Y por último, el DNS. Tú eliges quién responde a las preguntas de tu dispositivo.",
+        "fr": "Et enfin, le DNS. Vous choisissez qui répond aux questions de votre appareil.",
+        "it": "E per ultimo c’è il DNS. Sei tu a scegliere chi risponde alle domande del tuo dispositivo.",
+        "ja": "そして最後はDNSです。デバイスの質問にどこが答えるかは、自分で選べます。",
+        "ko": "마지막은 DNS예요. 기기의 질문에 누가 답할지는 직접 고를 수 있어요.",
+        "pt-BR": "E, por último, vem o DNS. Você escolhe quem responde às perguntas do seu dispositivo.",
+        "zh-Hans": "最后一站是 DNS。你可以自己选择由谁来回答设备的问题。",
+        "zh-Hant": "最後一站是 DNS。你可以自己選擇由誰來回答裝置的問題。"
+      }
+    },
+    {
+      "id": "blocked-intro",
+      "locales": {
+        "en": "Let’s try a website you’ve blocked. First, your device sends the request to your filter.",
+        "de": "Probieren wir eine Website aus, die du blockiert hast. Zuerst schickt dein Gerät die Anfrage an deinen Filter.",
+        "es": "Probemos un sitio que has bloqueado. Primero, tu dispositivo envía la solicitud a tu filtro.",
+        "fr": "Essayons un site que vous avez bloqué. D’abord, votre appareil envoie la requête à votre filtre.",
+        "it": "Proviamo con un sito che hai bloccato. Per prima cosa, il dispositivo invia la richiesta al tuo filtro.",
+        "ja": "ブロックしたサイトを開いてみましょう。まず、デバイスがリクエストをフィルターへ送ります。",
+        "ko": "차단한 사이트를 열어 볼게요. 먼저 기기가 요청을 필터로 보내요.",
+        "pt-BR": "Vamos testar um site que você bloqueou. Primeiro, o dispositivo envia a solicitação ao seu filtro.",
+        "zh-Hans": "我们来试试一个你拦截的网站。首先，设备会把请求发给你的筛选器。",
+        "zh-Hant": "我們來試試一個你封鎖的網站。首先，裝置會把請求傳給你的篩選器。"
+      }
+    },
+    {
+      "id": "blocked-stop",
+      "locales": {
+        "en": "Your filter sees that this website is blocked and stops the request right here. It never reaches DNS.",
+        "de": "Dein Filter sieht, dass diese Website blockiert ist, und hält die Anfrage hier auf. Sie erreicht das DNS nie.",
+        "es": "Tu filtro ve que este sitio está bloqueado y detiene la solicitud aquí mismo. Nunca llega al DNS.",
+        "fr": "Votre filtre voit que ce site est bloqué et arrête la requête ici même. Elle n’atteint jamais le DNS.",
+        "it": "Il tuo filtro vede che questo sito è bloccato e ferma la richiesta proprio qui. Non arriva mai al DNS.",
+        "ja": "フィルターはブロックされたサイトだと気づき、ここでリクエストを止めます。DNSには届きません。",
+        "ko": "필터가 차단된 사이트라는 걸 알아보고 요청을 바로 여기서 막아요. DNS에는 닿지 않아요.",
+        "pt-BR": "Seu filtro vê que este site está bloqueado e interrompe a solicitação aqui mesmo. Ela nunca chega ao DNS.",
+        "zh-Hans": "筛选器发现这个网站已被拦截，就在这里拦下请求，DNS 完全不会收到。",
+        "zh-Hant": "篩選器發現這個網站已被封鎖，就在這裡擋下請求，DNS 完全不會收到。"
+      }
+    },
+    {
+      "id": "allowed-intro",
+      "locales": {
+        "en": "Now let’s try a website you’ve allowed. The request goes to your filter, just like before.",
+        "de": "Probieren wir jetzt eine Website aus, die du erlaubt hast. Die Anfrage geht wie zuvor an deinen Filter.",
+        "es": "Ahora probemos un sitio que has permitido. La solicitud va a tu filtro, igual que antes.",
+        "fr": "Essayons maintenant un site que vous avez autorisé. La requête arrive à votre filtre, comme avant.",
+        "it": "Ora proviamo con un sito che hai consentito. La richiesta va al tuo filtro, proprio come prima.",
+        "ja": "今度は、許可したサイトを開いてみましょう。リクエストは先ほどと同じように、フィルターへ届きます。",
+        "ko": "이제 허용한 사이트를 열어 볼게요. 요청은 아까처럼 필터로 가요.",
+        "pt-BR": "Agora vamos testar um site que você permitiu. A solicitação vai até seu filtro, como antes.",
+        "zh-Hans": "现在，我们来试试一个你允许的网站。请求和刚才一样，先到你的筛选器。",
+        "zh-Hant": "現在，我們來試試一個你允許的網站。請求和剛才一樣，先到你的篩選器。"
+      }
+    },
+    {
+      "id": "allowed-pass",
+      "locales": {
+        "en": "This time, your filter sees that this website is allowed and lets the request continue.",
+        "de": "Diesmal sieht dein Filter, dass diese Website erlaubt ist, und lässt die Anfrage passieren.",
+        "es": "Esta vez, tu filtro ve que este sitio está permitido y deja que la solicitud continúe.",
+        "fr": "Cette fois, votre filtre voit que ce site est autorisé et laisse la requête poursuivre sa route.",
+        "it": "Questa volta il tuo filtro vede che questo sito è consentito e lascia proseguire la richiesta.",
+        "ja": "フィルターは許可されたサイトだと気づき、今回はリクエストをそのまま通します。",
+        "ko": "이번에는 필터가 허용된 사이트라는 걸 알아보고 요청을 통과시켜요.",
+        "pt-BR": "Desta vez, seu filtro vê que este site está permitido e deixa a solicitação seguir.",
+        "zh-Hans": "这一次，筛选器发现这个网站已被允许，就让请求继续前进。",
+        "zh-Hant": "這一次，篩選器發現這個網站已被允許，就讓請求繼續前進。"
+      }
+    },
+    {
+      "id": "vpn-follow",
+      "locales": {
+        "en": "From here, the request travels through your VPN if chaining is on, then heads to DNS.",
+        "de": "Von hier aus läuft die Anfrage bei eingeschalteter Verkettung über dein VPN und dann weiter zum DNS.",
+        "es": "Desde aquí, la solicitud pasa por tu VPN si el encadenamiento está activado y luego va al DNS.",
+        "fr": "À partir d’ici, la requête passe par votre VPN si le chaînage est activé, puis se dirige vers le DNS.",
+        "it": "Da qui, la richiesta passa dalla tua VPN se il concatenamento è attivato, poi si dirige al DNS.",
+        "ja": "ここからリクエストは、VPNチェーンがオンならVPNを通って、DNSへ向かいます。",
+        "ko": "여기서부터는 체이닝이 켜져 있으면 요청이 VPN을 거친 다음 DNS로 가요.",
+        "pt-BR": "Daqui, a solicitação passa pela sua VPN se o encadeamento estiver ativado e depois segue para o DNS.",
+        "zh-Hans": "接下来，如果串联已开启，请求会先经过你的 VPN，再前往 DNS。",
+        "zh-Hant": "接下來，如果串接已開啟，請求會先經過你的 VPN，再前往 DNS。"
+      }
+    },
+    {
+      "id": "lookup-complete",
+      "locales": {
+        "en": "DNS finds the website’s address and sends it back, so your device knows where to connect.",
+        "de": "Das DNS findet die Adresse der Website und schickt sie zurück. So weiß dein Gerät, wohin es sich verbinden soll.",
+        "es": "El DNS encuentra la dirección del sitio y la devuelve para que tu dispositivo sepa dónde conectarse.",
+        "fr": "Le DNS trouve l’adresse du site et la renvoie : votre appareil sait alors où se connecter.",
+        "it": "Il DNS trova l’indirizzo del sito e lo restituisce, così il tuo dispositivo sa dove connettersi.",
+        "ja": "DNSがサイトのアドレスを見つけて返します。これでデバイスは、どこに接続すればよいかわかります。",
+        "ko": "DNS가 사이트 주소를 찾아 돌려주면, 기기는 어디로 연결할지 알게 돼요.",
+        "pt-BR": "O DNS encontra o endereço do site e o envia de volta para que seu dispositivo saiba onde se conectar.",
+        "zh-Hans": "DNS 找到网站的地址并传回来，你的设备就知道该连接到哪里了。",
+        "zh-Hant": "DNS 找到網站的位址並傳回來，你的裝置就知道該連線到哪裡了。"
+      }
+    },
+    {
+      "id": "ending",
+      "locales": {
+        "en": "That’s the whole journey. Now it’s your turn: tap a step to take a closer look.",
+        "de": "Das war der ganze Weg. Jetzt bist du dran: Tippe auf einen Schritt, um ihn dir genauer anzusehen.",
+        "es": "Ese es todo el recorrido. Ahora es tu turno: toca un paso para verlo más de cerca.",
+        "fr": "Voilà tout le trajet. À vous de jouer : touchez une étape pour la voir de plus près.",
+        "it": "Ecco tutto il percorso. Ora è il tuo turno: tocca un passaggio per vederlo più da vicino.",
+        "ja": "これが全体の流れです。さあ、あなたの番です。ステップをタップして、詳しく見てみましょう。",
+        "ko": "여기까지가 전체 과정이에요. 이제 직접 해 볼 차례예요. 단계를 탭해 자세히 살펴보세요.",
+        "pt-BR": "Esse é o caminho todo. Agora é a sua vez: toque em uma etapa para ver mais de perto.",
+        "zh-Hans": "这就是整个过程。现在轮到你了：轻点任一步骤，仔细看看。",
+        "zh-Hant": "這就是整個過程。現在換你了：點一下任一步驟，仔細看看。"
+      }
+    }
+  ]
+}

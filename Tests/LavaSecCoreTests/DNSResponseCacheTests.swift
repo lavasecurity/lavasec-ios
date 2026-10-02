@@ -45,6 +45,49 @@ final class DNSResponseCacheTests: XCTestCase {
         XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: truncatedHeader))
     }
 
+    func testCacheAdmissionUsesTheWholeResponseCodeForEverySectionShape() throws {
+        let query = Self.dnsQuery(id: 1, domain: "example.com")
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+        for answerTTLs: [UInt32] in [[], [120]] {
+            for rcode: UInt16 in Array(0...16) + [19, 32, 4095] {
+                var response = Self.dnsResponse(
+                    id: 1, domain: "example.com", rcode: rcode & 0x0F,
+                    answerTTLs: answerTTLs, authoritySOA: (ttl: 120, minimum: 30),
+                    includesOPTAdditional: true)
+                response[response.count - 6] = UInt8(rcode >> 4)
+                XCTAssertEqual(DNSEDNS0.fullRCode(of: response), rcode)
+                let cache = DNSResponseCache()
+                cache.store(response, for: key, now: now)
+                let shouldCache = rcode == 0 || rcode == 3
+                XCTAssertEqual(DNSResponseCachePolicy.cacheTTL(for: response) != nil, shouldCache,
+                    "rcode=\(rcode), answers=\(answerTTLs.count)")
+                XCTAssertEqual(cache.count, shouldCache ? 1 : 0)
+                XCTAssertEqual(cache.cachedResponse(for: key, query: query, now: now) != nil, shouldCache)
+            }
+        }
+    }
+
+    func testCacheRefusesRepliesTheSharedServiceValidatorCannotAccept() throws {
+        let query = Self.dnsQuery(id: 1, domain: "example.com")
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+        let valid = Self.dnsResponse(id: 1, domain: "example.com", answerTTLs: [120],
+            includesOPTAdditional: true)
+        var notAResponse = valid
+        notAResponse[2] &= 0x7F
+        var duplicateOPT = valid
+        duplicateOPT[11] = 2
+        Self.appendOPTRecord(to: &duplicateOPT)
+        var trailingData = valid
+        trailingData.append(0)
+        for response in [notAResponse, duplicateOPT, trailingData] {
+            XCTAssertFalse(DNSResolverSmokeProbe.indicatesServedAnswer(response))
+            XCTAssertNil(DNSResponseCachePolicy.cacheTTL(for: response))
+            let cache = DNSResponseCache()
+            cache.store(response, for: key, now: now)
+            XCTAssertEqual(cache.count, 0)
+        }
+    }
+
     // MARK: - Negative caching (RFC 2308)
 
     func testNegativeCacheTTLUsesSOAMinimumForNODATAAndNXDOMAIN() {
@@ -80,9 +123,7 @@ final class DNSResponseCacheTests: XCTestCase {
     }
 
     func testServfailAndRefusedAreNeverCacheableEvenWithSOA() throws {
-        // FAIL-CLOSED, load-bearing: `indicatesResolverFailure` keys encrypted-fallback
-        // engagement off rcodes 2/5, and the tunnel's synthesized SERVFAILs flow into
-        // store() — a cached failure would replay while masking the recovery signal.
+        // Cached errors would replay failure while bypassing fresh recovery evidence.
         let servfail = Self.dnsResponse(
             id: 1, domain: "example.com", rcode: 2, answerTTLs: [],
             authoritySOA: (ttl: 900, minimum: 30)
@@ -327,6 +368,54 @@ final class DNSResponseCacheTests: XCTestCase {
         XCTAssertEqual(hit[0], 0x56)
         XCTAssertEqual(hit[1], 0x78)
         XCTAssertEqual(hit.dropFirst(2), response.dropFirst(2))
+    }
+
+    func testReplayAgesEveryOrdinarySectionAndPreservesOPT() throws {
+        let cache = DNSResponseCache()
+        let query = Self.dnsQuery(id: 0x5678, domain: "example.com")
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+        let response = Self.dnsResponse(id: 0xABCD, domain: "example.com",
+            answerTTLs: [60, 120], authorityTTLs: [90], additionalNonOPTTTLs: [180],
+            includesOPTAdditional: true)
+        cache.store(response, for: key, now: now)
+        for age: TimeInterval in [0, 10, 10, 59, 59.5] {
+            let elapsed = UInt32(ceil(age))
+            let expected = Self.dnsResponse(id: 0x5678, domain: "example.com",
+                answerTTLs: [60 - elapsed, 120 - elapsed], authorityTTLs: [90 - elapsed],
+                additionalNonOPTTTLs: [180 - elapsed], includesOPTAdditional: true)
+            XCTAssertEqual(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(age)),
+                expected, "age \(age): hits age the original bytes exactly once, including OPT preservation")
+        }
+        XCTAssertNil(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(60)))
+    }
+
+    func testNegativeReplayAgesTheClampedSOATTL() throws {
+        for rcode: UInt16 in [0, 3] {
+            let cache = DNSResponseCache()
+            let query = Self.dnsQuery(id: 1, domain: "example.com")
+            let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+            cache.store(Self.dnsResponse(id: 1, domain: "example.com", rcode: rcode, answerTTLs: [],
+                authoritySOA: (ttl: 3_600, minimum: 3_600)), for: key, now: now)
+            let expected = Self.dnsResponse(id: 1, domain: "example.com", rcode: rcode, answerTTLs: [],
+                authoritySOA: (ttl: 1, minimum: 3_600))
+            XCTAssertEqual(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(59)), expected)
+            XCTAssertNil(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(60)))
+        }
+    }
+
+    func testClockRollbackEvictsRatherThanExtendingRemainingLifetime() throws {
+        let cache = DNSResponseCache()
+        let query = Self.dnsQuery(id: 1, domain: "example.com")
+        let key = try XCTUnwrap(DNSCacheKey(resolverIdentifier: "doh:one", dnsPayload: query))
+        let response = Self.dnsResponse(id: 1, domain: "example.com", answerTTLs: [60])
+        cache.store(response, for: key, now: now)
+        XCTAssertNotNil(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(59)))
+        XCTAssertNil(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(20)))
+        XCTAssertEqual(cache.count, 0)
+        cache.store(response, for: key, now: now)
+        XCTAssertNil(cache.cachedResponse(for: key, query: query, now: now.addingTimeInterval(-1)))
+        cache.store(response, for: key, now: now.addingTimeInterval(-1))
+        XCTAssertNotNil(cache.cachedResponse(for: key, query: query, now: now))
     }
 
     func testExpiredEntriesMissAndAreEvicted() throws {

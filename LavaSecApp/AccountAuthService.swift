@@ -137,27 +137,27 @@ enum AccountAuthError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .authorizationAlreadyInProgress:
-            "Sign in is already in progress."
+            "Sign in is already in progress.".lavaLocalized
         case .cancelled:
-            "Sign in was cancelled."
+            "Sign in was cancelled.".lavaLocalized
         case .googleClientIDNotConfigured:
-            "Google sign-in needs GIDClientID and GIDServerClientID in the app configuration."
+            "Google sign-in is unavailable. Try signing in with Apple.".lavaLocalized
         case .googleSignInAlreadyInProgress:
-            "Google sign-in is already in progress."
+            "Google sign-in is already in progress.".lavaLocalized
         case .invalidIdentityToken:
-            "Apple returned an identity token Lava could not read."
+            "Apple returned an identity token Lava could not read.".lavaLocalized
         case .missingIdentityToken:
-            "Apple did not return an identity token."
+            "Apple did not return an identity token.".lavaLocalized
         case .missingGoogleAccessToken:
-            "Google did not return an access token."
+            "Google did not return an access token.".lavaLocalized
         case .missingGoogleIDToken:
-            "Google did not return an identity token."
+            "Google did not return an identity token.".lavaLocalized
         case .missingPresentationViewController:
-            "Lava could not find a window to present Google sign-in."
+            "Lava could not find a window to present Google sign-in.".lavaLocalized
         case .nonceGenerationFailed(let status):
-            "Could not prepare a secure sign-in nonce. Security returned status \(status)."
+            "Could not prepare a secure sign-in nonce. Security returned status %@.".lavaLocalizedFormat(String(status))
         case .notConfigured:
-            "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration."
+            "Account sign-in is unavailable. Please try again later.".lavaLocalized
         }
     }
 }
@@ -173,11 +173,13 @@ final class AccountAuthService: NSObject, ObservableObject {
     private var authorizationContinuation: CheckedContinuation<ASAuthorizationAppleIDCredential, Error>?
     private var activeAuthorizationController: ASAuthorizationController?
     private var isGoogleSignInInProgress = false
+    // Identity ownership changes invalidate older refreshes and sign-in completions.
+    private var sessionGeneration: UInt64 = 0
 
     init(
         configuration: SupabaseAppConfiguration? = SupabaseAppConfiguration.load(),
         sessionStore: AccountSessionKeychainStore = AccountSessionKeychainStore(),
-        urlSession: URLSession = .shared
+        urlSession: URLSession = PrivateServiceSession.shared
     ) {
         self.configuration = configuration
         self.sessionStore = sessionStore
@@ -215,12 +217,15 @@ final class AccountAuthService: NSObject, ObservableObject {
             throw AccountAuthError.authorizationAlreadyInProgress
         }
 
+        sessionGeneration &+= 1
+        let generation = sessionGeneration
         let previousState = state
         state = .signingIn(connections: previousState.connections, provider: .apple)
 
         do {
             let rawNonce = try Self.makeRandomNonce()
             let credential = try await requestAppleCredential(hashedNonce: Self.sha256(rawNonce))
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
 
             guard let identityTokenData = credential.identityToken else {
                 throw AccountAuthError.missingIdentityToken
@@ -231,6 +236,7 @@ final class AccountAuthService: NSObject, ObservableObject {
             }
 
             let session = try await authClient.signInWithApple(identityToken: identityToken, nonce: rawNonce)
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
             let connections = Self.makeConnections(
                 from: session,
                 fallbackProvider: .apple,
@@ -239,10 +245,16 @@ final class AccountAuthService: NSObject, ObservableObject {
             )
             try replaceSavedSessionsIfNeeded(for: session, provider: .apple, connections: previousState.connections)
             try sessionStore.saveSession(session, provider: .apple)
+            sessionGeneration &+= 1
             state = .signedIn(connections: connections)
             return state
         } catch {
-            state = previousState
+            if generation == sessionGeneration {
+                sessionGeneration &+= 1
+                let saved = (try? sessionStore.loadSessions()) ?? [:]
+                let connections = Self.makeConnections(from: saved)
+                state = connections.isEmpty ? .signedOut : .signedIn(connections: connections)
+            }
             throw error
         }
     }
@@ -261,6 +273,8 @@ final class AccountAuthService: NSObject, ObservableObject {
             throw AccountAuthError.googleSignInAlreadyInProgress
         }
 
+        sessionGeneration &+= 1
+        let generation = sessionGeneration
         let previousState = state
         isGoogleSignInInProgress = true
         state = .signingIn(connections: previousState.connections, provider: .google)
@@ -268,11 +282,13 @@ final class AccountAuthService: NSObject, ObservableObject {
         do {
             let rawNonce = try Self.makeRandomNonce()
             let credential = try await requestGoogleCredential(rawNonce: rawNonce)
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
             let session = try await authClient.signInWithGoogle(
                 identityToken: credential.idToken,
                 accessToken: credential.accessToken,
                 nonce: rawNonce
             )
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
             let connections = Self.makeConnections(
                 from: session,
                 fallbackProvider: .google,
@@ -281,12 +297,18 @@ final class AccountAuthService: NSObject, ObservableObject {
             )
             try replaceSavedSessionsIfNeeded(for: session, provider: .google, connections: previousState.connections)
             try sessionStore.saveSession(session, provider: .google)
+            sessionGeneration &+= 1
             state = .signedIn(connections: connections)
             isGoogleSignInInProgress = false
             return state
         } catch {
             isGoogleSignInInProgress = false
-            state = previousState
+            if generation == sessionGeneration {
+                sessionGeneration &+= 1
+                let saved = (try? sessionStore.loadSessions()) ?? [:]
+                let connections = Self.makeConnections(from: saved)
+                state = connections.isEmpty ? .signedOut : .signedIn(connections: connections)
+            }
             throw error
         }
     }
@@ -296,6 +318,7 @@ final class AccountAuthService: NSObject, ObservableObject {
     }
 
     func currentBackupSessions() async throws -> [BackupAccountSession] {
+        let generation = sessionGeneration
         guard authClient != nil else {
             state = .notConfigured
             return []
@@ -318,10 +341,12 @@ final class AccountAuthService: NSObject, ObservableObject {
                 ? try await refreshSavedSession(savedSession, provider: provider)
                 : savedSession
 
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
             refreshedSessions[provider] = session
             backupSessions.append(session.backupAccountSession)
         }
 
+        guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
         let connections = Self.makeConnections(from: refreshedSessions)
         state = connections.isEmpty ? .signedOut : .signedIn(connections: connections)
         return Self.uniqueBackupSessions(from: backupSessions)
@@ -332,6 +357,7 @@ final class AccountAuthService: NSObject, ObservableObject {
     }
 
     func refreshCurrentSessions() async throws -> [BackupAccountSession] {
+        let generation = sessionGeneration
         let savedSessions = Self.canonicalSessions(from: try sessionStore.loadSessions())
         guard !savedSessions.isEmpty else {
             state = .signedOut
@@ -346,26 +372,33 @@ final class AccountAuthService: NSObject, ObservableObject {
             }
 
             let refreshedSession = try await refreshSavedSession(savedSession, provider: provider)
+            guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
             refreshedSessions[provider] = refreshedSession
             backupSessions.append(refreshedSession.backupAccountSession)
         }
 
+        guard generation == sessionGeneration else { throw AccountAuthError.cancelled }
         let connections = Self.makeConnections(from: refreshedSessions)
         state = connections.isEmpty ? .signedOut : .signedIn(connections: connections)
         return Self.uniqueBackupSessions(from: backupSessions)
     }
 
-    func deleteAccount() async throws {
-        guard let session = try await currentBackupSession() else {
-            signOut()
-            return
-        }
-
+    /// Returns only the identity whose server deletion was confirmed. Backup preflight
+    /// settles its durable Off intent while that account can still authorize the request.
+    func deleteAccount(preparing: (String) async throws -> Void) async throws -> String? {
+        guard let session = try await currentBackupSession() else { return nil }
+        try await preparing(session.userID)
+        guard state.connections.contains(userID: session.userID) else { throw AccountAuthError.cancelled }
         try await AccountDeletionClient(urlSession: urlSession).deleteAccount(accessToken: session.accessToken)
-        signOut()
+        // A different account established during the request does not belong to this deletion.
+        if state.connections.isEmpty || state.connections.contains(userID: session.userID) {
+            signOut()
+        }
+        return session.userID
     }
 
     func signOut() {
+        sessionGeneration &+= 1
         GIDSignIn.sharedInstance.signOut()
         try? sessionStore.deleteAllSessions()
         state = authClient == nil ? .notConfigured : .signedOut
@@ -498,13 +531,23 @@ final class AccountAuthService: NSObject, ObservableObject {
             state = .notConfigured
             throw AccountAuthError.notConfigured
         }
-
+        let generation = sessionGeneration
+        guard try sessionStore.loadSessions()[provider] == savedSession else { throw AccountAuthError.cancelled }
         do {
             let refreshedSession = try await authClient.refreshSession(refreshToken: savedSession.refreshToken)
+            guard generation == sessionGeneration,
+                  try sessionStore.loadSessions()[provider] == savedSession,
+                  refreshedSession.user.id == savedSession.user.id else { throw AccountAuthError.cancelled }
             try sessionStore.saveSession(refreshedSession, provider: provider)
             return refreshedSession
+        } catch AccountAuthError.cancelled {
+            throw AccountAuthError.cancelled
         } catch {
-            try? sessionStore.deleteSession(provider: provider)
+            // A failed stale refresh has no authority to delete a newer provider session.
+            if generation == sessionGeneration,
+               (try? sessionStore.loadSessions()[provider]) == savedSession {
+                try? sessionStore.deleteSession(provider: provider)
+            }
             throw error
         }
     }
@@ -631,13 +674,13 @@ private struct AccountDeletionClient: Sendable {
 
                 let (data, response) = try await urlSession.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AccountDeletionError(message: "The account deletion server response was not valid.")
+                    throw AccountDeletionError(message: "The account deletion server response was not valid.".lavaLocalized)
                 }
 
                 guard 200..<300 ~= httpResponse.statusCode else {
-                    let serverMessage = String(data: data, encoding: .utf8) ?? "No response body"
+                    let serverMessage = String(data: data, encoding: .utf8) ?? "No response body".lavaLocalized
                     throw AccountDeletionError(
-                        message: "The account deletion server returned HTTP \(httpResponse.statusCode): \(serverMessage)"
+                        message: "The account deletion server returned HTTP %lld: %@".lavaLocalizedFormat(httpResponse.statusCode, serverMessage)
                     )
                 }
 
@@ -647,7 +690,7 @@ private struct AccountDeletionClient: Sendable {
             }
         }
 
-        throw lastError ?? AccountDeletionError(message: "Could not delete the account.")
+        throw lastError ?? AccountDeletionError(message: "Could not delete the account.".lavaLocalized)
     }
 
     private static var accountDeletionEndpointURLs: [URL] {

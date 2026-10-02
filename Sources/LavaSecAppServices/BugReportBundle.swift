@@ -256,10 +256,16 @@ public struct BugReportVPNSnapshot: Equatable, Codable, Sendable {
     public let health: TunnelHealthSnapshot
 
     /// Creates a VPN snapshot from status, resolver, and health values.
+    ///
+    /// Redacts HERE rather than at the call site, so the guarantee belongs to the type that means
+    /// "captured for a report" and a second caller cannot be added without it. The chained
+    /// fallback's custom-resolver field accepts any IPv4, so a QA user pointing it at their own
+    /// `10.x` would otherwise name their internal network in a report they send us
+    /// (Codex, PR #575).
     public init(status: String, resolverPreset: String, health: TunnelHealthSnapshot) {
         self.status = status
         self.resolverPreset = resolverPreset
-        self.health = health
+        self.health = health.redactingChainedFallbackAddresses()
     }
 }
 
@@ -432,42 +438,193 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
 
     /// Parses valid JSON lines, allowlists scalar details, drops report-window churn, and keeps the newest entries.
     public static func parseJSONLines(_ data: Data, limit: Int = 40) -> [BugReportDebugLogEntry] {
-        let text = String(decoding: data, as: UTF8.self)
-        let entries = text
-            .split(whereSeparator: \.isNewline)
-            .compactMap { line -> BugReportDebugLogEntry? in
-                guard let lineData = String(line).data(using: .utf8),
-                      let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+        let rawEntries = data
+            // Split physical bytes before decoding: loss-tolerant whole-buffer decoding repairs an
+            // invalid line into valid JSON and can falsely license ordering across damaged bytes.
+            // Empty lines remain barriers. CRLF leaves JSON-whitespace CR on each valid slice, and
+            // a terminal LF creates only a final nil slot discarded by the public compactMap.
+            .split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+            .enumerated()
+            .map { physicalIndex, line -> RawDebugLogEntry in
+                let lineData = Data(line)
+                guard String(data: lineData, encoding: .utf8) != nil,
+                      var object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
+                else {
+                    return RawDebugLogEntry(
+                        entry: nil, order: nil, physicalIndex: physicalIndex)
+                }
+
+                // `observationOrder` is structural metadata used only during this raw pass. Remove
+                // it before building the public entry: it must never become a report detail, a
+                // request/export field, or a key counted as withheld by the privacy allowlist.
+                let order = (object.removeValue(forKey: "observationOrder") as? String)
+                    .flatMap(DeviceLogObservationOrder.parse)
+
+                guard
                       let component = object["component"] as? String,
                       let event = object["event"] as? String,
                       let timestamp = object["timestamp"] as? String
                 else {
-                    return nil
+                    return RawDebugLogEntry(
+                        entry: nil, order: nil, physicalIndex: physicalIndex)
                 }
 
                 var details: [String: String] = [:]
-                for (key, value) in object where allowedDetailKeys.contains(key) {
+                var withheld: [String] = []
+                for (key, value) in object {
+                    guard !Self.structuralKeys.contains(key) else { continue }
+                    guard allowedDetailKeys.contains(key) else {
+                        withheld.append(key)
+                        continue
+                    }
                     if let scalar = stringValue(value) {
                         details[key] = scalar
                     }
                 }
+                // COUNT THE DROP. A key missing from `allowedDetailKeys` used to vanish without
+                // trace, and the report that resulted was indistinguishable from one written by a
+                // build that never emitted the key — which is how a current extension binary was
+                // diagnosed as stale on 2026-08-28, and how PR #580's 15 event kinds went
+                // unnoticed before that. Three occurrences, all of them the SILENCE rather than
+                // the filtering: the filter is doing its job, it was just doing it invisibly.
+                //
+                // A COUNT, NOT THE NAMES, and that is the whole design. Naming them reads as
+                // obviously more useful and cannot be made safe: a key name is only schema while
+                // every emitter writes it as a literal, and `details[userValue] = …` would put
+                // user data in the key position. No filter fixes that — `AliceSmith` and
+                // `secretToken` are perfectly ordinary identifiers (Codex, PR #615). Resting a
+                // privacy property on a source-text extractor is exactly the fragility this PR
+                // spent its review learning about.
+                //
+                // The count is enough for the failure it exists to prevent. `data-path-latched`
+                // reporting one withheld key says the binary emitted something the exporter
+                // dropped — which is the entire 2026-08-28 diagnosis, and the opposite of the
+                // conclusion that was drawn from its absence.
+                if !withheld.isEmpty {
+                    details[withheldKeysField] = "\(withheld.count)"
+                }
 
-                return BugReportDebugLogEntry(
-                    component: component,
-                    event: event,
-                    timestamp: timestamp,
-                    details: details
+                return RawDebugLogEntry(
+                    entry: BugReportDebugLogEntry(
+                        component: component,
+                        event: event,
+                        timestamp: timestamp,
+                        details: details
+                    ),
+                    order: order,
+                    physicalIndex: physicalIndex
                 )
             }
+        let entries = orderedByObservation(rawEntries)
+            .compactMap(\.entry)
             // Drop presentation-churn BEFORE the suffix so the small report window keeps the
             // tunnel / DNS / self-reconnect events that explain the incident (LAV-94 A).
             .filter { !$0.isReportWindowChurn }
+        let capped = cappingTransportTransitions(entries)
 
-        guard entries.count > limit else {
-            return entries
+        guard capped.count > limit else {
+            return capped
         }
 
-        return Array(entries.suffix(limit))
+        return Array(capped.suffix(limit))
+    }
+
+    /// One parsed raw line retained until the ordering pass has honored its barrier semantics.
+    ///
+    /// An invalid JSON/envelope line has no public `entry`, but keeping the slot here prevents the
+    /// valid keyed lines on either side from becoming falsely contiguous before it is discarded.
+    private struct RawDebugLogEntry {
+        let entry: BugReportDebugLogEntry?
+        let order: DeviceLogObservationOrder?
+        let physicalIndex: Int
+    }
+
+    /// Orders only contiguous valid entries from one boot's monotonic clock domain.
+    ///
+    /// A boot change, a missing/malformed key, or a malformed raw line ends a run. Those boundaries
+    /// are physical-order evidence and cannot be crossed: monotonic readings from different boots
+    /// are incomparable, and a legacy or damaged line carries no key that licenses moving anything
+    /// across it. Chunk boundaries are deliberately absent from this representation, so a single
+    /// boot run can still be restored across rotated + current files.
+    ///
+    /// Ordering happens before churn filtering, transition caps, and the final suffix. Otherwise
+    /// removing a barrier could merge runs, or a physical-order cap could discard the genuinely
+    /// newest incident before this pass gets a chance to place it.
+    ///
+    /// Stable by construction: Swift's sort is not stable, so equal monotonic readings use the
+    /// physical line index as their explicit tiebreak.
+    /// - pinned: BugReportBundleTests.testSameBootDelayedAppendIsOrderedByCapturedObservation
+    /// - pinned: BugReportBundleTests.testLegacyEntryWithoutOrderIsAPhysicalOrderBarrier
+    private static func orderedByObservation(
+        _ entries: [RawDebugLogEntry]
+    ) -> [RawDebugLogEntry] {
+        var ordered = entries
+        var runStart = ordered.startIndex
+
+        while runStart < ordered.endIndex {
+            guard let firstOrder = ordered[runStart].order,
+                  ordered[runStart].entry != nil
+            else {
+                runStart += 1
+                continue
+            }
+
+            var runEnd = runStart + 1
+            while runEnd < ordered.endIndex,
+                  ordered[runEnd].entry != nil,
+                  ordered[runEnd].order?.bootSessionID == firstOrder.bootSessionID {
+                runEnd += 1
+            }
+
+            let run = ordered[runStart..<runEnd].sorted { left, right in
+                guard let leftOrder = left.order, let rightOrder = right.order else {
+                    return left.physicalIndex < right.physicalIndex
+                }
+                if leftOrder.monotonicNanoseconds != rightOrder.monotonicNanoseconds {
+                    return leftOrder.monotonicNanoseconds < rightOrder.monotonicNanoseconds
+                }
+                return left.physicalIndex < right.physicalIndex
+            }
+            ordered.replaceSubrange(runStart..<runEnd, with: run)
+            runStart = runEnd
+        }
+
+        return ordered
+    }
+
+    /// How many transport-transition entries the report window keeps.
+    ///
+    /// The family is EVIDENCE now — PR #580 allowlisted `channel`, `state`, `previousState`,
+    /// `previousMs` and `isViable`, so each line carries a stall's state ordering and the time
+    /// spent in the previous state, which the 60 s liveness counters cannot supply. It is also
+    /// the highest-frequency family in the log: rate-bounded to one line per second per key,
+    /// which a sustained flap still turns into dozens.
+    ///
+    /// Dropping them wholesale discarded the brief-stall evidence; keeping them all lets a long
+    /// flap evict the cause lines that explain the incident. Keeping the NEWEST few does
+    /// neither — the most recent stall's ordering survives, and the window stays open for the
+    /// `chained-path-identity-changed` / `self-reconnect` lines it exists to carry
+    /// (Codex P2, PR #581).
+    static let transportTransitionReportCap = 6
+
+    private static let transportTransitionEvents: Set<String> = [
+        "chained-transport-state", "chained-transport-viability", "chained-transport-better-path",
+    ]
+
+    /// Keeps the newest ``transportTransitionReportCap`` transport transitions and drops older
+    /// ones, leaving every other entry untouched and in order.
+    private static func cappingTransportTransitions(
+        _ entries: [BugReportDebugLogEntry]
+    ) -> [BugReportDebugLogEntry] {
+        var kept = 0
+        var dropIndices = Set<Int>()
+        for (index, entry) in entries.enumerated().reversed()
+        where transportTransitionEvents.contains(entry.event) {
+            kept += 1
+            if kept > transportTransitionReportCap { dropIndices.insert(index) }
+        }
+        guard !dropIndices.isEmpty else { return entries }
+        return entries.enumerated().compactMap { dropIndices.contains($0.offset) ? nil : $0.element }
     }
 
     /// High-frequency events that carry no incident-diagnostic value but, left in, flood the
@@ -493,6 +650,54 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
             let spanName = details["spanName"]
             return spanName == nil || spanName == "resolver.endpointAttempt"
         }
+        // Chained transport-health churn (brief-stall observability, 2026-08-24). These three
+        // fire on socket flap — the very condition a "sites won't load" report is filed about —
+        // and each is rate-bounded PER `name:channel:value` key, so a waiting↔ready flap plus a
+        // viability flip runs several lines a second between them. Left in, ~10-20 s of flap
+        // fills the whole 40-entry window and evicts the tunnel/DNS/self-reconnect entries that
+        // explain the report.
+        //
+        // AND THEY RENDER HOLLOW HERE, which is what makes dropping them a strict gain rather
+        // than a trade: none of their detail keys (`state`, `previousState`, `previousMs`,
+        // `isViable`, `channel`) are in `allowedDetailKeys`, so the projection keeps the event
+        // name and discards the reading — an entry that costs a window slot and carries no
+        // number. The evidence itself is not lost: the full on-device log keeps every line (the
+        // devicectl app-group pull is the channel this instrumentation was built for) and the
+        // 60 s `chained-session-liveness` counters carry the same facts as differenceable
+        // totals.
+        //
+        // 🔴 THAT HAS NOW HAPPENED, and this is the promised revisit. PR #580 allowlisted
+        // `channel`, `state`, `previousState`, `previousMs` and `isViable`, so these entries are
+        // no longer hollow — they carry each stall's state ordering and the duration spent in the
+        // previous state, which is exactly the evidence the 60 s liveness counters cannot supply
+        // (they keep aggregate totals only). Dropping them now discards the brief-stall evidence
+        // this whole family was added to capture (Codex P2, PR #581).
+        //
+        // The frequency objection that justified the drop is separately handled:
+        // `ChainedTransportDiagnosticsRecorder` rate-bounds emission to one line per second per
+        // `name:channel:value` key, so a churn burst can no longer flood the report window.
+        //
+        // 🔴 The two-surface note stands: the read broker mirrors this allowlist, so the five
+        // keys must also be added there before a submitted report renders them. That is a
+        // separate repo (lavasec-infra worker) and is NOT done by this change — the local export
+        // carries them either way, which is the path the founder is using from the road.
+        //
+        // The rest of the family is deliberately KEPT, because frequency is the whole criterion
+        // and they do not have it: `chained-path-identity-changed` is the production cause line
+        // for a rebind (only on a real identity change), `chained-transport-receive-ended` fires
+        // at most once per socket, `chained-transport-send-failed` is edge-triggered per socket
+        // and its `error` renders, and `chained-data-path-pressure` is rate-bounded per kind
+        // with its `kind` rendering.
+        // The per-path-callback observation line is QA-only (DEBUG/LAVA_QA_TOOLS) and, unlike
+        // everything above, is NOT rate-bounded at all — it appends once per `NWPathMonitor`
+        // callback, and a churn burst delivers those in runs. Its `eligible`/`satisfied` details
+        // ARE allowlisted as of PR #580, so the hollowness half of this reasoning no longer
+        // applies — but the frequency half was always the load-bearing one for this event, and an
+        // unbounded emitter cannot be capped the way the rate-bounded transport family can. The transition it exists to bracket is logged separately
+        // and unconditionally by `chained-path-identity-changed`, which is kept.
+        if event == "chained-path-observation" {
+            return true
+        }
         return false
     }
 
@@ -507,6 +712,114 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
     }
 
     private static let allowedDetailKeys: Set<String> = [
+        // Canonical tier and typed repair labels only; no endpoint or queried name.
+        "tier", "recoveryKind",
+        // OS routing-policy booleans from the installed tunnel protocol; no network identifiers.
+        "enforceRoutes", "includeAllNetworks", "excludeLocalNetworks",
+        // ── Chained-tunnel telemetry ──────────────────────────────────────────────────────
+        // The allowlist did not keep pace with the chained work, so the richest diagnostics in
+        // the system exported as `"details": {}` — 1,076 lines across 15 event kinds in a field
+        // log from 2026-08-25, including every `nrg-counters` and `chained-session-liveness`
+        // line, and the `dataPath`/`refusal` pair that says WHY chaining did not engage. The
+        // founder sent that log from the road, off-tether, and it could not be diagnosed
+        // (PR #580).
+        //
+        // Every key here is a COUNTER, a BOOL, a DURATION or a closed-set LABEL. The allowlist
+        // exists to keep queried domains out of a user-shareable bundle, and that guarantee is
+        // unchanged: see the deliberate exclusions noted after this block.
+        "dataPath",
+        "refusal",
+        "upstreamReadiness",
+        "chainedDNSResolution", "chainedDNSResolutionPerMin",
+        "chainedDNSSilentTimeout", "chainedDNSSilentTimeoutPerMin",
+        // A COUNT of distinct names, never the names themselves — `EnergyCounters` emits
+        // `chainedDNSSilentTimeoutNameKeys.count`. Verified before allowlisting, because the
+        // key's spelling invites exactly the wrong assumption.
+        "chainedDNSSilentTimeoutNames", "chainedDNSSilentTimeoutNamesSaturated",
+        "chainedDNSTruncatedAnswer", "chainedDNSTruncatedAnswerPerMin",
+        "chainedDNSTruncatedUnresolved", "chainedDNSTruncatedUnresolvedPerMin",
+        "chainedDNSUnparseableTimeout", "chainedDNSUnparseableTimeoutPerMin",
+        "chainedDNSFallbackRescue", "chainedDNSFallbackRescuePerMin",
+        // Reply SHAPE, split by RFC 2308 §2.2 backing. Counts of resolutions, no name and no
+        // rcode of a particular query — the unbacked count against `chainedDNSResolution` is what
+        // says "the VPN's resolver completes every lookup without resolving anything", which no
+        // other exported key could express (PR #588).
+        "chainedDNSEmptyAnswer", "chainedDNSEmptyAnswerPerMin",
+        // The address-query split (PR: chained A-negative visibility). Counts only; the question's
+        // NAME is never recorded, here or at the emitter.
+        "chainedDNSEmptyIPv4AddressAnswer", "chainedDNSEmptyIPv4AddressAnswerPerMin",
+        "chainedDNSNXDomainIPv4Address", "chainedDNSNXDomainIPv4AddressPerMin",
+        // Answer-side routing class (PR #619). Membership per resolution, never an address.
+        "chainedDNSAnswerPublicIPv4Address", "chainedDNSAnswerPublicIPv4AddressPerMin",
+        "chainedDNSAnswerCGNATIPv4Address", "chainedDNSAnswerCGNATIPv4AddressPerMin",
+        "chainedDNSAnswerPrivateIPv4Address", "chainedDNSAnswerPrivateIPv4AddressPerMin",
+        "chainedDNSAnswerSpecialIPv4Address", "chainedDNSAnswerSpecialIPv4AddressPerMin",
+        // The IPv6 answer counterpart (PR: observability gap) — membership per resolution.
+        "chainedDNSAnswerIPv6Address", "chainedDNSAnswerIPv6AddressPerMin",
+        "chainedDNSUnbackedEmptyAnswer", "chainedDNSUnbackedEmptyAnswerPerMin",
+        // Local refusals rescued by a retry, and the port registry's own pressure levels (PR #621).
+        // Counts and occupancy only — no port number, no address, no name.
+        "chainedDNSPreWireRetry", "chainedDNSPreWireRetryPerMin",
+        "chainedResolverPortRefusedAtCapacity", "chainedResolverPortRefusedAtGraceCapacity",
+        "chainedResolverPortEvictedWhileLive", "chainedResolverPortLiveClaims",
+        "outageCount", "tunnelDNSOutageCount", "egressDeadOutageCount",
+        "tunnelDNSAnswered", "tunnelDNSUnanswered",
+        // The physical T1 rung's rescues, which SEPARATE two states the pair above renders
+        // identically: a high `tunnelDNSUnanswered` with this climbing is a split-tunnel upstream
+        // answering only its own namespace while the rung serves the rest — the user has DNS — and
+        // the same shape with this at zero is a genuinely dead resolver. Without it, the 2026-09-01
+        // surrenders were only diagnosable by reading the resolution log line by line, which is
+        // exactly the reconstruction an exported counter exists to spare. A count per session, no
+        // name, address or rcode.
+        "tierOneRungRescues",
+        "rebindCount", "rebindReanchorRetryCount", "rebindDeclinedCount",
+        "rebindUnconfirmedCount",
+        "offlinePathCount", "pathRecoveryCount", "coalescedPathRecoveryCount",
+        "selfHealResumeCount", "stoodDownCount", "sessionEndCount", "startedAttemptCount",
+        "suppressionPersisted",
+        // Recovery-window shape: how long until DNS came back after a cold start or a roam.
+        "elapsedMs", "firstAnswerMs", "dnsAnsD", "dnsUnansD",
+        // Chained-connect gate. `phase` and `elapsedMs` reached the export only by NAME COLLISION
+        // with tunnel keys above; these three never did, so every `chained-establish-gate` line
+        // exported as `_withheld: 3` — the telemetry PR #598 added expressly to diagnose this gate
+        // was stripped from the one artifact it exists to appear in, and three device connect
+        // failures (2026-08-30) had to be reconstructed from tunnel-side counters instead.
+        // Carry no address, name, port, rcode or timestamp: `polls`/`unknownReplies` are bounded
+        // at ~15 by the gate's own timeout, and `receivedDelta` is a ≤15 s delta of the counter
+        // whose CUMULATIVE form `fwdNonDNSBytes` is already exported two lines below.
+        "polls", "unknownReplies", "receivedDelta",
+        // Data-path health and backpressure.
+        "hasHandshake", "rxBytes", "txBytes", "fwdNonDNSBytes",
+        "shedPackets", "droppedDNSQueries", "sendErrors", "pressureEvents",
+        // Engine output, the positive counterpart to `sendErrors`. A COUNT of datagrams the
+        // engine produced for the peer — no address, no payload, no name (PR #585).
+        "sendToPeer",
+        "refusedInboundBacklog", "refusedOutboundBacklog", "saturatedTicks",
+        // NWConnection transport observer.
+        "channel", "channelNotReady", "channelUnviable", "channelSendFailEdges",
+        // Added WITH its emitter (PR #582) rather than a round later — a key that ships before
+        // its allowlist entry is the exact gap #580 existed to close.
+        "channelSuppressedLogs", "pressureSuppressedLogs",
+        "channelReceiveLoopEnds", "isViable", "isSuspended", "hasBetterPath",
+        "state", "previousState", "previousMs",
+        // Memory footprint, so a jetsam kill leaves evidence (PR #578). Listed here rather than
+        // added later for the same reason this whole block exists.
+        // `footprintMB` is already allowlisted alphabetically below — only the peak and the
+        // percentage are new (Kilo, PR #580).
+        "footprintPeakMB", "footprintPctOfCeiling",
+        // Window framing for the 60 s counter flush.
+        "windowSec", "cpuMs", "cpuMsPerMin", "sqliteWalKB",
+        "satisfied", "eligible", "identityChanged", "resolverChanged", "sleptSeconds",
+        // The address family of a query that ended unanswered (PR #620). Never the name —
+        // `domain-history` carries that against a timestamp, and this lines up with it.
+        "recordShape", "clientQueries", "suppressedClientQueries",
+        "thermalState", "mtu",
+        //
+        // 🔴 DELIBERATELY NOT ADDED, though they appear in the device log: `sawEgressDemandHost`
+        // (a QA launch-arg hostname), `identity` and `sessionID` (opaque, but identity-shaped),
+        // and `filterID` / `sawEnableSourceIDs`. None is needed to diagnose a tunnel fault, and
+        // the point of an allowlist is that adding a key is a decision rather than a default.
+        // ──────────────────────────────────────────────────────────────────────────────────
         "allowRuleCount",
         "activeCount",
         "attemptsInWindow",
@@ -519,7 +832,50 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "consecutiveSmokeFailures",
         "consecutiveRejectedResponses",
         "count",
+        // Protected-boot recovery's spent online windows (0...3), with no network identity.
+        "windows",
         "compactReason",
+        // WHICH ARTIFACT A SNAPSHOT RELOAD REJECTED, AND WHICH ONE THE APP PUBLISHED. The reload's
+        // reason strings name the identity FIELDS that differed and cannot say which side is stale:
+        // an artifact the tunnel has not adopted yet and a configuration the pointer has not caught
+        // up with read identically. `artifactToken` (the versioned directory, `<fingerprint>-<ms>`,
+        // and the fixed literal `non-versioned` on the root and tunnel-compiled routes, whose
+        // directory names are the app-group container and a constant) and `publishedArtifactToken`
+        // pair across the two processes and separate the two; the remaining keys say whether a flip
+        // was attempted at all, which is the case that leaves configuration ahead of the pointer
+        // with nothing logged.
+        //
+        // Without these a preset switch that persists, reports success, and is then rejected by
+        // every reload for 40 minutes exports as `_withheld` and cannot be diagnosed from a capture
+        // at all (field 2026-09-01).
+        //
+        // ALL CONTENT HASHES AND BOOLEANS — no domain, rule text, filter name or identifier. The
+        // active filter's ID is deliberately not logged at the emitter, because filter names are
+        // user-authored.
+        "artifactToken",
+        "expectedSnapshotFingerprint",
+        "publishedArtifactToken",
+        "didRewriteArtifacts",
+        "rewritesRuleArtifacts",
+        "publishOutcome",
+        // Also the two the artifact-flip veto has always logged. That event exists to explain a
+        // self-perpetuating no-flip, and both of its diagnostic fields were being stripped from
+        // every report — the app's detail keys are subject to this allowlist but nothing checks
+        // them, so the omission was invisible on both sides.
+        "coversEnabledBlocklists",
+        "fitsTierBudget",
+        // And the verdict on whether the tunnel can adopt what that publish wrote. A closed-set
+        // label (`adoptable` / `no-persisted-catalog` / `rejected:<field names>`) — the reason
+        // string is `reuseMismatchReason`'s field NAMES, never a domain, rule or list name. This
+        // event exists so a report answers the cross-process identity question in one line; absent
+        // from the allowlist it would export as `_withheld` and answer nothing (Kilo, PR #643).
+        "tunnelAdoptability",
+        // Warm-index coverage: whether a headless switch could have applied at all. The value is
+        // a covered count and a histogram of gap REASONS — no filter IDs and no filter names.
+        // Added WITH the event, because an emitted-but-unlisted key exports as `_withheld` and the
+        // diagnostic reads as if the app never recorded it (the exact shape of the two omissions
+        // noted above; PR #644).
+        "coverage",
         // Self-reconnect suppression diagnostics (why a wedge did not restart the
         // tunnel): a decision label + the gating booleans. Privacy-safe — no
         // queried domain, just policy state.
@@ -528,6 +884,20 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "protectionEnabled",
         "deviceDNSFallbackActivationCount",
         "deviceDNSFallbackModeActive",
+        // The user-manual-rule diagnostic: a closed-set rule KIND and the DECISION for a query
+        // covered by one of the user's own `blockedDomains`/`allowedDomains`. Two labels only —
+        // the queried name is never emitted, and the user's rule text never leaves the device.
+        // Added WITH the emitter so the "I added a domain and it still loads" question is
+        // answerable from a shared bundle.
+        "manualRuleKind",
+        "manualRuleAction",
+        // Which clear-text DNS the claimed routes let the tunnel see (`INV-DNS-7`), logged beside
+        // `route` at settings-apply. A closed-set LABEL — `every-destination` or
+        // `system-resolver-and-claimed-routes` — carrying no address and no queried name. Added
+        // WITH the emitter: unlisted it would export as `_withheld` and the invariant's promise
+        // that a field capture shows the coverage a session actually got would hold for the raw
+        // device log but not for the bundle support actually reads (Kilo, PR #728).
+        "dnsCapture",
         "dnsServerAddress",
         "dnsSmokeProbeFailureCount",
         "dnsSmokeProbeSuccessCount",
@@ -576,6 +946,24 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         "pendingResponses",
         "preparedReason",
         "primaryAction",
+        "previousAllowRuleCount",
+        "previousBlockRuleCount",
+        // The third loosening axis, added with the axis itself: `ruleset-loosened-nudge` reports a
+        // before/after on all three counts, and an unlisted key exports as `_withheld` — which
+        // would leave the capture saying a nudge fired without saying which axis moved (PR #645).
+        "previousGuardrailRuleCount",
+        // Whether the nudge fired because the tunnel just left fail-closed rather than because the
+        // counts fell. A recovery is always a loosening relative to a block-all resident, and the
+        // counts alone cannot show that — so without this key a capture shows a nudge whose
+        // before/after looks like a TIGHTENING, which reads as a bug rather than the rule (PR #645).
+        "recoveringFromFailClosed",
+        // `ruleset-adopted`: how many snapshots this provider instance has adopted, and the
+        // policy's loosening verdict on each. Together they measure the adoption RATE, which is the
+        // evidence the open "drop the policy and nudge on every adoption" decision turns on
+        // (PR #645). Withheld, the capture would carry the event with `_withheld` for both fields
+        // and answer neither half.
+        "adoptionCount",
+        "loosened",
         "previousKind",
         "previousSatisfied",
         "providerBundleIdentifier",
@@ -645,8 +1033,119 @@ public struct BugReportDebugLogEntry: Equatable, Codable, Sendable {
         // (a single export can span an app update). Not PII — version/build/SHA only.
         "appVersion",
         "appBuild",
-        "sourceRevision"
+        "sourceRevision",
+
+        // ── Chained diagnostics the allowlist fell behind on, AGAIN ─────────────────────
+        // PR #580 added the block above after 1,076 lines across 15 event kinds exported as
+        // `"details": {}`. The same gap reopened for the two chained features added since, and
+        // it cost a field investigation on 2026-08-28: an export showed `data-path-latched`
+        // carrying only {dataPath, refusal, upstreamReadiness} and `chained-session-liveness`
+        // carrying 31 of its 33 counters. Every key that appeared was allowlisted and every key
+        // that did not was missing from this set — but read from the outside that is
+        // indistinguishable from an extension binary predating the features, which is what it
+        // was diagnosed as first.
+        //
+        // `TunnelDetailKeyExportSourceTests` now fails when a tunnel detail key is neither
+        // exported nor explicitly withheld, so the next addition cannot go silent.
+        //
+        // A COUNT, A DURATION AND AN OPAQUE IDENTIFIER — no queried domain, no endpoint, no key
+        // material. `unansweredDests` and `longestUnansweredSecs` are the per-destination
+        // reachability reading (PR #593), the only signal that can be non-zero while every other
+        // liveness counter reads healthy. `upstreamGeneration` names WHICH stored rotation the
+        // latch approved (PR #613); it is a random non-zero identifier, never ordered, and it is
+        // the field that tells two valid upstreams apart in a capture.
+        //
+        // `upstreamGeneration` IS a correlation handle, and that is accepted rather than
+        // overlooked (Kilo, PR #615): it is stable for the life of a rotation, so two reports
+        // exported weeks apart carrying the same value are linkable as the same device on the
+        // same upstream. The bundle already carries far stronger linkage — build, revision and
+        // the log's own contents — so the token adds no reach an attacker holding two reports
+        // did not have, and dropping it would cost the one field that distinguishes a stale
+        // latch from a current one. It is `identity`-shaped only in being opaque; unlike
+        // `identity` and `sessionID` below it is drawn per rotation, not per install or session.
+        "unansweredDests",
+        "longestUnansweredSecs",
+        "upstreamGeneration",
+
+        // ── Keys the tunnel does not compose inline, found by tracing (PR #615) ─────────
+        // The guard test's first version read only inline `details: [ … ]` literals, so two
+        // payload shapes were invisible to it and stayed unexported: dictionaries assembled
+        // as `var details = [ … ]` plus conditional subscripts, and dictionaries built
+        // entirely in another type and forwarded verbatim. All are counters, byte/packet totals,
+        // booleans, a closed-set admission label and an SQLite result code — no queried
+        // domains, which is the only thing this allowlist exists to keep out.
+        //
+        // `admission`/`bytes`/`packets`/`queueDepth` are the worst of the set:
+        // `chained-data-path-pressure` emits them from `recordPressure` on an unconditional
+        // production path, so every pressure line in every report so far carried only
+        // `kind`. That is a third instance of the PR #580 failure, in a third shape.
+        "admission",
+        "bytes",
+        "packets",
+        "queueDepth",
+        "attempt",
+        "capturedCount",
+        "raw",
+        "masked",
+        "suppressedRepeats",
+        "sqliteCode",
+
+        // ── The energy counters, derived from an enum rather than written (PR #615) ─────
+        // `EnergyCounters.flush` emits `details[counter.rawValue]` and a `…PerMin` rate for
+        // every `EnergyCounter`, so these key names appear nowhere as literals and the first
+        // version of the guard test could not see them. Twelve of the eighteen counters and
+        // nearly every rate were unexported — a fourth instance of the PR #580 gap, in a
+        // fourth shape, and the one that made the extractor read `Shared/AppGroup.swift`
+        // rather than only the tunnel's own files.
+        //
+        // Counts, rates and one duration average. The emitter is `#if DEBUG || LAVA_QA_TOOLS`,
+        // and a QA build's report is exactly where an energy question gets answered, so
+        // dropping them silently cost the reports that most needed them. The chained counters
+        // in this family were already allowlisted above; these are the rest.
+        "debugLogAppend", "debugLogAppendPerMin",
+        "doqHandshake", "doqHandshakePerMin", "doqHandshakeAvgMs",
+        "smokeProbeWire", "smokeProbeWirePerMin",
+        "smokeProbeSkip", "smokeProbeSkipPerMin",
+        "focusPollTick", "focusPollTickPerMin",
+        "sqliteFlush", "sqliteFlushPerMin",
+        "sqliteFlushRows", "sqliteFlushRowsPerMin",
+        "sqliteFlushRetry", "sqliteFlushRetryPerMin",
+        "sqlitePrunePass", "sqlitePrunePassPerMin",
+        "sqlitePruneRows", "sqlitePruneRowsPerMin",
+        "sqliteSweepRun", "sqliteSweepRunPerMin",
+        "thermalTransition",
+        // Background warm-pass shape: which window ran, which window a queued rerun was owed in,
+        // how many candidates that window refused on budget, and what the budget was. Closed-set
+        // labels and integers only — no filter id, name, or domain. Added WITH the events, because
+        // an emitted-but-unlisted key exports as `_withheld`, and "this window keeps declining the
+        // same filter" is precisely the shape a reader needs when a switch keeps deferring (#646).
+        "window",
+        "owner",
+        "refused",
+        "perRunRuleBudget",
+        // The catalog-wide guardrail size the estimate charges to EVERY candidate. Without it a
+        // capture cannot tell "these filters are too big for this window" from "this constant term
+        // now exceeds the window's whole budget, so nothing will ever be admitted" — the same
+        // refusal count, two different problems, and only the first resolves itself in a longer
+        // window (#646). A catalog-wide integer: no filter id, name, or domain.
+        "guardrailRules",
+        "thermalTransitionPerMin"
     ]
+
+    /// The envelope fields every line carries; they are not details and were never candidates
+    /// for the allowlist, so naming them as withheld would be noise in every entry.
+    private static let structuralKeys: Set<String> = ["component", "event", "timestamp"]
+
+    /// How many detail keys the allowlist dropped from an entry, as a decimal count.
+    ///
+    /// Underscored so it cannot collide with a real detail key, and deliberately part of
+    /// `details` rather than a new field on the entry: the report's readers and its decoder both
+    /// already handle arbitrary detail keys, and a schema change would need every consumer to
+    /// learn about it before the information reached anyone.
+    ///
+    /// A count, never the names — see the comment at the filter for why naming them cannot be
+    /// made safe. The value is a small integer, so it needs no cap of its own.
+    public static let withheldKeysField = "_withheld"
 
     private static func stringValue(_ value: Any) -> String? {
         switch value {
@@ -732,6 +1231,13 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
     /// The most recent Focus-driven switch attempt (LAV-100 Phase 4). Diagnostic-only, privacy-safe; lets a
     /// closed-app Focus failure be localized on internal TestFlight without a device or the QA device log.
     package let lastFocusSwitch: FocusSwitchDiagnosticRecord?
+    /// The last Focus switch that FAILED, in its own slot.
+    ///
+    /// Separate from ``lastFocusSwitch`` because that one records every decision, successes
+    /// included, so a routine switch would evict the failure before a report was ever filed.
+    package let lastFocusFailure: FocusSwitchDiagnosticRecord?
+    /// Whether ``lastFocusFailure`` is recent enough (< 24 h) to claim a live incident.
+    package let hasRecentFocusFailure: Bool
     /// Durable gap evidence (LAV-92/93) — survives the productive credit and the 600 s prune.
     package let selfReconnectGap: SelfReconnectGapRecord?
     /// Whether the recorded gap is ONGOING (still open — protection has been down the whole
@@ -758,6 +1264,7 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
         health: TunnelHealthSnapshot,
         selfReconnectTimes: [Date],
         lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        lastFocusFailure: FocusSwitchDiagnosticRecord? = nil,
         selfReconnectGap: SelfReconnectGapRecord? = nil,
         recentIncidents: [IncidentLedgerRecord] = [],
         now: Date = Date()
@@ -791,6 +1298,7 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
         self.lastFailClosedAt = health.lastFailClosedAt
         self.lastFailClosedReason = health.lastFailClosedReason
         self.lastFocusSwitch = lastFocusSwitch
+        self.lastFocusFailure = lastFocusFailure
         self.selfReconnectGap = selfReconnectGap
         self.hasRecentSelfReconnectGap = selfReconnectGap.map { gap in
             // Recency keys on the gap's END: an open gap references `now` (ongoing evidence,
@@ -806,6 +1314,14 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
             now.timeIntervalSince(record.at) <= 24 * 60 * 60
         }
         self.hasRecentFocusSwitch = lastFocusSwitch.map { record in
+            now.timeIntervalSince(record.at) <= 24 * 60 * 60
+        } ?? false
+        // The FAILURE follows the same recency rule, and needs its own flag: a failed apply is
+        // frequently the ONLY evidence in a report — the tunnel is healthy, DNS is fine, nothing
+        // reconnected, and the user's complaint is simply that their automation did not happen.
+        // Without this the summary reports no content and the section is dropped before it is
+        // ever rendered, so the record would be forwarded correctly and still never seen.
+        self.hasRecentFocusFailure = lastFocusFailure.map { record in
             now.timeIntervalSince(record.at) <= 24 * 60 * 60
         } ?? false
     }
@@ -842,6 +1358,7 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
             // while RECENT: the record never expires, and an install-lifetime record flipping the flag
             // forever is the misleading-true failure the 2026-07 review flagged (OBS-1).
             || hasRecentFocusSwitch
+            || hasRecentFocusFailure
             // The ledger timeline follows the same recency rule (< 24 h). Older records still
             // SHIP (context for triage) — they just don't claim a live incident.
             || hasRecentLedgerIncident
@@ -926,6 +1443,18 @@ package struct BugReportIncidentSummary: Equatable, Sendable {
             body["focus_last_switch"] = focus
         }
 
+        if let lastFocusFailure {
+            var failure: [String: Any] = [
+                "outcome": lastFocusFailure.outcome,
+                "target_filter_id": lastFocusFailure.targetFilterID,
+                "at": SharedDateFormatting.iso8601.string(from: lastFocusFailure.at)
+            ]
+            if !lastFocusFailure.reason.isEmpty {
+                failure["reason"] = lastFocusFailure.reason
+            }
+            body["focus_last_failure"] = failure
+        }
+
         return body
     }
 
@@ -970,6 +1499,9 @@ public struct BugReportBundle: Sendable {
     /// The last Focus-driven switch attempt (LAV-100 Phase 4), read app-side from the shared app group.
     /// Diagnostic-only; folded into `incident`.
     public let lastFocusSwitch: FocusSwitchDiagnosticRecord?
+    /// The last Focus switch that FAILED, in its own slot — successes cannot evict it.
+    /// Diagnostic-only; folded into `incident`.
+    public let lastFocusFailure: FocusSwitchDiagnosticRecord?
     /// Durable self-reconnect gap evidence (LAV-92/93), read app-side from the shared app group.
     /// Diagnostic-only; folded into `incident`.
     public let selfReconnectGap: SelfReconnectGapRecord?
@@ -990,6 +1522,7 @@ public struct BugReportBundle: Sendable {
         debugLogEntries: [BugReportDebugLogEntry],
         selfReconnectTimes: [Date] = [],
         lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        lastFocusFailure: FocusSwitchDiagnosticRecord? = nil,
         selfReconnectGap: SelfReconnectGapRecord? = nil,
         recentIncidents: [IncidentLedgerRecord] = []
     ) {
@@ -1004,8 +1537,23 @@ public struct BugReportBundle: Sendable {
         self.debugLogEntries = debugLogEntries
         self.selfReconnectTimes = selfReconnectTimes
         self.lastFocusSwitch = lastFocusSwitch
+        self.lastFocusFailure = lastFocusFailure
         self.selfReconnectGap = selfReconnectGap
         self.recentIncidents = recentIncidents
+    }
+
+    /// Replaces only reviewed user inputs, retaining the captured environment and report identity.
+    /// The caller recomputes the site decision only when the affected site changes.
+    public func updatingContext(_ context: BugReportContext, affectedSiteDecision: BugReportAffectedSiteFilterDecision?) -> BugReportBundle {
+        BugReportBundle(reportID: reportID, context: context, app: app, device: device, vpn: vpn,
+            filters: BugReportFilterSummary(catalogVersion: filters.catalogVersion,
+                enabledListIDs: filters.enabledListIDs, snapshotVersion: filters.snapshotVersion,
+                compiledRuleCount: filters.compiledRuleCount, blocklistRuleCount: filters.blocklistRuleCount,
+                customBlocklistCount: filters.customBlocklistCount, enabledCustomBlocklistCount: filters.enabledCustomBlocklistCount,
+                affectedSiteDecision: affectedSiteDecision),
+            diagnostics: diagnostics, localHistoryEnabled: localHistoryEnabled, debugLogEntries: debugLogEntries,
+            selfReconnectTimes: selfReconnectTimes, lastFocusSwitch: lastFocusSwitch, lastFocusFailure: lastFocusFailure,
+            selfReconnectGap: selfReconnectGap, recentIncidents: recentIncidents)
     }
 
     /// The redacted recovery/escalation envelope surfaced in the report (LAV-94 B).
@@ -1014,6 +1562,7 @@ public struct BugReportBundle: Sendable {
             health: vpn.health,
             selfReconnectTimes: selfReconnectTimes,
             lastFocusSwitch: lastFocusSwitch,
+            lastFocusFailure: lastFocusFailure,
             selfReconnectGap: selfReconnectGap,
             recentIncidents: recentIncidents
         )

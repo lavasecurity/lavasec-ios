@@ -2,11 +2,6 @@ import SwiftUI
 import LavaSecKit
 import UIKit
 
-enum LocalLogPagination {
-    static let initialCount = 30
-    static let pageSize = 30
-}
-
 private struct LocalLogSubpageChrome: ViewModifier {
     let title: String
     let canClear: Bool
@@ -21,6 +16,7 @@ private struct LocalLogSubpageChrome: ViewModifier {
                     NativeToolbarIconButton(systemName: "trash", accessibilityLabel: "Clear", role: .destructive, action: clear)
                         .disabled(!canClear)
                 }
+                .lavaToolbarChrome()
             }
             // Every local-log subpage (Network Activity, Domain History, Top Domains) is a
             // Workshop-depth power-user surface, so they all declare the technical tier here.
@@ -38,41 +34,9 @@ extension View {
     }
 }
 
-struct LocalLogLoadMoreSentinel: View {
-    let hasMore: Bool
-    let loadMore: () -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            let minY = proxy.frame(in: .global).minY
-
-            Color.clear
-                .onAppear {
-                    loadMoreIfNeeded(sentinelMinY: minY)
-                }
-                .onChange(of: minY) { _, newMinY in
-                    loadMoreIfNeeded(sentinelMinY: newMinY)
-                }
-        }
-        .frame(height: hasMore ? 1 : 0)
-    }
-
-    private func loadMoreIfNeeded(sentinelMinY: CGFloat) {
-        guard hasMore else {
-            return
-        }
-
-        let preloadLine = UIScreen.main.bounds.height + 80
-        guard sentinelMinY <= preloadLine else {
-            return
-        }
-
-        loadMore()
-    }
-}
-
 struct LocalLogSearchField: View {
     @Binding var text: String
+    var placeholder: String = "Search domains"
 
     var body: some View {
         HStack(spacing: 10) {
@@ -81,7 +45,7 @@ struct LocalLogSearchField: View {
                 .foregroundStyle(LavaStyle.secondaryText)
                 .frame(width: 18)
 
-            TextField("Search domains", text: $text)
+            TextField(placeholder.lavaLocalized, text: $text)
                 .font(.body)
                 .foregroundStyle(LavaStyle.primaryText)
                 .textInputAutocapitalization(.never)
@@ -107,45 +71,20 @@ struct LocalLogSearchField: View {
     }
 }
 
-enum DomainHistoryFilter: String, CaseIterable, Identifiable {
-    case allowed = "Allowed"
-    case blocked = "Blocked"
-
-    var id: String {
-        rawValue
-    }
-
-    var action: FilterAction {
+extension FilterDecisionReason {
+    /// Clean, localizable source label for the Domain History / Top Domains row
+    /// (rawValue.capitalized produced ugly camelCase like "Localallowlist").
+    var domainHistoryLabel: String {
         switch self {
-        case .allowed:
-            .allow
-        case .blocked:
-            .block
+        case .defaultAllow: return "Default"
+        case .localAllowlist: return "Allowlist"
+        case .blocklist: return "Blocklist"
+        case .threatGuardrail: return "Threat Guardrail"
+        case .invalidDomain: return "Invalid domain"
+        case .pausedAllow: return "Allowed on Pause"
+        // Fail-closed blocks are dropped from Domain History, so this is reached only via
+        // historical/exported/bug-report rendering — keep it honest rather than "Blocklist".
+        case .protectionUnavailable: return "Failed safe"
         }
-    }
-
-    var emptyText: String {
-        switch self {
-        case .allowed:
-            "No allowed domains saved yet"
-        case .blocked:
-            "No blocked domains saved yet"
-        }
-    }
-}
-
-struct DomainHistoryDomainActionAlert: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
-}
-
-/// Quiet reminder shown directly above the domain rows (Top Domains / Domain
-/// History) that a long-press exposes the allow/block actions. Kept at the top of
-/// the list — not in the section footer — so it reads as a reminder before you act.
-struct DomainRowActionHint: View {
-    var body: some View {
-        Text("Touch and hold a domain to allow or block it.")
-            .lavaQuietNoteText()
     }
 }

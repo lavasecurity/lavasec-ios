@@ -1,0 +1,48 @@
+{
+  "now": 1800000000,
+  "pins": {
+    "fixture-only": "8QJL8LLAwJJ3psBZbtWrFbGvJ3x8FlqJQJDvc3utpOg="
+  },
+  "catalog": {
+    "schema_version": 2,
+    "catalog_version": "20270115T080000Z",
+    "generated_at": "2027-01-15T08:00:00Z",
+    "sources": [
+      {
+        "id": "example",
+        "name": "Example",
+        "category": "security",
+        "risk_level": "low",
+        "default_enabled": false,
+        "license_name": "Test",
+        "attribution": "Fixture only",
+        "project_url": "https://example.com/",
+        "source_url": "https://example.com/domains.txt",
+        "redistribution_mode": "source_url_only",
+        "parse_format": "plain_domains",
+        "license_text_url": null,
+        "notice_url": null,
+        "version_id": "v1",
+        "entry_count": 1,
+        "byte_size": 12,
+        "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "accepted_source_hashes": [
+          {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "status": "accepted"
+          }
+        ],
+        "published_at": "2027-01-15T08:00:00Z"
+      }
+    ],
+    "guardrails": [],
+    "withdrawn_sources": [],
+    "catalog_authorization": {
+      "format": 1,
+      "key_id": "fixture-only",
+      "payload": "eyJmb3JtYXQiOjEsInB1cnBvc2UiOiJsYXZhLWNhdGFsb2ctZGVmaW5pdGlvbnMiLCJrZXlfaWQiOiJmaXh0dXJlLW9ubHkiLCJyZXZpc2lvbiI6MSwic291cmNlcyI6W3siaWQiOiJleGFtcGxlIiwibmFtZSI6IkV4YW1wbGUiLCJjYXRlZ29yeSI6InNlY3VyaXR5Iiwicmlza19sZXZlbCI6ImxvdyIsImxpY2Vuc2VfbmFtZSI6IlRlc3QiLCJhdHRyaWJ1dGlvbiI6IkZpeHR1cmUgb25seSIsInByb2plY3RfdXJsIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS8iLCJzb3VyY2VfdXJsIjoiaHR0cHM6Ly9leGFtcGxlLmNvbS9kb21haW5zLnR4dCIsInJlZGlzdHJpYnV0aW9uX21vZGUiOiJzb3VyY2VfdXJsX29ubHkiLCJwYXJzZV9mb3JtYXQiOiJwbGFpbl9kb21haW5zIiwibGljZW5zZV90ZXh0X3VybCI6bnVsbCwibm90aWNlX3VybCI6bnVsbH1dLCJndWFyZHJhaWxzIjpbXSwid2l0aGRyYXduX3NvdXJjZXMiOltdLCJpc3N1ZWRfYXQiOjE4MDAwMDAwMDAsImV4cGlyZXNfYXQiOjE4MDA2MDQ4MDB9",
+      "signature": "uF0fgOo5adGXClYD+ubtdwFuIXITcv6BZqhGNFzMZ0F2jGADZanwNQUA03Zgquu9b3Z+Pwhtd+zib6EBR//yCA=="
+    }
+  }
+}

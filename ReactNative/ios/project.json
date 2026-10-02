@@ -1,0 +1,257 @@
+{
+  "name": "LavaSecUIReview",
+  "options": {
+    "deploymentTarget": {
+      "iOS": "18.0"
+    },
+    "xcodeVersion": "26.3"
+  },
+  "configs": {
+    "Debug": "debug",
+    "Release": "release",
+    "QAReview": "release"
+  },
+  "packages": {
+    "LavaSecPackage": {
+      "path": "../.."
+    }
+  },
+  "settings": {
+    "base": {
+      "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+      "SWIFT_VERSION": "6.0",
+      "CLANG_CXX_LANGUAGE_STANDARD": "c++20",
+      "CODE_SIGNING_ALLOWED": false,
+      "ENABLE_USER_SCRIPT_SANDBOXING": false,
+      "GENERATE_INFOPLIST_FILE": true,
+      "TARGETED_DEVICE_FAMILY": "1,2",
+      "INFOPLIST_KEY_UILaunchScreen_Generation": true,
+      "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents": true,
+      "INFOPLIST_KEY_CFBundleDisplayName": "Lava UI Review",
+      "CURRENT_PROJECT_VERSION": "1",
+      "MARKETING_VERSION": "0.0.1"
+    }
+  },
+  "targets": {
+    "LavaSecUIReview": {
+      "type": "application",
+      "platform": "iOS",
+      "sources": [
+        {
+          "path": "LavaSecUIReview/AppDelegate.swift"
+        },
+        {
+          "path": "LavaSecUIReview/AppearanceBridge.swift"
+        },
+        {
+          "path": "LavaSecUIReview/ReactReviewViewController.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaAppearanceModule.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaAppearanceModule.mm"
+        },
+        {
+          "path": "../.artifacts/LavaUIReview.js",
+          "buildPhase": "resources"
+        },
+        {
+          "path": "LavaSecUIReview/BridgingHeader.h"
+        },
+        {
+          "path": "PrivacyInfo.xcprivacy",
+          "buildPhase": "resources"
+        },
+        {
+          "path": "LavaSecUIReview/LavaDecorationView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaDecorationView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaDecorationContent.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSymbolPalette.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaNativeContainment.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaReviewModule.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaReviewModule.mm"
+        },
+        {
+          "path": "LavaSecUIReview/BundledNarrationPlayer.swift"
+        },
+        {
+          "path": "../../Shared/SoftShieldGuardian.swift"
+        },
+        {
+          "path": "../../Shared/LavaActivityAttributes.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaTextFieldView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaTextFieldView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/ReviewDomainValidator.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaControlTrackingGuard.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaControlTrackingGuard.m"
+        },
+        {
+          "path": "LavaSecUIReview/LavaChoiceView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaChoiceView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/ActivityDateBridge.swift"
+        },
+        {
+          "path": "../../LavaSecApp/DiagnosticsDateControls.swift"
+        },
+        {
+          "path": "../../LavaSecApp/LavaDesignSystem/LavaTokens.swift"
+        },
+        {
+          "path": "../../LavaSecApp/LavaDesignSystem/LavaScaffold.swift"
+        },
+        {
+          "path": "../../LavaSecApp/LavaDesignSystem/LavaSelectableRow.swift"
+        },
+        {
+          "path": "../../LavaSecApp/LavaStrings.swift"
+        },
+        {
+          "path": "../native-app/LavaAppModule.h"
+        },
+        {
+          "path": "../native-app/LavaAppModule.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaContextMenuView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaContextMenuView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaNativePageView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaNativePageView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSwitchView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSwitchView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSliderView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSliderView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/ReviewReferenceContent.swift"
+        },
+        {
+          "path": "Assets.xcassets",
+          "buildPhase": "resources"
+        },
+        {
+          "path": "../assets/ExploreNarration",
+          "type": "folder",
+          "buildPhase": "resources"
+        }
+      ],
+      "settings": {
+        "base": {
+          "PRODUCT_BUNDLE_IDENTIFIER": "com.lavasecurity.lavasec.ui-review",
+          "PRODUCT_MODULE_NAME": "LavaSecUIReview",
+          "INFOPLIST_FILE": "LavaSecUIReview/QAReview-Info.plist",
+          "SWIFT_OBJC_BRIDGING_HEADER": "LavaSecUIReview/BridgingHeader.h",
+          "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"
+        },
+        "configs": {
+          "QAReview": {
+            "PRODUCT_BUNDLE_IDENTIFIER": "com.lavasec.dev.qa",
+            "INFOPLIST_KEY_CFBundleDisplayName": "Lava RN Review",
+            "CODE_SIGNING_ALLOWED": true,
+            "CODE_SIGN_STYLE": "Manual",
+            "CODE_SIGN_IDENTITY": "Apple Distribution",
+            "PROVISIONING_PROFILE_SPECIFIER": "$(LAVASEC_APP_PROFILE)",
+            "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": false,
+            "INFOPLIST_KEY_UISupportedInterfaceOrientations": "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight",
+            "INFOPLIST_FILE": "LavaSecUIReview/QAReview-Info.plist"
+          }
+        }
+      },
+      "dependencies": [
+        {
+          "sdk": "AVFAudio.framework"
+        },
+        {
+          "package": "LavaSecPackage",
+          "product": "LavaSecAppServices"
+        },
+        {
+          "package": "LavaSecPackage",
+          "product": "LavaSecKit"
+        },
+        {
+          "package": "LavaSecPackage",
+          "product": "LavaSecPresentation"
+        }
+      ]
+    },
+    "LavaSecUIReviewUITests": {
+      "type": "bundle.ui-testing",
+      "platform": "iOS",
+      "sources": [
+        {
+          "path": "LavaSecUIReviewUITests/ReviewLifecycleTests.swift"
+        }
+      ],
+      "settings": {
+        "base": {
+          "PRODUCT_BUNDLE_IDENTIFIER": "com.lavasecurity.lavasec.ui-review.uitests",
+          "TEST_TARGET_NAME": "LavaSecUIReview"
+        }
+      },
+      "dependencies": [
+        {
+          "target": "LavaSecUIReview"
+        }
+      ]
+    }
+  },
+  "schemes": {
+    "LavaSecUIReview": {
+      "build": {
+        "targets": {
+          "LavaSecUIReview": "all"
+        }
+      },
+      "run": {
+        "config": "Debug"
+      },
+      "test": {
+        "config": "Debug",
+        "targets": [
+          "LavaSecUIReviewUITests"
+        ]
+      }
+    }
+  }
+}

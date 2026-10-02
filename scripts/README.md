@@ -1,5 +1,20 @@
 # iOS scripts
 
+## DNS configuration-profile signing
+
+`sign-dns-profile.py` signs a reviewed DNS-settings-only plist on macOS with an
+existing Keychain identity. Pass the **public leaf certificate**, never its private
+key. The tool independently checks the actual signer and original content before
+creating a new output artifact; it does not establish iOS installer trust.
+
+```sh
+python3 scripts/sign-dns-profile.py --input /path/to/reviewed.mobileconfig \
+  --certificate /path/to/public-signer.pem --output /path/to/new-signed.mobileconfig
+python3 -m unittest discover -s scripts/tests -p test_sign_dns_profile.py
+```
+
+Validate installer trust separately from CMS signing. A successful signature alone does not establish that iOS trusts or installs a profile.
+
 ## VPN latency QA suite
 
 Two device tools for the VPN action-latency work.
@@ -57,3 +72,22 @@ ranking), capture a genuine cold run:
 4. `python3 scripts/vpn-latency-report.py` — the latest session is the cold
    turn-on, with `enable-reuse-rejected` reasons and the `prepareSnapshot`
    breakdown.
+
+### DNS patch release candidate
+
+Generate the all-domain review input from the same versioned contract bundled in the
+app, then sign it with a public certificate whose private key remains in Keychain:
+
+```sh
+python3 scripts/build-dns-patch-profile.py --output /private/tmp/lava-dns-patch-unsigned.mobileconfig
+python3 scripts/sign-dns-profile.py --input /private/tmp/lava-dns-patch-unsigned.mobileconfig --certificate /path/to/public-leaf.pem --output /private/tmp/lava-dns-patch.mobileconfig
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*dns*profile*.py'
+```
+
+Both generators refuse to overwrite an artifact. The profile is removable, all-domain,
+and DNS-only. Stable payload identifiers allow same-signer replacement. Never commit
+private keys or PKCS#12 backups. CMS validation does not qualify network behavior.
+Keep `LAVA_DNS_PATCH_DOWNLOAD_URL` unset until the signed artifact, route discovery and
+setup checks pass device qualification. Host the final artifact over company HTTPS
+with `Content-Type: application/x-apple-aspen-config` and revalidation/no-store caching.
+The app-managed DNS lifecycle is owned by `updateManagedDNSPatch` and `refreshManagedDNSPatch` in `ReactNative/native-app/LavaAppSettings.swift`; signing experiments and release planning belong in infra.

@@ -28,17 +28,31 @@ public final class ResolverBootstrapService: @unchecked Sendable {
     }
 
     /// Synchronous hostname lookup invoked on the queue supplied when constructing the service.
-    public typealias AddressResolver = @Sendable (_ hostname: String) -> ResolvedAddresses
+    ///
+    /// `admittedAtEpoch` is the admission token of the session that KICKED the pre-warm —
+    /// captured at the acceptance boundary and carried across this service's queue hop,
+    /// never re-read on the far side. A lookup that runs after its kicking session ended
+    /// must refuse rather than egress into whatever session is live by then (the resolver
+    /// validates the token per wire attempt; PR #524).
+    public typealias AddressResolver = @Sendable (_ hostname: String, _ admittedAtEpoch: UInt64) -> ResolvedAddresses
 
     private let resolveAddresses: AddressResolver
     private let queue: DispatchQueue
     private let lock = NSLock()
     private var cachedAddressesByHostname: [String: ResolvedAddresses] = [:]
-    // hostname → the generation its in-flight lookup was kicked at. A prewarm is
-    // suppressed only while a lookup for the *current* generation is running, so
-    // after invalidateAll() bumps the generation a fresh prewarm can re-kick even
-    // if the superseded lookup is still finishing (it won't reuse the empty cache).
-    private var inFlightGenerationByHostname: [String: UInt64] = [:]
+    /// The (cache generation, admission token) an in-flight lookup was kicked under.
+    private struct InFlightKick: Equatable {
+        var generation: UInt64
+        var admittedAtEpoch: UInt64
+    }
+    // hostname → the kick its in-flight lookup runs under. A prewarm is suppressed
+    // only while a lookup for the *current* generation AND the *same* session is
+    // running: after invalidateAll() bumps the generation a fresh prewarm re-kicks,
+    // and a prewarm from a NEW session supersedes an old session's lookup — which
+    // correctly resolves nothing once its session ends, so suppressing the newer
+    // kick would leave the cache empty until an unrelated cold miss (Codex P2,
+    // PR #524). Either way the superseded lookup can no longer cache.
+    private var inFlightKickByHostname: [String: InFlightKick] = [:]
     // Bumped by invalidateAll(). A lookup captures the generation when it starts
     // and only caches its result if the generation is unchanged on completion, so
     // a lookup kicked on a previous network (e.g. in flight across a sleep/network
@@ -65,16 +79,32 @@ public final class ResolverBootstrapService: @unchecked Sendable {
 
     /// Resolves asynchronously on the service queue unless the hostname is
     /// already cached or a lookup is already in flight.
-    public func prewarm(hostname: String) {
+    ///
+    /// - Parameter admittedAtEpoch: the kicking session's admission token, threaded
+    ///   verbatim to the resolver closure. See ``AddressResolver``.
+    public func prewarm(hostname: String, admittedAtEpoch: UInt64) {
         lock.lock()
-        guard cachedAddressesByHostname[hostname] == nil,
-              inFlightGenerationByHostname[hostname] != generation
-        else {
+        guard cachedAddressesByHostname[hostname] == nil else {
+            lock.unlock()
+            return
+        }
+        // A same-generation in-flight lookup is superseded only by a STRICTLY NEWER
+        // session's kick. Lifecycle generations are monotonic, so `>` orders sessions;
+        // treating every unequal token as newer let an OLD session's straggling cold-miss
+        // kick (fence passed, thread descheduled) displace the LIVE session's marker — the
+        // live result was then dropped as unowned while the stale lookup resolved nothing,
+        // and the cache stayed empty until an unrelated kick (Codex P2, PR #524). An
+        // equal token is the ordinary duplicate and still deduplicates; a different cache
+        // generation means invalidateAll() ran and any kick may proceed.
+        if let inFlight = inFlightKickByHostname[hostname],
+           inFlight.generation == generation,
+           admittedAtEpoch <= inFlight.admittedAtEpoch {
             lock.unlock()
             return
         }
         let kickGeneration = generation
-        inFlightGenerationByHostname[hostname] = kickGeneration
+        let ownKick = InFlightKick(generation: kickGeneration, admittedAtEpoch: admittedAtEpoch)
+        inFlightKickByHostname[hostname] = ownKick
         lock.unlock()
 
         queue.async { [weak self] in
@@ -82,15 +112,15 @@ public final class ResolverBootstrapService: @unchecked Sendable {
                 return
             }
 
-            let addresses = self.resolveAddresses(hostname)
+            let addresses = self.resolveAddresses(hostname, admittedAtEpoch)
 
             self.lock.lock()
-            // Only the lookup that still owns the in-flight marker for its
-            // generation clears it and may cache. A lookup superseded by a later
-            // invalidateAll()/re-prewarm leaves the newer marker intact and drops
-            // its own (previous-network) result.
-            if self.inFlightGenerationByHostname[hostname] == kickGeneration {
-                self.inFlightGenerationByHostname[hostname] = nil
+            // Only the lookup that still owns the in-flight marker clears it and may
+            // cache. A lookup superseded by a later invalidateAll()/re-prewarm — or by
+            // a newer session's kick for the same hostname — leaves the newer marker
+            // intact and drops its own (previous-network or previous-session) result.
+            if self.inFlightKickByHostname[hostname] == ownKick {
+                self.inFlightKickByHostname[hostname] = nil
                 if kickGeneration == self.generation, !addresses.isEmpty {
                     self.cachedAddressesByHostname[hostname] = addresses
                 }

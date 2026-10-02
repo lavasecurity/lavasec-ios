@@ -17,20 +17,24 @@ final class LavaIconRoleSourceTests: XCTestCase {
         }
     }
 
-    func testSharedComponentsAndTabsNameRolesNotSymbolStrings() throws {
+    func testRankingDestinationUsesTheSharedOrderedBarGlyph() throws {
+        let icon = try readSource(.lavaIcon)
+        let tokens = try readSource(.lavaTokens)
         let components = try readSource(.lavaComponents)
-        XCTAssertTrue(components.contains("let icon: LavaIconRole?"))
-        XCTAssertTrue(components.contains("badge: icon.map { .systemImage($0.sfSymbolName) }"))
-        XCTAssertTrue(components.contains("Image(systemName: systemImage)"))
+        let activity = try readSource(.reactNativeActivityScreen)
+        XCTAssertTrue(icon.components(separatedBy: .whitespacesAndNewlines).joined().contains("case.ranking:LavaGlyphSymbol.ranking"))
+        XCTAssertTrue(tokens.contains("static let ranking = \"lava.ranking\""))
+        XCTAssertTrue(tokens.contains("struct LavaRankingGlyph: Shape"))
+        XCTAssertTrue(components.contains("if systemImage == LavaGlyphSymbol.ranking"))
+        XCTAssertTrue(components.contains("LavaRankingGlyph().fill(tint)"))
+        XCTAssertTrue(activity.contains("ranking"))
+    }
 
+    func testRootAndSettingsNavigationUseRNTabs() throws {
         let root = try readSource(.rootView)
-        // The Guard tab still names the ROLE (not a raw glyph string); it now resolves the glyph
-        // per selection state via tabBarSymbolName for the Differentiate-Without-Color fill cue (R1).
-        XCTAssertTrue(root.contains("Label(\"Guard\", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))"))
-        XCTAssertFalse(root.contains("Label(\"Guard\", systemImage: \"shield.fill\")"))
-        // The Settings tab migrated to the same per-selection role API — cover it too so a revert
-        // to a raw glyph string on either tab is caught.
-        XCTAssertTrue(root.contains("Label(\"Settings\", systemImage: LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings))"))
-        XCTAssertFalse(root.contains("Label(\"Settings\", systemImage: \"gearshape.fill\")"))
+        let navigation = try readSource(.reactNativeReviewNavigation)
+        XCTAssertFalse(root.contains("TabView(selection: guardedRootTabSelection)"))
+        XCTAssertTrue(navigation.contains("<Tabs.Screen name=\"GuardTab\""))
+        XCTAssertTrue(navigation.contains("<Tabs.Screen name=\"SettingsTab\""))
     }
 }

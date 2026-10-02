@@ -26,7 +26,8 @@ public enum LavaGuardProgressPolicy {
         LavaGuardUnlockGoal(guardID: "obsidian", requiredUsageDays: 14),
         LavaGuardUnlockGoal(guardID: "strawberryObsidian", requiredUsageDays: 30),
         LavaGuardUnlockGoal(guardID: "emerald", requiredUsageDays: 60),
-        LavaGuardUnlockGoal(guardID: "kiwiCreme", requiredUsageDays: 90)
+        LavaGuardUnlockGoal(guardID: "kiwiCreme", requiredUsageDays: 90),
+        LavaGuardUnlockGoal(guardID: "aquamarine", requiredUsageDays: 120)
     ]
 
     /// Returns the configured unlock goal for `guardID`, if one exists.

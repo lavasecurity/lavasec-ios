@@ -30,8 +30,12 @@ public enum FilterSnapshotMemoryBudget: Sendable {
     /// buffers, the extension baseline), measured ≈ 3.5 MB; rounded up.
     package static let baselineMegabytes = 4.0
     /// Dirty resident bytes per filter rule (the table entry; domain text is
-    /// mapped/clean), measured ≈ 8.5 B; rounded up.
-    package static let estimatedBytesPerRule = 9.0
+    /// mapped/clean). Previously measured ≈ 8.5 B and rounded up to 9.0 with the
+    /// 8-byte entry (offset + length); the entry is now a bare 4-byte offset (the
+    /// length rides in the blob as a 1-byte prefix), so the structural per-rule
+    /// cost is ~4 B + ~1 B mmap page slack. This is the conservative re-derivation —
+    /// re-validate on device before trusting the higher `maxFilterRuleCount` it yields.
+    package static let estimatedBytesPerRule = 5.0
     /// Target ceiling for steady-state resident memory, leaving ~10 MB headroom
     /// under the observed ~40–46 MB jetsam cliff for the decode transient and
     /// OS variance.
@@ -57,35 +61,58 @@ public enum FilterSnapshotMemoryBudget: Sendable {
     }
 
     /// In-heap bytes per rule for a compact entry table (`CompactDomainRuleSet.Entry`
-    /// is `UInt32` offset + `UInt16` length → 8 B array stride). The in-extension
-    /// streaming compile holds the entry arrays resident while it sorts/dedups them; the
-    /// domain bytes themselves live on disk (memory-mapped), so they do NOT count here.
-    package static let estimatedCompactEntryBytesPerRule = 8.0
+    /// is a bare `UInt32` offset → 4 B array stride; the `UInt16` length moved into the
+    /// blob as a 1-byte prefix). The in-extension streaming compile holds the entry arrays
+    /// resident while it sorts/dedups them; the domain bytes themselves live on disk
+    /// (memory-mapped), so they do NOT count here.
+    package static let estimatedCompactEntryBytesPerRule = 4.0
+
+    /// Separate modeled reserve for the streaming compiler's heap-backed threat subset.
+    /// A broad allowed suffix can intersect arbitrarily many threat descendants, so this
+    /// cannot be bounded by the number of allowances. Reserve 4 MiB using a conservative
+    /// 1 KiB per unique scope for a normalized hostname (up to 253 bytes), Set storage,
+    /// sorting and compact conversion slack. This is a model, not a measured peak guarantee.
+    /// Exceeding it requires foreground preparation; no guardrail is silently omitted.
+    package static let maxStreamingHeapGuardrailRuleCount = (4 * 1_024 * 1_024) / 1_024
 
     /// Largest AGGREGATE rule count the packet-tunnel streaming fallback may compile in
     /// the extension. The streaming compile (`StreamingCompactSnapshotCompiler`) parses
     /// every source straight through `BlocklistParser.forEachBlockRule` into an on-disk
     /// blob — it NEVER builds a per-source dirty `DomainRuleSet`, so a single source's size
-    /// no longer bounds the compile; only the AGGREGATE compact entry arrays grow in heap.
+    /// no longer bounds the compile. The AGGREGATE compact entry arrays grow in heap,
+    /// alongside the separately capped threat subset (`maxStreamingHeapGuardrailRuleCount`).
     /// The binding constraint is therefore the entry-array transient (the arrays plus the
     /// slack of an in-place sort and amortized `Array` growth, modeled as ~2×
     /// `estimatedCompactEntryBytesPerRule`); the domain bytes are streamed to disk and
     /// memory-mapped (paged, not resident). Above this the per-rule gate throws and the
     /// compile fails CLOSED, so the app re-prepares the full snapshot. The decoded resident
-    /// snapshot is the 9 B/rule mapped-compact form, additionally bounded by
+    /// snapshot is the ~5 B/rule mapped-compact form, additionally bounded by
     /// `maxFilterRuleCount`.
     ///
-    /// This is intentionally BELOW the Plus tier limit (2M) and the device guardrail
-    /// (`maxFilterRuleCount` ~3.26M): the very largest Plus configurations fail closed in
-    /// the rare in-extension fallback (deferring to the app, which prepares them fine under
-    /// the higher mapped-compact budget) rather than risk the jetsam transient.
+    /// With the 4-byte entry the compile transient (entry arrays + sort slack, ~2×) is
+    /// ~8 B/rule, so a full 2M Plus config now fits the in-extension transient. The ceiling
+    /// is capped at the Plus tier limit (2M) — the in-extension fallback must never compile
+    /// a config larger than the app's own envelope (`BlocklistParseResourceBudget.default`),
+    /// so the policy cap, not the memory bound, is now the binding constraint. It stays below
+    /// `maxFilterRuleCount` (the resident guardrail) because the transient holds ~2× the
+    /// entry bytes per rule.
+    /// The current 2M cap leaves over 12 MiB below this modeled transient ceiling, enough
+    /// for the separate 4 MiB threat reservation without changing artifact or tier limits.
     ///
     /// NOTE: a conservative model that assumes `.mappedIfSafe` actually maps on the
     /// app-group container (the same assumption `reusableCompactSnapshot` already relies
     /// on); the safe value wants on-device publish-stress validation, which should include
     /// a near-ceiling config.
     package static var maxStreamingCompileRuleCount: Int {
-        Int(((maxResidentMegabytes - baselineMegabytes) * bytesPerMegabyte) / (estimatedCompactEntryBytesPerRule * 2.0))
+        let memoryCeiling = Int(
+            ((maxResidentMegabytes - baselineMegabytes) * bytesPerMegabyte)
+                / (estimatedCompactEntryBytesPerRule * 2.0)
+        )
+        // The in-extension streaming fallback must never compile a config larger than the
+        // app's own per-source envelope, so cap it at the Plus tier limit (2M). With the
+        // 4-byte entry the memory transient (~2× the entry, ~8 B/rule) would admit ~3.67M —
+        // the policy cap, not the memory bound, is the binding constraint now.
+        return min(memoryCeiling, FeatureLimits.plus.maxFilterRules)
     }
 }
 

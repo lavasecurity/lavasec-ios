@@ -10,9 +10,9 @@ enum AccountSessionKeychainStoreError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .unexpectedItemData:
-            "The saved account session could not be read."
+            "The saved account session could not be read.".lavaLocalized
         case .unhandledStatus(let status):
-            "Keychain returned status \(status)."
+            "Keychain returned status %@.".lavaLocalizedFormat(String(status))
         }
     }
 }

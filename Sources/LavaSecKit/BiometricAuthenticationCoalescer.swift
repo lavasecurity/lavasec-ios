@@ -10,7 +10,8 @@ import Foundation
 /// Codex/OCR review on lavasec-ios#69). Each debounce handle only prevents a re-tap of its OWN surface.
 ///
 /// This gate closes the cross-handle window at the source: a caller that arrives while an evaluation is
-/// already in flight awaits that SAME evaluation's result instead of starting another prompt. It mirrors
+/// already in flight shares its result only within the same authorization scope. A newer turn waits
+/// for the old OS prompt to finish before starting its own evaluation. It mirrors
 /// the passcode-request coalescing in `SecurityController.requestPasscode` (which shares one presented
 /// passcode sheet across waiters) so the biometric path is symmetric with it.
 ///
@@ -27,28 +28,49 @@ public final class BiometricAuthenticationCoalescer {
     /// The evaluation shared by every caller that arrives during a single prompt's lifetime, or `nil`
     /// when no prompt is outstanding. `Task<Bool, Never>` because `evaluatePolicy` reports a plain
     /// success `Bool` and never throws to the caller.
-    private var inFlight: Task<Bool, Never>?
+    private struct Evaluation {
+        let id: UInt64
+        let scope: UInt64?
+        let task: Task<Bool, Never>
+    }
+    private var inFlight: Evaluation?
+    private var nextID: UInt64 = 0
 
     /// Creates a coalescer with no evaluation in flight.
     public init() {}
 
-    /// Runs `evaluate` (which performs exactly one biometric prompt) only when no evaluation is already
-    /// in flight; callers that arrive mid-flight share the running evaluation's result rather than
-    /// raising a second prompt. Once the shared evaluation completes, the next call starts fresh.
+    /// Serializes OS evaluations while sharing results only within one current authorization scope.
+    /// Revoked callers receive false; their results cannot authorize a replacement turn.
     ///
-    /// - Parameter evaluate: Performs a single biometric evaluation and returns whether it succeeded.
-    ///   It is invoked at most once per outstanding prompt — a coalesced caller never invokes it.
-    /// - Returns: The shared evaluation's result (`true` on success).
-    public func authenticate(_ evaluate: @escaping @MainActor () async -> Bool) async -> Bool {
-        if let inFlight {
-            return await inFlight.value
+    /// - Parameters:
+    ///   - scope: View-authentication turn, or nil for the distinct foreground App Unlock owner.
+    ///   - isCurrent: Whether this caller still owns its turn. Revoked callers cannot reuse results
+    ///     or start replacement prompts after the OS finishes an earlier evaluation.
+    ///   - evaluate: Performs one OS evaluation. Different turns serialize without sharing results.
+    /// - Returns: The evaluation result only while this caller still owns its authorization scope.
+    public func authenticate(
+        scope: UInt64? = nil,
+        isCurrent: @escaping @MainActor () -> Bool = { true },
+        _ evaluate: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        while let current = inFlight {
+            let result = await current.task.value
+            guard isCurrent() else { return false }
+            if current.scope == scope { return result }
+            // A newer owner waits for the old OS prompt to end. Its completion may resume this
+            // caller before the original owner, so cleanup must be owned by the evaluation ID.
+            if inFlight?.id == current.id { inFlight = nil }
         }
-
-        let evaluation = Task { @MainActor in
-            await evaluate()
+        guard isCurrent() else { return false }
+        nextID += 1
+        let id = nextID
+        let task = Task { @MainActor in
+            guard isCurrent() else { return false }
+            return await evaluate()
         }
-        inFlight = evaluation
-        defer { inFlight = nil }
-        return await evaluation.value
+        inFlight = Evaluation(id: id, scope: scope, task: task)
+        let result = await task.value
+        if inFlight?.id == id { inFlight = nil }
+        return isCurrent() && result
     }
 }

@@ -4,6 +4,23 @@ import XCTest
 @testable import LavaSecKit
 
 final class LocalLogExportArchiveTests: XCTestCase {
+    func testDefaultExportOmitsHistoryEvenWhenDiagnosticsHasQueryEvents() throws {
+        let now = Date()
+        var diagnostics = DiagnosticsStore(startedAt: now)
+        diagnostics.record(domain: "sensitive-query.example", decision: .defaultAllow,
+                           keepFilteringCounts: true, keepDomainHistory: true)
+        let archive = try LocalLogExportArchive.make(
+            diagnostics: diagnostics, networkActivityLog: NetworkActivityLog(),
+            lavaGuardProgress: LavaGuardProgress(), lavaGuardUnlocks: LavaGuardAchievementLedger(),
+            generatedAt: now)
+        let text = String(decoding: archive.data, as: UTF8.self)
+        XCTAssertFalse(text.contains("domain-history-"))
+        XCTAssertFalse(text.contains("sensitive-query.example"))
+        XCTAssertTrue(text.contains("filtering-counts-"))
+        XCTAssertTrue(text.contains("network-activity-"))
+        XCTAssertTrue(text.contains("manifest.json"))
+    }
+
     func testArchiveUsesTimestampedZipWithSeparateLocalLogFiles() throws {
         let generatedAt = Self.date(year: 2026, month: 6, day: 12, hour: 17, minute: 18)
         var calendar = Calendar(identifier: .gregorian)
@@ -49,6 +66,7 @@ final class LocalLogExportArchiveTests: XCTestCase {
 
         let archive = try LocalLogExportArchive.make(
             diagnostics: diagnostics,
+            domainHistory: .events(diagnostics.recentEvents),
             networkActivityLog: networkLog,
             lavaGuardProgress: guardProgress,
             lavaGuardUnlocks: unlocks,
@@ -175,10 +193,12 @@ final class LocalLogExportArchiveTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
         // Pre-redacted entries (as produced by parseJSONLines): a co-located
-        // queried domain must already be stripped, and the new wedge-recovery /
-        // suppression diagnostics must survive into the local export.
+        // queried domain and raw observation key must already be stripped, and the new
+        // wedge-recovery / suppression diagnostics must survive into the local export.
+        // Production mutation caught: carrying structural ordering metadata into the public
+        // entry dictionary exposes `observationOrder` in this sanitized JSONL file.
         let entries = BugReportDebugLogEntry.parseJSONLines(Data("""
-        {"component":"tunnel","event":"self-reconnect-suppressed","timestamp":"2026-06-18T05:09:14Z","decision":"throttled","onDemandConfirmed":"false","reason":"send-failed","privateDomain":"checkout.example"}
+        {"component":"tunnel","event":"self-reconnect-suppressed","timestamp":"2026-06-18T05:09:14Z","observationOrder":"v1:0123456789abcdef0123456789abcdef:10","decision":"throttled","onDemandConfirmed":"false","reason":"send-failed","privateDomain":"checkout.example"}
         {"component":"tunnel","event":"device-dns-captured","timestamp":"2026-06-18T05:09:20Z","reason":"network-settled","count":"2","activeCount":"2"}
         {"component":"tunnel","event":"loadSnapshot-store-miss","timestamp":"2026-06-18T05:09:24Z","route":"resolved","compactReason":"reuse:inputs:selectedSourceHashes+catalogVersion","preparedReason":"manifest-missing","storeCount":"2","eligibleStoreCount":"1","privateDomain":"checkout.example"}
         """.utf8))
@@ -204,6 +224,7 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("eligibleStoreCount"))
         // Redaction holds in the export path too: a queried domain never ships.
         XCTAssertFalse(archiveText.contains("checkout.example"))
+        XCTAssertFalse(archiveText.contains("observationOrder"))
     }
 
     func testArchiveOmitsDeviceDebugLogFileWhenEmpty() throws {
@@ -315,9 +336,16 @@ final class LocalLogExportArchiveTests: XCTestCase {
         XCTAssertTrue(archiveText.contains("1781939878"))
         XCTAssertTrue(archiveText.contains("sourceRevision"))
         XCTAssertTrue(archiveText.contains("859665babc12"))
-        // A non-allowlisted key on the same line is still redacted out.
+        // A non-allowlisted key on the same line is still redacted out, name and value both.
         XCTAssertFalse(archiveText.contains("privateNote"))
         XCTAssertFalse(archiveText.contains("checkout.example"))
+        // The export does say that something was dropped, as a COUNT (PR #615): two keys here,
+        // `hasOptions` and `privateNote`. Naming them would have been more useful and could not
+        // be made safe — a key name is only schema while every emitter writes it as a literal.
+        XCTAssertTrue(
+            archiveText.contains("_withheld"),
+            "a reading that vanishes without trace is what let a current build read as stale on "
+                + "2026-08-28")
     }
 
     private static func date(

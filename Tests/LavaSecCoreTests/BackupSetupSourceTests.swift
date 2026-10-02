@@ -1,6 +1,49 @@
 import XCTest
 
 final class BackupSetupSourceTests: XCTestCase {
+    func testRecoveryConfirmationsKeepSeparateBindingsInSharedDividedRows() throws {
+        let source = try readSource(.backupSetupView)
+        let confirmation = try sourceBlock(in: source, startingAt: "private var recoveryPhraseStep: some View",
+                                          endingBefore: "private var completionStep: some View")
+        XCTAssertTrue(confirmation.contains("LavaCondensedList {"))
+        XCTAssertEqual(confirmation.components(separatedBy: "LavaToggleRow(").count - 1, 2)
+        XCTAssertTrue(confirmation.contains("LavaCondensedDivider()"))
+        XCTAssertFalse(confirmation.contains("if consent.copiedRecoveryPhrase {"))
+        XCTAssertTrue(confirmation.contains("isOn: $consent.savedRecoveryPhrase"))
+        XCTAssertTrue(confirmation.contains("isOn: $consent.understandsNoRecovery"))
+        XCTAssertFalse(source.contains("BackupConfirmationToggle"))
+    }
+
+    func testUnavailableBackupRefreshUsesExistingUnlockAndForegroundOwners() throws {
+        let observer = try sourceBlock(in: try readSource(.appViewModelCore),
+                                       startingAt: "protectedDataAvailableObserver = NotificationCenter.default.addObserver(",
+                                       endingBefore: "        if loadVPNState {")
+        XCTAssertTrue(observer.contains("UIApplication.protectedDataDidBecomeAvailableNotification"))
+        XCTAssertTrue(observer.contains("if UIApplication.shared.isProtectedDataAvailable {\n                        self?.backup.refreshUnavailableBackupStateAfterUnlock()"))
+        let foreground = try sourceBlock(in: try readSource(.appViewModelFocusAutoSwitch),
+                                         startingAt: "func setAppForegroundActive(_ active: Bool)",
+                                         endingBefore: "let defaults = LavaSecAppGroup.sharedDefaults")
+        XCTAssertTrue(foreground.contains("guard !isHeadless else { return }"))
+        XCTAssertTrue(foreground.contains("if active {"))
+        XCTAssertTrue(foreground.contains("if UIApplication.shared.isProtectedDataAvailable {\n                backup.refreshUnavailableBackupStateAfterUnlock()"))
+        XCTAssertTrue(try readSource(.rootView).contains("viewModel.setAppForegroundActive(true)"))
+        XCTAssertFalse(try readSource(.reactNativeAppBridge).contains("refreshUnavailableBackupStateAfterUnlock"), "Recovery belongs to native lifecycle, never the RN polling loop.")
+        let refresh = try sourceBlock(in: try readSource(.backupController),
+                                      startingAt: "func refreshUnavailableBackupStateAfterUnlock()",
+                                      endingBefore: "func loadEncryptedBackupState()")
+        XCTAssertTrue(refresh.contains("guard (!deletionFenceReadable || automaticBackupPreferenceNeedsReload), !isBackupMaintenanceInProgress"))
+        XCTAssertTrue(refresh.contains("!isBackingUpNow, !isUploadingEncryptedBackup, uploadTask == nil"))
+        XCTAssertTrue(refresh.contains("loadEncryptedBackupState()"))
+        XCTAssertTrue(refresh.contains("guard deletionFenceReadable else { return }"))
+        XCTAssertTrue(refresh.contains("isBackupEnabled = false"))
+        XCTAssertTrue(refresh.contains("UserDefaults.standard.bool(forKey: backupEnabledDefaultsKeyName)"))
+        XCTAssertTrue(refresh.contains("backupEnvelopeStore.loadEnvelope() != nil"))
+        XCTAssertTrue(refresh.contains("UserDefaults.standard.object(forKey: automaticBackupEnabledDefaultsKeyName)"))
+        for sideEffect in ["Task {", "await ", "loadAutomaticBackupPreference", "save", "uploadEncryptedBackup", "disableEncryptedBackup", "completeExplicitBackupEnablement"] {
+            XCTAssertFalse(refresh.contains(sideEffect), "Read-only recovery must not perform \(sideEffect).")
+        }
+    }
+
     func testSetupUsesPasswordlessDeviceSecretFlow() throws {
         let setupSource = try readSource(.backupSetupView)
         let controllerSource = try readSource(.backupController)
@@ -17,6 +60,41 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("func registerBackupPasskey() async throws"))
         XCTAssertTrue(keychainSource.contains("func saveDeviceSecret"))
         XCTAssertTrue(keychainSource.contains("func loadDeviceSecret"))
+    }
+
+    func testSetupRequiresAbsentDeviceSecretToReplaceOrphanedEnvelope() throws {
+        let source = try readSource(.backupController)
+        let setup = try sourceBlock(
+            in: source,
+            startingAt: "func turnOnEncryptedBackup(recoveryPhrase: String)",
+            endingBefore: "func backUpNow()"
+        )
+        // Account deletion retains the envelope but removes its local unlock key, so an
+        // orphan may be replaced only when the absent-key read succeeds or a completed Off
+        // tombstone already authorized replacement. The guard must run before any new
+        // secret or envelope is written.
+        let orphanGuard = try XCTUnwrap(setup.range(of: "if loadLocalEncryptedBackupEnvelope() != nil {"))
+        let secretRead = try XCTUnwrap(setup.range(of: "let orphaned = try backupKeychainStore.loadDeviceSecret() == nil"))
+        let tombstoneExemption = try XCTUnwrap(setup.range(of: "guard orphaned || deletionIntent?.phase == .disabled else"))
+        let secretWrite = try XCTUnwrap(setup.range(of: "try backupKeychainStore.saveDeviceSecret(deviceSecret)"))
+        XCTAssertLessThan(orphanGuard.lowerBound, secretRead.lowerBound)
+        XCTAssertLessThan(secretRead.lowerBound, tombstoneExemption.lowerBound)
+        XCTAssertLessThan(tombstoneExemption.lowerBound, secretWrite.lowerBound)
+        XCTAssertTrue(setup.contains("EncryptedBackupError.supersededByConcurrentConfigurationChange"))
+    }
+
+    func testSetupClearsOrphanUploadEvidenceBeforePublishingEnvelope() throws {
+        let source = try readSource(.backupController)
+        let setup = try sourceBlock(
+            in: source,
+            startingAt: "func turnOnEncryptedBackup(recoveryPhrase: String)",
+            endingBefore: "func backUpNow()"
+        )
+        // A new setup has no upload receipt: clear an orphan's prior evidence before the
+        // new envelope is published, so a stop before upload cannot report the old one.
+        let clear = try XCTUnwrap(setup.range(of: "backupEnvelopeStore.clearUploadMarker()"))
+        let publish = try XCTUnwrap(setup.range(of: "try backupEnvelopeStore.saveEnvelope(envelope)"))
+        XCTAssertLessThan(clear.lowerBound, publish.lowerBound)
     }
 
     func testPasskeySetupSplitsRegistrationAndValidationIntoSteps() throws {
@@ -53,29 +131,71 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("Set up with Passkey"))
         XCTAssertTrue(source.contains("Set up without Passkey"))
         XCTAssertTrue(source.contains("@State private var selectedPasskeyMode: BackupSetupPasskeyMode?"))
-        XCTAssertTrue(source.contains("selectedPasskeyMode = .withPasskey"))
-        XCTAssertTrue(source.contains("selectedPasskeyMode = .withoutPasskey"))
+        XCTAssertTrue(source.contains("beginSetup(with: .withPasskey)"))
+        XCTAssertTrue(source.contains("beginSetup(with: .withoutPasskey)"))
     }
 
     func testPasskeyCopyReferencesSelectedPasswordManager() throws {
         let source = try readSource(.backupSetupView)
 
-        XCTAssertTrue(source.contains("Saved in your password manager to restore on a new device"))
+        XCTAssertTrue(source.contains("Restore with your password manager."))
         // The passkey path is zero-knowledge now: copy must not imply Lava assists decryption.
         XCTAssertFalse(source.contains("lets Lava help restore on a new device"))
         XCTAssertFalse(source.contains("Saved by iOS for lavasecurity.app."))
     }
 
-    func testRecoveryPhraseCopyIsNotRequiredToAdvance() throws {
+    func testRecoveryPhraseAcknowledgmentsGateFinalActionWithoutCopy() throws {
         let source = try readSource(.backupSetupView)
+        XCTAssertTrue(source.contains("@State private var consent = BackupSetupConsent()"))
+        let phraseStep = try sourceBlock(in: source, startingAt: "private var recoveryPhraseStep: some View",
+                                         endingBefore: "private var completionStep: some View")
+        XCTAssertTrue(phraseStep.contains("LavaCondensedList"))
+        XCTAssertTrue(phraseStep.contains("LavaCondensedDivider()"))
+        XCTAssertTrue(phraseStep.contains("isOn: $consent.savedRecoveryPhrase"))
+        XCTAssertTrue(phraseStep.contains("isOn: $consent.understandsNoRecovery"))
+        XCTAssertFalse(phraseStep.contains("if consent.copiedRecoveryPhrase {"))
+        XCTAssertTrue(source.contains("!recoveryPhrase.isEmpty && consent.canFinish"))
+        XCTAssertTrue(source.contains("guard canAdvance, !isFinishingSetup else"))
+        XCTAssertTrue(source.contains("consent.recordCopy()"))
+        XCTAssertTrue(source.contains("consent.reset()"))
+        XCTAssertFalse(source.contains("consent.savedRecoveryPhrase = true"))
+        XCTAssertFalse(source.contains("consent.understandsNoRecovery = true"))
+    }
 
-        XCTAssertFalse(source.contains("case .recoveryPhrase:\n            copiedRecoveryPhrase"))
-        XCTAssertTrue(source.contains("savedRecoveryPhrase && understandsNoRecovery"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("copiedRecoveryPhrase"))
-        XCTAssertTrue(source.contains("recoveryPhrase"))
+    func testCompletionRequiresTheCurrentSetupUploadAndUsesAStaticOnlineMessage() throws {
+        let source = try readSource(.backupSetupView)
+        let completion = try sourceBlock(in: source, startingAt: "private var completionStep:", endingBefore: "private var uploadStep:")
+        XCTAssertTrue(completion.contains("message: \"Your encrypted backup is saved online.\""))
+        XCTAssertFalse(completion.contains("encryptedBackupState"))
+        XCTAssertTrue(source.contains("backup.isSetupUploadConfirmed(attemptID: setupAttemptID)"))
+        XCTAssertTrue(source.contains("backup.retrySetupUpload(attemptID: setupAttemptID)"))
+        XCTAssertTrue(source.contains("Button(\"Return to Account & Backup\".lavaLocalized, action: closeFlow)"))
+        XCTAssertTrue(source.contains("guard !isStepActionInFlight, !didClose else"))
+    }
+
+    func testUnknownOrChangedSetupMethodInvalidatesPhraseAndConsentBeforeSelection() throws {
+        let source = try readSource(.backupSetupView)
+        let begin = try sourceBlock(in: source, startingAt: "private func beginSetup(with mode:",
+                                    endingBefore: "private func validatePasskey()")
+        XCTAssertTrue(begin.contains("if selectedPasskeyMode != mode {"))
+        XCTAssertFalse(begin.contains("if let selectedPasskeyMode"))
+        let invalidation = try sourceBlock(in: begin, startingAt: "if selectedPasskeyMode != mode {",
+                                           endingBefore: "selectedPasskeyMode = mode")
+        XCTAssertTrue(invalidation.contains("recoveryPhrase = \"\""))
+        XCTAssertTrue(invalidation.contains("consent.reset()"))
+        XCTAssertTrue(invalidation.contains("ensureRecoveryPhrase()"))
+        // Executable native transitions are exercised by NativeBackupSetupConsentTests.py.
+    }
+
+    func testRecoveryWordsRemainFullyDisclosedAtAccessibilitySizes() throws {
+        let source = try readSource(.backupSetupView)
+        XCTAssertTrue(source.contains("columns: dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : ["))
+        let start = try XCTUnwrap(source.range(of: "private struct BackupRecoveryPhraseWord:"))
+        let word = String(source[start.lowerBound...])
+        XCTAssertTrue(word.contains("@ScaledMetric(relativeTo: .caption) private var numberWidth"))
+        XCTAssertTrue(word.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertFalse(word.contains(".lineLimit(1)"))
+        XCTAssertFalse(word.contains(".minimumScaleFactor"))
     }
 
     func testRecoveryPhraseCopyUsesLocalOnlyExpiringPasteboard() throws {
@@ -107,12 +227,11 @@ final class BackupSetupSourceTests: XCTestCase {
     func testOverviewCopyAndFactRowsMatchSettingsScale() throws {
         let source = try readSource(.backupSetupView)
 
-        // The flow is a full bottom sheet now, so the title sits in the sheet's
-        // chevron-back header (step.title) rather than a pushed navigation bar.
+        // The focused sheet delegates title and navigation semantics to its native task scaffold.
         XCTAssertFalse(source.contains(".navigationTitle(\"Set Up Encrypted Backup\".lavaLocalized)"))
-        XCTAssertTrue(source.contains("Text(step.title.lavaLocalized)"))
+        XCTAssertTrue(source.contains("LavaTaskSheet(title: step.title"))
         XCTAssertTrue(source.contains("case .overview:\n            \"Set Up Encrypted Backup\""))
-        XCTAssertTrue(source.contains("Your lists are encrypted on your device before upload. Only you can unlock them — with your recovery phrase or a Passkey. Lava only ever stores encrypted data."))
+        XCTAssertTrue(source.contains("Encrypted on this device. Only you can unlock your backup."))
         XCTAssertFalse(source.contains("Lava stores only ciphertext"))
         // The passkey path no longer escrows a recovery secret.
         XCTAssertFalse(source.contains("stores a recovery secret"))
@@ -133,10 +252,12 @@ final class BackupSetupSourceTests: XCTestCase {
     func testConfirmCopyAvoidsTerminalPeriodsAndClarifiesRecoveryLimits() throws {
         let source = try readSource(.backupSetupView)
 
-        XCTAssertTrue(source.contains("New-device restore can use a Passkey or this recovery phrase with your signed-in Lava account"))
-        XCTAssertTrue(source.contains("title: \"I saved the recovery phrase\""))
+        XCTAssertTrue(source.contains("!recoveryPhrase.isEmpty && consent.canFinish"))
+        XCTAssertFalse(source.contains("copiedRecoveryPhrase && savedRecoveryPhrase"))
+        XCTAssertFalse(source.contains(".disabled(!copiedRecoveryPhrase"))
+        XCTAssertTrue(source.contains("title: \"I have saved my recovery phrase in a secure, accessible place\""))
         XCTAssertTrue(source.contains("title: \"I understand that if I lose every unlock method, I may not be able to restore my backup\""))
-        XCTAssertFalse(source.contains("I saved the recovery phrase."))
+        XCTAssertFalse(source.contains("I have saved my recovery phrase in a secure, accessible place."))
         XCTAssertFalse(source.contains("I understand Lava cannot recover it."))
     }
 
@@ -161,9 +282,17 @@ final class BackupSetupSourceTests: XCTestCase {
         // token drives the panel/standalone/secondary action button styles so
         // sibling buttons line up automatically (UR-4).
         XCTAssertTrue(tokensSource.contains("static let actionButtonHeight: CGFloat = 44"))
-        XCTAssertTrue(componentsSource.contains(".frame(height: LavaSurface.actionButtonHeight)"))
-        XCTAssertFalse(componentsSource.contains("let height: CGFloat"))
-        XCTAssertFalse(componentsSource.contains(".frame(height: 44)"))
+        let actionBody = try sourceBlock(in: try readSource(.lavaScaffold),
+                                         startingAt: "struct LavaFullWidthActionButtonBody<",
+                                         endingBefore: "struct LavaFullWidthActionPrimitiveStyle:")
+        XCTAssertTrue(actionBody.contains(".frame(minHeight: LavaSurface.actionButtonHeight)"))
+        let panelStyle = try sourceBlock(in: componentsSource,
+                                         startingAt: "struct LavaPanelActionButtonStyle:",
+                                         endingBefore: "struct LavaSecondaryActionButtonStyle:")
+        XCTAssertTrue(panelStyle.contains("LavaFullWidthActionPrimitiveStyle(role: .panel"))
+        XCTAssertTrue(panelStyle.contains(".makeBody(configuration: configuration)"))
+        XCTAssertFalse(panelStyle.contains("let height: CGFloat"))
+        XCTAssertFalse(panelStyle.contains(".frame(height: 44)"))
         XCTAssertTrue(setupSource.contains("LavaPanelActionButtonStyle()"))
         XCTAssertFalse(setupSource.contains("LavaPanelActionButtonStyle(height: 44"))
     }
@@ -283,20 +412,19 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testSetupFlowIsFullSheetWithFooterActions() throws {
         let source = try readSource(.backupSetupView)
-        let settings = try readSource(.accountBackupSettingsView)
+        let settings = try readSource(.reactNativeAppFlows)
+        XCTAssertTrue(settings.contains("case \"backupSetup\": "))
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // not pushed onto the settings navigation stack.
-        XCTAssertTrue(settings.contains(".sheet(isPresented: $isSettingUpBackup)"))
-        XCTAssertTrue(settings.contains("isSettingUpBackup = true"))
         XCTAssertFalse(settings.contains("NavigationLink {\n                                BackupSetupView()"))
 
         // The step actions (e.g. "Set up with Passkey") live on the sheet's footer
-        // bar; back is the header chevron.
+        // bar; the shared task header owns Back and Close.
         XCTAssertTrue(source.contains("} footer: {"))
         XCTAssertTrue(source.contains("private var overviewActions: some View"))
         XCTAssertTrue(source.contains("private var validatePasskeyActions: some View"))
-        XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\", action: headerBack)"))
+        XCTAssertTrue(source.contains("back: sheetBackAction"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -304,11 +432,11 @@ final class BackupSetupSourceTests: XCTestCase {
     }
 
     func testSettingsSwitchesSetupActionToBackupNowAfterSetup() throws {
-        let settingsSource = try readSource(.accountBackupSettingsView)
+        let settingsSource = try readSource(.reactNativeAppBridge)
         let controllerSource = try readSource(.backupController)
 
         XCTAssertTrue(settingsSource.contains("backup.isEncryptedBackupConfigured"))
-        XCTAssertTrue(settingsSource.contains("Back Up Now"))
+        XCTAssertTrue(settingsSource.contains("await model.backup.backUpNow()"))
         XCTAssertTrue(controllerSource.contains("var isEncryptedBackupConfigured: Bool"))
         XCTAssertTrue(controllerSource.contains("func backUpNow() async"))
     }

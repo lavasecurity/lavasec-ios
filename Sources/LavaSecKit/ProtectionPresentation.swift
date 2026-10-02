@@ -5,7 +5,7 @@ import Foundation
 /// to a concrete color (iOS: `ProtectionTintRole.color`). This keeps raw, non-adaptive
 /// `Color.green`/`.orange` out of the view model and gives Android the same role table.
 public enum ProtectionTintRole: Equatable, Sendable {
-    /// Healthy / filtering with device-DNS fallback.
+    /// Healthy filtering.
     case protected
     /// Slow DNS or needs reconnect — warm caution.
     case attention
@@ -17,16 +17,24 @@ public enum ProtectionTintRole: Equatable, Sendable {
     case inactive
 }
 
+/// Whether the chained "forwarding unconfirmed" surface may speak over a connected severity.
+public extension ProtectionConnectivitySeverity {
+    /// Only healthy DNS yields to VPN verification. Fallback is itself an attention state,
+    /// even when it carries queries successfully, and must not disappear behind idle traffic.
+    var yieldsToUnconfirmedChainedForwarding: Bool {
+        switch self {
+        case .healthy: true
+        case .recovering, .dnsSlow, .needsReconnect, .networkUnavailable,
+             .usingDeviceDNSFallback, .usingEncryptedFallback: false
+        }
+    }
+}
+
 /// Maps connectivity health into platform-independent protection tint roles.
 public extension ProtectionTintRole {
     /// The tint role while protection is connected, from the connectivity severity.
     /// Exhaustive over every `ProtectionConnectivitySeverity`.
     static func connected(severity: ProtectionConnectivitySeverity) -> ProtectionTintRole {
-        switch severity {
-        case .healthy, .usingDeviceDNSFallback, .usingEncryptedFallback: .protected
-        case .recovering:                        .transitioning
-        case .dnsSlow, .needsReconnect:          .attention
-        case .networkUnavailable:                .inactive
-        }
+        GuardStatusPresentation(status: .connected(severity)).tintRole
     }
 }

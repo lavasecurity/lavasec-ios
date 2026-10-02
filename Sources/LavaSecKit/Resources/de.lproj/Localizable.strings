@@ -16,19 +16,19 @@
 "dialog.filterSwitchDisallowed" = "Konnte nicht zu %@ wechseln. Öffne Lava, um deine Filtereinstellungen zu prüfen.";
 
 /* Live Activity / widget UI (shared via Bundle.module). */
-"widget.state.on" = "Lava Security ist aktiviert";
-"widget.state.paused" = "Lava Security ist pausiert";
-"widget.state.restartingTitle" = "Neustart …";
-"widget.a11y.restarting" = "Lava Security wird neu gestartet";
+"widget.state.on" = "Lava ist aktiviert";
+"widget.state.paused" = "Lava ist pausiert";
+"widget.state.restartingTitle" = "Wird neu verbunden…";
+"widget.a11y.restarting" = "Lava wird neu verbunden";
 "widget.status.on" = "Ein";
 "widget.status.paused" = "Pausiert";
-"widget.status.restarting" = "Neustart";
+"widget.status.restarting" = "Wird neu verbunden";
 "widget.action.resume" = "Fortsetzen";
-"widget.action.restart" = "Neu starten";
+"widget.action.restart" = "Neu verbinden";
 "widget.action.pauseForMinutes" = "Für %d Min. pausieren";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
 "widget.action.pauseForMinutesShort" = "%d Min.";
-"a11y.shieldGuardian" = "Lava-Schildwächter";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
 "core.domainError.alreadyBlocked" = "%@ ist bereits in deinen blockierten Domains.";
@@ -43,32 +43,102 @@
 "core.resolver.badStamp" = "Der DNS-Stamp konnte nicht gelesen werden. Überprüfe den Stamp und versuche es erneut.";
 "core.resolver.missingDoHPath" = "DNS-over-HTTPS-URLs müssen einen Pfad enthalten, z. B. /dns-query.";
 "core.resolver.credentialsNotAllowed" = "Eigene DNS-URLs dürfen keine Benutzernamen oder Passwörter enthalten.";
-"core.resolver.secondaryTransportMismatch" = "Das sekundäre DNS muss denselben Transport wie das primäre DNS verwenden.";
+"core.resolver.secondaryTransportMismatch" = "Der sekundäre Server muss denselben Transport wie der primäre Server verwenden.";
 "core.endpoint.credentialsNotAllowed" = "URLs mit Benutzernamen oder Passwörtern werden nicht unterstützt.";
-"core.endpoint.localhostNotAllowed" = "Localhost kann hier nicht als DNS-Resolver verwendet werden.";
-"core.endpoint.privateNetworkNotAllowed" = "Eigene Sperrlisten-URLs müssen einen öffentlichen Host verwenden.";
-"core.endpoint.unusableResolverAddress" = "Gib eine nutzbare DNS-Resolver-Adresse ein, keine Loopback-, Multicast- oder nicht spezifizierte Adresse.";
-"core.endpoint.invalidResolverHost" = "Gib einen gültigen DNS-Resolver-Host ein.";
-"core.customBlocklist.invalidURL" = "Gib eine gültige Sperrlisten-URL ein.";
-"core.customBlocklist.unsupportedScheme" = "Eigene Sperrlisten müssen HTTPS verwenden.";
-"core.customBlocklist.missingHost" = "Die eigene Sperrlisten-URL muss einen Host enthalten.";
-"core.customBlocklist.privateNetworkHost" = "Eigene Sperrlisten-URLs müssen einen öffentlichen Host verwenden.";
-"core.customBlocklist.credentialsNotAllowed" = "Eigene Sperrlisten-URLs dürfen keine Benutzernamen oder Passwörter enthalten.";
+"core.endpoint.localhostNotAllowed" = "Localhost kann hier nicht als DNS-Server verwendet werden.";
+"core.endpoint.privateNetworkNotAllowed" = "Eigene Blocklisten-URLs müssen einen öffentlichen Host verwenden.";
+"core.endpoint.unusableResolverAddress" = "Gib eine nutzbare DNS-Serveradresse ein, keine Loopback-, Multicast- oder nicht spezifizierte Adresse.";
+"core.endpoint.invalidResolverHost" = "Gib einen gültigen DNS-Server-Host ein.";
+"core.customBlocklist.invalidURL" = "Gib eine gültige Blocklisten-URL ein.";
+"core.customBlocklist.unsupportedScheme" = "Eigene Blocklisten müssen HTTPS verwenden.";
+"core.customBlocklist.missingHost" = "Die eigene Blocklisten-URL muss einen Host enthalten.";
+"core.customBlocklist.privateNetworkHost" = "Eigene Blocklisten-URLs müssen einen öffentlichen Host verwenden.";
+"core.customBlocklist.credentialsNotAllowed" = "Eigene Blocklisten-URLs dürfen keine Benutzernamen oder Passwörter enthalten.";
 "core.domain.empty" = "Die Domain ist leer.";
 "core.domain.tooLong" = "Die Domain ist zu lang.";
 "core.domain.needsTwoLabels" = "Gib eine vollständige Domain ein, z. B. example.com.";
-"core.domain.invalidLabel" = "Ungültiges Domain-Label: %@";
+"core.domain.invalidLabel" = "„%@“ ist in einem Domainnamen nicht gültig.";
 "core.domain.ipNotAllowed" = "IP-Adressen werden hier nicht unterstützt.";
-"core.filterBudget.exceedsDeviceMemory" = "Diese Auswahl benötigt etwa %1$@ Filterregeln, mehr als dein Gerät aufnehmen kann (%2$@). Entferne eine Liste, um den Schutz zu aktivieren.";
-"core.filterBudget.exceedsTierLimit" = "Deine Sperrlisten verwenden etwa %1$@ von %2$@ Filterregeln. %3$@";
-"core.filterBudget.action.remove" = "Entferne eine Liste, um den Schutz zu aktivieren.";
-"core.filterBudget.action.removeOrUpgrade" = "Entferne eine Liste oder steige auf Plus um.";
+"core.filterBudget.exceedsDeviceMemory" = "Diese Auswahl benötigt etwa %1$@ Filterregeln, mehr als dein Gerät aufnehmen kann (%2$@). Entferne eine Blockliste, um den Schutz einzuschalten.";
+"core.filterBudget.exceedsTierLimit" = "Deine Blocklisten verwenden etwa %1$@ von %2$@ Filterregeln. %3$@";
+"core.filterBudget.action.remove" = "Entferne eine Blockliste, um den Schutz einzuschalten.";
+"core.filterBudget.action.removeOrUpgrade" = "Entferne eine Blockliste oder wechsle zu Lava Plus.";
 "core.filterBudget.largestSuffix" = " Größte: %@.";
-"core.catalogSync.invalidBlocklistEncoding" = "Die heruntergeladene Sperrliste für %@ ist kein gültiges UTF-8.";
-"core.catalogSync.blocklistTooLarge" = "Die heruntergeladene Sperrliste für %1$@ ist zu groß (%2$lld Byte).";
-"core.catalogSync.blocklistExceedsRuleLimit" = "Die Sperrliste für %1$@ hat mehr als %2$lld Regeln. Verringere ihre Größe oder entferne sie.";
-"core.catalogSync.noRulesAvailable" = "Es sind noch keine aktivierten, heruntergeladenen Filter verfügbar.";
-"core.catalogSync.customBlocklistUnavailable" = "Die eigene Sperrliste „%1$@“ konnte nicht geladen werden. %2$@";
-"core.domainError.freeBlockedLimit" = "Der kostenlose Schutz umfasst %lld zusätzliche blockierte Domains.";
-"core.domainError.freeAllowedLimit" = "Der kostenlose Schutz umfasst %lld erlaubte Ausnahmen.";
+"core.catalogSync.invalidBlocklistEncoding" = "Die heruntergeladene Blockliste für %@ ist kein gültiges UTF-8.";
+"core.catalogSync.blocklistTooLarge" = "Die heruntergeladene Blockliste für %1$@ ist zu groß (%2$lld Byte).";
+"core.catalogSync.blocklistExceedsRuleLimit" = "Die Blockliste für %1$@ hat mehr als %2$lld Regeln. Verringere ihre Größe oder entferne sie.";
+"core.catalogSync.noRulesAvailable" = "Es sind noch keine heruntergeladenen Blocklisten verfügbar.";
+"core.catalogSync.customBlocklistUnavailable" = "Die eigene Blockliste „%1$@“ konnte nicht geladen werden. %2$@";
+"core.domainError.freeBlockedLimit" = "Der kostenlose Plan umfasst %lld zusätzliche blockierte Domains.";
+"core.domainError.freeAllowedLimit" = "Der kostenlose Plan umfasst %lld erlaubte Ausnahmen.";
 "core.backup.lastUploaded" = "Zuletzt hochgeladen %@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "Lavas Sperrentscheidungen werden auf diesem iPhone getroffen. Der von dir gewählte Resolver, derzeit %@, kann zugelassene DNS-Anfragen empfangen; sie unterliegen dann dessen Richtlinie.";
+"core.disclosure.resolverNetworkProvided" = "Lavas Sperrentscheidungen werden auf diesem iPhone getroffen. Die DNS-Server, die dieses iPhone aus einem WLAN, dem Mobilfunknetz oder den Systemeinstellungen übernommen hat, können zugelassene DNS-Anfragen empfangen. Ein Lava-Server nie.";
+"core.disclosure.resolverSelfEntered" = "Lavas Sperrentscheidungen werden auf diesem iPhone getroffen. Das von dir eingerichtete eigene DNS kann zugelassene DNS-Anfragen empfangen.";
+"core.disclosure.dnsScope" = "Lava prüft Domainnamen, keine vollständigen URLs, Seitenpfade, Seitentexte, Formulare oder Nachrichten. Lava kann eine ganze Domain sperren, aber keine einzelne Seite auf einer zugelassenen Domain.";
+"core.disclosure.vpn" = "Das iPhone nennt dies ein VPN, weil Lava einen lokal geschützten Pfad benötigt, um Domainnamen zu prüfen. Dein Surf-Datenverkehr wird nicht an Lava-Server gesendet.";
+"core.disclosure.encryptedFallbackRecipient" = "Das von dir gewählte verschlüsselte Ersatz-DNS (%@) kann ebenfalls erlaubte DNS-Anfragen erhalten.";
+"core.disclosure.chainedRecipient" = "Während Lava mit einem anderen VPN verkettet ist, können die DNS-Server aus der Konfiguration dieses VPNs zugelassene DNS-Anfragen als Erste empfangen. Lava kann nicht sagen, wer sie betreibt.";
+"core.disclosure.fallbackNetworkProvided" = "Auch die DNS-Server, die dieses iPhone aus dem Netzwerk übernommen hat, können zugelassene DNS-Anfragen empfangen.";
+"core.disclosure.plainFallbackRecipient" = "Das von dir gewählte Ersatz-DNS (%@) kann ebenfalls erlaubte DNS-Anfragen erhalten. Es ist nicht verschlüsselt.";
+"core.disclosure.upstreamFilteringRecipient" = "%@ filtert selbst und kann daher eine Domain sperren, die Lava zugelassen hat.";
+"core.disclosure.selfEnteredRecipients" = "Du hast diese DNS-Server selbst eingetragen, daher kann Lava nicht sagen, wer sie betreibt. Jede von dir eingetragene Adresse kann zugelassene DNS-Anfragen empfangen.";
+"core.disclosure.selfEnteredRecipient" = "Du hast diesen DNS-Server selbst eingetragen, daher kann Lava nicht sagen, wer ihn betreibt.";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "Lava braucht deine Aufmerksamkeit";
+"notif.body.filteringUnavailableMessage" = "Deine ausgewählten Blocklisten überschreiten weiterhin das Regellimit, deshalb wird DNS blockiert. Öffne Lava, um deine Blocklisten zu überprüfen.";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "Eine eigene Blockliste muss aktualisiert werden. Das ist im Hintergrund nicht möglich, deshalb wird DNS blockiert. Öffne Lava, um deine eigenen Blocklisten zu aktualisieren.";
+
+"widget.action.confirmPause" = "Bestätigen";
+"Activity" = "Aktivität";
+"Confirmation" = "Bestätigung";
+
+"A saved configuration's key is unavailable. Import it again." = "Der Schlüssel einer gespeicherten Konfiguration ist nicht verfügbar. Importiere sie erneut.";
+"Choose a different DNS for the second tier." = "Wähle einen anderen DNS für die zweite Stufe.";
+"Choose a valid DNS provider and transport." = "Wähle einen gültigen DNS-Anbieter und Transport.";
+"Custom DNS requires Lava Plus." = "Benutzerdefinierter DNS erfordert Lava Plus.";
+"Keep one primary DNS and, optionally, one secondary DNS." = "Behalte einen primären DNS und optional einen sekundären DNS.";
+"No accepted blocklist checksum is available for %@." = "Für %@ ist keine akzeptierte Blocklisten-Prüfsumme verfügbar.";
+"No enabled blocklist source is available for %@." = "Für %@ ist keine aktivierte Blocklistenquelle verfügbar.";
+"No saved Lava Security catalog is available yet." = "Noch kein gespeicherter Lava Security-Katalog verfügbar.";
+"Supabase Auth returned status %lld." = "Supabase Auth gab Status %lld zurück.";
+"Supabase Auth returned status %lld: %@" = "Supabase Auth gab Status %lld zurück: %@";
+"The Lava Security catalog could not be read." = "Der Lava Security-Katalog konnte nicht gelesen werden.";
+"The Lava Security catalog server returned HTTP %lld." = "Der Lava Security-Katalogserver gab HTTP %lld zurück.";
+"The Supabase Auth endpoint is not valid." = "Der Supabase-Auth-Endpunkt ist ungültig.";
+"The Supabase Auth response was not valid." = "Die Supabase-Auth-Antwort war ungültig.";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "Der Download überschritt die Größenbegrenzung von %lld MB (%lld Bytes).";
+"The downloaded blocklist checksum did not match for %@." = "Die Prüfsumme der heruntergeladenen Blockliste für %@ stimmte nicht überein.";
+"The first configuration needs an IP endpoint address." = "Die erste Konfiguration benötigt eine IP-Endpunktadresse.";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "AllowedIPs der ersten Konfiguration muss den Endpunkt des zweiten VPNs enthalten.";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "Für zwei VPN-Hops muss die MTU der ersten Konfiguration mindestens 1340 betragen.";
+"The saved configurations changed. Reopen the editor and try again." = "Die gespeicherten Konfigurationen wurden geändert. Öffne den Editor erneut und versuche es noch einmal.";
+"The second configuration needs an IPv4 endpoint address." = "Die zweite Konfiguration benötigt eine IPv4-Endpunktadresse.";
+"You can add up to two WireGuard configurations." = "Du kannst bis zu zwei WireGuard-Konfigurationen hinzufügen.";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@ ist eine Drittanbieterquelle zur Namensnennung und Quellenangabe. Lizenz: %2$@. Inhaber oder Projekt: %3$@.";
+"Third-party source project" = "Drittanbieter-Quellprojekt";
+
+"Latest encrypted settings backup size is %@." = "Die Größe der letzten verschlüsselten Einstellungssicherung beträgt %@.";
+"Added %@" = "%@ hinzugefügt";
+"This domain will be blocked after you save." = "Diese Domain wird nach dem Speichern blockiert.";
+"This exception will take effect after you save." = "Diese Ausnahme wird nach dem Speichern wirksam.";
+"Pending setup" = "Einrichtung ausstehend";
+"Set up encrypted backup for this account." = "Verschlüsseltes Backup für dieses Konto einrichten.";
+"Off" = "Aus";
+"Sign in to set up encrypted backup." = "Melde dich an, um ein verschlüsseltes Backup einzurichten.";
+"Not uploaded yet" = "Noch nicht hochgeladen";
+"Encrypted locally. Back up now to store a copy online." = "Lokal verschlüsselt. Sichere jetzt, um eine Kopie online zu speichern.";
+"Ready after sign-in" = "Bereit nach der Anmeldung";
+"Encrypted locally. Sign in to upload." = "Lokal verschlüsselt. Melde dich an, um hochzuladen.";
+"Needs attention" = "Erfordert Aufmerksamkeit";
+"Domain cannot be added" = "Diese Domain kann nicht hinzugefügt werden";
+"Already blocked" = "Bereits blockiert";
+"Blocked domain limit reached" = "Limit für blockierte Domains erreicht";
+"Exception cannot be added" = "Diese Ausnahme kann nicht hinzugefügt werden";
+"Already allowed" = "Bereits erlaubt";
+"Allowed exception limit reached" = "Limit für erlaubte Ausnahmen erreicht";

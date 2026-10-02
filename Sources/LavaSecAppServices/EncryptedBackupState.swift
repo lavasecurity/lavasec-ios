@@ -45,25 +45,25 @@ public enum EncryptedBackupState: Equatable, Sendable {
         switch self {
         case .off:
             if isAccountSignedIn {
-                return ("Pending setup", "Set up encrypted backup for this account.")
+                return (LavaCoreStrings.localized("Pending setup"), LavaCoreStrings.localized("Set up encrypted backup for this account."))
             }
-            return ("Off", "Sign in to set up encrypted backup.")
+            return (LavaCoreStrings.localized("Off"), LavaCoreStrings.localized("Sign in to set up encrypted backup."))
         case .waitingForSignIn:
             if isAccountSignedIn {
-                return ("Not uploaded yet", "Encrypted locally. Back up now to store a copy online.")
+                return (LavaCoreStrings.localized("Not uploaded yet"), LavaCoreStrings.localized("Encrypted locally. Back up now to store a copy online."))
             }
-            return ("Ready after sign-in", "Encrypted locally. Sign in to upload.")
+            return (LavaCoreStrings.localized("Ready after sign-in"), LavaCoreStrings.localized("Encrypted locally. Sign in to upload."))
         case .synced(_, let uploadedAt):
             return (LavaCoreStrings.localizedFormat("core.backup.lastUploaded", Self.formattedUploadDate(uploadedAt)), syncedDetailText)
         case .failed(let message):
-            return ("Needs attention", message)
+            return (LavaCoreStrings.localized("Needs attention"), message)
         }
     }
 
     private var syncedDetailText: String {
         switch self {
         case .synced(let estimatedByteSize, _):
-            return "Latest encrypted settings backup size is \(Self.formattedByteSize(estimatedByteSize))."
+            return LavaCoreStrings.localizedFormat("Latest encrypted settings backup size is %@.", Self.formattedByteSize(estimatedByteSize))
         case .off,
              .waitingForSignIn,
              .failed:

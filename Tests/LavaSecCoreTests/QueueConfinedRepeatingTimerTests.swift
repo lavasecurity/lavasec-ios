@@ -17,6 +17,13 @@ final class QueueConfinedRepeatingTimerTests: XCTestCase {
         let timer = QueueConfinedRepeatingTimer(queue: queue)
         let twoTicks = expectation(description: "two ticks")
         twoTicks.expectedFulfillmentCount = 2
+        // The timer KEEPS TICKING between the second fulfill and `stop()` landing below, and
+        // on a loaded runner that gap exceeds the 50 ms interval: a third tick then fulfills
+        // an already-fulfilled expectation, which XCTest treats as a crash (signal 6), not a
+        // failure. Over-fulfilment here is the cadence working, not a defect — the sibling
+        // restart test already says so for the same reason. Flaked on CI 2026-07-30
+        // (ios.yml run 30534632437) with every prior run of the same code green.
+        twoTicks.assertForOverFulfill = false
         let confinedQueue = queue // hoisted: the @Sendable tick must not capture XCTestCase self
         await timer.start(interval: 0.05, leeway: .milliseconds(5)) {
             dispatchPrecondition(condition: .onQueue(confinedQueue))

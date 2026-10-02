@@ -236,8 +236,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare"
         case Self.quad9Secure.id:
             "Quad9"
-        case Self.mullvad.id:
-            "Mullvad"
+        case Self.quad9Unfiltered.id:
+            "Quad9"
         case Self.hagezi.id:
             "HaGeZi"
         case Self.googleDoH.id:
@@ -246,8 +246,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare (\(dohAnnotation))"
         case Self.quad9SecureDoH.id:
             "Quad9 (\(dohAnnotation))"
-        case Self.mullvadDoH.id:
-            "Mullvad (\(dohAnnotation))"
+        case Self.quad9UnfilteredDoH.id:
+            "Quad9 (\(dohAnnotation))"
         case Self.hageziDoH.id:
             "HaGeZi (\(dohAnnotation))"
         case Self.googleDoT.id:
@@ -256,8 +256,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare (DoT)"
         case Self.quad9SecureDoT.id:
             "Quad9 (DoT)"
-        case Self.mullvadDoT.id:
-            "Mullvad (DoT)"
+        case Self.quad9UnfilteredDoT.id:
+            "Quad9 (DoT)"
         case Self.hageziDoT.id:
             "HaGeZi (DoT)"
         default:
@@ -302,8 +302,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             "Cloudflare"
         case Self.quad9Secure.id, Self.quad9SecureDoH.id, Self.quad9SecureDoT.id:
             "Quad9"
-        case Self.mullvad.id, Self.mullvadDoH.id, Self.mullvadDoT.id:
-            "Mullvad"
+        case Self.quad9Unfiltered.id, Self.quad9UnfilteredDoH.id, Self.quad9UnfilteredDoT.id:
+            "Quad9"
         case Self.hagezi.id, Self.hageziDoH.id, Self.hageziDoT.id:
             "HaGeZi"
         default:
@@ -325,16 +325,16 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflare
         case Self.quad9SecureDoH.id:
             return .quad9Secure
-        case Self.mullvadDoH.id:
-            return .mullvad
+        case Self.quad9UnfilteredDoH.id:
+            return .quad9Unfiltered
         case Self.googleDoT.id:
             return .google
         case Self.cloudflareDoT.id:
             return .cloudflare
         case Self.quad9SecureDoT.id:
             return .quad9Secure
-        case Self.mullvadDoT.id:
-            return .mullvad
+        case Self.quad9UnfilteredDoT.id:
+            return .quad9Unfiltered
         case Self.hageziDoH.id:
             return .hagezi
         case Self.hageziDoT.id:
@@ -356,8 +356,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflareDoH
         case Self.quad9Secure.id:
             return .quad9SecureDoH
-        case Self.mullvad.id:
-            return .mullvadDoH
+        case Self.quad9Unfiltered.id:
+            return .quad9UnfilteredDoH
         case Self.hagezi.id:
             return .hageziDoH
         default:
@@ -385,8 +385,8 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
             return .cloudflareDoT
         case Self.quad9Secure.id:
             return .quad9SecureDoT
-        case Self.mullvad.id:
-            return .mullvadDoT
+        case Self.quad9Unfiltered.id:
+            return .quad9UnfilteredDoT
         case Self.hagezi.id:
             return .hageziDoT
         default:
@@ -895,12 +895,13 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         hasUpstreamFiltering: true
     )
 
-    public static let mullvad = DNSResolverPreset(
-        id: "mullvad",
-        displayName: "Mullvad",
-        ipv4Servers: ["194.242.2.2"],
-        ipv6Servers: ["2a07:e340::2"],
-        notes: "Privacy-focused resolver from Mullvad VPN with no logging and DNSSEC validation.",
+    /// Unfiltered Quad9 service; local Lava rules remain authoritative.
+    public static let quad9Unfiltered = DNSResolverPreset(
+        id: "quad9-unfiltered",
+        displayName: "Quad9",
+        ipv4Servers: ["9.9.9.10"],
+        ipv6Servers: ["2620:fe::10"],
+        notes: "Quad9 resolver without upstream threat blocking; Lava applies your local filtering rules.",
         hasUpstreamFiltering: false
     )
 
@@ -970,18 +971,19 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         )
     )
 
-    public static let mullvadDoH = DNSResolverPreset(
-        id: "mullvad-doh",
-        displayName: "Mullvad (DoH)",
-        ipv4Servers: ["194.242.2.2"],
-        ipv6Servers: ["2a07:e340::2"],
-        notes: "DNS over HTTPS endpoint metadata for Mullvad.",
+    /// Encrypted HTTPS variant of the unfiltered Quad9 service.
+    public static let quad9UnfilteredDoH = DNSResolverPreset(
+        id: "quad9-unfiltered-doh",
+        displayName: "Quad9 (DoH)",
+        ipv4Servers: ["9.9.9.10"],
+        ipv6Servers: ["2620:fe::10"],
+        notes: "DNS over HTTPS endpoint metadata for Quad9.",
         hasUpstreamFiltering: false,
         transport: .dnsOverHTTPS,
         dohEndpoint: DNSOverHTTPSEndpoint(
-            url: URL(string: "https://dns.mullvad.net/dns-query")!,
-            bootstrapIPv4Servers: ["194.242.2.2"],
-            bootstrapIPv6Servers: ["2a07:e340::2"]
+            url: URL(string: "https://dns10.quad9.net/dns-query")!,
+            bootstrapIPv4Servers: ["9.9.9.10"],
+            bootstrapIPv6Servers: ["2620:fe::10"]
         )
     )
 
@@ -1050,18 +1052,19 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
         )
     )
 
-    public static let mullvadDoT = DNSResolverPreset(
-        id: "mullvad-dot",
-        displayName: "Mullvad (DoT)",
-        ipv4Servers: ["194.242.2.2"],
-        ipv6Servers: ["2a07:e340::2"],
-        notes: "DNS over TLS endpoint metadata for Mullvad.",
+    /// Encrypted TLS variant of the unfiltered Quad9 service.
+    public static let quad9UnfilteredDoT = DNSResolverPreset(
+        id: "quad9-unfiltered-dot",
+        displayName: "Quad9 (DoT)",
+        ipv4Servers: ["9.9.9.10"],
+        ipv6Servers: ["2620:fe::10"],
+        notes: "DNS over TLS endpoint metadata for Quad9.",
         hasUpstreamFiltering: false,
         transport: .dnsOverTLS,
         dotEndpoint: DNSOverTLSEndpoint(
-            hostname: "dns.mullvad.net",
-            bootstrapIPv4Servers: ["194.242.2.2"],
-            bootstrapIPv6Servers: ["2a07:e340::2"]
+            hostname: "dns10.quad9.net",
+            bootstrapIPv4Servers: ["9.9.9.10"],
+            bootstrapIPv6Servers: ["2620:fe::10"]
         )
     )
 
@@ -1087,48 +1090,44 @@ public struct DNSResolverPreset: Identifiable, Hashable, Codable, Sendable {
 
     public static let builtInPresets: [DNSResolverPreset] = [
         .device,
-        .mullvad,
+        .quad9Unfiltered,
         .cloudflare,
-        .quad9Secure,
         .hagezi,
         .google
     ]
 
     public static let settingsPresets: [DNSResolverPreset] = [
         .device,
-        .mullvad,
+        .quad9Unfiltered,
         .cloudflare,
-        .quad9Secure,
         .hagezi,
         .google
     ]
 
     public static let allPresets: [DNSResolverPreset] = [
         .device,
-        .mullvad,
+        .quad9Unfiltered,
         .cloudflare,
-        .quad9Secure,
         .hagezi,
         .google,
-        .mullvadDoH,
+        .quad9UnfilteredDoH,
         .cloudflareDoH,
-        .quad9SecureDoH,
         .hageziDoH,
         .googleDoH,
-        .mullvadDoT,
+        .quad9UnfilteredDoT,
         .cloudflareDoT,
-        .quad9SecureDoT,
         .hageziDoT,
         .googleDoT
     ]
 
     /// Maps retired preset IDs to their current equivalent so a stored selection
-    /// survives a catalog change. DNS.SB was replaced by Mullvad.
+    /// survives a catalog change. Mullvad public DNS retires on 2026-11-02.
+    /// Quad9 now has one unfiltered picker entry; transport and custom values survive.
     public static func migratedPresetID(_ storedID: String) -> String {
         switch storedID {
-        case "dns-sb": return mullvad.id
-        case "dns-sb-doh": return mullvadDoH.id
-        case "dns-sb-dot": return mullvadDoT.id
+        case "dns-sb", "mullvad", "quad9-secure": return quad9Unfiltered.id
+        case "dns-sb-doh", "mullvad-doh", "quad9-secure-doh": return quad9UnfilteredDoH.id
+        case "dns-sb-dot", "mullvad-dot", "quad9-secure-dot": return quad9UnfilteredDoT.id
         default: return storedID
         }
     }

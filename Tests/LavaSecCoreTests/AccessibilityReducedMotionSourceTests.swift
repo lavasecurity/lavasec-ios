@@ -19,63 +19,33 @@ final class AccessibilityReducedMotionSourceTests: XCTestCase {
         )
     }
 
-    func testOnboardingSelectionAndFallbackAnimationsAreGated() throws {
+    func testOnboardingTechnicalChoicesUpdateWithoutLayoutAnimation() throws {
         let source = try readSource(.onboardingFlowView)
-        // The segment slide and the encrypted-fallback expand/collapse now route through the gate…
-        XCTAssertTrue(
-            source.contains("withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion))"),
-            "The protection-level segment selection must be gated on Reduce Motion."
-        )
-        XCTAssertTrue(
-            source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: useEncryptedFallback)"),
-            "The encrypted-fallback section expand/collapse must be gated on Reduce Motion."
-        )
-        // …and the old ungated forms are gone.
-        XCTAssertFalse(
-            source.contains(".animation(.easeInOut(duration: 0.2), value: selection)"),
-            "The segment animation must not remain ungated."
-        )
-        XCTAssertFalse(
-            source.contains(".animation(.easeInOut(duration: 0.2), value: fallbackResolverPresetID)"),
-            "The fallback provider animation must not remain ungated."
-        )
-        // Positively verify the GATED replacements are present too, so an accidental deletion of a
-        // gated animation line can't pass this test vacuously (asserts-gone alone would). The
-        // panel-level `value: selection` modifier is a DISTINCT site from the segment-tap
-        // `withAnimation(...)` asserted above, so it needs its own positive check.
-        XCTAssertTrue(
-            source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: selection)"),
-            "The selection panel animation must route through the Reduce-Motion gate."
-        )
-        XCTAssertTrue(
-            source.contains(".animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: fallbackResolverPresetID)"),
-            "The fallback provider animation must route through the Reduce-Motion gate."
-        )
+        let panel = try sourceBlock(in: source, startingAt: "private struct OnboardingProtectionLevelPanel", endingBefore: "private struct OnboardingFeatureRow")
+        XCTAssertTrue(panel.contains("OnboardingSelectionLabel("))
+        XCTAssertTrue(panel.contains("connectionChoice(\"Keep connections working\""))
+        XCTAssertFalse(panel.contains(".animation("))
+        XCTAssertFalse(panel.contains("withAnimation("))
+        XCTAssertFalse(panel.contains("providerRow"))
+        XCTAssertFalse(panel.contains("if useEncryptedFallback"), "Switching the toggle must not insert a provider table or move the page.")
+        XCTAssertTrue(source.contains("reduceMotion ? .easeInOut(duration: 0.2) : LavaFlowTransition.animation(reduceMotion: false)"))
     }
 
     func testSharedButtonPressScaleIsGated() throws {
-        let source = try readSource(.lavaComponents)
-        // All standard button styles gate their press-scale; none animate it unconditionally. The
-        // exact count is an intentional guardrail — bump it (and the message) when a button style is added.
+        let components = try readSource(.lavaComponents)
+        let scaffold = try readSource(.lavaScaffold)
+        let source = components + "\n" + scaffold
+        // Three full-width roles share one installed body, which must honor Reduce Motion;
+        // the thin role wrappers are pinned by LavaActionButtonSourceTests.
         XCTAssertEqual(
-            source.components(separatedBy: ".animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)").count - 1, 4,
-            "All four standard button styles must gate their press-scale animation on Reduce Motion."
+            source.components(separatedBy: ".animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: state.isPressed)").count - 1, 1,
+            "The shared full-width action body must gate every role's press-scale animation."
         )
         XCTAssertFalse(
             source.contains(".animation(.easeOut(duration: 0.12), value: configuration.isPressed)"),
             "No button style may animate its press-scale ungated."
         )
+        XCTAssertFalse(source.contains(".animation(.easeOut(duration: 0.12), value: state.isPressed)"))
     }
 
-    func testFiltersCategoryScrollIsGated() throws {
-        let source = try readSource(.blocklistPickerView)
-        XCTAssertTrue(
-            source.contains("withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.25), reduceMotion: reduceMotion))"),
-            "The category jump-pill scroll must be gated on Reduce Motion."
-        )
-        XCTAssertFalse(
-            source.contains("withAnimation(.easeInOut(duration: 0.25))"),
-            "The category scroll must not remain an ungated animated scroll."
-        )
-    }
 }

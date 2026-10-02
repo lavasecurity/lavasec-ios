@@ -17,8 +17,8 @@ final class PublicNetworkActivityFeatureTests: XCTestCase {
     }
 
     func testNetworkActivityLoggingIsNotQAGated() throws {
-        let appViewModelSource = try readSource(.appViewModel)
-        let tunnelSource = try readSource(.packetTunnelProvider)
+        let appViewModelSource = try readAppViewModelSource()
+        let tunnelSource = try readPacketTunnelProviderSource()
 
         assertPhraseNotInsideQAConditional("logSettings.append(configuration.keepNetworkActivity)", in: appViewModelSource)
         assertPhraseNotInsideQAConditional("guard configuration.keepNetworkActivity else", in: appViewModelSource)

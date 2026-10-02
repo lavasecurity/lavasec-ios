@@ -15,19 +15,30 @@ final class AppDeepLinkEffectTests: XCTestCase {
             + [
                 LavaSettingsDeepLink.account,
                 .upgrade,
+                .customization,
                 .dnsResolver,
                 .privacyData,
                 .security,
                 .feedback,
                 .legalNotices,
                 .nerdStats,
+                .networkActivity,
             ].map { .settings($0) }
         let imports: [LavaAppDeepLink] = [
             LavaImportDeepLinkEntry.chooser,
             .scan,
             .enterCode,
+            // A link may now carry a decoded configuration, which makes this
+            // sweep the load-bearing check: even *with* a payload in hand, the
+            // effect must still be `.stage`.
+            .sharedConfiguration(
+                ShareableFilterConfiguration(
+                    enabledBlocklistIDs: ["blocklistproject-basic"],
+                    blockedDomains: ["tracker.example.com"]
+                )
+            ),
         ].map { .importFilters($0) }
-        return [.guardPanel, .filters, .activity] + settings + imports
+        return [.guardPanel, .explore, .filters, .activity] + settings + imports
     }()
 
     func testEffectModelHasNoApplyEffect() {
@@ -48,17 +59,35 @@ final class AppDeepLinkEffectTests: XCTestCase {
 
     func testNavigationRoutesAreNavigate() {
         XCTAssertEqual(LavaAppDeepLink.guardPanel.effect, .navigate)
+        XCTAssertEqual(LavaAppDeepLink.explore.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.filters.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.activity.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.settings(nil).effect, .navigate)
         // The DNS resolver route only *navigates* to the picker; changing a
         // resolver is an explicit in-app tap behind the settings auth gate.
         XCTAssertEqual(LavaAppDeepLink.settings(.dnsResolver).effect, .navigate)
+        // Customization and Network Activity links open pages, not toggles: the
+        // page's own controls remain behind the app-settings / activity auth gates.
+        XCTAssertEqual(LavaAppDeepLink.settings(.customization).effect, .navigate)
+        XCTAssertEqual(LavaAppDeepLink.settings(.networkActivity).effect, .navigate)
     }
 
     func testImportRoutesStage() {
         XCTAssertEqual(LavaAppDeepLink.importFilters(.chooser).effect, .stage)
         XCTAssertEqual(LavaAppDeepLink.importFilters(.scan).effect, .stage)
         XCTAssertEqual(LavaAppDeepLink.importFilters(.enterCode).effect, .stage)
+    }
+
+    func testCarryingAPayloadDoesNotUpgradeTheEffect() {
+        // The whole security argument rests on this: a link that already holds a
+        // fully decoded configuration is still only allowed to open a review.
+        let configuration = ShareableFilterConfiguration(
+            enabledBlocklistIDs: ["blocklistproject-basic"],
+            blockedDomains: ["tracker.example.com"]
+        )
+        XCTAssertEqual(
+            LavaAppDeepLink.importFilters(.sharedConfiguration(configuration)).effect,
+            .stage
+        )
     }
 }

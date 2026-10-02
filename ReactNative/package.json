@@ -1,0 +1,73 @@
+{
+  "name": "@lavasec/react-native-ui",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "main": "src/index.ts",
+  "react-native": "src/index.ts",
+  "engines": {
+    "node": "^22.13.0 || ^24.3.0 || >=26.0.0"
+  },
+  "scripts": {
+    "tokens": "node scripts/generate-tokens.mjs",
+    "tokens:check": "node scripts/generate-tokens.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "test:tokens": "node --test tests/token-generator.test.mjs",
+    "test:components": "jest --runInBand",
+    "test": "npm run i18n:check && npm run test:i18n && node scripts/configure-native-tabs.mjs && npm run tokens:check && npm run test:tokens && npm run test:host-policy && npm run host:check && npm run design:check && npm run test:design && npm run typecheck && npm run test:components",
+    "bundle:ios": "node scripts/bundle-gallery.mjs",
+    "bundle:review": "node scripts/bundle-gallery.mjs --review && node scripts/verify-review-bundle.mjs",
+    "test:host-policy": "node --test tests/review-host-policy.test.mjs tests/native-build-modes.test.mjs tests/native-impact.test.mjs tests/native-navigation-patch.test.mjs tests/native-tab-baseline.test.mjs tests/discovery-symbol.test.mjs tests/toolbar-adapter.test.mjs",
+    "host:check": "node scripts/check-review-host.mjs",
+    "design:check": "node scripts/check-design-system.mjs",
+    "test:design": "node --test tests/design-system.test.mjs",
+    "i18n:check": "node scripts/check-i18n-source.mjs && node scripts/generate-localizations.mjs --check",
+    "test:i18n": "node --test tests/i18n-source.test.mjs"
+  },
+  "peerDependencies": {
+    "react": "19.2.3",
+    "react-native": "0.87.1"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.0",
+    "@react-native/babel-preset": "0.87.1",
+    "@react-native/jest-preset": "0.87.1",
+    "@react-native/metro-config": "0.87.1",
+    "@react-navigation/bottom-tabs": "7.18.18",
+    "@react-navigation/native": "7.3.18",
+    "@react-navigation/native-stack": "7.18.10",
+    "@tanstack/react-query": "5.102.8",
+    "@testing-library/react-native": "13.3.3",
+    "@types/jest": "29.5.14",
+    "@types/react": "19.2.18",
+    "jest": "29.7.0",
+    "metro": "0.87.0",
+    "react": "19.2.3",
+    "react-native": "0.87.1",
+    "react-native-safe-area-context": "5.9.1",
+    "react-native-screens": "4.27.0",
+    "react-test-renderer": "19.2.3",
+    "typescript": "5.9.3"
+  },
+  "codegenConfig": {
+    "name": "LavaUIReviewSpec",
+    "type": "all",
+    "jsSrcsDir": "specs",
+    "ios": {
+      "modulesProvider": {
+        "NativeLavaAppearance": "LavaAppearanceModule",
+        "NativeLavaReview": "LavaReviewModule",
+        "NativeLavaApp": "LavaAppModule"
+      },
+      "componentProvider": {
+        "LavaDecoration": "LavaDecorationView",
+        "LavaTextField": "LavaTextFieldView",
+        "LavaChoice": "LavaChoiceView",
+        "LavaSlider": "LavaSliderView",
+        "LavaContextMenu": "LavaContextMenuView",
+        "LavaSwitch": "LavaSwitchView",
+        "LavaNativePage": "LavaNativePageView"
+      }
+    }
+  }
+}

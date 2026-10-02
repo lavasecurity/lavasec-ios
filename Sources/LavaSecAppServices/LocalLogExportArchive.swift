@@ -119,9 +119,9 @@ public struct LocalLogExportArchive: Equatable, Sendable {
     /// Builds a stored ZIP archive from current diagnostics, activity, progress, and metadata.
     /// Debug-log and Domain History entries are archived as supplied; callers choose any required
     /// retention filtering first. `domainHistory` is drained one bounded page at a time so a large
-    /// retained history never becomes resident here; it defaults to the diagnostics ring for source
-    /// compatibility, while the app supplies its full SQLite-backed retained history as a streaming
-    /// source. Runs no main-actor work, so callers build the archive off the main thread.
+    /// retained history never becomes resident here. A nil source omits the domain-history file;
+    /// callers supply a source only after explicit export consent. Runs no main-actor work,
+    /// so callers build the archive off the main thread.
     public static func make(
         diagnostics: DiagnosticsStore,
         domainHistory: DomainHistoryExportSource? = nil,
@@ -136,7 +136,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
         let timestamp = ExportTimestamp(generatedAt: generatedAt, calendar: calendar)
         let files = makeFiles(
             diagnostics: diagnostics,
-            domainHistory: domainHistory ?? .events(diagnostics.recentEvents),
+            domainHistory: domainHistory,
             networkActivityLog: networkActivityLog,
             lavaGuardProgress: lavaGuardProgress,
             lavaGuardUnlocks: lavaGuardUnlocks,
@@ -155,7 +155,7 @@ public struct LocalLogExportArchive: Equatable, Sendable {
 
     private static func makeFiles(
         diagnostics: DiagnosticsStore,
-        domainHistory: DomainHistoryExportSource,
+        domainHistory: DomainHistoryExportSource?,
         networkActivityLog: NetworkActivityLog,
         lavaGuardProgress: LavaGuardProgress,
         lavaGuardUnlocks: LavaGuardAchievementLedger,
@@ -172,10 +172,6 @@ public struct LocalLogExportArchive: Equatable, Sendable {
                 filteringCountsCSV(diagnostics: diagnostics, generatedAt: generatedAt, calendar: calendar)
             ),
             (
-                "domain-history-\(timestamp.filename).csv",
-                domainHistoryCSV(domainHistory)
-            ),
-            (
                 "network-activity-\(timestamp.filename).csv",
                 networkActivityCSV(networkActivityLog)
             ),
@@ -189,10 +185,14 @@ public struct LocalLogExportArchive: Equatable, Sendable {
             )
         ]
 
+        if let domainHistory {
+            files.append(("domain-history-\(timestamp.filename).csv", domainHistoryCSV(domainHistory)))
+        }
+
         // The device debug log (the granular tunnel/VPN trace — device-dns-captured,
         // self-reconnect-suppressed, resolver outcomes) previously shipped only in
         // the Feedback report (→ Supabase). Including the same entries here makes
-        // the local export a true superset, so the on-device VPN-recovery story can
+        // the on-device VPN-recovery story available in the local export, so it can
         // be self-diagnosed without backend access. The app supplies parser output
         // whose allowlisted detail keys omit queried domains; this archive builder
         // deliberately preserves whatever entries its caller supplies.

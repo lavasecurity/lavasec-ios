@@ -1,3 +1,8 @@
+// The app runs through the RN workspace; the base project is a target manifest.
+#if !LAVA_REACT_NATIVE
+#error("Build ReactNative/native-app/LavaSecRN.xcworkspace after running prepare-full-app.sh.")
+#endif
+
 import SwiftUI
 import LavaSecKit
 import StoreKit
@@ -6,24 +11,12 @@ import UIKit
 enum LavaRootTab: Hashable {
     case guardPanel
     case settings
+}
 
-    var securityPolicy: SecurityAccessPolicy {
-        switch self {
-        case .guardPanel:
-            return .readOnly
-        case .settings:
-            return .requires(.appSettings)
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .guardPanel:
-            return "Guard"
-        case .settings:
-            return "Settings"
-        }
-    }
+enum GuardDestination: Hashable {
+    case explore
+    case filters
+    case activity
 }
 
 struct RootView: View {
@@ -44,33 +37,17 @@ struct RootView: View {
     @State private var selectedRootTab: LavaRootTab = .guardPanel
     @State private var settingsPath = [SettingsRoute]()
     @State private var guardNavigationPath = [GuardDestination]()
-    @State private var rootTabScrollToTopRequests = [LavaRootTab: Int]()
     @State private var importDeepLinkPresentation: ImportDeepLinkPresentation?
+    /// Deliberately a bare Bool, not the payload. The configuration that triggered
+    /// this notice is discarded at the guard, so there is nothing here to replay.
+    @State private var isShowingFinishSetupBeforeImportNotice = false
 
     #if DEBUG
     private static let debugRageShakeLaunchArgument = "-lava-trigger-rage-shake"
     #endif
 
     var body: some View {
-        TabView(selection: guardedRootTabSelection) {
-            GuardView(
-                navigationPath: $guardNavigationPath,
-                scrollToTopTrigger: scrollToTopTrigger(for: .guardPanel)
-            )
-                .tabItem {
-                    // Fill on select (outline when not) so the active tab reads without relying on
-                    // tint — a Differentiate Without Color cue. VoiceOver selection is already
-                    // conveyed by the native tab bar.
-                    Label("Guard", systemImage: LavaIconRole.guardShield.tabBarSymbolName(isSelected: selectedRootTab == .guardPanel))
-                }
-                .tag(LavaRootTab.guardPanel)
-
-            SettingsView(path: $settingsPath, scrollToTopTrigger: scrollToTopTrigger(for: .settings))
-                .tabItem {
-                    Label("Settings", systemImage: LavaIconRole.settings.tabBarSymbolName(isSelected: selectedRootTab == .settings))
-                }
-                .tag(LavaRootTab.settings)
-        }
+        rootPresentation
         .tint(LavaStyle.safeGreen)
         .background(LavaStyle.groupedBackground)
         .preferredColorScheme(customization.preferredColorScheme)
@@ -87,6 +64,15 @@ struct RootView: View {
         // pinned: ReviewPromptWiringSourceTests.testRootViewForwardsTheSignalToNativeRequestReview
         .onChange(of: viewModel.pendingReviewRequest) { _, _ in
             presentReviewRequestIfActive()
+        }
+        .accessibilityHidden(!hasSeenLavaOnboarding)
+        .allowsHitTesting(hasSeenLavaOnboarding)
+        .overlay {
+            if !hasSeenLavaOnboarding {
+                LavaOnboardingView(hasSeenOnboarding: $hasSeenLavaOnboarding,
+                    installDNSProfile: { try await LavaAppBridge.shared.updateManagedDNSPatch(create: true) },
+                    supportsDNSProfile: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27)
+            }
         }
         .overlay {
             RageShakeDetector {
@@ -109,10 +95,7 @@ struct RootView: View {
                 SecurityPrivacyMaskOverlay()
             }
         }
-        .fullScreenCover(item: $security.passcodeAuthenticationRequest) { request in
-            SecurityPasscodeAuthenticationView(request: request)
-                .environmentObject(security)
-        }
+
         .lavaConfirmationAlert { host in
             host.alert(
                 "Send feedback?",
@@ -134,79 +117,16 @@ struct RootView: View {
                 Button("Send feedback") { reports.confirmRageShakeFeedback() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Looks like you shook your phone. Want to tell us what went wrong?")
+                Text("Looks like you shook your device. Want to tell us what went wrong?")
             }
         }
-        // The bug-report sheet stays MOUNTED across an App Unlock lock so an
-        // in-progress feedback draft (BugReportSettingsView's local @State)
-        // survives lock->unlock. It presents above the app-unlock overlay, so
-        // `BugReportSettingsView` paints its OWN opaque, hit-blocking mask while
-        // App Unlock is pending (and while the app-switcher privacy mask is up) —
-        // see `isAppUnlockMaskVisible` there. Unlike the importer, withholding
-        // (tearing down) here would lose an accumulating draft, so we mask in
-        // place instead of withholding.
-        .sheet(item: $reports.rageShakeDestination) { destination in
-            switch destination {
-#if DEBUG || LAVA_QA_TOOLS
-            case .phoneQA:
-                PhoneQASheetView(
-                    showWelcome: {
-                        reports.dismissRageShakeDestination()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            hasSeenLavaOnboarding = false
-                        }
-                    },
-                    showUserBugReport: {
-                        reports.dismissRageShakeDestination()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            reports.rageShakeDestination = .bugReport
-                        }
-                    }
-                )
-                    .onAppear {
-                        debugLogRageShakeSheet("phoneQA")
-                    }
-#endif
-            case .bugReport:
-                BugReportSheetView()
-                    .onAppear {
-                        debugLogRageShakeSheet("bugReport")
-                    }
-            }
-        }
-        .sheet(item: importDeepLinkSheetItem) { presentation in
-            // The importer opened from a deeplink runs the *same* protected apply
-            // gate as the in-app Filters entry point — fresh authentication on the
-            // filter-editing surface — so a link can surface the importer but can
-            // never apply a filter change without explicit confirm + auth. The
-            // binding additionally withholds the sheet while App Unlock is
-            // pending (see `importDeepLinkSheetItem`).
-            ImportFiltersFlow(
-                startMode: presentation.startMode,
-                authorizeImport: {
-                    await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filter")
-                }
-            )
-            .environmentObject(viewModel)
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { !hasSeenLavaOnboarding },
-                set: { isPresented in
-                    if !isPresented {
-                        hasSeenLavaOnboarding = true
-                    }
-                }
-            )
+        .alert(
+            "Finish setup, then scan again".lavaLocalized,
+            isPresented: $isShowingFinishSetupBeforeImportNotice
         ) {
-            LavaOnboardingView(
-                hasSeenOnboarding: $hasSeenLavaOnboarding,
-                onRequestOpenSettings: {
-                    // Route through the auth-gated opener so passcode-protected
-                    // Settings still require authentication.
-                    openSettingsRoot()
-                }
-            )
+            Button("OK".lavaLocalized, role: .cancel) {}
+        } message: {
+            Text("Lava protects this device first. Once setup is done, scan the same QR code again to review the shared filter.".lavaLocalized)
         }
         .onAppear {
             handleDebugLaunchRageShakeIfNeeded()
@@ -267,12 +187,17 @@ struct RootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .lavaOpenGuardFromNotification)) { _ in
-            hasSeenLavaOnboarding = true
-            reports.dismissRageShakeDestination()
+            // Navigates only. Tapping a notification must not complete setup, for the
+            // same reason a deeplink must not: setup is what gets protection running,
+            // and nothing outside it may mark it done as a side effect. If onboarding
+            // is still up, the overlay stays up and this navigation lands behind it.
+            // pinned: SharedFilterImportSourceTests.testNoExternalEntryPointCompletesOnboarding
+            dismissFeedbackForNavigation()
             settingsPath = []
             guardNavigationPath = []
             security.resetViewAuthenticationTurn()
             selectedRootTab = .guardPanel
+            forwardReactNavigation()
         }
         .onReceive(NotificationCenter.default.publisher(for: .lavaOpenDeepLinkURL)) { notification in
             guard let url = notification.object as? URL else {
@@ -285,40 +210,78 @@ struct RootView: View {
         }
     }
 
-    private var guardedRootTabSelection: Binding<LavaRootTab> {
-        Binding {
-            selectedRootTab
-        } set: { nextTab in
-            guard nextTab != selectedRootTab else {
-                requestRootTabScrollToTop(nextTab)
-                return
+    @ViewBuilder
+    private var rootPresentation: some View {
+        // UIKit owns keyboard avoidance inside the embedded app. SwiftUI must
+        // not shrink the React Native tab controller when a descendant field focuses.
+        LavaAppHost().ignoresSafeArea(.all, edges: .bottom)
+            .statusBarHidden(false)
+            .onAppear { forwardReactExternalFlows() }
+            .onReceive(LavaAppBridge.shared.$flow) { flow in
+                guard flow == nil else { return }
+                // @Published emits before assignment. Defer until the current
+                // dismissal also clears its original native request binding.
+                Task { @MainActor in forwardReactExternalFlows() }
             }
+            .onChange(of: importDeepLinkPresentation?.id) { _, _ in forwardReactImport() }
+            .onChange(of: security.isAppUnlockBlockingUI) { _, _ in forwardReactImport() }
+            .onChange(of: security.isAppUnlockPrivacyMaskVisible) { _, _ in forwardReactImport() }
+            .onChange(of: reports.rageShakeDestination?.id) { _, _ in forwardReactRageShake() }
+    }
 
-            security.resetViewAuthenticationTurn()
-
-            // Switch synchronously when the tab needs no auth gate (Guard is
-            // .readOnly). Routing every switch through an async Task makes the
-            // TabView selection lag the tap by a frame — the tapped tab flashes
-            // in, snaps back to the old tab, then settles — which is the
-            // Upgrade↔Guard flicker. Only auth-gated tabs (Settings) need the
-            // async authentication round-trip.
-            if nextTab.securityPolicy.requiredSurface == nil {
-                selectedRootTab = nextTab
-                return
-            }
-
-            Task {
-                await selectRootTab(nextTab)
-            }
+    private func forwardReactExternalFlows() {
+        forwardReactImport()
+        forwardReactRageShake()
+    }
+    private func forwardReactImport() {
+        guard let presentation = importDeepLinkSheetItem.wrappedValue else { return }
+        guard LavaAppBridge.shared.flow == nil else { return }
+        LavaAppBridge.shared.flow = LavaAppNativeFlow(name: "deepLinkImport", externalRequestID: presentation.id, importStartMode: presentation.startMode, importCompletion: presentation.completion, onDismiss: {
+            if importDeepLinkPresentation?.id == presentation.id { importDeepLinkPresentation = nil }
+        })
+    }
+    private func forwardReactRageShake() {
+        guard let destination = reports.rageShakeDestination else { return }
+        guard LavaAppBridge.shared.flow == nil else { return }
+        let dismiss = { if reports.rageShakeDestination?.id == destination.id { reports.dismissRageShakeDestination() } }
+        switch destination {
+        case .bugReport: LavaAppBridge.shared.flow = LavaAppNativeFlow(name: "feedback", onDismiss: dismiss)
+        #if DEBUG || LAVA_QA_TOOLS
+        case .phoneQA: LavaAppBridge.shared.flow = LavaAppNativeFlow(name: "phoneQASheet", onDismiss: dismiss, showWelcome: {
+            LavaAppBridge.shared.flow = nil
+            reports.dismissRageShakeDestination()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { hasSeenLavaOnboarding = false }
+        })
+        #endif
         }
     }
 
-    private func selectRootTab(_ tab: LavaRootTab) async {
-        guard await canAccess(tab.securityPolicy, reason: "Open %@".lavaLocalizedFormat(tab.title.lavaLocalized)) else {
-            return
+    private func forwardReactNavigation() {
+        if selectedRootTab == .guardPanel {
+            let screen: String
+            switch guardNavigationPath.last { case .explore: screen = "Explore"; case .filters: screen = "Filters"; case .activity: screen = "Activity"; case nil: screen = "Guard" }
+            LavaAppBridge.shared.requestNavigation(tab: "GuardTab", screen: screen)
+        } else {
+            let screen: String
+            switch settingsPath.last {
+            case .account: screen = "Account"
+            case .upgrade: screen = "Upgrade"
+            case .customization: screen = "Customization"
+            case .dnsResolver: screen = "DNS"
+            case .privacyData: screen = "Privacy"
+            case .security: screen = "Security"
+            case .bugReport: screen = "Feedback"
+            case .legalNotices: screen = "Legal"
+            case .versionNerdStats: screen = "Stats"
+            case .networkActivity: screen = "Network"
+            #if DEBUG || LAVA_QA_TOOLS
+            case .phoneQA: screen = "phoneQA"
+            case .vpnChaining: screen = "vpnChaining"
+            #endif
+            case nil: screen = "Settings"
+            }
+            LavaAppBridge.shared.requestNavigation(tab: "SettingsTab", screen: screen)
         }
-
-        selectedRootTab = tab
     }
 
     private func openSettingsRoute(_ route: SettingsRoute) {
@@ -333,6 +296,7 @@ struct RootView: View {
 
             settingsPath = [route]
             selectedRootTab = .settings
+            forwardReactNavigation()
         }
     }
 
@@ -346,12 +310,26 @@ struct RootView: View {
 
             settingsPath = []
             selectedRootTab = .settings
+            forwardReactNavigation()
+        }
+    }
+
+    private func dismissFeedbackForNavigation() {
+        reports.dismissRageShakeDestination()
+        // Native Feedback/QA sheets may also originate outside the rage-shake binding.
+        // Pushed Settings pages are reset by their navigation stack, not this sheet path.
+        if let name = LavaAppBridge.shared.flow?.name, name == "feedback" || name == "phoneQASheet" {
+            LavaAppBridge.shared.flow = nil
         }
     }
 
     private func handleDeepLink(_ deepLink: LavaAppDeepLink) {
-        hasSeenLavaOnboarding = true
-        reports.dismissRageShakeDestination()
+        // No deeplink may complete onboarding. Setup is what gets protection running
+        // on the device in the first place, and it is the one flow a link must never
+        // be able to skip, choose for the user, or mark done as a side effect —
+        // including the non-import routes, which used to do exactly that from here.
+        // pinned: SharedFilterImportSourceTests.testNoDeepLinkCanCompleteOnboarding
+        dismissFeedbackForNavigation()
         security.resetViewAuthenticationTurn()
 
         switch deepLink {
@@ -359,37 +337,30 @@ struct RootView: View {
             settingsPath = []
             guardNavigationPath = []
             selectedRootTab = .guardPanel
+            forwardReactNavigation()
+        case .explore:
+            settingsPath = []
+            guardNavigationPath = [.explore]
+            selectedRootTab = .guardPanel
+            forwardReactNavigation()
         case .filters:
             settingsPath = []
             guardNavigationPath = [.filters]
             selectedRootTab = .guardPanel
+            forwardReactNavigation()
         case .activity:
             settingsPath = []
             guardNavigationPath = [.activity]
             selectedRootTab = .guardPanel
+            forwardReactNavigation()
         case .settings(let settingsRoute):
             guard let settingsRoute else {
                 openSettingsRoot()
                 return
             }
 
-            // Feedback presents as a bottom sheet (the same surface as the in-app
-            // Settings row and the rage-shake gesture), not a pushed settings page.
-            // The bug-report sheet previews diagnostic context and can submit a
-            // report, so it must never reveal content above the app-unlock overlay:
-            // BugReportSettingsView masks its own content (opaque, hit-blocking)
-            // while App Unlock is pending, so a `lavasecurity://settings/feedback`
-            // link arriving on a locked device opens the sheet masked. Kick the
-            // unlock prompt here so the mask drops once the device is unlocked.
-            if case .feedback = settingsRoute {
-                settingsPath = []
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    reports.rageShakeDestination = .bugReport
-                }
-                Task { await security.authenticateAppUnlockIfNeeded() }
-                return
-            }
-
+            // Settings links use the same page routes as Settings rows. Feedback keeps
+            // its own App Unlock mask and guarded Back; rage shake remains a separate sheet.
             guard let route = SettingsRoute(settingsRoute) else {
                 return
             }
@@ -403,9 +374,19 @@ struct RootView: View {
             // holds the sheet back until App Unlock is satisfied, so a locked
             // device can't reach the importer above the lock overlay; kick the
             // unlock prompt here in case the link arrived while locked.
+            // A payload-bearing link that arrives before setup is finished is
+            // explained and DISCARDED — never stashed to replay afterwards. Holding
+            // it would mean an untrusted configuration surviving across onboarding
+            // and surfacing at a moment the user didn't ask for it. The same card
+            // can simply be scanned again once setup is done.
+            if case .sharedConfiguration = entry, !hasSeenLavaOnboarding {
+                isShowingFinishSetupBeforeImportNotice = true
+                return
+            }
             settingsPath = []
             guardNavigationPath = []
             selectedRootTab = .guardPanel
+            forwardReactNavigation()
             importDeepLinkPresentation = ImportDeepLinkPresentation(
                 startMode: Self.importStartMode(for: entry)
             )
@@ -427,6 +408,7 @@ struct RootView: View {
         Binding {
             (security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible) ? nil : importDeepLinkPresentation
         } set: { newValue in
+            guard !(security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible) else { return }
             if newValue == nil {
                 importDeepLinkPresentation = nil
             }
@@ -441,28 +423,8 @@ struct RootView: View {
             return .scanCode
         case .enterCode:
             return .enterCode
-        }
-    }
-
-    private func performLiveActivityActionRequest(_ request: LavaLiveActivityActionRequest) {
-        Task {
-            security.resetViewAuthenticationTurn()
-
-            if request == .resume || request == .reconnect {
-                viewModel.performLiveActivityActionRequest(request)
-                viewModel.reconcileLiveActivity()
-                return
-            }
-
-            guard await security.requireFreshAuthentication(
-                for: .protectionPause,
-                reason: request.authenticationReason
-            ) else {
-                return
-            }
-
-            viewModel.performLiveActivityActionRequest(request)
-            viewModel.reconcileLiveActivity()
+        case .sharedConfiguration(let configuration):
+            return .review(configuration)
         }
     }
 
@@ -472,14 +434,6 @@ struct RootView: View {
         }
 
         return await security.requireAuthentication(for: surface, reason: reason)
-    }
-
-    private func requestRootTabScrollToTop(_ tab: LavaRootTab) {
-        rootTabScrollToTopRequests[tab, default: 0] += 1
-    }
-
-    private func scrollToTopTrigger(for tab: LavaRootTab) -> Int {
-        rootTabScrollToTopRequests[tab, default: 0]
     }
 
     /// Issues the native review prompt when one is armed AND the scene is active, then records the
@@ -516,18 +470,10 @@ struct RootView: View {
         #endif
     }
 
-    private func debugLogRageShakeSheet(_ destination: String) {
-        #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains(Self.debugRageShakeLaunchArgument) else {
-            return
-        }
 
-        print("LAVA_RAGE_SHAKE_SHEET_VISIBLE \(destination)")
-        #endif
-    }
 }
 
-private extension View {
+extension View {
     /// Forces an app-wide Dynamic Type size when the Customization → Text Size control is set to a
     /// fixed size; passes through untouched (letting the system's Larger Text setting flow) when
     /// "Match System" is on and `size` is nil.
@@ -549,9 +495,11 @@ private extension View {
 
 /// Identifies one deeplink-driven presentation of the importer. A fresh `id`
 /// per request lets the same entry re-present the sheet if tapped again.
+@MainActor
 private struct ImportDeepLinkPresentation: Identifiable {
     let id = UUID()
     let startMode: ImportFiltersStartMode
+    let completion = ImportFiltersCompletion()
 }
 
 private extension SettingsRoute {
@@ -561,6 +509,8 @@ private extension SettingsRoute {
             self = .account
         case .upgrade:
             self = .upgrade
+        case .customization:
+            self = .customization
         case .dnsResolver:
             self = .dnsResolver
         case .privacyData:
@@ -573,13 +523,19 @@ private extension SettingsRoute {
             self = .legalNotices
         case .nerdStats:
             self = .versionNerdStats
+        case .networkActivity:
+            self = .networkActivity
         }
     }
 }
 
-private struct BugReportSheetView: View {
+struct BugReportSheetView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var isReportDirty = false
+    @Binding private var isReportDirty: Bool
+
+    init(isReportDirty: Binding<Bool> = .constant(false)) {
+        self._isReportDirty = isReportDirty
+    }
 
     var body: some View {
         NavigationStack {
@@ -601,4 +557,5 @@ private struct BugReportSheetView: View {
     RootView()
         .environmentObject(viewModel)
         .environmentObject(viewModel.catalog)
+        .environmentObject(viewModel.filterDrafts)
 }

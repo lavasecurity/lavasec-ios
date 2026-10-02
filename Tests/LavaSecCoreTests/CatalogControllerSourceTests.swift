@@ -1,8 +1,6 @@
 import XCTest
 
-/// App-target source contracts for the catalog single-flight peel. The SPM test target cannot
-/// instantiate `CatalogController`, so these pins stay narrow: task ownership and wiring that the
-/// compiler cannot observe, while catalog presentation behavior remains in executable value tests.
+/// Pins only the app/package bridge; executable coordinator tests cover task lifetime and reentrancy.
 final class CatalogControllerSourceTests: XCTestCase {
     func testBridgeExposesOneWholeTransactionAndControllerOwnsOnlySyncCoordination() throws {
         let source = try readSource(.catalogController)
@@ -31,12 +29,13 @@ final class CatalogControllerSourceTests: XCTestCase {
             controller.contains("unowned"),
             "A controller retained independently by SwiftUI must not trap after its hub deallocates."
         )
-        XCTAssertTrue(controller.contains("private var syncTask: Task<CatalogSyncTransactionResult, Never>?"))
-        XCTAssertTrue(controller.contains("private var activeOperationID: LatencyOperationID?"))
+        XCTAssertTrue(controller.contains("private lazy var coordinator = CatalogSyncCoordinator("))
+        XCTAssertFalse(controller.contains("private var syncTask:"))
+        XCTAssertFalse(controller.contains("private var activeOperationID:"))
         XCTAssertTrue(
             controller.contains("@Published private(set) var syncState: CatalogPresentationState.Sync"))
         XCTAssertTrue(controller.contains("var isSyncInFlight: Bool"))
-        XCTAssertTrue(controller.contains("syncTask != nil"))
+        XCTAssertTrue(controller.contains("coordinator.isSyncInFlight"))
         XCTAssertFalse(controller.contains("AppViewModel"))
 
         let hubTransactionHelpers = [
@@ -48,7 +47,7 @@ final class CatalogControllerSourceTests: XCTestCase {
             "notifyTunnelSnapshotUpdated",
             "loadCachedCatalogAfterSyncFailure",
             "restoreProtectionIfNeeded",
-            "didSnapshotIdentityChangeAfterSync",
+            "snapshotNeedsPublicationAfterSync",
         ]
         for helper in hubTransactionHelpers {
             XCTAssertFalse(
@@ -58,85 +57,18 @@ final class CatalogControllerSourceTests: XCTestCase {
         }
     }
 
-    func testSyncCoalescesFollowersButOnlyCreatorForwardsCancellation() throws {
-        let source = try readSource(.catalogController)
-        let sync = try sourceBlock(
-            in: source,
-            startingAt: "func sync(",
-            endingBefore: "func awaitCompletion() async"
-        )
-        let follower = try sourceBlock(
-            in: sync,
-            startingAt: "if let syncTask {",
-            endingBefore: "let operationID = LatencyOperationID.make()"
-        )
-        let creator = try sourceBlock(
-            in: sync,
-            startingAt: "let operationID = LatencyOperationID.make()"
-        )
-
-        XCTAssertTrue(follower.contains("_ = await syncTask.value"))
-        XCTAssertTrue(follower.contains("return"), "A follower must not start a second transaction.")
-        XCTAssertFalse(
-            follower.contains("withTaskCancellationHandler"),
-            "Cancelling a coalesced follower must not cancel another caller's shared sync."
-        )
-
-        XCTAssertTrue(creator.contains("let task = Task { @MainActor"))
-        XCTAssertTrue(creator.contains("[weak self, weak hub = self.hub]"))
-        XCTAssertTrue(creator.contains("guard self != nil, let hub else"))
-        XCTAssertTrue(creator.contains("hub.performCatalogSyncTransaction("))
-        XCTAssertTrue(creator.contains("await withTaskCancellationHandler"))
-        XCTAssertTrue(creator.contains("task.cancel()"))
-        XCTAssertTrue(creator.contains("complete(operationID: operationID, result: result)"))
-
-        let taskInstall = try XCTUnwrap(creator.range(of: "syncTask = task")?.lowerBound)
-        let operationInstall = try XCTUnwrap(creator.range(of: "activeOperationID = operationID")?.lowerBound)
-        let stateInstall = try XCTUnwrap(creator.range(of: "syncState = .syncing")?.lowerBound)
-        let firstAwait = try XCTUnwrap(creator.range(of: "await withTaskCancellationHandler")?.lowerBound)
-        XCTAssertLessThan(
-            taskInstall, firstAwait, "The task must be visible synchronously before suspension.")
-        XCTAssertLessThan(
-            operationInstall, firstAwait, "The operation fence must be installed before suspension.")
-        XCTAssertLessThan(stateInstall, firstAwait, "In-flight presentation must publish before suspension.")
-    }
-
-    func testAwaitCompletionJoinsTheOwnedTaskWithoutPolling() throws {
-        let source = try readSource(.catalogController)
-        let awaitCompletion = try sourceBlock(
-            in: source,
-            startingAt: "func awaitCompletion() async",
-            endingBefore: "func complete("
-        )
-
-        XCTAssertTrue(awaitCompletion.contains("guard let syncTask else"))
-        XCTAssertTrue(awaitCompletion.contains("await syncTask.value"))
-        for pollingAnchor in ["Task.sleep", "Task.yield", "while ", "repeat {", "Timer", "DispatchQueue"] {
-            XCTAssertFalse(
-                awaitCompletion.contains(pollingAnchor),
-                "awaitCompletion must join the owned task directly, not poll with \(pollingAnchor)."
-            )
-        }
-    }
-
-    func testCompletionIsOperationIDFencedBeforeItClearsTaskAndPresentationState() throws {
-        let source = try readSource(.catalogController)
-        let completion = try sourceBlock(in: source, startingAt: "func complete(")
-
-        XCTAssertTrue(completion.contains("operationID: LatencyOperationID"))
-        XCTAssertTrue(completion.contains("result: CatalogSyncTransactionResult"))
-        XCTAssertTrue(
-            sourceContainsInOrder(
-                [
-                    "guard activeOperationID == operationID else",
-                    "syncTask = nil",
-                    "activeOperationID = nil",
-                    "syncState",
-                ], in: completion))
+    func testControllerDelegatesCoordinationAndMirrorsPublishedState() throws {
+        let source = sourceCodeOnly(try readSource(.catalogController))
+        XCTAssertTrue(source.contains("await coordinator.sync(isBackgroundRefresh: isBackgroundRefresh)"))
+        XCTAssertTrue(source.contains("await coordinator.awaitCompletion()"))
+        XCTAssertTrue(source.contains("coordinator.complete(operationID: operationID, result: result)"))
+        XCTAssertTrue(source.contains("onStateChange: { [weak self] in self?.syncState = $0 }"))
+        XCTAssertTrue(source.contains("guard let hub = self?.hub else { return .cancelled }"))
+        XCTAssertTrue(source.contains("return await hub.performCatalogSyncTransaction("))
     }
 
     func testHubOwnsTheWholeTransactionAndReleasesBeforeProtectionRestore() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let transaction = try sourceBlock(
             in: source,
             startingAt: "func performCatalogSyncTransaction(",
@@ -153,7 +85,7 @@ final class CatalogControllerSourceTests: XCTestCase {
             "notifyTunnelSnapshotUpdated",
             "loadCachedCatalogAfterSyncFailure",
             "restoreProtectionIfNeeded",
-            "didSnapshotIdentityChangeAfterSync",
+            "snapshotNeedsPublicationAfterSync",
         ] {
             XCTAssertTrue(
                 transaction.contains(retainedHelper),
@@ -198,16 +130,16 @@ final class CatalogControllerSourceTests: XCTestCase {
     }
 
     func testEveryHubLivenessReaderUsesTheControllerAPI() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let readerBlocks: [(String, String, Int, Int)] = [
-            ("func switchToFilter(id:", "private enum SwitchPublication", 1, 0),
-            ("private func prepareSwitchPublication(", "private func warmReusableSnapshotForSwitch(", 1, 0),
-            ("private func startOnboardingBlocklistSyncIfNeeded(", "func selectOnboardingBlocklist(", 1, 0),
+            ("func switchToFilter(id:", "enum SwitchPublication", 1, 0),
+            ("private func prepareSwitchPublication(", "func warmReusableSnapshotForSwitch(", 1, 0),
+            ("func startOnboardingBlocklistSyncIfNeeded(", "func selectOnboardingBlocklist(", 1, 1),
             ("func selectOnboardingBlocklist(", "private func deferralReasonForInPlaceBlocklistEdit(", 1, 0),
             ("func toggleBlocklist(", "func addCustomBlocklist(displayName:", 1, 0),
             ("func addCustomBlocklist(displayName:", "func removeCustomBlocklist(", 2, 0),
             ("private func startQAInternetBlocklistSyncIfNeeded(", "func applyAdminQAAction(", 1, 1),
-            ("private func enableProtection(", "private func disableProtection(", 1, 1),
+            ("func enableProtection(", "func disableProtection(", 1, 1),
         ]
 
         for (start, end, expectedReads, expectedAwaits) in readerBlocks {
@@ -226,7 +158,7 @@ final class CatalogControllerSourceTests: XCTestCase {
     }
 
     func testAppViewModelHasNoRawCatalogTaskOrSyncStateMirror() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let syncWrapper = try sourceBlock(
             in: source,
             startingAt: "func syncCatalog(isBackgroundRefresh: Bool = false) async",
@@ -249,53 +181,12 @@ final class CatalogControllerSourceTests: XCTestCase {
     }
 
     func testOnlyCatalogConsumersObserveControllerAndRootsInjectHubOwnedInstance() throws {
-        let filters = try [
-            readSource(.filtersView),
-            readSource(.filterMyListView),
-        ].joined(separator: "\n")
         let app = try readSource(.lavaSecApp)
-        let previews = try readSource(.developerPreviewViews)
-        let myList = try sourceBlock(
-            in: filters,
-            startingAt: "struct MyListCover: View",
-            endingBefore: "private enum BlockedDomainSheet"
-        )
-        let productionRoot = try sourceBlock(
-            in: app,
-            startingAt: "private var productionRoot: some View",
-            endingBefore: "#if DEBUG\nprivate enum LavaLiveDNSSmokeState"
-        )
-        let previewRoot = try sourceBlock(
-            in: previews,
-            startingAt: "struct WebsiteAssetCaptureRootView: View",
-            endingBefore: "struct GentleProtectionDiagram: View"
-        )
-
-        XCTAssertTrue(myList.contains("@EnvironmentObject private var catalog: CatalogController"))
-        XCTAssertTrue(myList.contains(".disabled(catalog.isSyncInFlight)"))
-        XCTAssertEqual(
-            sourceOccurrenceCount(
-                of: "@EnvironmentObject private var catalog: CatalogController",
-                in: filters
-            ),
-            2
-        )
-        XCTAssertEqual(sourceOccurrenceCount(of: "await catalog.sync()", in: filters), 4)
-        XCTAssertEqual(sourceOccurrenceCount(of: "catalog.isSyncInFlight", in: filters), 1)
-
-        XCTAssertEqual(
-            sourceOccurrenceCount(of: ".environmentObject(viewModel.catalog)", in: productionRoot), 1)
         XCTAssertEqual(sourceOccurrenceCount(of: ".environmentObject(viewModel.catalog)", in: app), 1)
         XCTAssertTrue(app.contains("await viewModel.syncCatalog(isBackgroundRefresh: true)"))
         XCTAssertFalse(app.contains("CatalogController(hub:"))
-
-        XCTAssertEqual(sourceOccurrenceCount(of: ".environmentObject(viewModel.catalog)", in: previewRoot), 1)
-        XCTAssertEqual(sourceOccurrenceCount(of: ".environmentObject(viewModel.catalog)", in: previews), 1)
-        XCTAssertFalse(previews.contains("CatalogController(hub:"))
-
-        for unrelated in [SourceFile.guardView, .settingsView] {
-            XCTAssertFalse(try readSource(unrelated).contains("CatalogController"))
-        }
-        XCTAssertFalse(try readDiagnosticsSourceAggregate().contains("CatalogController"))
+        let bridge = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(bridge.contains("await model.syncCatalog()"))
+        XCTAssertFalse(bridge.contains("CatalogController(hub:"))
     }
 }

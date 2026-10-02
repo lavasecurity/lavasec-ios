@@ -1,55 +1,81 @@
 import Foundation
 import LavaSecKit
 
-// In-flight DNS query coalescing, extracted from PacketTunnelProvider: the
-// first waiter for a cache key starts exactly one upstream resolution and
-// every duplicate joins it, so a burst of identical questions costs one wire
-// exchange. Generic over the waiter payload — the tunnel keeps its own
-// per-request state (packet, protocol, TTL caps) out of core. NOT internally
-// synchronized — access is confined to the caller's DNS state queue, matching
-// the dictionary this replaces.
-
-/// Queue-confined registry that lets duplicate cache keys share one upstream resolution without losing waiters.
+/// Queue-confined, bounded waiter registry for duplicate DNS questions.
+/// Resolution identities keep a late answer from draining a new request with the same cache key.
 public final class InFlightDNSQueryCoalescer<Waiter> {
-    /// Tells the caller whether enqueueing transfers responsibility for starting the upstream request.
+    /// Whether the caller owns a new resolution, joined one, or must reject this waiter.
     public enum EnqueueOutcome: Equatable {
-        /// First waiter for this key — the caller must start the resolution.
-        case startedResolution
-        /// A resolution is already in flight — the waiter rides along.
+        /// Start one resolution and retain this identity through completion.
+        case startedResolution(UInt64)
+        /// A resolution already owns the question; this waiter shares its remaining lifetime.
         case joinedExistingResolution
+        /// No waiter or key was retained because a count or byte budget was exhausted.
+        case rejected
     }
 
-    private var waitersByKey: [DNSCacheKey: [Waiter]] = [:]
+    private struct Entry {
+        let id: UInt64
+        var waiters: [Waiter]
+        var retainedBytes: Int
+    }
+    private let maximumWaiterCount: Int
+    private let maximumWaitersPerKey: Int
+    private let maximumRetainedBytes: Int
+    private var waitersByKey: [DNSCacheKey: Entry] = [:]
+    private var nextID: UInt64 = 0
+    /// Total retained clients across all questions.
+    public private(set) var waiterCount = 0
+    /// Declared payload bytes retained across all clients.
+    public private(set) var retainedByteCount = 0
 
-    /// Creates an empty registry with no synchronization; callers own queue confinement.
-    public init() {}
-
-    package var inFlightKeyCount: Int {
-        waitersByKey.count
+    /// Sets independent total, per-question, and payload-byte ceilings; callers own synchronization.
+    public init(
+        maximumWaiterCount: Int = 256, maximumWaitersPerKey: Int = 16,
+        maximumRetainedBytes: Int = 1024 * 1024
+    ) {
+        self.maximumWaiterCount = max(0, maximumWaiterCount)
+        self.maximumWaitersPerKey = max(0, maximumWaitersPerKey)
+        self.maximumRetainedBytes = max(0, maximumRetainedBytes)
     }
 
-    /// Retains a waiter in arrival order and identifies whether this key needs a new upstream resolution.
-    public func enqueue(_ waiter: Waiter, for key: DNSCacheKey) -> EnqueueOutcome {
+    package var inFlightKeyCount: Int { waitersByKey.count }
+
+    /// Retains an eligible waiter in arrival order; rejected clients must be settled by the caller.
+    public func enqueue(_ waiter: Waiter, for key: DNSCacheKey, retainedBytes: Int) -> EnqueueOutcome {
+        let cost = max(0, retainedBytes)
+        guard waiterCount < maximumWaiterCount,
+              cost <= maximumRetainedBytes - retainedByteCount,
+              (waitersByKey[key]?.waiters.count ?? 0) < maximumWaitersPerKey
+        else { return .rejected }
+        waiterCount += 1
+        retainedByteCount += cost
         if waitersByKey[key] != nil {
-            waitersByKey[key]?.append(waiter)
+            waitersByKey[key]?.waiters.append(waiter)
+            waitersByKey[key]?.retainedBytes += cost
             return .joinedExistingResolution
         }
-
-        waitersByKey[key] = [waiter]
-        return .startedResolution
+        nextID &+= 1
+        waitersByKey[key] = Entry(id: nextID, waiters: [waiter], retainedBytes: cost)
+        return .startedResolution(nextID)
     }
 
-    /// Removes and returns the waiters for one completed resolution — exactly
-    /// one drain per started key, in enqueue order.
-    public func drain(_ key: DNSCacheKey) -> [Waiter] {
-        waitersByKey.removeValue(forKey: key) ?? []
+    /// Drains only the resolution that owns this key; stale or duplicate completions do nothing.
+    public func drain(_ key: DNSCacheKey, resolutionID: UInt64) -> [Waiter] {
+        guard let entry = waitersByKey[key], entry.id == resolutionID else { return [] }
+        waitersByKey.removeValue(forKey: key)
+        waiterCount -= entry.waiters.count
+        retainedByteCount -= entry.retainedBytes
+        return entry.waiters
     }
 
-    /// Removes and returns ALL waiters (runtime resets answer them with
-    /// SERVFAIL so nothing hangs across a resolver identity change).
+    /// Returns every waiter on reset. The caller preserves current SERVFAIL/retired-lifecycle rules.
+    /// Resolution identities are never reset, so late completions cannot acquire successor waiters.
     public func drainAll() -> [Waiter] {
-        let waiters = Array(waitersByKey.values.joined())
-        waitersByKey = [:]
+        let waiters = waitersByKey.values.flatMap(\.waiters)
+        waitersByKey.removeAll(keepingCapacity: true)
+        waiterCount = 0
+        retainedByteCount = 0
         return waiters
     }
 }

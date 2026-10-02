@@ -51,8 +51,11 @@ public enum WarmFilterSnapshotLoader {
         containerURL: URL,
         cacheURL: URL?,
         freshnessMaxAge: TimeInterval,
-        backgroundWarmIndex: BackgroundWarmIndex
+        backgroundWarmIndex: BackgroundWarmIndex,
+        onCompleted: (@Sendable () -> Void)? = nil
     ) async -> ReusablePreparedFilterSnapshot? {
+        // Complete the whole lookup once, including an early library-token success.
+        defer { onCompleted?() }
         var candidateTokens: [String] = []
         if let libraryToken = target.lastCompiledToken { candidateTokens.append(libraryToken) }
         if let sidecarToken = backgroundWarmIndex.token(forFilterID: target.id),
@@ -60,7 +63,7 @@ public enum WarmFilterSnapshotLoader {
             candidateTokens.append(sidecarToken)
         }
         for token in candidateTokens {
-            if let reusable = await loadReusable(
+            if let reusable = await loadReusableUnwrapped(
                 token: token,
                 configuration: configuration,
                 containerURL: containerURL,
@@ -79,6 +82,22 @@ public enum WarmFilterSnapshotLoader {
     /// the tier rule-limit gate. The decoded snapshot's content-addressed token must equal the
     /// directory name, so the subsequent publish flips the pointer to THIS validated dir.
     public static func loadReusable(
+        token: String,
+        configuration: AppConfiguration,
+        containerURL: URL,
+        cacheURL: URL?,
+        freshnessMaxAge: TimeInterval
+    ) async -> ReusablePreparedFilterSnapshot? {
+        await loadReusableUnwrapped(
+            token: token,
+            configuration: configuration,
+            containerURL: containerURL,
+            cacheURL: cacheURL,
+            freshnessMaxAge: freshnessMaxAge
+        )
+    }
+
+    private static func loadReusableUnwrapped(
         token: String,
         configuration: AppConfiguration,
         containerURL: URL,
@@ -184,11 +203,16 @@ public enum WarmFilterSnapshotLoader {
         _ snapshot: PreparedFilterSnapshot,
         configuration: AppConfiguration,
         cacheURL: URL?,
-        freshnessMaxAge: TimeInterval
+        freshnessMaxAge: TimeInterval,
+        onCompleted: (@Sendable () -> Void)? = nil
     ) async -> Bool {
-        guard let cacheURL else { return false }
+        guard let cacheURL else {
+            onCompleted?()
+            return false
+        }
         let maxAge = freshnessMaxAge
         return await Task.detached(priority: .userInitiated) {
+            defer { onCompleted?() }
             guard BlocklistCatalogSynchronizer.hasFreshCachedCatalog(in: cacheURL, maxAge: maxAge),
                   let cachedCatalog = try? BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheURL).loadCachedCatalogMetadata()
             else {

@@ -192,6 +192,11 @@ enum ResolverHealthEffect: Equatable, Sendable {
     // Delivery is separate so health persistence/notification ordering stays exact.
     case requestResolverRuntimeReset(ResolverRuntimeResetRequest)
     case deliverPendingResolverFailures(reason: String)
+    // Clears ONLY the resolver backoff penalty box (no query drain, no runtime-generation bump, no
+    // cache wipe). Emitted for a SATISFIED chained roam whose tunnelled carry survives, in place of
+    // the full reset: a resolver backed off on the degrading old link then gets an immediate fresh
+    // attempt on the healthy new path, without tearing down runtime the carry never moved (task #56).
+    case resetResolverBackoff(reason: String)
     case recordEncryptedFallbackCarry(ResolverEncryptedFallbackCarry)
     case endEncryptedFallbackLogEpisode(ResolverFallbackLogEnd)
     case clearDeviceDNSRecaptureRestartPending
@@ -208,6 +213,13 @@ struct ResolverNetworkPathObservation: Equatable, Sendable {
     var kind: TunnelNetworkKind
     var isSatisfied: Bool
     var observedAt: Date
+    /// True ONLY when the provider has confirmed a latched chained data path whose tunnelled plain-DNS
+    /// route (`currentTunnelledPlainDNSRoute()`) is non-nil — so DNS rides the tunnel to the conf's
+    /// resolver on a route sealed to the current latch epoch, unmoved by THIS physical roam. When true
+    /// (and the path is satisfied) the reducer SKIPS the destructive resolver reset + pending-SERVFAIL
+    /// (task #56). Defaults false so every existing construction keeps today's full-reset behavior and
+    /// all existing effect-array pins stay green.
+    var chainedTunnelledDNSCarryUnchanged = false
 }
 
 struct ResolverRuntimeResetObservation: Equatable, Sendable {
@@ -260,6 +272,19 @@ struct ResolverSmokeProbeEvidence: Equatable, Sendable {
         case primaryAccepted(PrimaryAccepted)
         case deviceDNSFallbackAccepted(DeviceDNSFallbackAccepted)
         case neitherAccepted(Failure)
+        /// The egress policy declined every transport, so no resolver was contacted.
+        ///
+        /// A fourth outcome because the other three are all wrong for it. Without this, an
+        /// all-refused completion classified as `.neitherAccepted(.transport(
+        /// "refused-by-egress-policy"))` and the reducer incremented the smoke and upstream
+        /// failure streaks and invoked the recovery ladder — so while chained, every startup
+        /// and periodic probe reported a synthetic outage and could drive a reconnect, for a
+        /// decision the tunnel made deliberately and nothing went wrong in.
+        ///
+        /// This is the third level the same neutrality had to be carried to: the resolution
+        /// result, the organic evidence path, and now the smoke-probe path, which classifies
+        /// completions on its own.
+        case declinedByPolicy
     }
 
     let occurredAt: Date
@@ -267,6 +292,19 @@ struct ResolverSmokeProbeEvidence: Equatable, Sendable {
     let modeInsensitivePrimaryIdentifier: String
     let configuredResolverDisplayName: String
     let outcome: Outcome
+
+    /// Whether the probe contacted nothing because policy refused every transport.
+    ///
+    /// Requires at least one recorded attempt: an EMPTY attempt list means nothing was tried
+    /// for some other reason, and reading that as "declined" would silence real failures.
+    private static func everyAttemptWasRefusedByPolicy(
+        _ primary: DNSResolutionResult,
+        _ fallback: DNSResolutionResult?
+    ) -> Bool {
+        let attempts = primary.attempts + (fallback?.attempts ?? [])
+        guard !attempts.isEmpty else { return false }
+        return attempts.allSatisfy { $0.outcome.isDeliberateRefusal }
+    }
 
     init(
         occurredAt: Date,
@@ -299,6 +337,8 @@ struct ResolverSmokeProbeEvidence: Equatable, Sendable {
                         primaryResult.hasFallbackActivationEvidence
                 )
             )
+        } else if Self.everyAttemptWasRefusedByPolicy(primaryResult, fallbackResult) {
+            outcome = .declinedByPolicy
         } else {
             let failureKind: Failure.Kind
             if primaryResult.response != nil {
@@ -454,14 +494,54 @@ enum ResolverHealthReducer {
                 next.episode.consecutiveCarriedQueryFailureCount = 0
                 next.effectDelivery.lastReconnectNeededActivityAt = nil
 
+                // When the chain is latched and the tunnelled plain-DNS carry (to the conf's DNS, over
+                // the still-forwarding tunnel) is unchanged by this SATISFIED physical roam, the
+                // destructive resolver teardown is misapplied: the route/socket/binding all survive
+                // untouched, so a `.full` reset only tears down PHYSICAL-interface runtime the carry
+                // never uses AND SERVFAILs in-flight carried queries that would have resolved — stalling
+                // DNS ~1-2 min while the data path forwards fine (device-instrumented, task #56). Skip
+                // BOTH the destructive reset and the pending-SERVFAIL together (a half-skip that keeps
+                // the reset's runtime-generation bump orphans the drained queries and reproduces the
+                // stall) — but substitute `.resetResolverBackoff` for the full reset's ONE beneficial
+                // side effect: clearing the backoff penalty box. A resolver backed off by timeouts on
+                // the degrading OLD link is no longer SERVFAILed outright on the healthy new path —
+                // `availableAddresses(from:)` now hands back a fully-suppressed route rather than an
+                // empty one — but it is still MISRANKED for the residual ~30 s window: a multi-address
+                // ladder keeps walking the benched address first and pays its full UDP timeout before
+                // reaching a healthy sibling. Clearing the box is what makes the new path fast rather
+                // than merely working, which is why the substitution stands. Every other case — an
+                // unsatisfied path (route may be down), dns-only / device-DNS-direct, or split with an
+                // off-tunnel resolver (all nil-route) and a real conf/route change (which arrives on the
+                // reload path, not here) — has the flag false and keeps today's full reset byte-for-byte.
+                // INV-DNS-1: skipping elides only teardown the carry does not use; carried queries
+                // continue on the unchanged tunnel-pinned socket, or fail CLOSED via
+                // TunnelledPlainDNSResolution's own SERVFAIL synthesis — nothing is routed around filtering.
+                // pinned: ResolverHealthEvidenceTests.testChainedUnchangedTunnelledRouteSkipsResetAndPendingFailures
+                let tunnelledCarrySurvives =
+                    observation.chainedTunnelledDNSCarryUnchanged && observation.isSatisfied
+
                 var pathEffects: [ResolverHealthEffect] = [
                     .endEncryptedFallbackLogEpisode(.contextReset),
                     .cancelWedgeRecoveryProbe,
                     .clearDeviceDNSRecaptureRestartPending,
                     .cancelFallbackRecoveryProbe,
-                    .requestResolverRuntimeReset(
-                        .full(reason: "network-path-changed", force: true)
-                    ),
+                ]
+                if !tunnelledCarrySurvives {
+                    pathEffects.append(
+                        .requestResolverRuntimeReset(
+                            .full(reason: "network-path-changed", force: true)
+                        )
+                    )
+                } else {
+                    // Carry survives → no destructive teardown, but STILL give the resolver a fresh
+                    // attempt on the healthy new path. Backoff-only: no drain / no generation bump / no
+                    // cache wipe (chained answers stay valid across a physical roam — same conf resolver
+                    // through the tunnel regardless of interface).
+                    pathEffects.append(
+                        .resetResolverBackoff(reason: "network-path-changed")
+                    )
+                }
+                pathEffects.append(contentsOf: [
                     .signalConnectivityProjectionChanged,
                     .appendNetworkActivity(
                         .networkChanged(
@@ -476,15 +556,17 @@ enum ResolverHealthReducer {
                         at: observation.observedAt
                     ),
                     .persistHealth(.immediate),
-                ]
+                ])
                 if !observation.isSatisfied {
                     pathEffects.append(
                         .evaluateProtectionNotification(at: observation.observedAt)
                     )
                 }
-                pathEffects.append(
-                    .deliverPendingResolverFailures(reason: "network-path-changed")
-                )
+                if !tunnelledCarrySurvives {
+                    pathEffects.append(
+                        .deliverPendingResolverFailures(reason: "network-path-changed")
+                    )
+                }
                 effects = pathEffects
             } else {
                 effects = [

@@ -81,6 +81,141 @@ final class VPNLifecycleControllerTests: XCTestCase {
         XCTAssertTrue(fixture.events.contains { $0.0 == "load-or-create-creating-new-manager" })
     }
 
+    func testLoadOrCreateDoesNotMutateAfterOwnershipIsLostDuringResolve() async {
+        let fixture = Fixture()
+        let gate = VPNRepositoryLoadGate()
+        var ownsLifecycle = true
+        fixture.repository.onLoadAll = {
+            await gate.wait()
+        }
+
+        let load = Task { @MainActor in
+            try await fixture.controller.loadOrCreateManager(
+                continueIfOwned: { ownsLifecycle }
+            )
+        }
+        await gate.waitUntilStarted()
+        ownsLifecycle = false
+        gate.release()
+
+        do {
+            _ = try await load.value
+            XCTFail("A stale lifecycle owner must abort before configuring or saving a manager.")
+        } catch {
+            XCTAssertEqual(error as? VPNLifecycleMutationError, .superseded)
+        }
+        XCTAssertTrue(fixture.repository.madeManagers.isEmpty)
+        XCTAssertTrue(fixture.repository.configuredManagers.isEmpty)
+        XCTAssertTrue(fixture.repository.savedManagers.isEmpty)
+        XCTAssertTrue(fixture.repository.removedManagers.isEmpty)
+    }
+
+    func testGatedPreferenceSaveFenceBlocksRestartAfterLogicalLeaseExpiry() async throws {
+        let fixture = Fixture()
+        let saveGate = VPNRepositoryLoadGate()
+        fixture.repository.onSaveAndReload = {
+            await saveGate.wait()
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vpn-lifecycle-fence-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fenceURL = directory.appendingPathComponent("mutation.lock")
+
+        let clock = FakeProtectionClock(now: Date(timeIntervalSinceReferenceDate: 1_000))
+        let tokenSequence = VPNLeaseTokenSequence(["automatic", "restart"])
+        let leaseStore = ProtectionLifecycleLeaseStore(
+            storage: FakeProtectionKeyValueStore(),
+            lock: ProtectionNSLock(),
+            clock: clock,
+            makeToken: { tokenSequence.next() }
+        )
+        let automaticLease = try XCTUnwrap(
+            leaseStore.claimAutomaticRestore(
+                expectedExternalRestartGeneration: nil,
+                leaseDuration: 10
+            )
+        )
+        let validateOwnership: @MainActor () -> Bool = {
+            (try? leaseStore.renew(automaticLease, leaseDuration: 10)) == true
+        }
+
+        let load = Task { @MainActor in
+            try await fixture.controller.loadOrCreateManager(
+                continueIfOwned: validateOwnership,
+                performPreferenceMutation: { operation in
+                    try await ProtectionLifecycleMutationFence.withOwnedMutation(
+                        lockFileURL: fenceURL,
+                        validateOwnership: validateOwnership,
+                        operation: operation
+                    )
+                }
+            )
+        }
+        await saveGate.waitUntilStarted()
+
+        // Simulate task/process suspension: the logical lease expires and even cancelling the
+        // waiter cannot release a non-cancellable preferences callback's kernel fence.
+        clock.advance(seconds: 11)
+        load.cancel()
+
+        func claimRestartLikeProduction() throws -> ProtectionLifecycleLease? {
+            guard let fence = try ProtectionLifecycleMutationFence.acquire(
+                lockFileURL: fenceURL,
+                wait: false
+            ) else {
+                return nil
+            }
+            defer { fence.release() }
+            return try leaseStore.claimExplicitRestart(leaseDuration: 10)
+        }
+
+        XCTAssertNil(try claimRestartLikeProduction())
+        XCTAssertNil(
+            try leaseStore.currentExternalRestartGeneration(),
+            "A restart rejected by the callback fence must not rotate generation as though it ran."
+        )
+
+        saveGate.release()
+        do {
+            _ = try await load.value
+            XCTFail("The expired automatic owner must abort after its gated save settles.")
+        } catch {
+            XCTAssertEqual(error as? ProtectionLifecycleMutationFenceError, .ownershipLost)
+        }
+
+        let restart = try XCTUnwrap(claimRestartLikeProduction())
+        XCTAssertEqual(restart.owner, .explicitRestart)
+        XCTAssertEqual(try leaseStore.currentExternalRestartGeneration(), "restart")
+    }
+
+    func testOwnedMutationRejectsBusyFenceWithoutBlockingMainActor() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vpn-lifecycle-fence-busy-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fenceURL = directory.appendingPathComponent("mutation.lock")
+        let holder = try XCTUnwrap(
+            ProtectionLifecycleMutationFence.acquire(lockFileURL: fenceURL, wait: false)
+        )
+        defer { holder.release() }
+
+        var didRunMutation = false
+        do {
+            try await ProtectionLifecycleMutationFence.withOwnedMutation(
+                lockFileURL: fenceURL,
+                validateOwnership: { true },
+                operation: {
+                    didRunMutation = true
+                }
+            )
+            XCTFail("A busy cross-process fence must reject instead of blocking the MainActor.")
+        } catch {
+            XCTAssertEqual(error as? ProtectionLifecycleMutationFenceError, .busy)
+        }
+        XCTAssertFalse(didRunMutation)
+    }
+
     func testDuplicateCleanupRemovesOnlyLavaDuplicatesAndKeepsForeignManagers() async throws {
         let fixture = Fixture()
         let kept = FakeVPNManager(displayName: "Lava Security", bundleID: Self.providerBundleID, status: .connected)
@@ -106,6 +241,31 @@ final class VPNLifecycleControllerTests: XCTestCase {
             fixture.repository.removedManagers.isEmpty,
             "Cleanup only converges on the canonical display name; keeping a legacy manager must not delete siblings."
         )
+    }
+
+    func testDuplicateCleanupDoesNotRemoveAfterOwnershipIsLostDuringReload() async {
+        let fixture = Fixture()
+        let gate = VPNRepositoryLoadGate()
+        let kept = FakeVPNManager(displayName: "Lava Security", bundleID: Self.providerBundleID, status: .connected)
+        let legacyDuplicate = FakeVPNManager(displayName: "Lava Sec", bundleID: Self.providerBundleID, status: .disconnected)
+        fixture.repository.managers = [kept, legacyDuplicate]
+        var ownsLifecycle = true
+        fixture.repository.onLoadAll = {
+            await gate.wait()
+        }
+
+        let cleanup = Task { @MainActor in
+            await fixture.controller.removeDuplicateManagers(
+                keeping: kept,
+                continueIfOwned: { ownsLifecycle }
+            )
+        }
+        await gate.waitUntilStarted()
+        ownsLifecycle = false
+        gate.release()
+        await cleanup.value
+
+        XCTAssertTrue(fixture.repository.removedManagers.isEmpty)
     }
 
     func testWaitForConnectReturnsImmediatelyWhenAlreadyConnected() async {
@@ -310,7 +470,8 @@ private final class FakeVPNManager: VPNManagerControlling {
 @MainActor
 private final class FakeVPNManagerRepository: VPNManagerRepositoryProtocol {
     var managers: [FakeVPNManager] = []
-    var onLoadAll: (() -> Void)?
+    var onLoadAll: (() async -> Void)?
+    var onSaveAndReload: (() async -> Void)?
     private(set) var madeManagers: [FakeVPNManager] = []
     private(set) var configuredManagers: [FakeVPNManager] = []
     private(set) var savedManagers: [FakeVPNManager] = []
@@ -319,7 +480,7 @@ private final class FakeVPNManagerRepository: VPNManagerRepositoryProtocol {
 
 
     func loadAll() async throws -> [FakeVPNManager] {
-        onLoadAll?()
+        await onLoadAll?()
         return managers
     }
 
@@ -338,6 +499,7 @@ private final class FakeVPNManagerRepository: VPNManagerRepositoryProtocol {
     }
 
     func saveAndReload(_ manager: FakeVPNManager) async throws {
+        await onSaveAndReload?()
         savedManagers.append(manager)
         if !managers.contains(where: { $0 === manager }) {
             managers.append(manager)
@@ -347,6 +509,47 @@ private final class FakeVPNManagerRepository: VPNManagerRepositoryProtocol {
     func remove(_ manager: FakeVPNManager) async throws {
         removedManagers.append(manager)
         managers.removeAll { $0 === manager }
+    }
+}
+
+private final class VPNLeaseTokenSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tokens: [String]
+
+    init(_ tokens: [String]) {
+        self.tokens = tokens
+    }
+
+    func next() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        precondition(!tokens.isEmpty)
+        return tokens.removeFirst()
+    }
+}
+
+@MainActor
+private final class VPNRepositoryLoadGate {
+    private var started = false
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !released else { return }
+        started = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        while !started {
+            await Task.yield()
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 

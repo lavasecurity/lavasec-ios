@@ -28,6 +28,7 @@ struct SupabaseAppConfiguration: Equatable, Sendable {
 
 protocol BackupSyncServicing: Sendable {
     func upload(_ envelope: ZeroKnowledgeBackupEnvelope, session: BackupAccountSession) async throws
+    func fetchMetadata(session: BackupAccountSession) async throws -> BackupRemoteMetadata?
     func fetchLatest(session: BackupAccountSession) async throws -> ZeroKnowledgeBackupEnvelope?
     func markRestored(session: BackupAccountSession) async throws
     func deleteRemote(session: BackupAccountSession) async throws
@@ -40,7 +41,7 @@ enum BackupSyncServiceError: Error, LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            "The backup server response was not valid."
+            "The backup server response was not valid.".lavaLocalized
         case .requestFailed(let statusCode):
             Self.friendlyMessage(forStatusCode: statusCode)
         }
@@ -49,26 +50,26 @@ enum BackupSyncServiceError: Error, LocalizedError, Equatable {
     private static func friendlyMessage(forStatusCode statusCode: Int) -> String {
         switch statusCode {
         case 401:
-            "Sign in again to sync encrypted backup."
+            "Sign in again to sync encrypted backup.".lavaLocalized
         case 403:
-            "This backup is not available for this account."
+            "This backup is not available for this account.".lavaLocalized
         case 404:
-            "No encrypted backup was found for this account."
+            "No encrypted backup was found for this account.".lavaLocalized
         case 409:
-            "Backup sync conflict. Try Back Up Now again."
+            "Backup sync conflict. Try Back Up Now again.".lavaLocalized
         case 429:
-            "Too many backup attempts. Wait a minute, then try again."
+            "Too many backup attempts. Wait a minute, then try again.".lavaLocalized
         case 500..<600:
-            "Lava backup service is temporarily unavailable. Try again later."
+            "Lava backup service is temporarily unavailable. Try again later.".lavaLocalized
         default:
-            "Encrypted backup sync failed. Try again."
+            "Encrypted backup sync failed. Try again.".lavaLocalized
         }
     }
 }
 
 struct SupabaseBackupSyncService: BackupSyncServicing {
     let configuration: SupabaseAppConfiguration
-    var urlSession: URLSession = .shared
+    var urlSession: URLSession = PrivateServiceSession.shared
 
     func upload(_ envelope: ZeroKnowledgeBackupEnvelope, session: BackupAccountSession) async throws {
         var request = try makeRequest(
@@ -102,6 +103,28 @@ struct SupabaseBackupSyncService: BackupSyncServicing {
 
         let records = try Self.makeJSONDecoder().decode([UserBackupRecord].self, from: data)
         return records.first?.envelope()
+    }
+
+    /// Metadata is independent of local unlock readiness and never downloads ciphertext.
+    func fetchMetadata(session: BackupAccountSession) async throws -> BackupRemoteMetadata? {
+        func read(includeUploadDate: Bool) async throws -> BackupRemoteMetadata? {
+            var request = try makeRequest(path: "user_backups", queryItems: [
+                URLQueryItem(name: "select", value: includeUploadDate ? "user_id,uploaded_at" : "user_id"),
+                URLQueryItem(name: "user_id", value: "eq.\(session.userID)"),
+                URLQueryItem(name: "disabled_at", value: "is.null"),
+                URLQueryItem(name: "limit", value: "1")
+            ], session: session)
+            request.httpMethod = "GET"
+            let (data, response) = try await urlSession.data(for: request)
+            try validateReadResponse(response)
+            return try JSONDecoder().decode([BackupRemoteMetadata].self, from: data).first
+        }
+        do { return try await read(includeUploadDate: true) }
+        catch BackupSyncServiceError.requestFailed(400) {
+            // Older backends have no upload-specific field. Presence remains useful;
+            // updated_at is deliberately excluded because restore also changes it.
+            return try await read(includeUploadDate: false)
+        }
     }
 
     func markRestored(session: BackupAccountSession) async throws {

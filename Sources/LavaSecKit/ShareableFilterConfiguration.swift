@@ -2,78 +2,68 @@ import Foundation
 import CryptoKit
 import Compression
 
-/// A deterministic, security-reviewed subset of a person's filter setup that is
-/// safe to hand to someone else (for example, a parent setting up a child's
-/// phone by scanning a QR code).
-///
-/// It intentionally **excludes** anything that could weaken the recipient's
-/// protection or leak a private bypass:
-///   - `allowedDomains` (allowlist exceptions) are never included.
-///   - Custom resolver addresses / credentials are never included.
-///   - Local logging preferences and personal progress are never included.
-///
-/// Only the "what gets blocked" half of the setup travels: curated blocklist
-/// selections, custom blocklist sources, and manually blocked domains. The
-/// schema is fully `Codable` and parses **partial** payloads — any missing field
-/// decodes to an empty value rather than failing — so older or trimmed configs
-/// remain importable.
+/// Portable selected-filter configuration. Version 2 includes explicit allowed
+/// exceptions and stored disabled custom sources, with no account/device/cache data.
+/// Codes detect corruption; they do not authenticate or hide the sender's content.
 public struct ShareableFilterConfiguration: Equatable, Sendable {
-    /// Bumped only when the wire format changes in a way older readers cannot
-    /// understand. Additive fields do not require a bump because decoding is
-    /// tolerant of missing keys.
-    public static let currentSchemaVersion = 1
+    /// Version 2 requires explicit exceptions, distinguishing an empty set from
+    /// the absent exceptions in legacy version 1. Unsupported versions are rejected.
+    public static let currentSchemaVersion = 2
 
+    public private(set) var emoji: String?
     public private(set) var schemaVersion: Int
     public private(set) var enabledBlocklistIDs: Set<String>
     public private(set) var blockedDomains: Set<String>
+    /// Nil denotes a legacy block-only payload; an empty set deliberately clears exceptions.
+    public private(set) var allowedDomains: Set<String>?
     public private(set) var customBlocklists: [CustomBlocklistSource]
 
     public init(
         schemaVersion: Int = ShareableFilterConfiguration.currentSchemaVersion,
+        emoji: String? = nil,
         enabledBlocklistIDs: Set<String> = [],
         blockedDomains: Set<String> = [],
-        customBlocklists: [CustomBlocklistSource] = []
+        customBlocklists: [CustomBlocklistSource] = [],
+        allowedDomains: Set<String>? = []
     ) {
+        self.emoji = schemaVersion == 1 ? emoji.flatMap { FilterIdentityPolicy.isValidEmoji($0) ? $0 : nil } : nil
         self.schemaVersion = schemaVersion
         self.enabledBlocklistIDs = enabledBlocklistIDs
         self.blockedDomains = blockedDomains
         self.customBlocklists = customBlocklists
+        self.allowedDomains = schemaVersion >= 2 ? allowedDomains : nil
     }
 
-    /// Captures the shareable slice of a full `AppConfiguration`. Allowlist
-    /// exceptions and resolver settings are deliberately dropped here.
-    public init(configuration: AppConfiguration) {
-        // Only share *enabled* custom lists. A disabled-but-kept source would
-        // otherwise leak its URL/name and make a share look non-empty while
-        // compiling to zero effective rules on import (snapshot preparation only
-        // syncs custom sources whose IDs are enabled).
-        let enabledCustomBlocklists = configuration.customBlocklists.filter {
-            configuration.enabledBlocklistIDs.contains($0.id)
-        }
+    /// Captures only filter-scoped values, including disabled stored definitions.
+    public init(configuration: AppConfiguration, emoji: String? = nil) {
         self.init(
             enabledBlocklistIDs: configuration.enabledBlocklistIDs,
             blockedDomains: configuration.blockedDomains,
-            customBlocklists: enabledCustomBlocklists
+            customBlocklists: configuration.customBlocklists,
+            allowedDomains: configuration.allowedDomains
         )
     }
-
-    /// Captures the shareable slice of a stored library `Filter` (for sharing a filter
-    /// other than the one in effect). Mirrors `init(configuration:)` — only enabled
-    /// custom lists; allowlist exceptions are dropped.
+    /// Captures the selected library filter independently from the active filter.
     public init(filter: Filter) {
-        let enabledCustomBlocklists = filter.customBlocklists.filter {
-            filter.enabledBlocklistIDs.contains($0.id)
-        }
         self.init(
             enabledBlocklistIDs: filter.enabledBlocklistIDs,
             blockedDomains: filter.blockedDomains,
-            customBlocklists: enabledCustomBlocklists
+            customBlocklists: filter.customBlocklists,
+            allowedDomains: filter.allowedDomains
         )
     }
 
     /// `true` when there is nothing meaningful to share or apply.
     public var isEmpty: Bool {
-        enabledBlocklistIDs.isEmpty && blockedDomains.isEmpty && customBlocklists.isEmpty
+        enabledBlocklistIDs.isEmpty && blockedDomains.isEmpty && customBlocklists.isEmpty && (allowedDomains?.isEmpty ?? true)
+    }
+
+    /// Query/fragment data can carry credentials or private identifiers. Full-content
+    /// sharing must refuse such a source instead of stripping its parameters silently.
+    public var containsPrivateSourceParameters: Bool {
+        customBlocklists.contains { source in
+            source.sourceURL.query != nil || source.sourceURL.fragment != nil || source.sourceURL.user != nil
+        }
     }
 
     /// Whether this configuration is small enough for a recipient to import — i.e. within
@@ -95,8 +85,10 @@ public struct ShareableFilterConfiguration: Equatable, Sendable {
 extension ShareableFilterConfiguration: Codable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "v"
+        case emoji
         case enabledBlocklistIDs = "lists"
         case blockedDomains = "blocked"
+        case allowedDomains = "allowed"
         case customBlocklists = "custom"
     }
 
@@ -120,32 +112,36 @@ extension ShareableFilterConfiguration: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedEmoji = try container.decodeIfPresent(String.self, forKey: .emoji)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
-            ?? ShareableFilterConfiguration.currentSchemaVersion
+            ?? 1
+        emoji = schemaVersion == 1 ? decodedEmoji.flatMap { FilterIdentityPolicy.isValidEmoji($0) ? $0 : nil } : nil
         let lists = try container.decodeIfPresent([String].self, forKey: .enabledBlocklistIDs) ?? []
         let blocked = try container.decodeIfPresent([String].self, forKey: .blockedDomains) ?? []
         enabledBlocklistIDs = Set(lists)
         blockedDomains = Set(blocked)
+        if schemaVersion >= 2 {
+            // Version 2 must be explicit: missing allowed content is not an empty replacement.
+            allowedDomains = Set(try container.decode([String].self, forKey: .allowedDomains))
+        } else { allowedDomains = nil }
         let wire = try container.decodeIfPresent([WireCustomBlocklist].self, forKey: .customBlocklists) ?? []
-        // Rebuild through the validating initializer (drops malformed/unsafe URLs
-        // at the trust boundary); the import planner re-checks as defense in depth.
-        customBlocklists = wire.compactMap { entry in
-            try? CustomBlocklistSource(
-                id: entry.id,
-                displayName: entry.name,
-                rawURL: entry.url,
-                parseFormat: entry.format
-            )
+        // Reject malformed definitions instead of silently claiming a complete import.
+        customBlocklists = try wire.map { entry in
+            try CustomBlocklistSource(id: entry.id, displayName: entry.name,
+                                      rawURL: entry.url, parseFormat: entry.format)
         }
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        // Keep legacy v1 identity readable without transmitting it in new v2 shares.
+        if schemaVersion == 1 { try container.encodeIfPresent(emoji, forKey: .emoji) }
         try container.encode(schemaVersion, forKey: .schemaVersion)
         // Sets are encoded as sorted arrays so the same setup always produces an
         // identical, reproducible payload (and therefore an identical code/QR).
         try container.encode(enabledBlocklistIDs.sorted(), forKey: .enabledBlocklistIDs)
         try container.encode(blockedDomains.sorted(), forKey: .blockedDomains)
+        if schemaVersion >= 2 { try container.encode((allowedDomains ?? []).sorted(), forKey: .allowedDomains) }
         let wire = customBlocklists
             .sorted { $0.id < $1.id }
             .map { source in
@@ -189,7 +185,11 @@ public extension ShareableFilterConfiguration {
     /// Hard caps so an untrusted code can't allocate/parse an oversized payload.
     /// Both are far above any legitimate setup (even a Plus user with hundreds
     /// of blocked domains and several custom lists).
-    private static let maxEncodedCodeLength = 16 * 1024
+    /// Module-visible (not public) so ``ShareableFilterLink`` can bound a complete
+    /// untrusted input up front without duplicating the magic number. Measured on
+    /// the encoded body *after* ``codePrefix``, matching the check in
+    /// ``decode(configurationCode:)``.
+    internal static let maxEncodedCodeLength = 16 * 1024
     private static let maxInflatedPayloadBytes = 512 * 1024
 
     /// Produces the compact, URL-safe, tamper-evident code that backs both the
@@ -245,7 +245,7 @@ public extension ShareableFilterConfiguration {
             throw ShareableFilterConfigurationCodeError.malformedPayload
         }
 
-        guard configuration.schemaVersion <= currentSchemaVersion else {
+        guard (1...currentSchemaVersion).contains(configuration.schemaVersion) else {
             throw ShareableFilterConfigurationCodeError.unsupportedVersion(configuration.schemaVersion)
         }
 
@@ -357,19 +357,8 @@ public extension ShareableFilterConfiguration {
 // MARK: - Applying an imported config
 
 public extension AppConfiguration {
-    /// Returns a copy of this configuration with the **block-side** filter
-    /// fields replaced by those from an imported shareable config.
-    ///
-    /// "Replace" semantics: the recipient's enabled blocklists, custom blocklist
-    /// sources, and manually blocked domains become exactly what is passed in.
-    /// Everything else — allowlist exceptions, resolver choice, local logging,
-    /// account, and protection toggle — is left untouched, so importing can never
-    /// silently weaken protection or wipe personal exceptions.
-    ///
-    /// Callers are expected to pass an already-sanitized subset (see
-    /// ``ShareableFilterConfiguration/importPlan(capabilities:)``) so that
-    /// unavailable lists, upgrade-gated sources, or over-limit domains have been
-    /// dropped before this point.
+    /// Replaces filter content only. Legacy v1 payloads preserve local exceptions;
+    /// v2 explicitly replaces them, including an intentionally empty set.
     func applyingImportedShareableConfiguration(
         _ applied: ShareableFilterConfiguration
     ) -> AppConfiguration {
@@ -377,7 +366,29 @@ public extension AppConfiguration {
         updated.enabledBlocklistIDs = applied.enabledBlocklistIDs
         updated.customBlocklists = applied.customBlocklists
         updated.blockedDomains = applied.blockedDomains
+        if let allowed = applied.allowedDomains { updated.allowedDomains = allowed }
         return updated
+    }
+}
+
+public extension ShareableFilterConfiguration {
+    /// Reviews every reconciled filter-content addition and removal.
+    func replacementSummary(for target: Filter) -> FilterReplacementSummary {
+        var replacement = target
+        replacement.enabledBlocklistIDs = enabledBlocklistIDs
+        replacement.customBlocklists = customBlocklists
+        replacement.blockedDomains = blockedDomains
+        if let allowedDomains { replacement.allowedDomains = allowedDomains }
+        // The wire omits creation dates and accepted hashes. Compare only the source
+        // definition it can carry; local metadata must not invent a removal/re-addition.
+        var reviewedTarget = target
+        reviewedTarget.customBlocklists = target.customBlocklists.map { previous in
+            customBlocklists.first {
+                $0.id == previous.id && $0.displayName == previous.displayName
+                    && $0.sourceURL == previous.sourceURL && $0.parseFormat == previous.parseFormat
+            } ?? previous
+        }
+        return FilterReplacementSummary(before: reviewedTarget, after: replacement)
     }
 }
 
@@ -386,9 +397,12 @@ public extension AppConfiguration {
 /// What this device can actually accept, used to decide which parts of a shared
 /// config can be imported and which must be dropped.
 public struct ShareableFilterImportCapabilities: Equatable, Sendable {
-    /// Curated blocklist IDs that exist in this build's catalog (built-in plus
-    /// anything synced). Imported IDs outside this set are treated as unavailable.
+    /// Curated blocklist IDs offered by the recipient's server catalog.
+    /// Bundled definitions and existing selections do not grant import availability.
     public let availableCuratedBlocklistIDs: Set<String>
+    /// Known canonical/legacy catalog URLs carried as custom sources in a share.
+    /// These must use catalog availability rather than bypass it with a custom ID.
+    public let catalogSourceIDsByCustomURL: [URL: String]
     /// IDs an imported *custom* blocklist may not claim — curated and guardrail
     /// list IDs — so a crafted code can't shadow a trusted list with its own URL.
     public let reservedBlocklistIDs: Set<String>
@@ -396,6 +410,10 @@ public struct ShareableFilterImportCapabilities: Equatable, Sendable {
     public let allowsCustomBlocklists: Bool
     /// The maximum number of manually blocked domains on the current plan.
     public let maxBlockedDomains: Int
+    /// Maximum allowed exceptions accepted by the recipient.
+    public let maxAllowedDomains: Int
+    /// Current threat rules used by the same validation as manual exception editing.
+    public let nonAllowableThreatRules: DomainRuleSet
     /// The tier ceiling on total compiled filter rules (what snapshot preparation
     /// enforces). Defaults to "no limit" so callers that don't model it opt out.
     public let maxFilterRules: Int
@@ -411,16 +429,22 @@ public struct ShareableFilterImportCapabilities: Equatable, Sendable {
     public init(
         availableCuratedBlocklistIDs: Set<String>,
         reservedBlocklistIDs: Set<String> = [],
+        catalogSourceIDsByCustomURL: [URL: String] = [:],
         allowsCustomBlocklists: Bool,
         maxBlockedDomains: Int,
         maxFilterRules: Int = .max,
         blocklistRuleCounts: [String: Int] = [:],
-        preservedRuleCount: Int = 0
+        preservedRuleCount: Int = 0,
+        maxAllowedDomains: Int = .max,
+        nonAllowableThreatRules: DomainRuleSet = DomainRuleSet()
     ) {
         self.availableCuratedBlocklistIDs = availableCuratedBlocklistIDs
+        self.catalogSourceIDsByCustomURL = catalogSourceIDsByCustomURL
         self.reservedBlocklistIDs = reservedBlocklistIDs
         self.allowsCustomBlocklists = allowsCustomBlocklists
         self.maxBlockedDomains = maxBlockedDomains
+        self.maxAllowedDomains = maxAllowedDomains
+        self.nonAllowableThreatRules = nonAllowableThreatRules
         self.maxFilterRules = maxFilterRules
         self.blocklistRuleCounts = blocklistRuleCounts
         self.preservedRuleCount = preservedRuleCount
@@ -439,6 +463,8 @@ public struct ShareableFilterImportPlan: Equatable, Sendable {
             case requiresUpgrade
             /// A manually blocked domain beyond the current plan's limit.
             case exceedsLimit
+            /// A malformed or prohibited manually entered domain.
+            case invalidDomain
             /// A custom blocklist rejected for safety: an unsafe URL (non-HTTPS,
             /// credentialed, or private-network) or an ID that shadows a trusted
             /// list. LF1 codes are unsigned, so imported sources are never trusted.
@@ -488,24 +514,14 @@ public extension ShareableFilterConfiguration {
     func importPlan(capabilities: ShareableFilterImportCapabilities) -> ShareableFilterImportPlan {
         var dropped: [ShareableFilterImportPlan.DroppedEntry] = []
 
-        // Custom blocklists: gated behind Lava Security+, then sanitized.
+        // Validate custom sources and canonicalize known catalog URLs before the Plus gate.
         var supportedCustomBlocklists: [CustomBlocklistSource] = []
+        var matchedCuratedIDs: Set<String> = []
         var seenCustomIDs: Set<String> = []
         for source in customBlocklists {
-            // Inactive custom sources (present but not enabled — e.g. from a
-            // crafted code) compile to nothing, so they never enter the plan.
-            guard enabledBlocklistIDs.contains(source.id) else {
-                continue
-            }
-
             // Collapse duplicate IDs from a crafted code — persisting two custom
             // sources with the same ID later traps `Dictionary(uniqueKeysWithValues:)`.
             guard seenCustomIDs.insert(source.id).inserted else {
-                continue
-            }
-
-            guard capabilities.allowsCustomBlocklists else {
-                dropped.append(.init(kind: .requiresUpgrade, label: source.displayName))
                 continue
             }
 
@@ -531,6 +547,22 @@ public extension ShareableFilterConfiguration {
                 continue
             }
 
+            if let catalogID = capabilities.catalogSourceIDsByCustomURL[validated.sourceURL] {
+                if !capabilities.availableCuratedBlocklistIDs.contains(catalogID) {
+                    // Inactive definitions also carry references: do not import a withdrawn source.
+                    dropped.append(.init(kind: .unavailableBlocklist, label: source.displayName))
+                    continue
+                } else if enabledBlocklistIDs.contains(source.id) {
+                    matchedCuratedIDs.insert(catalogID)
+                    continue
+                }
+                // Keep an available inactive definition without enabling it; the normal Plus gate applies.
+            }
+            guard capabilities.allowsCustomBlocklists else {
+                dropped.append(.init(kind: .requiresUpgrade, label: source.displayName))
+                continue
+            }
+
             supportedCustomBlocklists.append(validated)
         }
 
@@ -541,11 +573,11 @@ public extension ShareableFilterConfiguration {
         // Enabled lists: keep curated IDs that exist here and supported custom
         // IDs. IDs belonging to dropped custom lists are already reported above,
         // so they're skipped silently here to avoid double-counting.
-        var supportedListIDs: Set<String> = []
+        var supportedListIDs = matchedCuratedIDs
         for id in enabledBlocklistIDs.sorted() {
             if acceptableListIDs.contains(id) {
                 supportedListIDs.insert(id)
-            } else if customSourceIDs.contains(id) {
+            } else if customSourceIDs.contains(id) && !capabilities.reservedBlocklistIDs.contains(id) {
                 continue
             } else {
                 dropped.append(.init(kind: .unavailableBlocklist, label: id))
@@ -559,13 +591,24 @@ public extension ShareableFilterConfiguration {
         // import that would otherwise contribute zero effective rules.
         var normalizedDomains: Set<String> = []
         for domain in blockedDomains {
-            if let normalized = try? DomainName.normalize(domain) {
-                normalizedDomains.insert(normalized)
-            }
+            if let normalized = try? DomainName.normalize(domain) { normalizedDomains.insert(normalized) }
+            else { dropped.append(.init(kind: .invalidDomain, label: domain)) }
         }
         let sortedDomains = normalizedDomains.sorted()
         let keptDomains = sortedDomains.prefix(max(0, capabilities.maxBlockedDomains))
         for domain in sortedDomains.dropFirst(keptDomains.count) {
+            dropped.append(.init(kind: .exceedsLimit, label: domain))
+        }
+
+        let validator = AllowlistValidator(nonAllowableThreatRules: capabilities.nonAllowableThreatRules)
+        var normalizedAllowed: Set<String> = []
+        for domain in (allowedDomains ?? []).sorted() {
+            let result = validator.validate(domain)
+            if result.isAllowed, let normalized = result.normalizedDomain { normalizedAllowed.insert(normalized) }
+            else { dropped.append(.init(kind: .invalidDomain, label: domain)) }
+        }
+        let keptAllowed = Set(normalizedAllowed.sorted().prefix(max(0, capabilities.maxAllowedDomains)))
+        for domain in normalizedAllowed.subtracting(keptAllowed).sorted() {
             dropped.append(.init(kind: .exceedsLimit, label: domain))
         }
 
@@ -575,7 +618,7 @@ public extension ShareableFilterConfiguration {
         // only after the user confirms. Each kept blocked domain also costs a
         // rule, and so do the recipient's preserved allowlist exceptions;
         // unknown-size lists count as 0 known, like the manual picker.
-        var runningRuleCount = keptDomains.count + capabilities.preservedRuleCount
+        var runningRuleCount = keptDomains.count + (allowedDomains == nil ? capabilities.preservedRuleCount : keptAllowed.count)
         var budgetedListIDs: Set<String> = []
         for id in supportedListIDs.sorted() {
             let cost = capabilities.blocklistRuleCounts[id] ?? 0
@@ -587,16 +630,18 @@ public extension ShareableFilterConfiguration {
             }
         }
         let budgetedCustomBlocklists = supportedCustomBlocklists.filter {
-            budgetedListIDs.contains($0.id)
+            !enabledBlocklistIDs.contains($0.id) || budgetedListIDs.contains($0.id)
         }
 
         let applied = ShareableFilterConfiguration(
+            schemaVersion: schemaVersion,
+            emoji: emoji,
             enabledBlocklistIDs: budgetedListIDs,
             blockedDomains: Set(keptDomains),
-            customBlocklists: budgetedCustomBlocklists
+            customBlocklists: budgetedCustomBlocklists,
+            allowedDomains: allowedDomains == nil ? nil : keptAllowed
         )
 
         return ShareableFilterImportPlan(applied: applied, dropped: dropped)
     }
 }
-

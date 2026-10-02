@@ -13,7 +13,7 @@ package enum CompactFilterSnapshotError: Error, Equatable {
 
 /// Binary filter snapshot optimized for low-memory runtime lookups.
 public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
-    package static let fileVersion: UInt32 = 1
+    package static let fileVersion: UInt32 = 2
 
     // Bumped when the stored metadata summary becomes trustworthy for cheap
     // reads. Artifacts without this marker fall back to full-table recompute.
@@ -63,7 +63,8 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
             ),
             allowRuleCount: allowRules.count,
             guardrailRuleCount: nonAllowableThreatRules.count,
-            tierBudgetRuleCount: summary?.tierBudgetRuleCount
+            tierBudgetRuleCount: summary?.tierBudgetRuleCount,
+            quarantinedBlocklistIDs: summary?.quarantinedBlocklistIDs
         )
     }
 
@@ -89,9 +90,24 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
         allowRules.count
     }
 
+    /// A compiled rule artifact serves the rules it was compiled with; it is never the fail-closed
+    /// posture, which has no artifact behind it at all.
+    public var blocksEveryLookup: Bool { false }
+
     /// Number of non-allowable threat guardrail rules in the snapshot.
     public var guardrailRuleCount: Int {
         nonAllowableThreatRules.count
+    }
+
+    /// Allow entries not wholly covered by a threat scope, recomputed from resident tables.
+    /// No stored metadata is needed, so cold-loaded and streaming-written artifacts use
+    /// the same semantics without changing their format or raw integrity/tier counts.
+    public var effectiveAllowRuleCount: Int {
+        allowRules.effectiveAllowRuleCount(nonAllowableThreatRules: nonAllowableThreatRules)
+    }
+
+    public var allowedSuffixGuardrailCoverage: [String: GuardrailScopeCoverage] {
+        allowRules.allowedSuffixGuardrailCoverage(nonAllowableThreatRules: nonAllowableThreatRules)
     }
 
     /// Recorded compiled-rule total used for exact tier-budget enforcement.
@@ -232,7 +248,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
 
     /// Streams a byte-valid `CompactFilterSnapshot` to `fileHandle` WITHOUT holding the
     /// large block-rule domain blob in heap — the in-extension fallback's whole reason
-    /// for existing. The block table's entries (the ~8 B/rule resident cost, supplied by
+    /// for existing. The block table's entries (the ~4 B/rule resident cost, supplied by
     /// the caller already sorted byte-lexicographically and deduped) are written through a
     /// bounded buffer, then the domain bytes are stream-copied from `blockDomainDataURL`
     /// (the insertion-order blob the caller built on disk; its bytes need not be sorted —
@@ -395,6 +411,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
                 resolver: metadata.resolver,
                 blocklistRuleCount: storedSummary.blocklistRuleCount,
                 blocklistSourceRuleCounts: storedSummary.blocklistSourceRuleCounts,
+                quarantinedBlocklistIDs: storedSummary.quarantinedBlocklistIDs,
                 blockRuleCount: storedSummary.blockRuleCount,
                 blockedDomainRuleCount: storedSummary.blockedDomainRuleCount,
                 allowRuleCount: storedSummary.allowRuleCount,
@@ -424,6 +441,7 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
             resolver: metadata.resolver,
             blocklistRuleCount: summary.blocklistRuleCount,
             blocklistSourceRuleCounts: summary.blocklistSourceRuleCounts,
+                quarantinedBlocklistIDs: summary.quarantinedBlocklistIDs,
             blockRuleCount: summary.blockRuleCount,
             blockedDomainRuleCount: summary.blockedDomainRuleCount,
             allowRuleCount: summary.allowRuleCount,
@@ -477,7 +495,8 @@ public struct CompactFilterSnapshot: FilterRuntimeSnapshot {
             ),
             allowRuleCount: allowRules.count,
             guardrailRuleCount: nonAllowableThreatRules.count,
-            tierBudgetRuleCount: metadata.summary?.tierBudgetRuleCount
+            tierBudgetRuleCount: metadata.summary?.tierBudgetRuleCount,
+            quarantinedBlocklistIDs: metadata.summary?.quarantinedBlocklistIDs
         )
     }
 }
@@ -494,6 +513,10 @@ public struct CompactFilterSnapshotSummary: Equatable, Sendable {
     public let blocklistRuleCount: Int?
     /// Parsed rule counts keyed by selected blocklist source, when recorded.
     public let blocklistSourceRuleCounts: [String: Int]?
+    /// Enabled blocklists this artifact deliberately omits because their source is
+    /// permanently unfetchable. See `PreparedFilterSnapshotSummary.quarantinedBlocklistIDs`
+    /// — the omission is DECLARED so coverage stays a real check rather than a tautology.
+    public let quarantinedBlocklistIDs: Set<String>?
     /// Number of effective block-table entries.
     public let blockRuleCount: Int
     /// Number of blocked-domain entries after overlapping allow rules are applied.
@@ -520,7 +543,10 @@ public struct CompactFilterSnapshotSummary: Equatable, Sendable {
             return false
         }
 
-        return configuration.enabledBlocklistIDs.allSatisfy { blocklistSourceRuleCounts[$0] != nil }
+        let quarantined = quarantinedBlocklistIDs ?? []
+        return configuration.enabledBlocklistIDs.allSatisfy {
+            blocklistSourceRuleCounts[$0] != nil || quarantined.contains($0)
+        }
     }
 
     /// Cheap reuse check from the header alone, mirroring
@@ -590,10 +616,14 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
     // Internal (not fileprivate) so the in-extension streaming writer
     // (`StreamingCompactSnapshotCompiler`) can build entries that point into the blob it
     // streams to disk and hand them to `CompactFilterSnapshot.writeStreaming`.
-    struct Entry: Equatable, Sendable {
-        let offset: UInt32
-        let length: UInt16
-    }
+    //
+    // A rule entry is a bare `UInt32` offset into `domainData`, which stores each domain
+    // as a 1-byte length prefix followed by the domain bytes. Dropping the `UInt16`
+    // length field halves the resident entry table (8 B → 4 B array stride): the length is
+    // read from the blob instead, on the same page the binary search already touches to
+    // compare bytes. Normalized domains are ≤253 bytes (DNS wire spec), so a 1-byte prefix
+    // always suffices.
+    typealias Entry = UInt32
 
     private let exactEntries: [Entry]
     private let suffixEntries: [Entry]
@@ -623,8 +653,8 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
         suffixEntries = try Self.readEntries(count: suffixCount, reader: &reader)
         domainData = try reader.readData(count: Int(try reader.readUInt32()))
 
-        guard Self.entriesAreValid(exactEntries, dataCount: domainData.count),
-              Self.entriesAreValid(suffixEntries, dataCount: domainData.count)
+        guard Self.entriesAreValid(exactEntries, domainData: domainData),
+              Self.entriesAreValid(suffixEntries, domainData: domainData)
         else {
             throw CompactFilterSnapshotError.invalidRuleTable
         }
@@ -647,13 +677,13 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
     fileprivate static func readSummary(reader: inout CompactBinaryReader) throws -> Int {
         let exactCount = Int(try reader.readUInt32())
         let suffixCount = Int(try reader.readUInt32())
-        try reader.skip(count: (exactCount + suffixCount) * 6)
+        try reader.skip(count: (exactCount + suffixCount) * 4)
         try reader.skip(count: Int(try reader.readUInt32()))
         return exactCount + suffixCount
     }
 
     fileprivate var encodedSizeEstimate: Int {
-        12 + ((exactEntries.count + suffixEntries.count) * 6) + domainData.count
+        12 + ((exactEntries.count + suffixEntries.count) * 4) + domainData.count
     }
 
     package func containsNormalized(_ normalizedDomain: String) -> Bool {
@@ -689,6 +719,51 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
             blockRules: self,
             nonAllowableThreatRules: nonAllowableThreatRules
         ))
+    }
+
+    fileprivate func effectiveAllowRuleCount(nonAllowableThreatRules: CompactDomainRuleSet) -> Int {
+        exactEntries.reduce(0) { count, entry in
+            count + (nonAllowableThreatRules.containsNormalized(domainString(for: entry)) ? 0 : 1)
+        } + suffixEntries.reduce(0) { count, entry in
+            count + (nonAllowableThreatRules.containsCoveringSuffixRule(domainString(for: entry)) ? 0 : 1)
+        }
+    }
+
+    fileprivate func allowedSuffixGuardrailCoverage(nonAllowableThreatRules: CompactDomainRuleSet) -> [String: GuardrailScopeCoverage] {
+        var counts: [String: GuardrailScopeCoverage] = [:]
+        for entry in suffixEntries {
+            let domain = domainString(for: entry)
+            if !nonAllowableThreatRules.containsCoveringSuffixRule(domain) { counts[domain] = GuardrailScopeCoverage() }
+        }
+        guard !counts.isEmpty else { return counts }
+
+        // Walk resident byte tables directly. Only the allow-key counters survive this
+        // pass; each threat hostname is decoded transiently, without materializing a set.
+        for entry in nonAllowableThreatRules.exactEntries {
+            let domain = nonAllowableThreatRules.domainString(for: entry)
+            guard !nonAllowableThreatRules.containsCoveringSuffixRule(domain) else { continue }
+            DomainRuleSet.recordGuardrailScope(domain, matchesSubdomains: false, in: &counts)
+        }
+        for entry in nonAllowableThreatRules.suffixEntries {
+            let domain = nonAllowableThreatRules.domainString(for: entry)
+            if let dot = domain.firstIndex(of: "."),
+               nonAllowableThreatRules.containsCoveringSuffixRule(String(domain[domain.index(after: dot)...])) {
+                continue
+            }
+            DomainRuleSet.recordGuardrailScope(domain, matchesSubdomains: true, in: &counts)
+        }
+        return counts
+    }
+
+    private func containsCoveringSuffixRule(_ normalizedDomain: String) -> Bool {
+        let queryBytes = Array(normalizedDomain.utf8)
+        if contains(queryBytes[...], in: suffixEntries) { return true }
+        var searchStart = queryBytes.startIndex
+        while let dotIndex = queryBytes[searchStart...].firstIndex(of: UInt8(ascii: ".")) {
+            searchStart = queryBytes.index(after: dotIndex)
+            if contains(queryBytes[searchStart...], in: suffixEntries) { return true }
+        }
+        return false
     }
 
     fileprivate func appendEncodedData(to data: inout Data) throws {
@@ -741,13 +816,11 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
         buffer.appendLittleEndian(UInt32(exactEntries.count))
         buffer.appendLittleEndian(UInt32(suffixEntries.count))
         for entry in exactEntries {
-            buffer.appendLittleEndian(entry.offset)
-            buffer.appendLittleEndian(entry.length)
+            buffer.appendLittleEndian(entry)
             if buffer.count >= flushThreshold { try flush(&buffer) }
         }
         for entry in suffixEntries {
-            buffer.appendLittleEndian(entry.offset)
-            buffer.appendLittleEndian(entry.length)
+            buffer.appendLittleEndian(entry)
             if buffer.count >= flushThreshold { try flush(&buffer) }
         }
         buffer.appendLittleEndian(UInt32(domainDataCount))
@@ -768,8 +841,7 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
                     let entry = entries[mid]
                     let order = Self.compareEntry(
                         table,
-                        offset: Int(entry.offset),
-                        length: Int(entry.length),
+                        offset: Int(entry),
                         to: queryBuffer
                     )
 
@@ -789,8 +861,8 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
         }
     }
 
-    /// Lexicographically compares an entry's stored UTF8 bytes (the `length`
-    /// bytes of `table` at `offset`) against the query's UTF8 bytes. Returns a
+    /// Lexicographically compares an entry's stored UTF8 bytes (the length-prefixed bytes
+    /// of `table` at `offset`) against the query's UTF8 bytes. Returns a
     /// negative value if the entry sorts before the query, zero if equal, and a
     /// positive value if after — reproducing `String`'s ordering for the
     /// ASCII-only normalized domains stored here, so the table's existing
@@ -798,13 +870,14 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
     private static func compareEntry(
         _ table: UnsafeRawBufferPointer,
         offset: Int,
-        length: Int,
         to query: UnsafeBufferPointer<UInt8>
     ) -> Int {
+        let length = Int(table[offset])
+        let start = offset + 1
         let shared = min(length, query.count)
         var index = 0
         while index < shared {
-            let entryByte = table[offset + index]
+            let entryByte = table[start + index]
             let queryByte = query[index]
             if entryByte != queryByte {
                 return entryByte < queryByte ? -1 : 1
@@ -822,54 +895,56 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
         blockRules: CompactDomainRuleSet,
         nonAllowableThreatRules: CompactDomainRuleSet
     ) -> Int {
-        exactEntries.reduce(0) { count, entry in
+        var reducing = exactEntries.reduce(0) { count, entry in
             let domain = domainString(for: entry)
-            return count + (Self.allowedRuleReducesProtection(
-                domain,
-                matchesSubdomains: false,
-                blockRules: blockRules,
-                nonAllowableThreatRules: nonAllowableThreatRules
-            ) ? 1 : 0)
-        } + suffixEntries.reduce(0) { count, entry in
+            return count + (blockRules.containsNormalized(domain)
+                && !nonAllowableThreatRules.containsNormalized(domain) ? 1 : 0)
+        }
+        var needsDescendant = Set<String>()
+        for entry in suffixEntries {
             let domain = domainString(for: entry)
-            return count + (Self.allowedRuleReducesProtection(
-                domain,
-                matchesSubdomains: true,
-                blockRules: blockRules,
-                nonAllowableThreatRules: nonAllowableThreatRules
-            ) ? 1 : 0)
+            if nonAllowableThreatRules.containsCoveringSuffixRule(domain) { continue }
+            if blockRules.containsCoveringSuffixRule(domain) {
+                reducing += 1
+            } else {
+                needsDescendant.insert(domain)
+            }
         }
+        guard !needsDescendant.isEmpty else { return reducing }
+
+        // Compact tables stay resident; decode one block hostname at a time and
+        // retain only the allowed suffixes still awaiting an unguarded overlap.
+        for entry in blockRules.exactEntries {
+            let domain = blockRules.domainString(for: entry)
+            if nonAllowableThreatRules.containsNormalized(domain) { continue }
+            reducing += Self.consumeAllowedSuffixes(covering: domain, from: &needsDescendant)
+            if needsDescendant.isEmpty { return reducing }
+        }
+        for entry in blockRules.suffixEntries {
+            let domain = blockRules.domainString(for: entry)
+            if nonAllowableThreatRules.containsCoveringSuffixRule(domain) { continue }
+            reducing += Self.consumeAllowedSuffixes(covering: domain, from: &needsDescendant)
+            if needsDescendant.isEmpty { return reducing }
+        }
+        return reducing
     }
 
-    private static func allowedRuleReducesProtection(
-        _ normalizedDomain: String,
-        matchesSubdomains: Bool,
-        blockRules: CompactDomainRuleSet,
-        nonAllowableThreatRules: CompactDomainRuleSet
-    ) -> Bool {
-        if blockRules.containsNormalized(normalizedDomain) {
-            return true
+    private static func consumeAllowedSuffixes(covering domain: String, from remaining: inout Set<String>) -> Int {
+        var matches = 0
+        var remainder = domain
+        while true {
+            if remaining.remove(remainder) != nil { matches += 1 }
+            guard let dot = remainder.firstIndex(of: ".") else { break }
+            remainder = String(remainder[remainder.index(after: dot)...])
         }
-
-        guard matchesSubdomains else {
-            return false
-        }
-
-        return blockRules.hasRuleAtOrBelow(normalizedDomain)
-    }
-
-    private func hasRuleAtOrBelow(_ normalizedDomain: String) -> Bool {
-        exactEntries.contains { Self.domain(domainString(for: $0), isEqualToOrSubdomainOf: normalizedDomain) }
-            || suffixEntries.contains { Self.domain(domainString(for: $0), isEqualToOrSubdomainOf: normalizedDomain) }
-    }
-
-    private static func domain(_ domain: String, isEqualToOrSubdomainOf parentDomain: String) -> Bool {
-        domain == parentDomain || domain.hasSuffix(".\(parentDomain)")
+        return matches
     }
 
     private func domainString(for entry: Entry) -> String {
-        let start = domainData.startIndex + Int(entry.offset)
-        let end = start + Int(entry.length)
+        let lengthIndex = domainData.startIndex + Int(entry)
+        let length = Int(domainData[lengthIndex])
+        let start = lengthIndex + 1
+        let end = start + length
         return String(decoding: domainData[start..<end], as: UTF8.self)
     }
 
@@ -881,20 +956,18 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
         entries.reserveCapacity(count)
 
         for _ in 0..<count {
-            entries.append(Entry(
-                offset: try reader.readUInt32(),
-                length: try reader.readUInt16()
-            ))
+            entries.append(try reader.readUInt32())
         }
 
         return entries
     }
 
-    private static func entriesAreValid(_ entries: [Entry], dataCount: Int) -> Bool {
+    private static func entriesAreValid(_ entries: [Entry], domainData: Data) -> Bool {
         entries.allSatisfy { entry in
-            let offset = Int(entry.offset)
-            let length = Int(entry.length)
-            return offset >= 0 && length > 0 && offset + length <= dataCount
+            let offset = Int(entry)
+            guard offset >= 0, offset + 1 <= domainData.count else { return false }
+            let length = Int(domainData[domainData.startIndex + offset])
+            return length > 0 && offset + 1 + length <= domainData.count
         }
     }
 
@@ -912,8 +985,8 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
                 let current = entries[index]
                 if compareTableSlices(
                     table,
-                    offset: Int(previous.offset), length: Int(previous.length),
-                    otherOffset: Int(current.offset), otherLength: Int(current.length)
+                    offset: Int(previous),
+                    otherOffset: Int(current)
                 ) > 0 {
                     return false
                 }
@@ -924,14 +997,18 @@ package struct CompactDomainRuleSet: Equatable, Sendable {
 
     private static func compareTableSlices(
         _ table: UnsafeRawBufferPointer,
-        offset: Int, length: Int,
-        otherOffset: Int, otherLength: Int
+        offset: Int,
+        otherOffset: Int
     ) -> Int {
+        let length = Int(table[offset])
+        let otherLength = Int(table[otherOffset])
+        let start = offset + 1
+        let otherStart = otherOffset + 1
         let shared = min(length, otherLength)
         var index = 0
         while index < shared {
-            let lhs = table[offset + index]
-            let rhs = table[otherOffset + index]
+            let lhs = table[start + index]
+            let rhs = table[otherStart + index]
             if lhs != rhs {
                 return lhs < rhs ? -1 : 1
             }
@@ -963,13 +1040,11 @@ private struct CompactDomainRuleTableBuilder {
 
         for domain in sortedDomains {
             let domainBytes = Data(domain.utf8)
-            precondition(domainBytes.count <= Int(UInt16.max), "Domain is too long for compact snapshot: \(domain)")
-            precondition(data.count <= Int(UInt32.max), "Compact snapshot domain table is too large.")
+            precondition(domainBytes.count <= Int(UInt8.max), "Domain is too long for compact snapshot: \(domain)")
+            precondition(data.count + 1 + domainBytes.count <= Int(UInt32.max), "Compact snapshot domain table is too large.")
 
-            entries.append(CompactDomainRuleSet.Entry(
-                offset: UInt32(data.count),
-                length: UInt16(domainBytes.count)
-            ))
+            entries.append(UInt32(data.count))
+            data.append(UInt8(domainBytes.count))
             data.append(domainBytes)
         }
 
@@ -983,11 +1058,6 @@ fileprivate struct CompactBinaryReader {
 
     init(data: Data) {
         self.data = data
-    }
-
-    mutating func readUInt16() throws -> UInt16 {
-        let bytes = try readBytes(count: 2)
-        return UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
     }
 
     mutating func readUInt32() throws -> UInt32 {
@@ -1034,11 +1104,6 @@ fileprivate struct CompactBinaryReader {
 }
 
 private extension Data {
-    mutating func appendLittleEndian(_ value: UInt16) {
-        append(UInt8(value & 0x00ff))
-        append(UInt8((value >> 8) & 0x00ff))
-    }
-
     mutating func appendLittleEndian(_ value: UInt32) {
         append(UInt8(value & 0x000000ff))
         append(UInt8((value >> 8) & 0x000000ff))

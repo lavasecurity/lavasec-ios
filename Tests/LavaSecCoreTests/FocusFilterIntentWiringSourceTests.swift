@@ -91,6 +91,9 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         // (the discoverable Switch intent) and the extension (the Focus intent), so there is ONE AppEntity
         // record. They must NOT be redefined in either intent file.
         let source = try readSource(.lavaFilterEntity)
+        XCTAssertTrue(source.contains("FilterIdentityPolicy.displayName(name: name, emoji: emoji)"))
+        XCTAssertTrue(source.contains("LavaFilterEntity(id: $0.id, name: $0.name, emoji: $0.emoji)"))
+        XCTAssertTrue(source.contains("DisplayRepresentation(title: \"\\(displayName)\")"))
         for intentFile in [SourceFile.focusFilterIntent, .switchFilterShortcut] {
             let intentSource = try readSource(intentFile)
             XCTAssertFalse(intentSource.contains("struct LavaFilterEntity: AppEntity"),
@@ -122,53 +125,23 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     // MARK: - The filters-list signpost (moon glyph) + how-to
 
     func testMoonGlyphShowsHowToForAllTiersBesideTheEditPencil() throws {
-        let source = try readSource(.filterLibraryView)
-
-        // The glyph sits in the non-editing primaryAction group with the edit pencil, so it's hidden in
-        // edit mode; declared first so it renders to the LEFT of the pencil.
-        let group = try sourceBlock(
-            in: source,
-            startingAt: "ToolbarItemGroup(placement: .primaryAction) {",
-            endingBefore: ".navigationDestination("
-        )
-        let moonIdx = try XCTUnwrap(group.range(of: "systemName: \"moon\"")?.lowerBound)
-        let pencilIdx = try XCTUnwrap(group.range(of: "systemName: \"square.and.pencil\"")?.lowerBound)
-        XCTAssertLessThan(moonIdx, pencilIdx, "The moon glyph must be declared before (left of) the edit pencil.")
-
-        // No paywall: Focus auto-switch is free for all tiers, so the glyph shows the how-to to everyone.
-        let moonButton = try sourceBlock(
-            in: group,
-            startingAt: "systemName: \"moon\"",
-            endingBefore: "NativeToolbarIconButton(systemName: \"square.and.pencil\""
-        )
-        XCTAssertTrue(moonButton.contains("isShowingAutoSwitchInfo = true"),
-                      "Tapping the moon glyph shows the how-to sheet to all tiers.")
-        XCTAssertFalse(moonButton.contains("isShowingPaywall"),
-                       "The moon glyph must NOT paywall — Focus auto-switch is free for all tiers.")
-        XCTAssertFalse(moonButton.contains("hasLavaSecurityPlus"),
-                       "The moon glyph must not Plus-gate.")
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("isShowingPaywall"))
-        XCTAssertTrue(source.contains("hasLavaSecurityPlus"))
+        let source = try readSource(.reactNativeFilterScreens)
+        XCTAssertTrue(source.contains("AutoSwitch"))
     }
 
-    func testHowToSheetCoversAutomationAndFocusWithDeepLinks() throws {
+    func testHowToPageCoversAutomationAndFocusWithDeepLinks() throws {
         let source = try readSource(.filterLibraryView)
-        XCTAssertTrue(source.contains(".sheet(isPresented: $isShowingAutoSwitchInfo) {"),
-                      "The how-to sheet must be presented from the moon glyph's state.")
+        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("AutoSwitchHowToSheet()"),
+                      "The how-to destination must use the native page stack.")
         let sheet = try sourceBlock(
             in: source,
-            startingAt: "private struct AutoSwitchHowToSheet: View {"
+            startingAt: "struct AutoSwitchHowToContent: View {"
         )
 
-        // Generic framing: the moon header + a schedule/Focus title, NOT a Focus-only header (focus-mode-
-        // sheet revamp). The panel title reuses the existing "Switch filters automatically" catalog key.
-        XCTAssertTrue(sheet.contains("systemImage: \"moon\""),
-                      "The how-to keeps the moon glyph in its header panel.")
-        XCTAssertTrue(sheet.contains("title: \"Switch filters automatically\""),
-                      "The header must frame auto-switch generically, not Focus-only.")
+        // Automation and Focus share a concise introduction, with no duplicate hero.
+        XCTAssertTrue(sheet.contains("Switch filters on a schedule or with a Focus."))
+        XCTAssertTrue(sheet.contains(".navigationTitle(\"Auto-switch filters\".lavaLocalized)"))
+        XCTAssertFalse(sheet.contains("systemImage: \"moon\""))
 
         // Two sections, Automation BEFORE Focus mode (task order).
         let automationIdx = try XCTUnwrap(sheet.range(of: "title: \"Automation\"")?.lowerBound,
@@ -259,6 +232,9 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             startingAt: "func perform() async throws -> some IntentResult & ProvidesDialog {",
             endingBefore: "\n    }\n}"
         )
+
+        XCTAssertEqual(perform.components(separatedBy: "languageCode: languageCode, filter.displayName").count - 1, 4,
+                       "Every system-owned outcome must use the same emoji identity as the entity picker.")
 
         // Same shared FilterPipeline engine any in-app or Focus caller uses — the single gated boundary.
         // `.systemOwnedDialog`: the system owns this caller's dialog/error feedback; the engine hook adds
@@ -379,7 +355,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
         XCTAssertLessThan(initGateIdx, initPublishIdx,
                           "The protected-data gate must precede the process-start clear.")
 
-        let model = try readSource(.appViewModel)
+        let model = try readAppViewModelSource()
         XCTAssertTrue(model.contains("LavaAppForegroundPublication.publish(active, to: defaults)"),
                       "Scene-transition publishes must go through the stamped kit API (the stamp is what the age-out reads).")
 
@@ -456,7 +432,7 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
             app.contains("LavaShortcuts.updateAppShortcutParameters()"),
             "LavaSecApp must register/refresh the Switch Filter shortcut at launch."
         )
-        let model = try readSource(.appViewModel)
+        let model = try readAppViewModelSource()
         // The refresh runs AFTER the library reaches disk, in the shared-writer helper both persist
         // funnels call, so it re-reads the CURRENT on-disk list (the entity query reads disk) and covers
         // every mutation incl. wholesale restores (Codex #325 r4/r5). Assert the helper refreshes and both

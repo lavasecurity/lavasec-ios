@@ -3,6 +3,8 @@ import LavaSecKit
 import UIKit
 
 struct DNSResolverSettingsView: View {
+    var onDismissRequested: (() -> Void)? = nil
+    private var isFullSheet: Bool { onDismissRequested != nil }
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
@@ -17,6 +19,7 @@ struct DNSResolverSettingsView: View {
     @State private var pendingCustomResolverDiscardAction: CustomResolverDiscardAction?
     @State private var customResolverValidationMessage: String?
     @State private var showUpgradePage = false
+    @State private var showVPNChaining = false
     @FocusState private var focusedCustomResolverField: CustomResolverFocusField?
 
     var body: some View {
@@ -25,19 +28,18 @@ struct DNSResolverSettingsView: View {
             tier: .technical,
             intro: LavaInfoPanel(
                 title: "How websites get found",
-                description: "DNS is how your phone finds a website's address. Our default is safe for almost everyone, so we recommend keeping it.",
+                description: viewModel.dnsSettingsPresentation.canEditDNS ? "Choose who looks up website addresses for your device." : "With fallback off, VPN chaining uses DNS from its WireGuard configuration.",
                 systemImage: "network"
-            )
+            ),
+            introAction: viewModel.dnsSettingsPresentation.canEditDNS ? nil : LavaSectionFooterLink(title: "Review VPN chaining", action: { showVPNChaining = true })
         ) {
+            Group {
             LavaSectionGroup("Device DNS") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Use Device DNS Setting", isOn: useDeviceDNSBinding)
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-
-                    Text(viewModel.deviceDNSResolverDetailText.lavaLocalized)
-                        .lavaQuietNoteText()
+                    LavaSettingsRow(footer: viewModel.deviceDNSResolverDetailText) {
+                        LavaToggleRow(title: "Use Device DNS Setting", isOn: useDeviceDNSBinding,
+                                      accessibilityHint: viewModel.deviceDNSResolverDetailText)
+                    }
 
                     // The fallback toggle sits directly under the Device DNS detail in
                     // both states. When an encrypted primary is selected it offers the
@@ -91,7 +93,16 @@ struct DNSResolverSettingsView: View {
             }
 
             if !usesDeviceDNSSetting {
-                LavaSectionGroup("DNS Providers", footer: "A provider answers your phone's \"where is this website?\" questions. Any of these are trustworthy.") {
+                if showsResolverOptions {
+                    LavaSectionGroup("DNS Transport") {
+                        ResolverTransportControl(
+                            selectedBaseResolver: selectedBaseResolver,
+                            selection: resolverTransportBinding
+                        )
+                    }
+                }
+
+                LavaSectionGroup("DNS Providers", footer: nil) {
                     LavaCondensedList {
                         ForEach(Array(DNSResolverPreset.settingsPresets.filter { $0.id != DNSResolverPreset.device.id }.enumerated()), id: \.element.id) { _, preset in
                             Button {
@@ -136,7 +147,7 @@ struct DNSResolverSettingsView: View {
                 }
 
                 if showsCustomResolverOptions {
-                    LavaSectionGroup("Custom Resolver", footer: "For advanced users: enter the address of a DNS service you trust. Not sure? Leave it and pick a provider above.") {
+                    LavaSectionGroup("Custom Resolver") {
                         VStack(spacing: 12) {
                             LavaTextInputPanel {
                                 CustomResolverTextField(
@@ -175,11 +186,15 @@ struct DNSResolverSettingsView: View {
                                 )
                             }
 
+                            if let customResolverValidationMessage {
+                                DomainRejectPanel(title: "Custom DNS cannot be saved", message: customResolverValidationMessage)
+                            }
+
                             HStack(spacing: 12) {
                                 Button(action: clearCustomResolverDrafts) {
                                     Text("Clear".lavaLocalized)
                                 }
-                                .buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))
+                                .buttonStyle(LavaSecondaryActionButtonStyle())
                                 .disabled(!canClearCustomResolver)
 
                                 Button(action: saveCustomResolver) {
@@ -188,33 +203,26 @@ struct DNSResolverSettingsView: View {
                                 .buttonStyle(CustomResolverSaveButtonStyle(isSaved: customResolverSaveButtonTitle == "Saved"))
                                 .disabled(!canSaveCustomResolver)
                             }
-
-                            if let customResolverValidationMessage {
-                                DomainRejectPanel(title: "Custom DNS cannot be saved", message: customResolverValidationMessage)
-                            }
                         }
                     }
                 }
 
-                if showsResolverOptions {
-                    LavaSectionGroup("DNS Transport", footer: "\"Transport\" is how the lookup travels. IP is unencrypted; DoH, DoT, and DoQ scramble it so others on your network can't see the sites you visit.") {
-                        ResolverTransportControl(
-                            detail: transportDetailText,
-                            selectedBaseResolver: selectedBaseResolver,
-                            selection: resolverTransportBinding
-                        )
-                    }
-                }
             }
+            }.disabled(!viewModel.dnsSettingsPresentation.canEditDNS)
         }
         .navigationBarBackButtonHidden(customResolverBackButtonIsVisible)
         .toolbar {
-            if customResolverBackButtonIsVisible {
+            if customResolverBackButtonIsVisible && !isFullSheet {
                 ToolbarItem(placement: .topBarLeading) {
                     NativeToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: requestCustomResolverDismiss)
                 }
+                .lavaToolbarChrome()
             }
         }
+        .lavaFullSheetHeader("DNS Resolver", isPresented: isFullSheet, leading: {
+            NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: requestCustomResolverDismiss)
+        }, trailing: { EmptyView() })
+        .interactiveDismissDisabled(isFullSheet && customResolverHasUnsavedDraft)
         .lavaConfirmationAlert { host in
             host.alert("Discard custom DNS changes?", isPresented: $showingCustomResolverDiscardConfirmation) {
                 Button("Cancel", role: .cancel) {
@@ -229,9 +237,22 @@ struct DNSResolverSettingsView: View {
         }
         .navigationDestination(isPresented: $showUpgradePage) {
             LavaPlusUpgradeDestination()
+                .toolbar(.visible, for: .navigationBar)
         }
-        .onAppear(perform: resetCustomResolverDrafts)
-        .onDisappear(perform: resetCustomResolverDrafts)
+        .onAppear {
+            viewModel.refreshDNSSettingsPresentation()
+            if !hasPendingCustomResolverAddressChange && !hasPendingCustomResolverSecondaryAddressChange && !hasPendingCustomResolverNameChange { resetCustomResolverDrafts() }
+        }
+        #if DEBUG || LAVA_QA_TOOLS
+        .navigationDestination(isPresented: $showVPNChaining) {
+            VPNChainingSettingsView(showDNSSettings: .constant(false), onOpenDNSSettings: { showVPNChaining = false })
+        }
+        #endif
+        .onDisappear {
+            // The VPN review is a child of this exact editor. Retain its temporary
+            // fields through that detour; leaving the editor otherwise resets them.
+            if !showVPNChaining { resetCustomResolverDrafts() }
+        }
     }
 
     private var selectedResolver: DNSResolverPreset {
@@ -298,10 +319,10 @@ struct DNSResolverSettingsView: View {
             } else {
                 // Leaving Device DNS: there is no prior non-device transport to restore
                 // (`selectedMenuTransport` is forced to `.plainDNS` while Device DNS is
-                // selected), so adopt the app's default/top resolver — Mullvad DoH — to
+                // selected), so adopt the app's default/top resolver — Quad9 DoH — to
                 // match onboarding and the AppConfiguration default, rather than dropping
                 // the user onto Google plain IP.
-                viewModel.setResolver(.mullvadDoH)
+                viewModel.setResolver(.quad9UnfilteredDoH)
             }
         }
     }
@@ -335,10 +356,6 @@ struct DNSResolverSettingsView: View {
                 viewModel.setUsesEncryptedDeviceDNSFallback(newValue)
             }
         }
-    }
-
-    private var transportDetailText: String {
-        "IP uses standard DNS. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) encrypt allowed lookups to the resolver."
     }
 
     private var selectedMenuTransport: DNSResolverTransport {
@@ -563,8 +580,13 @@ struct DNSResolverSettingsView: View {
         if customResolverHasUnsavedDraft {
             requestCustomResolverDiscard(for: .dismiss)
         } else {
-            dismiss()
+            dismissCustomResolver()
         }
+    }
+
+    private func dismissCustomResolver() {
+        if let onDismissRequested { onDismissRequested() }
+        else { dismiss() }
     }
 
     private func requestCustomResolverDiscard(for action: CustomResolverDiscardAction) {
@@ -585,7 +607,7 @@ struct DNSResolverSettingsView: View {
         case .useDeviceDNS(let newValue):
             applyUseDeviceDNSSetting(newValue)
         case .dismiss:
-            dismiss()
+            dismissCustomResolver()
         case nil:
             break
         }
@@ -597,6 +619,7 @@ struct DNSResolverSettingsView: View {
                 return
             }
 
+            guard viewModel.mayEditDNSSettingsNow() else { return }
             action()
         }
     }
@@ -667,6 +690,15 @@ private struct ResolverPickerSections: View {
 
     var body: some View {
         Group {
+            if showsResolverOptions {
+                LavaSectionGroup("DNS Transport") {
+                    ResolverTransportControl(
+                        selectedBaseResolver: selectedBaseResolver,
+                        selection: transportBinding
+                    )
+                }
+            }
+
             LavaSectionGroup("DNS Providers") {
                 LavaCondensedList {
                     ForEach(Array(DNSResolverPreset.settingsPresets.filter { $0.id != DNSResolverPreset.device.id }.enumerated()), id: \.element.id) { _, preset in
@@ -742,11 +774,15 @@ private struct ResolverPickerSections: View {
                             )
                         }
 
+                        if let customResolverValidationMessage {
+                            DomainRejectPanel(title: "Custom DNS cannot be saved", message: customResolverValidationMessage)
+                        }
+
                         HStack(spacing: 12) {
                             Button(action: clearCustomResolverDrafts) {
                                 Text("Clear".lavaLocalized)
                             }
-                            .buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))
+                            .buttonStyle(LavaSecondaryActionButtonStyle())
                             .disabled(!canClearCustomResolver)
 
                             Button(action: saveCustomResolver) {
@@ -755,23 +791,10 @@ private struct ResolverPickerSections: View {
                             .buttonStyle(CustomResolverSaveButtonStyle(isSaved: customResolverSaveButtonTitle == "Saved"))
                             .disabled(!canSaveCustomResolver)
                         }
-
-                        if let customResolverValidationMessage {
-                            DomainRejectPanel(title: "Custom DNS cannot be saved", message: customResolverValidationMessage)
-                        }
                     }
                 }
             }
 
-            if showsResolverOptions {
-                LavaSectionGroup("DNS Transport") {
-                    ResolverTransportControl(
-                        detail: transportDetailText,
-                        selectedBaseResolver: selectedBaseResolver,
-                        selection: transportBinding
-                    )
-                }
-            }
         }
         .onAppear(perform: resetCustomResolverDrafts)
         .onDisappear(perform: resetCustomResolverDrafts)
@@ -809,10 +832,6 @@ private struct ResolverPickerSections: View {
         } set: { newValue in
             selectPreset(selectedBaseResolver.resolverVariant(for: newValue))
         }
-    }
-
-    private var transportDetailText: String {
-        "IP uses standard DNS. DNS over HTTPS (DoH), TLS (DoT), and QUIC (DoQ) encrypt allowed lookups to the resolver."
     }
 
     private var customResolverMetadata: String {
@@ -879,14 +898,14 @@ private struct ResolverPickerSections: View {
     }
 
     private var customResolverClearFallbackPreset: DNSResolverPreset {
-        let fallbackBasePreset = selectedBaseResolver.id == DNSResolverPreset.customID ? DNSResolverPreset.mullvad : selectedBaseResolver
+        let fallbackBasePreset = selectedBaseResolver.id == DNSResolverPreset.customID ? DNSResolverPreset.quad9Unfiltered : selectedBaseResolver
         let variant = fallbackBasePreset.resolverVariant(for: selectedMenuTransport)
         // The encrypted fallback must stay encrypted. A custom DoQ alternative has no
-        // built-in QUIC variant, so resolverVariant degrades to plain Mullvad IP —
+        // built-in QUIC variant, so resolverVariant degrades to plain Quad9 IP —
         // clearing it would silently drop the safety net from encrypted to unencrypted.
         // Coerce that unsupported-QUIC case to the encrypted default/top resolver.
         if selectedMenuTransport == .dnsOverQUIC, variant.transport != .dnsOverQUIC {
-            return .mullvadDoH
+            return .quad9UnfilteredDoH
         }
         return variant
     }
@@ -1035,21 +1054,22 @@ private struct CustomResolverSaveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(isSaved ? LavaStyle.secondaryText : .white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.82)
+            .foregroundStyle(isSaved || !isEnabled ? LavaStyle.secondaryText : .white)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
-            .frame(height: LavaSurface.actionButtonHeight)
+            .frame(minHeight: LavaSurface.actionButtonHeight)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSaved ? LavaStyle.quietControl : LavaStyle.safeControlGreen)
+                    .fill(isSaved || !isEnabled ? LavaStyle.quietControl : LavaStyle.safeControlGreen)
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(Color.black.opacity(configuration.isPressed ? 0.10 : 0))
                     }
             }
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .opacity(isEnabled || isSaved ? 1 : 0.45)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
@@ -1148,38 +1168,20 @@ private struct CustomDNSResolverRow: View {
 }
 
 private struct ResolverTransportControl: View {
-    let detail: String
     let selectedBaseResolver: DNSResolverPreset
     @Binding var selection: DNSResolverTransport
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("DNS Transport", selection: $selection) {
-                ForEach(selectedBaseResolver.availableTransports, id: \.self) { transport in
-                    Text(transport.menuTitle.lavaLocalized)
-                        .tag(transport)
-                }
-            }
-            .pickerStyle(.segmented)
+            LavaSegmentedPicker(label: "DNS Transport", options: selectedBaseResolver.availableTransports,
+                                selection: $selection) { $0.menuTitle.lavaLocalized }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .lavaControlRowCard()
-
-            Text(detail.lavaLocalized)
+            Text((selectedBaseResolver.availableTransports.contains(.dnsOverQUIC)
+                ? "IP uses standard, unencrypted DNS. DoH (DNS over HTTPS), DoT (DNS over TLS), and DoQ (DNS over QUIC) encrypt lookups between Lava and your DNS provider."
+                : "IP uses standard, unencrypted DNS. DoH (DNS over HTTPS) and DoT (DNS over TLS) encrypt lookups between Lava and your DNS provider.").lavaLocalized)
                 .lavaQuietNoteText()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct ResolverToggleRow: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(title.lavaLocalized, isOn: $isOn)
-            .font(.headline)
-            .tint(LavaStyle.safeGreen)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1189,13 +1191,8 @@ private struct ResolverOptionControl: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ResolverToggleRow(title: title, isOn: $isOn)
-                .lavaControlRowCard()
-
-            Text(detail.lavaLocalized)
-                .lavaQuietNoteText()
+        LavaSettingsRow(footer: detail) {
+            LavaToggleRow(title: title, isOn: $isOn, accessibilityHint: detail)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

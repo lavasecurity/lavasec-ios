@@ -134,14 +134,14 @@ package enum SupabaseIDTokenAuthError: Error, Equatable, LocalizedError {
     package var errorDescription: String? {
         switch self {
         case .invalidEndpoint:
-            "The Supabase Auth endpoint is not valid."
+            LavaCoreStrings.localized("The Supabase Auth endpoint is not valid.")
         case .invalidResponse:
-            "The Supabase Auth response was not valid."
+            LavaCoreStrings.localized("The Supabase Auth response was not valid.")
         case .requestFailed(let statusCode, let message):
             if let message, !message.isEmpty {
-                "Supabase Auth returned status \(statusCode): \(message)"
+                LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld: %@", statusCode, message)
             } else {
-                "Supabase Auth returned status \(statusCode)."
+                LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld.", statusCode)
             }
         }
     }

@@ -20,7 +20,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     private let writeMarker = "write(to: configurationURL"
 
     func testConfigurationIsWrittenOnlyByTheSingleSharedWriter() throws {
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         let writer = try readSource(.sharedFilterStatePersistence)
 
         // The single owner of the shared configuration file must stay main-actor confined, so no
@@ -48,8 +48,8 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         let delegateMarker = "SharedFilterStatePersistence.writeConfigurationAndLibrary("
         let persistSharedState = try sourceBlock(
             in: appViewModel,
-            startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly("
+            startingAt: "func persistSharedState(",
+            endingBefore: "func persistConfigurationOnly("
         )
         XCTAssertEqual(
             persistSharedState.components(separatedBy: delegateMarker).count - 1, 1,
@@ -57,7 +57,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         )
         let persistConfigurationOnly = try sourceBlock(
             in: appViewModel,
-            startingAt: "private func persistConfigurationOnly(",
+            startingAt: "func persistConfigurationOnly(",
             endingBefore: "private func syncActiveFilterFromConfiguration()"
         )
         XCTAssertEqual(
@@ -79,7 +79,7 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// switch). AppViewModel must therefore contain ZERO raw library writes — the library is only ever written
     /// by the shared writer, at a bumped generation.
     func testLibraryHalfOfThePairIsAlsoSingleSourced() throws {
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         let writer = try readSource(.sharedFilterStatePersistence)
         let libraryWriteMarker = "write(to: filterLibraryURL"
 
@@ -95,10 +95,10 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         // persistConfigurationOnly so the generation advances and the extension's fence can trip (Codex P1).
         let persistFilterLibrary = try sourceBlock(
             in: appViewModel,
-            startingAt: "private func persistFilterLibrary(",
+            startingAt: "func persistFilterLibrary(",
             // loadCustomizationPreferences moved to CustomizationController (Phase D5);
             // the next hub member after the library-only persist is the progress load.
-            endingBefore: "private func loadLavaGuardProgress()"
+            endingBefore: "func loadLavaGuardProgress()"
         )
         XCTAssertEqual(
             persistFilterLibrary.components(separatedBy: "persistConfigurationOnly(").count - 1, 1,
@@ -127,9 +127,8 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// the extension's engine) must pass that lock — otherwise the two processes can interleave the
     /// generation read + file writes. Pin the lock wrap + that the foreground publishers engage it.
     func testCrossProcessCASLockWrapsTheCriticalSectionAndAllWritersEngageIt() throws {
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         let writer = try readSource(.sharedFilterStatePersistence)
-        let engine = try readSource(.headlessFocusFilterSwitchEngine)
 
         // The writer wraps its read-generation-then-write critical section in the exclusive flock.
         XCTAssertTrue(writer.contains("crossProcessLockURL: URL? = nil"),
@@ -143,9 +142,8 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
         XCTAssertEqual(appViewModel.components(separatedBy: lockArg).count - 1, 2,
                        "Both foreground publishers (persistSharedState + persistConfigurationOnly) must pass the cross-process lock.")
 
-        // The extension engine must engage the SAME lock on both its commit and its rollback writer.
-        XCTAssertEqual(engine.components(separatedBy: "crossProcessLockURL: env.configurationWriteLockURL").count - 1, 2,
-                       "The engine's commit AND rollback writer must pass the cross-process lock.")
+        // Headless publication now holds configuration → publication across its commit callback.
+        // Executable contention and pointer-failure tests cover that path and its fenced rollback.
     }
 
     /// LAV-100 Phase 4 (Codex P1, state-agnostic switch): the cross-process WRITE lock is released before the
@@ -157,13 +155,13 @@ final class SharedConfigurationWriterInvariantSourceTests: XCTestCase {
     /// and that it keys on the ACTIVE FILTER (so a concurrent library-only generation bump — a warm-token
     /// promote, which has no marker to recover an aborted flip — does not needlessly abort the flip).
     func testForegroundFlipIsFencedAgainstAConcurrentSwitch() throws {
-        let appViewModel = try readSource(.appViewModel)
+        let appViewModel = try readAppViewModelSource()
         let writer = try readSource(.sharedFilterStatePersistence)
 
         let persistSharedState = try sourceBlock(
             in: appViewModel,
-            startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly("
+            startingAt: "func persistSharedState(",
+            endingBefore: "func persistConfigurationOnly("
         )
         XCTAssertTrue(persistSharedState.contains("supersededWhileLocked:"),
                       "The foreground publish must pass a flip fence (supersededWhileLocked) so a concurrent Focus commit isn't clobbered.")

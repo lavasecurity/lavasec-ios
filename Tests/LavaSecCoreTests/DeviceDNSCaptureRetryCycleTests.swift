@@ -75,27 +75,6 @@ final class DeviceDNSCaptureRetryCycleTests: XCTestCase {
         }
     }
 
-    func testAttemptCountingResetsPerCycleAndBoundsAtPolicyMax() {
-        let (cycle, advance) = makeCycle()
-        queue.sync {
-            cycle.assumeIsolated { cycle in
-                XCTAssertEqual(cycle.noteScheduleRequest(isWake: true), .start)
-                var attempts = 0
-                while cycle.shouldContinue(capturedNonEmpty: false) {
-                    attempts = cycle.noteAttemptRan()
-                }
-                XCTAssertEqual(attempts, DeviceDNSFallbackPolicy.deviceDNSCaptureMaxRetryAttempts,
-                               "cycle runs exactly the policy-bounded attempt count")
-                cycle.noteExhausted()
-                advance(90)
-                XCTAssertEqual(cycle.noteScheduleRequest(isWake: true), .start)
-                XCTAssertEqual(cycle.noteAttemptRan(), 1, "attempts reset on cycle start")
-                XCTAssertFalse(cycle.shouldContinue(capturedNonEmpty: true),
-                               "a non-empty capture ends the cycle regardless of attempts")
-            }
-        }
-    }
-
     // MARK: - The shipped bypass (flapping mask), pinned
 
     func testAddressNeutralFlapKeepsTheWakeCooldown() {
@@ -138,24 +117,20 @@ final class DeviceDNSCaptureRetryCycleTests: XCTestCase {
         let (cycle, _) = makeCycle()
         queue.sync {
             cycle.assumeIsolated { isolated in
-                XCTAssertEqual(isolated.attemptsMade, 0)
                 XCTAssertEqual(isolated.noteScheduleRequest(isWake: false), .start)
-                XCTAssertEqual(isolated.noteAttemptRan(), 1)
-                XCTAssertEqual(isolated.attemptsMade, 1)
+                isolated.noteExhausted()
                 isolated.cancelPendingAttempt()
             }
         }
     }
 }
 
-/// Runs one full masked cycle to exhaustion (every capture empty). A free function
-/// (not a test-case method) so the isolated `assumeIsolated` regions can call it
-/// without capturing the non-Sendable XCTestCase; the isolated parameter keeps it
-/// synchronous inside those regions.
+/// Runs one masked capture to exhaustion. Single-shot (P1): a masked read IS the
+/// exhaustion — there is no attempt loop. A free function (not a test-case method)
+/// so the isolated `assumeIsolated` regions can call it without capturing the
+/// non-Sendable XCTestCase; the isolated parameter keeps it synchronous inside
+/// those regions.
 private func runMaskedCycleToExhaustion(_ cycle: isolated DeviceDNSCaptureRetryCycle) {
-    while cycle.shouldContinue(capturedNonEmpty: false) {
-        _ = cycle.noteAttemptRan()
-    }
     cycle.noteExhausted()
 }
 

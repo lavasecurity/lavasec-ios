@@ -77,8 +77,8 @@ final class BackupRestoreSourceTests: XCTestCase {
     func testRestoreShowsStatusIndicatorPanelInsteadOfMessageLine() throws {
         let source = try readSource(.backupRestoreView)
 
-        XCTAssertTrue(source.contains("\"Unlock and restore locally\""))
-        XCTAssertTrue(source.contains("RestoreStatusPanel"))
+        XCTAssertTrue(source.contains("\"Unlock method\""))
+        XCTAssertTrue(source.contains("if restoreStatus != .choosing { RestoreStatusPanel(status: restoreStatus) }"))
         XCTAssertTrue(source.contains("case failed(reason: String)"))
         XCTAssertTrue(source.contains("Restored successfully"))
         XCTAssertTrue(source.contains("Restore failed"))
@@ -125,16 +125,15 @@ final class BackupRestoreSourceTests: XCTestCase {
 
     func testRestoreFlowIsFullSheetWithFooterAction() throws {
         let source = try readSource(.backupRestoreView)
-        let settings = try readSource(.accountBackupSettingsView)
+        let settings = try readSource(.reactNativeAppFlows)
+        XCTAssertTrue(settings.contains("case \"backupRestore\": "))
 
         // Presented as a full bottom sheet (covers the tab bar) like Import filters,
         // matching the backup setup flow, instead of a pushed screen.
-        XCTAssertTrue(settings.contains(".sheet(isPresented: $isRestoringBackup)"))
-        XCTAssertTrue(settings.contains("isRestoringBackup = true"))
-        XCTAssertTrue(source.contains("LavaSheetScaffold {"))
-        // The Restore button lives on the sheet's footer bar; back is the chevron.
+        XCTAssertTrue(source.contains("LavaTaskSheet(title: \"Restore Backup\""))
+        // Footer action stays pinned; Back exists only when leaving a prepared review.
         XCTAssertTrue(source.contains("} footer: {"))
-        XCTAssertTrue(source.contains("LavaToolbarIconButton(systemName: \"chevron.left\", accessibilityLabel: \"Back\")"))
+        XCTAssertTrue(source.contains("back: sheetBackAction"))
         XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
         XCTAssertFalse(source.contains(".navigationTitle(\"Restore Backup\".lavaLocalized)"))
         // Canary: the negative pins above key on these identifiers - if a rename removes

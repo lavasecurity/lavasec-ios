@@ -40,8 +40,22 @@ public struct ResolverHealthOrganicUpstreamCompletion: Equatable, Sendable {
     fileprivate let evidence: ResolverOrganicUpstreamEvidence
 
     /// Creates canonical resolver-health evidence for one organic upstream result.
-    public init(occurredAt: Date, result: DNSResolutionResult) {
-        evidence = ResolverOrganicUpstreamEvidence(occurredAt: occurredAt, result: result)
+    ///
+    /// - Parameter chainedDataPathLatched: when the resolution was carried through the chained
+    ///   tunnel, its health belongs to the outage supervisor, not this physical-DNS coordinator
+    ///   — see `ResolverOrganicUpstreamEvidence.Outcome.governedByOutageSupervisor`.
+    /// - Parameter clientDeadlineExpired: records completed attempts without crediting a late reply as client service.
+    public init(
+        occurredAt: Date,
+        result: DNSResolutionResult,
+        chainedDataPathLatched: Bool = false,
+        clientDeadlineExpired: Bool = false
+    ) {
+        evidence = ResolverOrganicUpstreamEvidence(
+            occurredAt: occurredAt,
+            result: result,
+            chainedDataPathLatched: chainedDataPathLatched,
+            clientDeadlineExpired: clientDeadlineExpired)
     }
 }
 
@@ -75,7 +89,8 @@ public struct ResolverHealthGatewayEvent: Sendable {
         previousIsSatisfied: Bool?,
         kind: TunnelNetworkKind,
         isSatisfied: Bool,
-        observedAt: Date
+        observedAt: Date,
+        chainedTunnelledDNSCarryUnchanged: Bool = false
     ) -> Self {
         Self(
             reducerEvent: .networkPathObserved(
@@ -84,7 +99,8 @@ public struct ResolverHealthGatewayEvent: Sendable {
                     previousIsSatisfied: previousIsSatisfied,
                     kind: kind,
                     isSatisfied: isSatisfied,
-                    observedAt: observedAt
+                    observedAt: observedAt,
+                    chainedTunnelledDNSCarryUnchanged: chainedTunnelledDNSCarryUnchanged
                 )
             )
         )
@@ -212,6 +228,9 @@ public enum ResolverHealthGatewayEffect: Equatable, Sendable {
     case requestResolverRuntimeReset(ResolverHealthGatewayRuntimeResetRequest)
     /// Delivers SERVFAIL responses collected by the preceding runtime replacement.
     case deliverPendingResolverFailures(reason: String)
+    /// Clears ONLY the resolver backoff penalty box, without the destructive full runtime reset —
+    /// so a satisfied chained roam whose tunnelled carry survives still gets a fresh attempt.
+    case resetResolverBackoff(reason: String)
     /// Clears a pending Device DNS recapture restart request.
     case clearDeviceDNSRecaptureRestartPending
     /// Signals that the connectivity projection may have changed.
@@ -400,6 +419,8 @@ private extension ResolverHealthGatewayEffect {
             }
         case .deliverPendingResolverFailures(let reason):
             self = .deliverPendingResolverFailures(reason: reason)
+        case .resetResolverBackoff(let reason):
+            self = .resetResolverBackoff(reason: reason)
         case .clearDeviceDNSRecaptureRestartPending:
             self = .clearDeviceDNSRecaptureRestartPending
         case .signalConnectivityProjectionChanged:

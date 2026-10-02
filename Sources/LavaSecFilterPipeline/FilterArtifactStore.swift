@@ -96,12 +96,14 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
     public let generatedAt: Date
     package let writtenAt: Date
     package let availableArtifacts: [FilterArtifactKind]
+    package let compactPayloadSHA256: String?
 
     package init(
         preparedSnapshot: PreparedFilterSnapshot,
         compactSchemaVersion: UInt32?,
         writtenAt: Date,
-        availableArtifacts: [FilterArtifactKind]
+        availableArtifacts: [FilterArtifactKind],
+        compactPayloadSHA256: String? = nil
     ) {
         self.init(
             snapshotIdentity: preparedSnapshot.identity,
@@ -109,7 +111,8 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
             summary: preparedSnapshot.summary,
             generatedAt: preparedSnapshot.snapshot.generatedAt,
             writtenAt: writtenAt,
-            availableArtifacts: availableArtifacts
+            availableArtifacts: availableArtifacts,
+            compactPayloadSHA256: compactPayloadSHA256
         )
     }
 
@@ -135,7 +138,8 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
         summary: PreparedFilterSnapshotSummary,
         generatedAt: Date,
         writtenAt: Date,
-        availableArtifacts: [FilterArtifactKind]
+        availableArtifacts: [FilterArtifactKind],
+        compactPayloadSHA256: String? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.snapshotIdentity = snapshotIdentity
@@ -146,6 +150,7 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
         self.generatedAt = generatedAt
         self.writtenAt = writtenAt
         self.availableArtifacts = availableArtifacts
+        self.compactPayloadSHA256 = compactPayloadSHA256
     }
 
     package func canReuseForProtectionStartup(
@@ -158,12 +163,26 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
     /// `nil` when the artifact set is reusable for warm startup, otherwise a
     /// privacy-safe reason string (field NAMES only, no domain/host values)
     /// naming why it was rejected — so reuse misses are self-explaining on device
-    /// (e.g. "inputs:selectedSourceHashes+catalogVersion").
+    /// (e.g. "freshness:selectedSourceHashes+catalogVersion" — see `reuseMismatchReason`, the
+    /// single producer this and the tunnel's own miss reason both go through, so the two can
+    /// never describe the same rejection differently).
     public func reuseRejectionReason(
         configuration: AppConfiguration,
         cachedCatalog: BlocklistCatalog?
     ) -> String? {
         guard schemaVersion == Self.currentSchemaVersion else { return "schemaVersion" }
+        // A manifest whose compact schema is STALE (older than this build's format) must not
+        // serve EITHER artifact: the compact is rejected by `readSummary`'s own `fileVersion`
+        // check, and serving the prepared JSON fallback instead would decode a dirty
+        // `DomainRuleSet` that, for a large paid-tier config, exceeds the packet-tunnel jetsam
+        // budget. Reject the whole set and force the streaming regeneration path. A FUTURE
+        // version (a downgrade to an older build) is deliberately NOT rejected here: the
+        // prepared JSON is backward-compatible and remains the best available fallback, which
+        // `testReusableSelectionFallsBackToPreparedWhenCompactSchemaMismatches` pins. `nil`
+        // (a manifest that predates the field) is stale and likewise regenerates.
+        guard (compactSchemaVersion ?? 0) >= CompactFilterSnapshot.fileVersion else {
+            return "compactSchemaVersion"
+        }
         guard snapshotIdentity.resolverTransport == configuration.resolverPreset.transport else {
             return "resolverTransport"
         }
@@ -178,8 +197,7 @@ public struct FilterArtifactManifest: Codable, Equatable, Sendable {
                 configuration: configuration,
                 catalog: cachedCatalog
             )
-            let mismatches = snapshotIdentity.snapshotInputMismatches(against: expectedIdentity)
-            return mismatches.isEmpty ? nil : "inputs:\(mismatches.joined(separator: "+"))"
+            return snapshotIdentity.reuseMismatchReason(against: expectedIdentity)
         }
 
         return snapshotIdentity.hasSameConfigurationInputs(as: configuration) ? nil : "configInputs"
@@ -246,9 +264,13 @@ public struct FilterArtifactStore: Sendable {
         try encoder.encode(preparedSnapshot).write(to: preparedSnapshotURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
     }
 
-    package func writeCompactSnapshot(_ compactSnapshot: CompactFilterSnapshot) throws {
+    @discardableResult
+    package func writeCompactSnapshot(_ compactSnapshot: CompactFilterSnapshot) throws -> String {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        try compactSnapshot.encodedData().write(to: compactSnapshotURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
+        let data = try compactSnapshot.encodedData()
+        let checksum = try Self.compactPayloadChecksum(data)
+        try data.write(to: compactSnapshotURL, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
+        return checksum
     }
 
     /// Writes the prepared JSON, the compact artifact, and the manifest — in that
@@ -257,12 +279,13 @@ public struct FilterArtifactStore: Sendable {
     /// single owner of artifact persistence.
     package func persist(preparedSnapshot: PreparedFilterSnapshot, writtenAt: Date = Date()) throws {
         try writePreparedSnapshot(preparedSnapshot)
-        try writeCompactSnapshot(CompactFilterSnapshot(preparedSnapshot: preparedSnapshot))
+        let checksum = try writeCompactSnapshot(CompactFilterSnapshot(preparedSnapshot: preparedSnapshot))
         try writeManifest(FilterArtifactManifest(
             preparedSnapshot: preparedSnapshot,
             compactSchemaVersion: CompactFilterSnapshot.fileVersion,
             writtenAt: writtenAt,
-            availableArtifacts: [.prepared, .compact]
+            availableArtifacts: [.prepared, .compact],
+            compactPayloadSHA256: checksum
         ))
     }
 
@@ -274,6 +297,52 @@ public struct FilterArtifactStore: Sendable {
 
         let data = try Data(contentsOf: manifestURL)
         return try JSONDecoder().decode(FilterArtifactManifest.self, from: data)
+    }
+
+    /// Whether the publisher must restore a current, usable compact artifact.
+    /// A matching manifest or prepared fallback alone cannot establish warm readiness.
+    public func needsCompactArtifactRepair(configuration: AppConfiguration, cachedCatalog: BlocklistCatalog?) -> Bool {
+        guard let manifest = try? loadManifest(),
+              manifest.canReuseForProtectionStartup(configuration: configuration, cachedCatalog: cachedCatalog),
+              manifest.availableArtifacts.contains(.compact),
+              manifest.compactSchemaVersion == CompactFilterSnapshot.fileVersion,
+              let data = try? Data(contentsOf: compactSnapshotURL, options: [.mappedIfSafe]),
+              let info = try? CompactFilterSnapshot.readSyncBootstrapInfo(from: data), info.hasStoredSummary,
+              let summary = try? CompactFilterSnapshot.readSummary(from: data),
+              summary.identity == manifest.snapshotIdentity,
+              summary.generatedAt == manifest.generatedAt,
+              manifest.summary == PreparedFilterSnapshotSummary(
+                blocklistRuleCount: summary.blocklistRuleCount,
+                blocklistSourceRuleCounts: summary.blocklistSourceRuleCounts,
+                blockRuleCount: summary.blockRuleCount,
+                blockedDomainRuleCount: summary.blockedDomainRuleCount,
+                allowRuleCount: summary.allowRuleCount,
+                guardrailRuleCount: summary.guardrailRuleCount,
+                tierBudgetRuleCount: summary.tierBudgetRuleCount,
+                quarantinedBlocklistIDs: summary.quarantinedBlocklistIDs),
+              summary.resolver.transport == configuration.resolverPreset.transport,
+              summary.coversEnabledBlocklists(in: configuration),
+              !FilterSnapshotMemoryBudget.exceedsBudget(
+                ruleCount: summary.blockRuleCount + summary.allowRuleCount + summary.guardrailRuleCount),
+              FilterRuleBudget.fitsTierBudget(recordedTotal: summary.tierBudgetRuleCount,
+                                             maxFilterRules: configuration.limits.maxFilterRules),
+              let checksum = manifest.compactPayloadSHA256,
+              (try? Self.compactPayloadChecksum(data)) == checksum else { return true }
+        return false
+    }
+
+    /// Detects altered payload bytes; this checksum does not authenticate the publisher.
+    package static func compactPayloadChecksum(_ data: Data) throws -> String {
+        var hasher = SHA256()
+        try data.withUnsafeBytes { bytes in
+            for offset in stride(from: 0, to: bytes.count, by: 1_048_576) {
+                try Task.checkCancellation()
+                hasher.update(bufferPointer: UnsafeRawBufferPointer(rebasing:
+                    bytes[offset..<min(offset + 1_048_576, bytes.count)]))
+            }
+        }
+        try Task.checkCancellation()
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     package func loadPreparedSnapshot() throws -> PreparedFilterSnapshot? {

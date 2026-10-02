@@ -23,13 +23,40 @@ final class AppDeepLinkSourceTests: XCTestCase {
         XCTAssertTrue(rootSource.contains("case .activity:"))
         XCTAssertTrue(rootSource.contains("case .settings(let settingsRoute):"))
         XCTAssertTrue(rootSource.contains("private extension SettingsRoute"))
-        XCTAssertTrue(rootSource.contains("init?(_ deepLink: LavaSettingsDeepLink)"))
-        XCTAssertTrue(rootSource.contains("case .upgrade:"))
-        XCTAssertTrue(rootSource.contains("self = .upgrade"))
-        XCTAssertTrue(rootSource.contains("case .dnsResolver:"))
-        XCTAssertTrue(rootSource.contains("self = .dnsResolver"))
-        XCTAssertTrue(rootSource.contains("case .feedback:"))
-        XCTAssertTrue(rootSource.contains("self = .bugReport"))
+        // Pin the mapping arms inside `SettingsRoute(deepLink:)` itself: the bare
+        // `case ...:` spellings also appear in `forwardReactNavigation`, so a
+        // whole-file match would pass without the mapping (Kilo, PR #786). The
+        // sourceBlock throws if the initializer disappears entirely.
+        let settingsRouteMapping = try sourceBlock(
+            in: rootSource,
+            startingAt: "init?(_ deepLink: LavaSettingsDeepLink)",
+            endingBefore: "struct BugReportSheetView"
+        )
+        XCTAssertTrue(settingsRouteMapping.contains("case .upgrade:"))
+        XCTAssertTrue(settingsRouteMapping.contains("self = .upgrade"))
+        XCTAssertTrue(settingsRouteMapping.contains("case .dnsResolver:"))
+        XCTAssertTrue(settingsRouteMapping.contains("self = .dnsResolver"))
+        XCTAssertTrue(settingsRouteMapping.contains("case .feedback:"))
+        XCTAssertTrue(settingsRouteMapping.contains("self = .bugReport"))
+        // Every user-facing SettingsRoute must be reachable from the URL parser;
+        // Customization and Network Activity were the two that had no link.
+        XCTAssertTrue(settingsRouteMapping.contains("case .customization:"))
+        XCTAssertTrue(settingsRouteMapping.contains("self = .customization"))
+        XCTAssertTrue(settingsRouteMapping.contains("case .networkActivity:"))
+        XCTAssertTrue(settingsRouteMapping.contains("self = .networkActivity"))
+    }
+
+    func testExploreDeepLinkUsesGuardStackAndAppSettingsGate() throws {
+        let root = try readSource(.rootView)
+        let bridge = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(root.contains("guardNavigationPath = [.explore]"))
+        XCTAssertTrue(root.contains("case .explore: screen = \"Explore\""))
+        // The auth prompt names the destination the link actually opens; reusing
+        // the Settings reason would misdescribe an Explore deep link.
+        XCTAssertTrue(bridge.contains("if tab == \"SettingsTab\" || screen == \"Explore\" { try await authorize(.appSettings, screen == \"Explore\" ? \"Explore\" : \"Open Settings\", fresh: false) }"))
+        // Revalidate both the request and the onboarding destination after auth.
+        XCTAssertTrue(bridge.contains("guard serial == navigationSerial,"))
+        XCTAssertTrue(bridge.contains("targetsGuard || !LavaOnboardingHandoff.shared.keepsGuardVisible else { return }"))
     }
 
     func testDeepLinkHandlerStagesImportAndNeverMutates() throws {
@@ -47,8 +74,8 @@ final class AppDeepLinkSourceTests: XCTestCase {
 
         // The deeplink-opened importer runs the same protected apply gate as the
         // in-app Filters entry point: fresh auth on the filter-editing surface.
-        XCTAssertTrue(rootSource.contains("ImportFiltersFlow("))
-        XCTAssertTrue(rootSource.contains("requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\")"))
+        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("ImportFiltersFlow("))
+        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\")"))
 
         // The importer sheet presents above the app-unlock overlay, so it must be
         // withheld until App Unlock is satisfied — otherwise a locked device could
@@ -60,20 +87,18 @@ final class AppDeepLinkSourceTests: XCTestCase {
         // Gate covers both the lock overlay and the app-switcher privacy mask so
         // the importer never sits above the lock nor lands in the .inactive snapshot.
         XCTAssertTrue(rootSource.contains("(security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible) ? nil : importDeepLinkPresentation"))
-        XCTAssertTrue(rootSource.contains(".sheet(item: importDeepLinkSheetItem)"))
 
-        // The feedback deeplink stages the bug-report sheet (the same surface as
-        // the rage-shake gesture). That sheet previews diagnostics and can submit
-        // a report. Unlike the importer it carries an accumulating draft, so it is
-        // kept MOUNTED across an App Unlock lock (so the draft survives) and the
-        // form paints its own opaque, hit-blocking mask while unlock is pending
-        // (see BugReportSettingsView). The handler stages the destination and
-        // kicks the unlock prompt so the mask drops once the device is unlocked.
-        XCTAssertTrue(handlerBlock.contains("case .feedback = settingsRoute"))
-        // The rage-shake destination lives on the `reports` environment object since the
-        // Phase D4 diagnostics peel.
-        XCTAssertTrue(handlerBlock.contains("reports.rageShakeDestination = .bugReport"))
-        XCTAssertTrue(rootSource.contains(".sheet(item: $reports.rageShakeDestination)"))
+        // RN UIKit sheets use the topmost presenter, while the native reference
+        // keeps the same binding. External imports still pass through the gated
+        // importDeepLinkSheetItem, and cannot bypass its App Unlock check.
+        XCTAssertTrue(rootSource.contains("let presentation = importDeepLinkSheetItem.wrappedValue"))
+        XCTAssertTrue(rootSource.contains("importStartMode: presentation.startMode"))
+
+        // A Feedback deep link follows the guarded Settings route. The Settings
+        // row and rage shake open the native sheet without bypassing this gate.
+        XCTAssertTrue(handlerBlock.contains("guard let route = SettingsRoute(settingsRoute)"))
+        XCTAssertTrue(handlerBlock.contains("openSettingsRoute(route)"))
+        XCTAssertFalse(handlerBlock.contains("reports.rageShakeDestination = .bugReport"))
         // The feedback sheet is masked-in-place, NOT withheld — there must be no
         // nil-gate binding that would tear the sheet (and its draft) down on lock.
         XCTAssertFalse(rootSource.contains("var rageShakeSheetItem: Binding<RageShakeDestination?>"))
@@ -100,22 +125,20 @@ final class AppDeepLinkSourceTests: XCTestCase {
         // binding is renamed or removed, those pins pass vacuously. Anchored to the live
         // sheet-item shape (a bare "RageShakeDestination" match would be satisfied by the
         // dismissRageShakeDestination() method-name substring).
-        XCTAssertTrue(rootSource.contains(".sheet(item: $reports.rageShakeDestination)"))
     }
 
     func testSettingsHelpOpensCanonicalSupportPage() throws {
-        let settingsSource = try [readSource(.settingsView), readSource(.settingsCommon)].joined(separator: "\n")
+        let settingsSource = try readSource(.settingsCommon)
         let settingsBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "struct SettingsView: View",
-            endingBefore: "private struct SettingsNavigationRow: View"
+            in: readSource(.reactNativeSettingsScreens),
+            startingAt: "<SettingsGroup title=\"Support\">",
+            endingBefore: "</SettingsGroup>"
         )
 
         XCTAssertTrue(settingsSource.contains("enum LavaWebLinks"))
         XCTAssertTrue(settingsSource.contains("static let support = URL(string: \"https://lavasecurity.app/support/\")!"))
-        XCTAssertTrue(settingsBlock.contains("SettingsExternalLinkRow("))
-        XCTAssertTrue(settingsBlock.contains("destination: LavaWebLinks.support"))
-        XCTAssertTrue(settingsBlock.contains("title: \"Help\""))
+        XCTAssertTrue(settingsBlock.contains("title=\"Help\""))
+        XCTAssertTrue(settingsBlock.contains("https://lavasecurity.app/support/"))
         XCTAssertFalse(settingsSource.contains("case .help"))
         XCTAssertFalse(settingsSource.contains("private struct HelpSettingsView"))
         XCTAssertFalse(settingsSource.contains("private struct HelpArticleView"))

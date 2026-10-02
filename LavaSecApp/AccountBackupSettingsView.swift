@@ -1,275 +1,7 @@
 import SwiftUI
 import LavaSecKit
 
-struct AccountSettingsView: View {
-    @EnvironmentObject private var account: AccountController
-    @EnvironmentObject private var backup: BackupController
-    @EnvironmentObject private var security: SecurityController
-    @State private var isShowingAccountSheet = false
-    @State private var isSettingUpBackup = false
-    @State private var isRestoringBackup = false
-    @State private var backupMaintenanceTarget: BackupMaintenanceAction?
-
-    var body: some View {
-        SettingsSubpageContent(
-            title: "Account & Backup",
-            tier: .calm,
-            intro: LavaInfoPanel(
-                title: backup.encryptedBackupInfoTitle,
-                description: "Lava works without an account. Sign in only to back up your settings online — encrypted, so only you can restore them on a new phone.",
-                systemImage: "person.crop.circle"
-            )
-        ) {
-            LavaSectionGroup(
-                "Account",
-                footer: "Account login is only needed for encrypted backup upload, support history, or paid account management."
-            ) {
-                LavaCondensedList {
-                    Button {
-                        performAppSettingsMutation(reason: "Edit Account settings") {
-                            if account.isAppleAccountConnected {
-                                isShowingAccountSheet = true
-                            } else {
-                                account.beginSignInWithApple()
-                            }
-                        }
-                    } label: {
-                        SettingsActionRow(
-                            title: account.appleSignInActionTitle,
-                            iconTint: LavaStyle.primaryText
-                        ) {
-                            AppleSignInStatusIcon(
-                                isSigningIn: account.isAppleSignInInProgress
-                            )
-                        }
-                        .lavaRow()
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(account.isAccountSignInInProgress)
-
-                    LavaCondensedDivider()
-
-                    Button {
-                        performAppSettingsMutation(reason: "Edit Account settings") {
-                            if account.isGoogleAccountConnected {
-                                isShowingAccountSheet = true
-                            } else {
-                                account.beginSignInWithGoogle()
-                            }
-                        }
-                    } label: {
-                        SettingsActionRow(title: account.googleSignInActionTitle) {
-                            if account.isGoogleSignInInProgress {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                GoogleSignInIcon()
-                            }
-                        }
-                        .lavaRow()
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(account.isAccountSignInInProgress)
-                }
-            }
-            .sheet(isPresented: $isShowingAccountSheet) {
-                AccountSheet()
-                    .environmentObject(account)
-            }
-            // The backup setup/restore flows present as full bottom sheets (like
-            // Import filters) so they cover the tab bar and put their actions on the
-            // sheet's footer bar.
-            .sheet(isPresented: $isSettingUpBackup) {
-                BackupSetupView()
-                    .environmentObject(backup)
-            }
-            .sheet(isPresented: $isRestoringBackup) {
-                BackupRestoreView()
-                    .environmentObject(backup)
-            }
-
-            LavaSectionGroup("Encrypted Backup") {
-                VStack(alignment: .leading, spacing: 10) {
-                    LavaCondensedList {
-                        if backup.isEncryptedBackupConfigured {
-                            Button {
-                                Task {
-                                    guard await security.requireAuthentication(
-                                        for: .appSettings,
-                                        reason: "Back up settings"
-                                    ) else {
-                                        return
-                                    }
-
-                                    await backup.backUpNow()
-                                }
-                            } label: {
-                                SettingsActionRow(title: backup.isBackingUpNow ? "Backing Up" : "Back Up Now") {
-                                    if backup.isBackingUpNow {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Image(systemName: "icloud.and.arrow.up.fill")
-                                            .font(.title3.weight(.semibold))
-                                    }
-                                }
-                                .lavaRow()
-                            }
-                            // Gated rows fade ONCE via LavaCondensedRowButtonStyle (isEnabled-driven)
-                            // rather than .plain + a stacked .opacity — see the style's note on the
-                            // signed-out double-dim that made these read a different grey than the
-                            // Automatic Backup toggle beside them.
-                            .buttonStyle(LavaCondensedRowButtonStyle())
-                            .disabled(!account.isAccountSignedIn || backup.isBackingUpNow || backup.isBackupMaintenanceInProgress)
-                        } else {
-                            Button {
-                                isSettingUpBackup = true
-                            } label: {
-                                SettingsActionRow(title: "Set Up Encrypted Backup") {
-                                    Image(systemName: "key.fill")
-                                        .font(.title3.weight(.semibold))
-                                }
-                                .lavaRow()
-                            }
-                            .buttonStyle(LavaCondensedRowButtonStyle())
-                            .disabled(!account.isAccountSignedIn)
-                        }
-
-                        LavaCondensedDivider()
-
-                        Button {
-                            isRestoringBackup = true
-                        } label: {
-                            SettingsActionRow(title: "Restore Backup") {
-                                Image(systemName: "icloud.and.arrow.down.fill")
-                                    .font(.title3.weight(.semibold))
-                            }
-                            .lavaRow()
-                        }
-                        .buttonStyle(LavaCondensedRowButtonStyle())
-                        .disabled(!account.isAccountSignedIn)
-                    }
-
-                    BackupOptionControl(
-                        title: "Automatic Backup",
-                        detail: "Lava waits 30 minutes after your last settings change before it tries an automatic upload.",
-                        isOn: automaticBackupBinding
-                    )
-                    .disabled(!isAutomaticBackupControlEnabled)
-                    .opacity(isAutomaticBackupControlEnabled ? 1 : 0.45)
-
-                    if backup.isEncryptedBackupConfigured {
-                        VStack(alignment: .leading, spacing: 8) {
-                            LavaCondensedList {
-                                backupMaintenanceButton(.clear)
-
-                                LavaCondensedDivider()
-
-                                backupMaintenanceButton(.disable)
-                            }
-
-                            Text("Delete online backup copy removes the server copy but keeps backups on. Turn off & delete backup stops them too. Either way, it's gone for good.".lavaLocalized)
-                                .lavaQuietNoteText()
-                        }
-                    }
-                }
-            }
-        }
-        .lavaConfirmationAlert { host in
-            host.alert(
-                backupMaintenanceTarget?.title.lavaLocalized ?? "",
-                isPresented: backupMaintenanceConfirmationBinding,
-                presenting: backupMaintenanceTarget
-            ) { target in
-                Button("Cancel", role: .cancel) {}
-                Button(target.actionTitle.lavaLocalized, role: .destructive) {
-                    performBackupMaintenance(target)
-                }
-            } message: { target in
-                Text(target.message.lavaLocalized)
-            }
-        }
-    }
-
-    private func backupMaintenanceButton(_ target: BackupMaintenanceAction) -> some View {
-        Button(role: .destructive) {
-            backupMaintenanceTarget = target
-        } label: {
-            SettingsActionRow(title: target.buttonTitle, iconTint: .red, titleTint: .red) {
-                Image(systemName: "trash")
-                    .font(.title3.weight(.semibold))
-            }
-            .lavaRow()
-        }
-        // Both delete paths hard-delete the server copy first (deleteRemoteEncryptedBackup) and
-        // refuse to tear down locally unless that is confirmed, so signed out they can only fail
-        // ("you may be offline or signed out"). Gate them on sign-in like Back Up Now / Restore so
-        // the whole section greys as one unit, and fade once via the shared row style.
-        .buttonStyle(LavaCondensedRowButtonStyle())
-        .disabled(!account.isAccountSignedIn || backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)
-    }
-
-    private var backupMaintenanceConfirmationBinding: Binding<Bool> {
-        Binding {
-            backupMaintenanceTarget != nil
-        } set: { isPresented in
-            if !isPresented {
-                backupMaintenanceTarget = nil
-            }
-        }
-    }
-
-    private func performBackupMaintenance(_ target: BackupMaintenanceAction) {
-        Task {
-            guard await security.requireAuthentication(for: .appSettings, reason: target.authReason) else {
-                return
-            }
-
-            switch target {
-            case .clear:
-                await backup.clearEncryptedBackup()
-            case .disable:
-                await backup.disableEncryptedBackup()
-            }
-        }
-    }
-
-    // Automatic upload is meaningless while signed out (the upload path short-circuits to
-    // .waitingForSignIn) OR before backup is configured, so the toggle greys out on the SAME
-    // conditions as the Back Up Now / Restore rows above rather than staying live on
-    // isEncryptedBackupConfigured alone — otherwise a configured-but-signed-out account (session
-    // expired / signed out after setup) left this toggle active and showing "on" while the rest of
-    // the section was correctly greyed. Kept in lockstep with automaticBackupBinding's getter so
-    // the toggle reads OFF exactly when it is greyed.
-    private var isAutomaticBackupControlEnabled: Bool {
-        backup.isEncryptedBackupConfigured && account.isAccountSignedIn
-    }
-
-    private var automaticBackupBinding: Binding<Bool> {
-        Binding {
-            // Reflect the preference only while the control is live; a signed-out account shows OFF
-            // even if the stored preference is on, so the greyed toggle never sits in the "on"
-            // position. The persisted preference is untouched, so it returns on re-sign-in.
-            isAutomaticBackupControlEnabled && backup.isAutomaticBackupEnabled
-        } set: { isEnabled in
-            performAppSettingsMutation(reason: "Edit backup settings") {
-                backup.setAutomaticBackupEnabled(isEnabled)
-            }
-        }
-    }
-
-    private func performAppSettingsMutation(reason: String, action: @escaping @MainActor () -> Void) {
-        Task {
-            guard await security.requireAuthentication(for: .appSettings, reason: reason) else {
-                return
-            }
-
-            action()
-        }
-    }
-}
-
-private enum BackupMaintenanceAction: Identifiable {
+enum BackupMaintenanceAction: Identifiable {
     case clear
     case disable
 
@@ -328,40 +60,7 @@ private enum BackupMaintenanceAction: Identifiable {
     }
 }
 
-private struct BackupOptionControl: View {
-    let title: String
-    let detail: String
-    let isOn: Binding<Bool>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle(title.lavaLocalized, isOn: isOn)
-                .font(.headline)
-                .tint(LavaStyle.safeGreen)
-                .lavaControlRowCard()
-
-            Text(detail.lavaLocalized)
-                .lavaQuietNoteText()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct AppleSignInStatusIcon: View {
-    let isSigningIn: Bool
-
-    var body: some View {
-        if isSigningIn {
-            ProgressView()
-                .controlSize(.small)
-        } else {
-            Image(systemName: "apple.logo")
-                .font(.title3.weight(.semibold))
-        }
-    }
-}
-
-private struct AccountSheet: View {
+struct AccountSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var account: AccountController
     @EnvironmentObject private var security: SecurityController
@@ -371,7 +70,7 @@ private struct AccountSheet: View {
         let accountConnections = account.accountConnections
 
         NavigationStack {
-            LavaSheetScaffold(spacing: 14, scrolls: false) {
+            LavaSheetScaffold(spacing: 14) {
                 LavaCondensedList {
                     ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
                         AccountConnectionRow(connection: connection)
@@ -430,9 +129,10 @@ private struct AccountSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
                 }
+                .lavaToolbarChrome()
             }
         }
-        .presentationDetents([.height(accountSheetHeight)])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .lavaConfirmationAlert { host in
             host.alert(
@@ -451,10 +151,6 @@ private struct AccountSheet: View {
                 Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
             }
         }
-    }
-
-    private var accountSheetHeight: CGFloat {
-        account.accountConnections.count > 1 ? 332 : 288
     }
 
     private func performAppSettingsMutation(reason: String, action: @escaping @MainActor () -> Void) {
@@ -476,8 +172,8 @@ private struct AccountConnectionRow: View {
             icon
                 .frame(width: 28, height: 28)
 
-            Text(connection.email ?? "\(connection.provider.displayName) account")
-                .font(.headline)
+            Text(connection.email ?? "%@ account".lavaLocalizedFormat(connection.provider.displayName))
+                .font(LavaTypography.rowTitle)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)

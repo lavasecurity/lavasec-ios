@@ -1,12 +1,12 @@
 /* LavaSecCore notification body strings — localized via Bundle.module (app + extension + tunnel). */
 
-"notif.body.switchedTo" = "已将过滤器切换到 %@";
+"notif.body.switchedTo" = "已将筛选器切换到 %@";
 "notif.body.couldNotSwitchTo" = "无法切换到 %@";
-"notif.body.pauseEnded" = "暂停已结束，保护已重新开启。";
+"notif.body.pauseEnded" = "暂停已结束，防护已重新开启。";
 "notif.body.reconnectTitle" = "重新连接 Lava";
-"notif.body.reconnectMessage" = "此网络上的 DNS 无法解析。点按以重新连接保护。";
+"notif.body.reconnectMessage" = "此网络上的 DNS 无法解析。轻点以重新连接防护。";
 "notif.body.dnsSlowTitle" = "Lava DNS 响应缓慢";
-"notif.body.dnsSlowMessage" = "所选的 DNS 解析器响应缓慢。点按以重新连接保护。";
+"notif.body.dnsSlowMessage" = "你的 DNS 提供商响应缓慢。轻点以重新连接防护。";
 
 /* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
@@ -16,24 +16,24 @@
 "dialog.filterSwitchDisallowed" = "无法切换到 %@。请打开 Lava 检查你的筛选器设置。";
 
 /* Live Activity / widget UI (shared via Bundle.module). */
-"widget.state.on" = "Lava Security 已开启";
-"widget.state.paused" = "Lava Security 已暂停";
-"widget.state.restartingTitle" = "正在重新启动…";
-"widget.a11y.restarting" = "Lava Security 正在重新启动";
+"widget.state.on" = "Lava 已开启";
+"widget.state.paused" = "Lava 已暂停";
+"widget.state.restartingTitle" = "正在重新连接…";
+"widget.a11y.restarting" = "Lava 正在重新连接";
 "widget.status.on" = "开启";
 "widget.status.paused" = "已暂停";
-"widget.status.restarting" = "正在重新启动";
-"widget.action.resume" = "继续";
-"widget.action.restart" = "重新启动";
+"widget.status.restarting" = "正在重新连接";
+"widget.action.resume" = "恢复";
+"widget.action.restart" = "重新连接";
 "widget.action.pauseForMinutes" = "暂停 %d 分钟";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
 "widget.action.pauseForMinutesShort" = "%d 分钟";
-"a11y.shieldGuardian" = "Lava 护盾守卫";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
-"core.domainError.alreadyBlocked" = "%@ 已在你的屏蔽域名中。";
+"core.domainError.alreadyBlocked" = "%@ 已在你的已拦截域名中。";
 "core.domainError.alreadyAllowed" = "%@ 已在你的允许例外中。";
-"core.domainError.blockedLimit" = "你最多可以再保留 %lld 个屏蔽域名。";
+"core.domainError.blockedLimit" = "你最多可以再保留 %lld 个已拦截的域名。";
 "core.domainError.allowedLimit" = "你最多可以保留 %lld 个允许例外。";
 
 /* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
@@ -43,32 +43,102 @@
 "core.resolver.badStamp" = "无法读取 DNS stamp。请检查后重试。";
 "core.resolver.missingDoHPath" = "DNS-over-HTTPS URL 必须包含路径，例如 /dns-query。";
 "core.resolver.credentialsNotAllowed" = "自定义 DNS URL 不能包含用户名或密码。";
-"core.resolver.secondaryTransportMismatch" = "备用 DNS 必须使用与主 DNS 相同的传输方式。";
+"core.resolver.secondaryTransportMismatch" = "次要服务器必须使用与主服务器相同的传输方式。";
 "core.endpoint.credentialsNotAllowed" = "不支持包含用户名或密码的 URL。";
-"core.endpoint.localhostNotAllowed" = "此处不能使用 localhost 作为 DNS 解析器。";
-"core.endpoint.privateNetworkNotAllowed" = "自定义屏蔽列表 URL 必须使用公开主机。";
-"core.endpoint.unusableResolverAddress" = "请输入可用的 DNS 解析器地址，不能是回环、多播或未指定地址。";
-"core.endpoint.invalidResolverHost" = "请输入有效的 DNS 解析器主机。";
-"core.customBlocklist.invalidURL" = "请输入有效的屏蔽列表 URL。";
-"core.customBlocklist.unsupportedScheme" = "自定义屏蔽列表必须使用 HTTPS。";
-"core.customBlocklist.missingHost" = "自定义屏蔽列表 URL 必须包含主机。";
-"core.customBlocklist.privateNetworkHost" = "自定义屏蔽列表 URL 必须使用公开主机。";
-"core.customBlocklist.credentialsNotAllowed" = "自定义屏蔽列表 URL 不能包含用户名或密码。";
+"core.endpoint.localhostNotAllowed" = "此处不能使用 localhost 作为 DNS 服务器。";
+"core.endpoint.privateNetworkNotAllowed" = "自定义拦截列表 URL 必须使用公开主机。";
+"core.endpoint.unusableResolverAddress" = "请输入可用的 DNS 服务器地址，不能是回环、多播或未指定地址。";
+"core.endpoint.invalidResolverHost" = "请输入有效的 DNS 服务器主机。";
+"core.customBlocklist.invalidURL" = "请输入有效的拦截列表 URL。";
+"core.customBlocklist.unsupportedScheme" = "自定义拦截列表必须使用 HTTPS。";
+"core.customBlocklist.missingHost" = "自定义拦截列表 URL 必须包含主机。";
+"core.customBlocklist.privateNetworkHost" = "自定义拦截列表 URL 必须使用公开主机。";
+"core.customBlocklist.credentialsNotAllowed" = "自定义拦截列表 URL 不能包含用户名或密码。";
 "core.domain.empty" = "域名为空。";
 "core.domain.tooLong" = "域名过长。";
 "core.domain.needsTwoLabels" = "请输入完整域名，例如 example.com。";
-"core.domain.invalidLabel" = "无效的域名标签：%@";
+"core.domain.invalidLabel" = "域名中不能使用“%@”。";
 "core.domain.ipNotAllowed" = "此处不支持 IP 地址。";
-"core.filterBudget.exceedsDeviceMemory" = "此选择约需 %1$@ 条过滤规则，超出你设备的承载上限（%2$@）。请移除一个列表以开启保护。";
-"core.filterBudget.exceedsTierLimit" = "你的屏蔽列表已使用约 %1$@ 条过滤规则，共 %2$@ 条。%3$@";
-"core.filterBudget.action.remove" = "请移除一个列表以开启保护。";
-"core.filterBudget.action.removeOrUpgrade" = "请移除一个列表或升级到 Plus。";
+"core.filterBudget.exceedsDeviceMemory" = "此选择约需 %1$@ 条过滤规则，超出你设备的承载上限（%2$@）。请移除一个拦截列表以开启防护。";
+"core.filterBudget.exceedsTierLimit" = "你的拦截列表已使用约 %1$@ 条过滤规则，共 %2$@ 条。%3$@";
+"core.filterBudget.action.remove" = "请移除一个拦截列表以开启防护。";
+"core.filterBudget.action.removeOrUpgrade" = "请移除一个拦截列表或升级到 Lava Plus。";
 "core.filterBudget.largestSuffix" = " 最大：%@。";
-"core.catalogSync.invalidBlocklistEncoding" = "为 %@ 下载的屏蔽列表不是有效的 UTF-8。";
-"core.catalogSync.blocklistTooLarge" = "为 %1$@ 下载的屏蔽列表过大（%2$lld 字节）。";
-"core.catalogSync.blocklistExceedsRuleLimit" = "%1$@ 的屏蔽列表超过 %2$lld 条规则。请缩减其大小或将其移除。";
-"core.catalogSync.noRulesAvailable" = "目前没有已启用的已下载过滤器。";
-"core.catalogSync.customBlocklistUnavailable" = "无法加载自定义屏蔽列表“%1$@”。%2$@";
-"core.domainError.freeBlockedLimit" = "免费保护包含 %lld 个额外的屏蔽域名。";
-"core.domainError.freeAllowedLimit" = "免费保护包含 %lld 个允许的例外项。";
+"core.catalogSync.invalidBlocklistEncoding" = "为 %@ 下载的拦截列表不是有效的 UTF-8。";
+"core.catalogSync.blocklistTooLarge" = "为 %1$@ 下载的拦截列表过大（%2$lld 字节）。";
+"core.catalogSync.blocklistExceedsRuleLimit" = "%1$@ 的拦截列表超过 %2$lld 条规则。请缩减其大小或将其移除。";
+"core.catalogSync.noRulesAvailable" = "目前还没有可用的已下载拦截列表。";
+"core.catalogSync.customBlocklistUnavailable" = "无法加载自定义拦截列表“%1$@”。%2$@";
+"core.domainError.freeBlockedLimit" = "免费方案包含 %lld 个额外的已拦截域名。";
+"core.domainError.freeAllowedLimit" = "免费方案包含 %lld 个允许的例外。";
 "core.backup.lastUploaded" = "上次上传于 %@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "Lava 的拦截判定在这台 iPhone 上完成。你所选择的解析器（当前为 %@）可能会收到已允许的 DNS 请求，并按该提供方的政策处理。";
+"core.disclosure.resolverNetworkProvided" = "Lava 的拦截判定在这台 iPhone 上完成。这台 iPhone 从 Wi-Fi、蜂窝网络或系统设置中获取的 DNS 服务器可能会收到已允许的 DNS 请求，Lava 的服务器则不会。";
+"core.disclosure.resolverSelfEntered" = "Lava 的拦截判定在这台 iPhone 上完成。你配置的自定义 DNS 可能会收到已允许的 DNS 请求。";
+"core.disclosure.dnsScope" = "Lava 检查的是域名，而不是完整网址、页面路径、页面文本、表单或消息。它可以拦截整个域名，但无法只拦截已放行域名下的某一个页面。";
+"core.disclosure.vpn" = "iPhone 将其显示为 VPN，因为 Lava 需要一条本地受保护的通道来检查域名。你的网页浏览流量不会发送到 Lava 的服务器。";
+"core.disclosure.encryptedFallbackRecipient" = "你选择的加密备用解析器（%@）也可能收到已允许的 DNS 请求。";
+"core.disclosure.chainedRecipient" = "当 Lava 串联到另一个 VPN 时，该 VPN 配置中的 DNS 服务器是最先可能收到已允许 DNS 请求的一方。Lava 无法说明由谁运营。";
+"core.disclosure.fallbackNetworkProvided" = "这台 iPhone 从网络中获取的 DNS 服务器同样可能收到已允许的请求。";
+"core.disclosure.plainFallbackRecipient" = "你选择的备用解析器（%@）也可能收到已允许的 DNS 请求。它未加密。";
+"core.disclosure.upstreamFilteringRecipient" = "%@ 会进行自己的过滤，因此可能拦截 Lava 已放行的域名。";
+"core.disclosure.selfEnteredRecipients" = "这些 DNS 服务器是你自己填写的，因此 Lava 无法说明由谁运营。你填写的每个地址都可能收到已允许的 DNS 请求。";
+"core.disclosure.selfEnteredRecipient" = "这台 DNS 服务器是你自己填写的，因此 Lava 无法说明由谁运营。";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "Lava 需要处理问题";
+"notif.body.filteringUnavailableMessage" = "所选拦截列表仍超出规则上限，因此 DNS 已被拦截。请打开 Lava 检查你的拦截列表。";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "某个自定义拦截列表需要更新，但此更新无法在后台完成，因此 DNS 已被拦截。请打开 Lava 更新你的自定义拦截列表。";
+
+"widget.action.confirmPause" = "确认";
+"Activity" = "活动";
+"Confirmation" = "确认";
+
+"A saved configuration's key is unavailable. Import it again." = "无法获取已保存配置的密钥。请重新导入。";
+"Choose a different DNS for the second tier." = "请为第二层选择不同的 DNS。";
+"Choose a valid DNS provider and transport." = "请选择有效的 DNS 提供商和传输方式。";
+"Custom DNS requires Lava Plus." = "自定义 DNS 需要 Lava Plus。";
+"Keep one primary DNS and, optionally, one secondary DNS." = "保留一个主要 DNS，并可选择加入一个次要 DNS。";
+"No accepted blocklist checksum is available for %@." = "%@ 没有可接受的拦截列表校验码。";
+"No enabled blocklist source is available for %@." = "%@ 没有可用的已启用拦截列表来源。";
+"No saved Lava Security catalog is available yet." = "尚无已保存的 Lava Security 目录。";
+"Supabase Auth returned status %lld." = "Supabase 验证返回状态 %lld。";
+"Supabase Auth returned status %lld: %@" = "Supabase 验证返回状态 %lld：%@";
+"The Lava Security catalog could not be read." = "无法读取 Lava Security 目录。";
+"The Lava Security catalog server returned HTTP %lld." = "Lava Security 目录服务器返回 HTTP %lld。";
+"The Supabase Auth endpoint is not valid." = "Supabase 验证端点无效。";
+"The Supabase Auth response was not valid." = "Supabase 验证响应无效。";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "下载超过 %lld MB 大小限制（%lld 字节）。";
+"The downloaded blocklist checksum did not match for %@." = "%@ 下载的拦截列表校验码不符。";
+"The first configuration needs an IP endpoint address." = "第一个配置需要 IP 端点地址。";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "第一个配置的 AllowedIPs 必须包含第二个 VPN 的端点。";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "使用两个 VPN 节点时，第一个配置的 MTU 必须至少为 1340。";
+"The saved configurations changed. Reopen the editor and try again." = "已保存的配置已更改。请重新打开编辑器后重试。";
+"The second configuration needs an IPv4 endpoint address." = "第二个配置需要 IPv4 端点地址。";
+"You can add up to two WireGuard configurations." = "最多可添加两个 WireGuard 配置。";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@ 是用于标识归属与来源的第三方来源。许可：%2$@。所有者或项目：%3$@。";
+"Third-party source project" = "第三方来源项目";
+
+"Latest encrypted settings backup size is %@." = "最新的加密设置备份大小为 %@。";
+"Added %@" = "已添加 %@";
+"This domain will be blocked after you save." = "保存后将拦截此域名。";
+"This exception will take effect after you save." = "保存后此例外将生效。";
+"Pending setup" = "待设置";
+"Set up encrypted backup for this account." = "为此账户设置加密备份。";
+"Off" = "关闭";
+"Sign in to set up encrypted backup." = "登录以设置加密备份。";
+"Not uploaded yet" = "尚未上传";
+"Encrypted locally. Back up now to store a copy online." = "已在本地加密。立即备份即可在线保存一份副本。";
+"Ready after sign-in" = "登录后即可使用";
+"Encrypted locally. Sign in to upload." = "已在本地加密。登录以上传。";
+"Needs attention" = "需要处理";
+"Domain cannot be added" = "无法添加此域名";
+"Already blocked" = "已拦截";
+"Blocked domain limit reached" = "已达拦截域名上限";
+"Exception cannot be added" = "无法添加此例外";
+"Already allowed" = "已放行";
+"Allowed exception limit reached" = "已达放行例外上限";

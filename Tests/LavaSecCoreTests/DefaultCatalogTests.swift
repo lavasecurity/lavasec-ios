@@ -97,7 +97,11 @@ final class DefaultCatalogTests: XCTestCase {
         let ids = Set(DefaultCatalog.curatedSources.map(\.id))
 
         // Previously excluded "noisy" lists, now selectable.
-        XCTAssertTrue(ids.contains(DefaultCatalog.blockListProjectMalware.id))
+        //
+        // `blockListProjectMalware` was here and is gone: the upstream grew to 2,656,393
+        // entries / 72 MB, past BOTH the per-source byte cap and the paid-tier rule cap, so
+        // it is inadmissible at every tier and was retired from the catalog rather than
+        // shipped as a list no device can load.
         XCTAssertTrue(ids.contains(DefaultCatalog.hageziMultiProPlusMini.id))
         XCTAssertTrue(ids.contains(DefaultCatalog.hageziMultiUltimateMini.id))
         XCTAssertTrue(ids.contains(DefaultCatalog.oisdBig.id))
@@ -239,6 +243,34 @@ final class DefaultCatalogTests: XCTestCase {
         XCTAssertEqual(visibleIDs, DefaultCatalog.curatedSources.map(\.id))
     }
 
+    func testPickerDoesNotReintroduceUnpublishedHaGeZiSources() {
+        let unpublished: Set<String> = ["hagezi-social", "hagezi-anti-piracy"]
+        let available = Set(DefaultCatalog.curatedSources.map(\.id)).subtracting(unpublished)
+        let selectable = DefaultCatalog.selectableCuratedSources(
+            availableSourceIDs: available, enabledSourceIDs: [], catalogLoaded: true
+        )
+        let sections = DefaultCatalog.groupedByCategory(selectable)
+        XCTAssertEqual(Set(sections.flatMap(\.sources).map(\.id)), available)
+        XCTAssertTrue(sections.allSatisfy { !$0.sources.isEmpty })
+
+        let published = DefaultCatalog.selectableCuratedSources(
+            availableSourceIDs: available.union(unpublished), enabledSourceIDs: [], catalogLoaded: true
+        )
+        XCTAssertTrue(unpublished.isSubset(of: Set(DefaultCatalog.groupedByCategory(published).flatMap(\.sources).map(\.id))))
+    }
+
+    func testLoadedEmptyCatalogDoesNotRestoreBundledOptions() {
+        XCTAssertTrue(DefaultCatalog.selectableCuratedSources(
+            availableSourceIDs: [], enabledSourceIDs: [], catalogLoaded: true
+        ).isEmpty)
+        XCTAssertTrue(DefaultCatalog.groupedByCategory([]).isEmpty)
+        // Existing selections remain manageable even when publication disappears.
+        let retained = DefaultCatalog.selectableCuratedSources(
+            availableSourceIDs: [], enabledSourceIDs: ["hagezi-social"], catalogLoaded: true
+        )
+        XCTAssertEqual(retained.map(\.id), ["hagezi-social"])
+    }
+
     func testFreePlanAllowsTwentyFiveIndividualDomainsButNoCustomLists() {
         let limits = AppConfiguration().limits
 
@@ -253,5 +285,65 @@ final class DefaultCatalogTests: XCTestCase {
     func testPaidPlanAllowsOneThousandAdditionalBlockedDomainsAndCustomLists() {
         XCTAssertEqual(FeatureLimits.paid.maxBlockedDomains, 1_000)
         XCTAssertTrue(FeatureLimits.paid.allowsCustomBlocklists)
+    }
+
+    /// 🔴 EVERY retired catalog URL must still normalize to its source.
+    ///
+    /// `KnownBlocklistURLMatcher` turns a pasted or restored custom blocklist into the
+    /// equivalent catalog source, and it is built from the CURRENT catalog URLs. So changing
+    /// one silently strands everybody holding the old value — from a backup restore, a shared
+    /// filter card, or a paste. Worst in the case that forces the change: these eleven moved
+    /// off `raw.githubusercontent.com/hagezi/dns-blocklists/...` because the account was
+    /// locked, so an un-migrated user keeps a custom list pointing at a DEAD host instead of
+    /// following the catalog to the working mirror. (Codex, #536.)
+    ///
+    /// The expected pairs are restated here rather than read from the table, deliberately:
+    /// the alias map is private, and a test that read it would agree with a typo instead of
+    /// catching one. This is an independent second copy, so a slip in either side fails.
+    /// Covering all eleven matters because a typo in ANY row strands exactly the users that
+    /// row exists for, with nothing else to notice. (Kilo, #536.)
+    func testEveryRetiredHaGeZiURLStillNormalizesToItsCatalogSource() {
+        let retiredPath = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/"
+        let expected: [String: String] = [
+            "tif.mini-onlydomains.txt": "hagezi-tif-mini",
+            "light-onlydomains.txt": "hagezi-multi-light",
+            "multi-onlydomains.txt": "hagezi-multi-normal",
+            "pro-onlydomains.txt": "hagezi-multi-pro",
+            "pro.mini-onlydomains.txt": "hagezi-multi-pro-mini",
+            "pro.plus.mini-onlydomains.txt": "hagezi-multi-pro-plus-mini",
+            "ultimate.mini-onlydomains.txt": "hagezi-multi-ultimate-mini",
+            "social-onlydomains.txt": "hagezi-social",
+            "nsfw-onlydomains.txt": "hagezi-nsfw",
+            "gambling-onlydomains.txt": "hagezi-gambling",
+            "anti.piracy-onlydomains.txt": "hagezi-anti-piracy",
+        ]
+
+        let catalogIDs = Set(DefaultCatalog.curatedSources.map(\.id))
+        for (filename, sourceID) in expected {
+            guard let url = URL(string: retiredPath + filename) else {
+                return XCTFail("fixture URL should parse: \(filename)")
+            }
+            XCTAssertEqual(
+                KnownBlocklistURLMatcher.catalogSourceID(for: url), sourceID,
+                "The retired URL for \(sourceID) must still normalize, or every user holding "
+                    + "it keeps a custom list pointing at the locked GitHub account.")
+            XCTAssertTrue(
+                catalogIDs.contains(sourceID),
+                "\(sourceID) is aliased but no longer in the catalog — the alias points nowhere.")
+        }
+    }
+
+    /// The CURRENT URLs must keep working; an alias must never shadow a live catalog entry.
+    func testTheCurrentMirrorURLsStillNormalize() {
+        let current = "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/"
+        for (filename, sourceID) in [
+            ("pro-onlydomains.txt", "hagezi-multi-pro"),
+            ("nsfw-onlydomains.txt", "hagezi-nsfw"),
+        ] {
+            guard let url = URL(string: current + filename) else {
+                return XCTFail("fixture URL should parse")
+            }
+            XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceID(for: url), sourceID)
+        }
     }
 }

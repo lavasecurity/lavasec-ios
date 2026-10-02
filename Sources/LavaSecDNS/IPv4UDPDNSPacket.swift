@@ -10,7 +10,7 @@ import Foundation
 /// Parsing is strict and fails to `nil` for anything that is not a well-formed,
 /// unfragmented IPv4 datagram carrying a non-empty UDP payload to destination
 /// port 53, so only plausible DNS traffic ever reaches the DNS message parser.
-public struct IPv4UDPDNSPacket: Sendable {
+public struct IPv4UDPDNSPacket: DNSDatagramRequest {
     /// IPv4 source address (4 bytes, network order) — the querying host,
     /// which responses must be addressed back to.
     package let sourceAddress: Data
@@ -25,6 +25,12 @@ public struct IPv4UDPDNSPacket: Sendable {
     package let identifier: UInt16
     /// The raw DNS message carried by the datagram.
     public let dnsPayload: Data
+
+    /// The ``DNSDatagramRequest`` write-back half: builds the IPv4/UDP reply for this
+    /// request. Delegates to ``response(to:dnsPayload:)`` so the two spellings cannot drift.
+    public func response(dnsPayload: Data) -> Data? {
+        Self.response(to: self, dnsPayload: dnsPayload)
+    }
 
     /// Parses `packet` as an IPv4/UDP DNS datagram. Returns `nil` unless ALL of:
     /// IP version 4; header length ≥ 20 bytes and contained in the packet; total

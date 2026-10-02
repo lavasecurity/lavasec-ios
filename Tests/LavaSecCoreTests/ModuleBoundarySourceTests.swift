@@ -2,6 +2,27 @@ import Foundation
 import XCTest
 
 final class ModuleBoundarySourceTests: XCTestCase {
+    func testSeparateReactNativeReviewProjectHasExplicitNonProductionConsumers() throws {
+        let data = Data(try readSource(.reactNativeReviewProject).utf8)
+        let project = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let targets = try XCTUnwrap(project["targets"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(targets.keys), ["LavaSecUIReview", "LavaSecUIReviewUITests"])
+        XCTAssertEqual(targets["LavaSecUIReview"]?["type"] as? String, "application")
+        XCTAssertEqual(targets["LavaSecUIReviewUITests"]?["type"] as? String, "bundle.ui-testing")
+        // Optional Explore narration uses the public system speech SDK in this isolated host.
+        // Keep the complete dependency list exact: this adds no package or production consumer.
+        XCTAssertEqual(targets["LavaSecUIReview"]?["dependencies"] as? [[String: String]],
+                       [["sdk": "AVFAudio.framework"],
+                        ["package": "LavaSecPackage", "product": "LavaSecAppServices"],
+                        ["package": "LavaSecPackage", "product": "LavaSecKit"],
+                        ["package": "LavaSecPackage", "product": "LavaSecPresentation"]])
+        XCTAssertEqual(targets["LavaSecUIReviewUITests"]?["dependencies"] as? [[String: String]],
+                       [["target": "LavaSecUIReview"]])
+        XCTAssertEqual(project["packages"] as? [String: [String: String]], ["LavaSecPackage": ["path": "../.."]])
+        // The existing production matrix below still classifies every target in
+        // the root project. RN dependencies are checked only in this review graph.
+    }
+
     private let layerProducts = [
         "LavaSecKit",
         "LavaSecNetworking",
@@ -14,11 +35,18 @@ final class ModuleBoundarySourceTests: XCTestCase {
     private var expectedPackageProducts: [String: [String]] {
         var products = Dictionary(uniqueKeysWithValues: layerProducts.map { ($0, [$0]) })
         products["LavaSecCore"] = ["LavaSecCore"] + layerProducts
+        // The chained-upstream engine wrapper is a product but NOT a façade member: the
+        // façade must not re-export a crypto archive into every compatibility caller. The
+        // tunnel is its ONE approved consumer (plan D4 least privilege); the façade taking
+        // it would hand it to every caller of the compatibility product instead.
+        products["LavaSecChainedUpstream"] = ["LavaSecChainedUpstream"]
         return products
     }
 
     private var expectedLayerSourcePaths: [String: String] {
-        Dictionary(uniqueKeysWithValues: layerProducts.map { ($0, "Sources/\($0)") })
+        var paths = Dictionary(uniqueKeysWithValues: layerProducts.map { ($0, "Sources/\($0)") })
+        paths["LavaSecChainedUpstream"] = "Sources/LavaSecChainedUpstream"
+        return paths
     }
 
     private var expectedConsumerProducts: [String: [String]] {
@@ -29,6 +57,7 @@ final class ModuleBoundarySourceTests: XCTestCase {
                 "LavaSecNetworking",
                 "LavaSecDNS",
                 "LavaSecFilterPipeline",
+                "LavaSecChainedUpstream",
             ],
             "LavaSecWidget": ["LavaSecKit", "LavaSecPresentation"],
             "LavaSecIntents": ["LavaSecKit", "LavaSecFilterPipeline"],

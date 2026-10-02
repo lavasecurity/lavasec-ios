@@ -41,6 +41,7 @@ struct BugReportSettingsView: View {
     @EnvironmentObject private var security: SecurityController
     @Binding private var externalIsReportDirty: Bool
     private let onDismissRequested: (() -> Void)?
+    private let usesPageNavigation: Bool
     @State private var selectedIssueType: BugReportIssueType?
     @State private var affectedSite = ""
     @State private var details = ""
@@ -51,47 +52,53 @@ struct BugReportSettingsView: View {
     @State private var isShowingDiscardConfirmation = false
     @State private var isShowingThankYou = false
     @State private var didCopySubmittedReportID = false
+    /// Set SYNCHRONOUSLY by `submitReport()`, because `bugReportSendState` does not become
+    /// `.sending` until `sendBugReport` runs — and since PR #620 there is an `await` before it,
+    /// for the tunnel-health flush that carries the suppressed-failure tail. That await is a
+    /// window in which the button was still enabled, so a second tap started a second task and
+    /// both went on to submit (Codex P2, PR #620).
+    @State private var isPreparingSubmission = false
+    /// The in-flight submission, retained so a discard can CANCEL it. The task is unstructured —
+    /// the sheet's `.task` cancellation does not reach it — so without this a Submit followed by
+    /// "Discard feedback" during the flush await would resume and send the freshly reset draft
+    /// (Codex P2, PR #620).
+    @State private var isDismissed = false
+    @State private var submissionTask: Task<Void, Never>?
+    @AccessibilityFocusState private var isThankYouHeadingFocused: Bool
 
     init(
         isReportDirty: Binding<Bool> = .constant(false),
-        onDismissRequested: (() -> Void)? = nil
+        onDismissRequested: (() -> Void)? = nil,
+        usesPageNavigation: Bool = false
     ) {
         self._externalIsReportDirty = isReportDirty
         self.onDismissRequested = onDismissRequested
+        self.usesPageNavigation = usesPageNavigation
     }
 
     var body: some View {
-        SettingsSubpageContent(title: "Feedback", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing, scrolls: !isShowingThankYou) {
+        Group {
             if isShowingThankYou {
                 thankYouPage
             } else {
-                BugReportStepProgressView(
-                    currentStep: currentStep,
-                    furthestVisitedStep: furthestVisitedStep,
-                    selectStep: goToStep
-                )
-                currentPage
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if isShowingThankYou {
-                thankYouBottomActionBar
-            } else {
-                feedbackBottomActionBar
-            }
-        }
-        .navigationBarBackButtonHidden(isReportDirty && onDismissRequested == nil)
-        .toolbar {
-            if isReportDirty && onDismissRequested == nil {
-                ToolbarItem(placement: .topBarLeading) {
-                    NativeToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: requestDismiss)
+                SettingsSubpageContent(title: "Feedback", tier: .calm, spacing: SettingsSubpageLayout.feedbackSpacing) {
+                    BugReportStepProgressView(
+                        currentStep: currentStep,
+                        furthestVisitedStep: furthestVisitedStep,
+                        selectStep: goToStep
+                    )
+                    currentPage
                 }
+                .safeAreaInset(edge: .bottom) { feedbackBottomActionBar }
             }
-
-            if onDismissRequested != nil && !isShowingThankYou {
-                ToolbarItem(placement: .cancellationAction) {
+        }
+        .navigationBarBackButtonHidden(usesPageNavigation || (isReportDirty && onDismissRequested == nil))
+        .toolbar {
+            if usesPageNavigation || (isReportDirty && onDismissRequested == nil) {
+                ToolbarItem(placement: .topBarLeading) {
                     NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: requestDismiss)
                 }
+                .lavaToolbarChrome()
             }
         }
         .lavaConfirmationAlert { host in
@@ -109,12 +116,16 @@ struct BugReportSettingsView: View {
             // while the content is masked for App Unlock; re-sample once the mask
             // drops on unlock so the draft carries fresh, post-unlock diagnostics.
             guard !isAppUnlockMaskVisible else { return }
-            await viewModel.sampleReports()
+            // Forced: this is a one-shot capture, not the 5 s poll the throttle was written
+            // for, and the report is the only reading of this session anyone gets. The
+            // tunnel hands back its suppressed unanswered-query tail on the flush this
+            // triggers (PR #620), so a throttled skip would silently truncate it.
+            await viewModel.sampleReports(force: true)
             // `sampleReports()` isn't cancellation-aware, so the app may have
             // locked during the await (this task is cancelled, but execution
             // resumes). Re-check before refreshing the draft so we never rebuild
             // it above the lock — the unlock transition starts a fresh task.
-            guard !Task.isCancelled, !isAppUnlockMaskVisible else { return }
+            guard !Task.isCancelled, !isDismissed, !isAppUnlockMaskVisible else { return }
             refreshDraft()
             syncReportDirtyState()
         }
@@ -133,20 +144,19 @@ struct BugReportSettingsView: View {
         .onChange(of: contactEmail) { _, _ in reportInputChanged() }
         .onChange(of: includeDiagnostics) { _, _ in reportInputChanged() }
         .onChange(of: isShowingThankYou) { _, _ in syncReportDirtyState() }
-        // Opaque, hit-blocking mask over the WHOLE sheet (form + bottom action
-        // bar) while App Unlock is pending or the privacy mask is up. Placed as
-        // the last modifier so it composes over `.safeAreaInset` (the Submit /
-        // Continue bar) — content stays unreadable and unsubmittable above the
-        // lock overlay. The toolbar Cancel/Back buttons live in nav chrome above
-        // this overlay and are intentionally left reachable: they only dismiss
-        // (never reveal or submit content).
+        // Mask all form content and the pinned Submit/Continue footer. The
+        // rendered header is added afterward so Cancel remains reachable, like
+        // the pushed page's native Back; neither action reveals or submits data.
         .overlay {
             if isAppUnlockMaskVisible {
-                BugReportSheetLockMask(
+                LavaSheetLockMask(
                     unlock: { Task { await security.authenticateAppUnlockIfNeeded() } }
                 )
             }
         }
+        .lavaFullSheetHeader("Feedback", isPresented: onDismissRequested != nil && !usesPageNavigation && !isShowingThankYou, leading: {
+            NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: requestDismiss)
+        }, trailing: { EmptyView() })
     }
 
     @ViewBuilder
@@ -163,11 +173,7 @@ struct BugReportSettingsView: View {
 
     private var topicPage: some View {
         VStack(spacing: 18) {
-            LavaInfoPanel(
-                title: "No silent telemetry",
-                description: "Lava only sends feedback after you review it and tap Submit",
-                systemImage: "ladybug"
-            )
+            LavaSettingsIntroduction(summary: "Lava only sends feedback after you review it and tap Submit")
 
             LavaSectionGroup("Choose a topic") {
                 LavaCondensedList {
@@ -241,21 +247,16 @@ struct BugReportSettingsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Optional diagnostics include anonymized Lava Data like VPN status, network logs, and filter snapshot. They help the Lava team better investigate what went wrong.")
-                    .lavaQuietNoteText()
-
+            LavaQuietFooter("Optional diagnostics include anonymized Lava Data like VPN status, network logs, and filter snapshot. They help the Lava team better investigate what went wrong.") {
                 NavigationLink {
                     BugReportDiagnosticsInfoView(sections: diagnosticPreviewSections)
                 } label: {
                     Text("See what information is sent".lavaLocalized)
-                        .font(.footnote.weight(.semibold))
+                        .lavaQuietLinkText()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(LavaStyle.safeGreen)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -295,60 +296,23 @@ struct BugReportSettingsView: View {
     }
 
     private var thankYouPage: some View {
-        VStack(spacing: 20) {
-            FeedbackThankYouMascot()
-
-            VStack(spacing: 12) {
-                Text(thankYouTitle.lavaLocalized)
-                    .font(.title2.bold())
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(spacing: 6) {
-                    Text("Report ID:".lavaLocalized)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(LavaStyle.secondaryText)
-
-                    Text(submittedReportID)
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(LavaStyle.secondaryText)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-
-    @ViewBuilder
-    private var thankYouBottomActionBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-
-            HStack(spacing: 12) {
-                Button {
-                    copySubmittedReportID()
-                } label: {
+        LavaSuccessScreen(title: "Feedback sent", message: thankYouTitle,
+                          done: dismissAfterSubmit) {
+            VStack(spacing: LavaSpacing.sm) {
+                Text("Report ID:".lavaLocalized)
+                    .lavaMetadataText()
+                Text(submittedReportID)
+                    .font(.footnote.monospaced())
+                    .foregroundStyle(LavaStyle.secondaryText)
+                    .textSelection(.enabled)
+                Button(action: copySubmittedReportID) {
                     Text((didCopySubmittedReportID ? "Copied!" : "Copy ID").lavaLocalized)
                         .contentTransition(.identity)
-                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(LavaPanelActionButtonStyle())
                 .disabled(submittedReportID.isEmpty)
-
-                Button {
-                    dismissAfterSubmit()
-                } label: {
-                    Text("Done".lavaLocalized)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(LavaStandaloneActionButtonStyle())
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
         }
-        .background(LavaStyle.groupedBackground)
     }
 
     @ViewBuilder
@@ -368,7 +332,7 @@ struct BugReportSettingsView: View {
         switch currentStep {
         case .topic:
             Button {
-                refreshDraft()
+                refreshDraftContext()
                 markStepVisited(.context)
                 currentStep = .context
             } label: {
@@ -385,10 +349,10 @@ struct BugReportSettingsView: View {
                     Text("Back".lavaLocalized)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))
+                .buttonStyle(LavaSecondaryActionButtonStyle())
 
                 Button {
-                    refreshDraft()
+                    refreshDraftContext()
                     markStepVisited(.review)
                     currentStep = .review
                 } label: {
@@ -406,8 +370,13 @@ struct BugReportSettingsView: View {
                     Text("Back".lavaLocalized)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(LavaSecondaryActionButtonStyle(disabledOpacity: 0.55))
-                .disabled(reports.bugReportSendState.isSending)
+                .buttonStyle(LavaSecondaryActionButtonStyle())
+                // PREPARATION IS PART OF SUBMITTING. This button was already disabled while
+                // `.sending`; the flush await sits immediately before that and is no more
+                // interruptible, so leaving Back live for those few seconds created an edit the
+                // submission could not honour — the send overwrites `bugReportDraft` with the
+                // bundle it sent, so the edit was silently lost (Codex P2, PR #620).
+                .disabled(isPreparingSubmission || reports.bugReportSendState.isSending)
 
                 Button {
                     submitReport()
@@ -416,12 +385,21 @@ struct BugReportSettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(LavaStandaloneActionButtonStyle())
-                .disabled(!canContinueFromContext || reports.bugReportSendState.isSending || reports.bugReportDraft == nil)
+                .disabled(
+                    !canContinueFromContext
+                        || isPreparingSubmission
+                        || reports.bugReportSendState.isSending
+                        || reports.bugReportDraft == nil)
             }
         }
     }
 
     private func goToStep(_ step: BugReportStep) {
+        // Same rule as the Back button: no step navigation once a submission is under way,
+        // through the flush await as well as the send (Codex P2, PR #620).
+        guard !isPreparingSubmission, !reports.bugReportSendState.isSending else {
+            return
+        }
         guard step.rawValue <= furthestVisitedStep.rawValue else {
             return
         }
@@ -462,7 +440,11 @@ struct BugReportSettingsView: View {
     }
 
     private func selectIssueType(_ type: BugReportIssueType) {
-        selectedIssueType = type
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedIssueType = type
+        }
         if type != .websiteAccess {
             affectedSite = ""
         }
@@ -470,6 +452,16 @@ struct BugReportSettingsView: View {
     }
 
     private func requestDismiss() {
+        // ONE RULE FOR EVERY PRESENTER: no navigation out of a submission that is under way,
+        // matching Back and the step progress. Cancelling here instead would be wrong in the
+        // other direction — the alert's "Cancel" branch keeps the draft, and the user who takes
+        // it did not ask to abandon their submit. And once the POST is on the wire no local
+        // cancel retracts it anyway, so the honest fix is to not open the exit at all while a
+        // report is being prepared or sent (Codex P2, PR #620).
+        guard !isPreparingSubmission, !reports.bugReportSendState.isSending else {
+            return
+        }
+
         if isReportDirty {
             isShowingDiscardConfirmation = true
         } else {
@@ -478,32 +470,29 @@ struct BugReportSettingsView: View {
     }
 
     private func discardAndDismiss() {
-        resetReport()
+        // BEFORE the reset, so a submission still inside the flush await cannot resume against
+        // the cleared draft. Cancellation alone is not enough — the task re-checks after each
+        // await, because an unstructured task keeps running through a cancel until it looks.
+        cancelAnyPreparingSubmission()
+        isDismissed = true
+        reports.discardBugReportDraft()
         dismissAfterSubmit()
     }
 
+    private func cancelAnyPreparingSubmission() {
+        submissionTask?.cancel()
+        submissionTask = nil
+        isPreparingSubmission = false
+    }
+
     private func dismissAfterSubmit() {
+        isDismissed = true
         externalIsReportDirty = false
         if let onDismissRequested {
             onDismissRequested()
         } else {
             dismiss()
         }
-    }
-
-    private func resetReport() {
-        selectedIssueType = nil
-        affectedSite = ""
-        details = ""
-        contactEmail = ""
-        includeDiagnostics = false
-        currentStep = .topic
-        furthestVisitedStep = .topic
-        isShowingThankYou = false
-        didCopySubmittedReportID = false
-        reports.resetBugReportSendState()
-        refreshDraft()
-        syncReportDirtyState()
     }
 
     private func reportInputChanged() {
@@ -516,12 +505,46 @@ struct BugReportSettingsView: View {
     }
 
     private func submitReport() {
-        refreshDraft()
+        // Both synchronous, before the Task: the guard closes the double-tap window even if the
+        // button's disabled state has not been re-evaluated yet.
+        guard !isPreparingSubmission else {
+            return
+        }
+        isPreparingSubmission = true
         didCopySubmittedReportID = false
-        Task {
-            await reports.sendBugReport(context: currentContext)
+        // SNAPSHOT THE REVIEWED DRAFT AT THE TAP, so what was reviewed is what is sent. Back and
+        // the step progress are frozen for the duration (see their guards), which is the primary
+        // fix; this is the defence in depth, and it is what a pin can assert. Reading
+        // `currentContext` after the await would submit content that never passed through Review
+        // or `canContinueFromContext` (Codex P2, PR #620).
+        let reviewedContext = currentContext
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("feedback.send")
+        submissionTask = Task {
+            defer {
+                isPreparingSubmission = false
+                submissionTask = nil
+            }
+            // Re-sample BEFORE the draft is rebuilt, not only on sheet appearance. The whole
+            // point of leaving Feedback open is to reproduce the failure with the sheet up, and
+            // everything that happens while it is open is held by the tunnel's 30 s suppressor
+            // until something flushes it — so submitting inside the poll window would send a
+            // report describing the reproduction with the reproduction's own tail missing
+            // (Codex P2, PR #620). Forced for the same reason the appearance sample is: this is
+            // a one-shot capture, not the 5 s poll the throttle was written for.
+            await viewModel.sampleReports(force: true)
+            // Re-checked because `sampleReports` is not cancellation-aware: a discard during the
+            // flush cancels this task, but execution still resumes here, and rebuilding the draft
+            // would recreate the report the user just threw away — then send it.
+            guard !Task.isCancelled else {
+                return
+            }
+            refreshDraft(context: reviewedContext)
+            await reports.sendBugReport(context: reviewedContext)
             if case .sent = reports.bugReportSendState {
+                LavaFeedbackCoordinator.shared.finish("feedback.send", feedbackID, .succeeded)
                 isShowingThankYou = true
+            } else if case .failed = reports.bugReportSendState {
+                LavaFeedbackCoordinator.shared.finish("feedback.send", feedbackID, .failed)
             }
         }
     }
@@ -625,34 +648,20 @@ struct BugReportSettingsView: View {
         }
     }
 
-    private func refreshDraft() {
-        reports.prepareBugReport(context: currentContext)
+    /// - Parameter context: the draft to build, defaulting to whatever is on screen NOW. The
+    ///   submit path passes the context it snapshotted at the tap instead, because the fields can
+    ///   change during its await — see `submitReport()`.
+    private func refreshDraft(context: BugReportContext? = nil) {
+        reports.prepareBugReport(context: context ?? currentContext)
     }
 
     private func refreshDraftContext() {
+        guard !isDismissed else { return }
         reports.refreshBugReportDraftContext(context: currentContext)
     }
 
     private func syncReportDirtyState() {
         externalIsReportDirty = isReportDirty
-    }
-}
-
-private struct FeedbackThankYouMascot: View {
-    @EnvironmentObject private var customization: CustomizationController
-    @State private var mascotState: GuardianMascotState = .awake
-
-    var body: some View {
-        SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)
-            .task {
-                mascotState = .awake
-                try? await Task.sleep(nanoseconds: 550_000_000)
-                guard !Task.isCancelled else { return }
-                mascotState = .grateful
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else { return }
-                mascotState = .awake
-            }
     }
 }
 
@@ -668,7 +677,12 @@ private struct FeedbackThankYouMascot: View {
 /// can't be swiped away while the draft is dirty, so without an in-mask unlock
 /// affordance a user who cancels the passcode prompt would be stuck (forced to
 /// discard the draft). Tapping it re-surfaces the App Unlock prompt.
-private struct BugReportSheetLockMask: View {
+/// Internal, not private: the Device QA sheet presents the same way (above RootView's
+/// overlays) and holds a pasted WireGuard private key, so it needs the identical mask.
+/// One implementation rather than two, for the reason every duplicated guard in this
+/// codebase has eventually earned — two copies of a privacy mask drift, and the drift is
+/// invisible until a snapshot carries something it should not.
+struct LavaSheetLockMask: View {
     let unlock: () -> Void
 
     var body: some View {
@@ -693,7 +707,7 @@ private struct BugReportSheetLockMask: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("bugReportSheetLockMask")
+        .accessibilityIdentifier("sheetLockMask")
     }
 }
 
@@ -702,24 +716,12 @@ private struct BugReportTopicOptionRow: View, Equatable {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(isSelected ? LavaStyle.safeGreen : LavaStyle.secondaryText)
-                .frame(width: 30, height: 30)
-                .accessibilityHidden(true)
-
+        LavaSelectableRow(state: isSelected ? .selected : .unselected) {
             Text(title.lavaLocalized)
                 .lavaRowTitleText()
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
@@ -778,7 +780,7 @@ private struct BugReportDiagnosticsInfoView: View {
                         Divider()
                         BugReportReviewRow(label: "Tunnel", value: "startTunnel-ready, network-path-changed, resolver-reset")
                         Divider()
-                        BugReportReviewRow(label: "Details", value: "VPN status, network kind, resolver status, failure counters")
+                        BugReportReviewRow(label: "Details", value: "VPN status, network kind, resolver status, failure counters".lavaLocalized)
                     }
                 }
             }
@@ -793,37 +795,12 @@ private struct BugReportStepProgressView: View {
     let selectStep: (BugReportStep) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            ForEach(BugReportStep.allCases) { step in
-                if isUnavailableStep(step) {
-                    stepLabel(for: step)
-                } else {
-                    Button {
-                        selectStep(step)
-                    } label: {
-                        stepLabel(for: step)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private func stepLabel(for step: BugReportStep) -> some View {
-        Text("\(step.displayNumber) \(step.title.lavaLocalized)")
-            // Current step also carries a heavier weight — a non-color cue so the active step
-            // survives grayscale, not just the selection tint swap.
-            .font(.caption.weight(step == currentStep ? .heavy : .semibold))
-            .foregroundStyle(isUnavailableStep(step) ? LavaStyle.tertiaryText : Color.primary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 6)
-            .lavaSurface(.selection(isSelected: step == currentStep))
-            .opacity(isUnavailableStep(step) ? 0.55 : 1)
-            .contentShape(Rectangle())
-            .accessibilityAddTraits(step == currentStep ? [.isSelected] : [])
+        LavaStepNavigation(
+            steps: BugReportStep.allCases,
+            title: { "\($0.displayNumber) \($0.title.lavaLocalized)" },
+            isSelected: { $0 == currentStep },
+            isEnabled: { !isUnavailableStep($0) },
+            select: selectStep)
     }
 
     private func isUnavailableStep(_ step: BugReportStep) -> Bool {
@@ -851,18 +828,7 @@ private struct BugReportPreviewSectionCard: View {
 
                 VStack(spacing: 8) {
                     ForEach(section.items) { item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(item.label.lavaLocalized)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(LavaStyle.secondaryText)
-                                .frame(width: 110, alignment: .leading)
-
-                            Text(item.value)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        LavaDiagnosticValueRow(title: item.label, value: item.value)
                     }
                 }
             }

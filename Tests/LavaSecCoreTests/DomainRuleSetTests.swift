@@ -74,6 +74,50 @@ final class DomainRuleSetTests: XCTestCase {
         )
     }
 
+    func testDescendantThreatDoesNotEraseParentAllowedException() throws {
+        var blockRules = DomainRuleSet()
+        try blockRules.insert(domain: "example.com", matchesSubdomains: true)
+        var allowRules = DomainRuleSet()
+        try allowRules.insert(domain: "example.com", matchesSubdomains: true)
+        var threatRules = DomainRuleSet()
+        try threatRules.insert(domain: "danger.example.com", matchesSubdomains: true)
+
+        XCTAssertEqual(blockRules.effectiveBlockedDomainRuleCount(
+            allowRules: allowRules, nonAllowableThreatRules: threatRules), 0)
+    }
+
+    func testGuardedDescendantIsStillCountedBehindAllowedParent() throws {
+        var allowRules = DomainRuleSet()
+        try allowRules.insert(domain: "example.com")
+
+        for matchesSubdomains in [false, true] {
+            var blockRules = DomainRuleSet()
+            try blockRules.insert(domain: "evil.example.com", matchesSubdomains: matchesSubdomains)
+            var threatRules = DomainRuleSet()
+            try threatRules.insert(domain: "evil.example.com", matchesSubdomains: matchesSubdomains)
+
+            XCTAssertEqual(blockRules.effectiveBlockedDomainRuleCount(
+                allowRules: allowRules, nonAllowableThreatRules: threatRules), 1)
+
+            try blockRules.insert(domain: "safe.example.com", matchesSubdomains: true)
+            XCTAssertEqual(blockRules.effectiveBlockedDomainRuleCount(
+                allowRules: allowRules, nonAllowableThreatRules: threatRules), 1,
+                "Only the unguarded child is released by the allowed parent")
+        }
+    }
+
+    func testExactGuardrailAtAllowedParentDoesNotReleaseItsOnlyExactBlock() throws {
+        var blockRules = DomainRuleSet()
+        try blockRules.insert(domain: "example.com", matchesSubdomains: false)
+        var allowRules = DomainRuleSet()
+        try allowRules.insert(domain: "example.com")
+        var threatRules = DomainRuleSet()
+        try threatRules.insert(domain: "example.com", matchesSubdomains: false)
+
+        XCTAssertEqual(blockRules.effectiveBlockedDomainRuleCount(
+            allowRules: allowRules, nonAllowableThreatRules: threatRules), 1)
+    }
+
     func testRejectsIPAddresses() {
         XCTAssertThrowsError(try DomainName("1.1.1.1"))
         XCTAssertThrowsError(try DomainName("2001:4860:4860::8888"))
@@ -82,5 +126,20 @@ final class DomainRuleSetTests: XCTestCase {
 
     func testNormalizesUnicodeDomainsToPunycode() throws {
         XCTAssertEqual(try DomainName("Bücher.Example").value, "xn--bcher-kva.example")
+    }
+
+    func testNormalizesTerminalDotsAndPunycodeTopLevelDomains() throws {
+        XCTAssertEqual(try DomainName(" Example.COM. ").value, "example.com")
+        XCTAssertEqual(try DomainName("EXAMPLE.XN--P1AI").value, "example.xn--p1ai")
+    }
+
+    func testEnforcesDNSLabelAndHostnameLengthBoundaries() throws {
+        let label = String(repeating: "a", count: 63)
+        XCTAssertNoThrow(try DomainName("\(label).example"))
+        XCTAssertThrowsError(try DomainName("a\(label).example"))
+        let maxHostname = [label, label, label, String(repeating: "b", count: 61)].joined(separator: ".")
+        XCTAssertEqual(maxHostname.utf8.count, 253)
+        XCTAssertNoThrow(try DomainName(maxHostname))
+        XCTAssertThrowsError(try DomainName(maxHostname + "b"))
     }
 }

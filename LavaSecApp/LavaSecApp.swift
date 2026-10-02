@@ -130,6 +130,127 @@ enum BackgroundCatalogRefresh {
     }
 }
 
+/// A cheap, frequent top-up that re-warms non-active filters from the catalog cache ALREADY HELD.
+///
+/// ## Why a second background task
+///
+/// A headless Focus or Shortcut switch is a pointer flip to a warm artifact, or it defers — the
+/// engine never cold-compiles, because an App Intent gets seconds. So the switch is only as
+/// reliable as the warm index is WHOLE, and ONE catalog refresh invalidates every entry at once
+/// (each artifact is valid only against the basis it was compiled from).
+///
+/// Refilling the index afterwards is opportunistic, and the audit in `lavasec-infra`
+/// `plans/2026-09-03-warm-index-coverage-plan.md` found why that is thin: the only background
+/// window declared today is `BackgroundCatalogRefresh`, a `BGProcessingTask` asking for
+/// `+12h` AND network connectivity, and its warm pass runs only on the `bg-published` outcome.
+/// Field capture 2026-09-02: the catalog moved at 12:17, a switch fired at 20:30 with nothing warm
+/// to flip to, and deferred correctly to a foreground the user reached hours later.
+///
+/// ## Why this one can be cheap
+///
+/// It does NO sync and needs NO network. Re-warming compiles from the cached catalog the device
+/// already has, which is what makes a `BGAppRefreshTask` — short, frequent, opportunistic — the
+/// right shape, where the refresh needs a long window because it fetches.
+///
+/// **The safety that makes a sync-free warm sound is already in `compileAndStageWarmArtifact`, not
+/// in the caller.** It self-gates on a FRESH cached catalog, on catalog-only filters, on
+/// non-active and non-frozen, and on no pending low-risk cache migration — staying read-only with
+/// respect to the shared cache. That is why this task can skip the `bg-published` condition the
+/// refresh's own warm pass carries: that condition exists because after a SYNC you cannot trust
+/// `latest.json` unless the sync committed it. With no sync at all, `latest.json` is simply the
+/// last committed catalog, and the freshness gate decides. A stale cache means no warming, which
+/// is correct — the next switch takes the network-first cold path.
+///
+/// Requires `Info.plist`: `UIBackgroundModes` includes `fetch`, and
+/// `BGTaskSchedulerPermittedIdentifiers` includes this identifier.
+/// Background *execution* can only be validated on a real device.
+enum BackgroundWarmTopUp {
+    /// Fixed (not bundle-derived) so it matches the Info.plist literal exactly in both the App
+    /// Store and dev/QA builds — no `$(PRODUCT_BUNDLE_IDENTIFIER)` substitution risk.
+    static let taskIdentifier = "com.lavasec.warm-topup"
+
+    /// App-group kill switch, mirroring `BackgroundCatalogRefresh`'s. ON by default: this task
+    /// only ever COMPILES artifacts into the sidecar warm-index — it never syncs, never touches
+    /// the catalog cache, and never writes the filter library or the artifact pointer — so the
+    /// worst case of a bad run is wasted work, not wrong bytes. Setting it true disables
+    /// scheduling and any run already pending.
+    static let killSwitchDefaultsKeyName = "backgroundWarmTopUpDisabled"
+
+    /// Must run before the app finishes launching; iOS requires a handler for every permitted
+    /// identifier. Scheduling is gated separately by `scheduleNext()`.
+    static func registerHandler() {
+        _ = BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: .main) { task in
+            let box = BGTaskBox(task)
+            MainActor.assumeIsolated {
+                handle(box.task)
+            }
+        }
+    }
+
+    /// Best-effort submit of the next run. Safe to call repeatedly.
+    ///
+    /// `earliestBeginDate` is a floor, not a schedule — iOS decides when an app-refresh task
+    /// actually runs, from usage patterns and budget. Two hours asks for "materially more often
+    /// than the 12-hour refresh" without pretending to a cadence the system does not offer.
+    ///
+    /// NO `requiresNetworkConnectivity`: this task compiles from the cache already on disk, and
+    /// asking for connectivity would make it wait for a condition it does not need — which is the
+    /// whole reason it can run when the refresh cannot.
+    static func scheduleNext() {
+        guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else { return }
+        let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 2 * 60 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    @MainActor
+    private static func handle(_ task: BGTask) {
+        scheduleNext() // always queue the next run, even if this one expires
+
+        let completion = BGTaskCompletion(task)
+
+        let work = Task { @MainActor in
+            // Re-read the kill switch: iOS can deliver a request that was already pending when the
+            // flag flipped, and `scheduleNext()` only stops future submissions.
+            guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else {
+                completion.complete(success: true)
+                return
+            }
+            // `headless: true` for the same reason the catalog refresh uses it: no entitlement
+            // listener, no temporary-protection resume, no live-activity observer — none of which
+            // may write this short-lived model's launch-time state over newer on-disk state.
+            let viewModel = AppViewModel(loadVPNState: false, headless: true)
+            await viewModel.topUpWarmIndexFromCachedCatalog()
+            // WARMING WITHOUT DRAINING LEAVES THE SWITCH STILL WAITING. A Focus or Shortcut switch
+            // that deferred for a missing artifact leaves its marker in `PendingFilterSwitchStore`;
+            // topping up makes the artifact exist but applies nothing, so the switch would keep
+            // waiting for a foreground or the next processing task — while every diagnostic reports
+            // health. The catalog refresh warms then drains for exactly this reason, and
+            // `lavasec-infra`
+            // `plans/2026-07-16-deferred-automation-switch-background-warm-and-apply-plan.md`
+            // requires rerunning the shared switch engine after a warm pass (Codex review, PR #646).
+            //
+            // AFTER the top-up, not before: the drain is warm-only by design, so a target this run
+            // just warmed is one it can now commit. Skipped when the BGTask already expired — the
+            // marker survives to the next window, which is the designed fallback.
+            if !Task.isCancelled {
+                await FocusSwitchEnvironment.drainPendingFilterSwitchAfterBackgroundRefresh()
+            }
+            completion.complete(success: !Task.isCancelled)
+        }
+
+        task.expirationHandler = {
+            // Delivered on the registration queue (.main). Cancelling propagates into the warm
+            // pass, whose every app-group mutation sits behind a `!Task.isCancelled` gate, and we
+            // finish immediately so iOS never records an overrun (which would throttle us).
+            MainActor.assumeIsolated {
+                work.cancel()
+                completion.complete(success: false)
+            }
+        }
+    }
+}
+
 private final class BGTaskBox: @unchecked Sendable {
     let task: BGTask
     init(_ task: BGTask) { self.task = task }
@@ -209,18 +330,58 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        #if LAVA_QA_TOOLS
+        QAMetricKitCollector.start()
+        #endif
         UNUserNotificationCenter.current().delegate = self
         BackgroundCatalogRefresh.registerHandler()
+        BackgroundWarmTopUp.registerHandler()
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
-        privacyShield.show(in: application)
+        updatePrivacyShield(in: application)
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        privacyShield.show(in: application)
+        updatePrivacyShield(in: application)
         BackgroundCatalogRefresh.scheduleNext()
+        BackgroundWarmTopUp.scheduleNext()
+    }
+
+    private func updatePrivacyShield(in application: UIApplication) {
+        // Read the live controller synchronously before iOS takes its snapshot.
+        // Credential-only setup does not opt into covering the entire window.
+        if LavaProtectionShortcutRuntime.shared.security.backgroundPrivacyCoverRequired {
+            privacyShield.show(in: application)
+        } else {
+            privacyShield.hide(from: application)
+        }
+    }
+
+    func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
+        // Revoke access before UIKit changes its bit. Selected or unknown security
+        // conceals immediately; confirmed all-off keeps only its accepted display.
+        LavaProtectionShortcutRuntime.shared.security.protectedDataWillBecomeUnavailable()
+        updatePrivacyShield(in: application)
+    }
+
+    func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        LavaProtectionShortcutRuntime.shared.security.protectedDataDidBecomeAvailable()
+        if application.applicationState == .active {
+            updateActivePrivacyShield(in: application)
+        } else {
+            updatePrivacyShield(in: application)
+        }
+    }
+
+    private func updateActivePrivacyShield(in application: UIApplication) {
+        let security = LavaProtectionShortcutRuntime.shared.security
+        if security.protectedDataIsAvailableForPresentation || !security.backgroundPrivacyCoverRequired {
+            privacyShield.hide(from: application)
+        } else {
+            privacyShield.show(in: application)
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -241,7 +402,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        privacyShield.hide(from: application)
+        updateActivePrivacyShield(in: application)
     }
 
     func userNotificationCenter(
@@ -279,13 +440,41 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 }
 
+#if DEBUG
+/// Exercises a real passcode keyboard inset without changing the production Sudoku input path.
+private struct SudokuKeyboardUITestControls: View {
+    @State private var code = ""
+    @State private var isFocused = false
+
+    var body: some View {
+        HStack {
+            Button { isFocused = true } label: { Text(verbatim: "Show keyboard") }
+                .accessibilityIdentifier("sudoku-test-show-keyboard")
+            Button { isFocused = false } label: { Text(verbatim: "Hide keyboard") }
+                .accessibilityIdentifier("sudoku-test-hide-keyboard")
+        }
+        .background {
+            SecurityHiddenPasscodeField(code: $code, isFocused: $isFocused)
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+}
+#endif
+
 @main
 struct LavaSecApp: App {
     @UIApplicationDelegateAdaptor(LavaNotificationDelegate.self) private var notificationDelegate
-    @StateObject private var viewModel = AppViewModel()
-    @StateObject private var security = SecurityController()
 
     init() {
+        #if DEBUG && targetEnvironment(simulator)
+        // Seed the real preference once for the isolated onboarding journey.
+        // A -hasSeenLavaOnboarding NO launch argument would outrank subsequent
+        // AppStorage writes and prevent the actual completion from dismissing.
+        if ProcessInfo.processInfo.environment["LAVA_UI_TEST_REPLAY_ONBOARDING"] == "1" {
+            UserDefaults.standard.set(false, forKey: "hasSeenLavaOnboarding")
+        }
+        #endif
         // Clear the shared "app is foregrounded" flag at process start. A previous app process that
         // died while VISIBLE — a crash, a watchdog/jetsam kill, or a force-quit from the app switcher
         // (killed from .inactive, so RootView's .background clear never ran) — leaves the flag stuck
@@ -303,8 +492,8 @@ struct LavaSecApp: App {
         if UIApplication.shared.isProtectedDataAvailable {
             LavaAppForegroundPublication.publish(false, to: LavaSecAppGroup.sharedDefaults)
         }
-        // Register / refresh the "Switch Filter" App Shortcut at launch so a fresh install surfaces
-        // it in Shortcuts & Siri and its filter parameter reflects the current library (Codex #325).
+        // Register the protection and filter App Shortcuts at launch. Refreshing also keeps
+        // the Switch Filter parameter aligned with the current library (Codex #325).
         // updateAppShortcutParameters re-reads the entity query, which loads the on-disk filter
         // library directly (no AppViewModel), so this is correct here in App.init before the model
         // finishes loading. The library-change refresh lives in AppViewModel.persistLibraryOnlyChange.
@@ -313,7 +502,7 @@ struct LavaSecApp: App {
 
     var body: some Scene {
         WindowGroup {
-            appRoot
+            LavaAppWindowRoot()
                 .onOpenURL { url in
                     guard !GIDSignIn.sharedInstance.handle(url) else {
                         return
@@ -323,12 +512,32 @@ struct LavaSecApp: App {
                 }
         }
     }
+}
+
+// The App graph is installed for background App Intent launches too. Keep the
+// side-effecting model in the window's view graph so Get Status can run without it.
+// Mutating shortcuts access the same lazy runtime only after existing authentication.
+// pinned: ProtectionShortcutWiringSourceTests.testBackgroundAppGraphDoesNotOwnTheProtectionModel
+private struct LavaAppWindowRoot: View {
+    @StateObject private var viewModel = LavaProtectionShortcutRuntime.shared.viewModel
+    @StateObject private var security = LavaProtectionShortcutRuntime.shared.security
+
+    var body: some View { appRoot }
 
     @ViewBuilder
     private var appRoot: some View {
         #if DEBUG
-        if WebsiteAssetCaptureConfiguration.isRequested {
-            WebsiteAssetCaptureRootView(configuration: .current)
+        if ProcessInfo.processInfo.arguments.contains("-lava-sudoku-ui-test") {
+            SudokuEasterEggView(initialPuzzleSeed: 648)
+                .environmentObject(viewModel)
+                // Explicit presentation preference makes dark-mode screenshot tests independent
+                // of Simulator defaults; this launch route is compiled only in DEBUG builds.
+                .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-lava-sudoku-dark-ui-test") ? .dark : .light)
+                .overlay(alignment: .top) {
+                    if ProcessInfo.processInfo.arguments.contains("-lava-sudoku-keyboard-ui-test") {
+                        SudokuKeyboardUITestControls()
+                    }
+                }
         } else if ProcessInfo.processInfo.arguments.contains("-lava-mascot-demo") {
             MascotAnimationDemoView()
         } else {
@@ -345,6 +554,7 @@ struct LavaSecApp: App {
             // Catalog sync single-flight/presentation is observed separately from the hub's
             // authoritative metadata and transaction state.
             .environmentObject(viewModel.catalog)
+            .environmentObject(viewModel.filterDrafts)
             // The backup scope peeled from the hub (Phase D1): views observe it as its own
             // environment object; the hub creates it so the bridge is wired to live state.
             .environmentObject(viewModel.backup)

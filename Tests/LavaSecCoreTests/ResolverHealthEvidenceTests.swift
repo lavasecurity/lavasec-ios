@@ -92,6 +92,90 @@ final class ResolverHealthEvidenceTests: XCTestCase {
         )
     }
 
+    // task #56: a SATISFIED physical roam that leaves the chained tunnelled plain-DNS carry unchanged
+    // (the provider passed `chainedTunnelledDNSCarryUnchanged: true`) must NOT tear down the resolver
+    // runtime or SERVFAIL pending carried queries — they ride the still-forwarding tunnel to the conf's
+    // DNS and would have resolved. The two destructive effects drop; the full reset is replaced by the
+    // lighter `.resetResolverBackoff` (its one beneficial side effect); episode bookkeeping is identical.
+    func testChainedUnchangedTunnelledRouteSkipsResetAndPendingFailures() {
+        let original = seededState()
+        let transition = ResolverHealthReducer.reduce(
+            state: original,
+            event: .networkPathObserved(
+                ResolverNetworkPathObservation(
+                    previousKind: .wifi,
+                    previousIsSatisfied: true,
+                    kind: .cellular,
+                    isSatisfied: true,
+                    observedAt: later,
+                    chainedTunnelledDNSCarryUnchanged: true
+                )
+            ),
+            projectingOnto: providerOwnedBase()
+        )
+
+        XCTAssertEqual(transition.state.identity, original.identity)
+        XCTAssertEqual(transition.state.session.networkChangeCount, original.session.networkChangeCount + 1)
+        XCTAssertEqual(transition.state.episode.consecutiveUpstreamFailureCount, 0)
+        XCTAssertEqual(
+            transition.effects,
+            [
+                .endEncryptedFallbackLogEpisode(.contextReset),
+                .cancelWedgeRecoveryProbe,
+                .clearDeviceDNSRecaptureRestartPending,
+                .cancelFallbackRecoveryProbe,
+                .resetResolverBackoff(reason: "network-path-changed"),
+                .signalConnectivityProjectionChanged,
+                .appendNetworkActivity(
+                    .networkChanged(from: .wifi, to: .cellular, isSatisfied: true),
+                    at: later
+                ),
+                .evaluateQAConnectivityLog(reason: "network-path-changed", at: later),
+                .persistHealth(.immediate),
+            ]
+        )
+        // The full destructive reset drops, but its backoff-clear is preserved by the lighter effect so
+        // a resolver backed off on the old link still gets a fresh attempt on the healthy new path.
+        XCTAssertFalse(transition.effects.contains(
+            .requestResolverRuntimeReset(.full(reason: "network-path-changed", force: true))))
+        XCTAssertFalse(transition.effects.contains(
+            .deliverPendingResolverFailures(reason: "network-path-changed")))
+        XCTAssertTrue(transition.effects.contains(
+            .resetResolverBackoff(reason: "network-path-changed")))
+    }
+
+    // The skip is satisfied-only: a DOWN path (chained, flag true) keeps the full reset +
+    // pending-SERVFAIL + protection-notification. The tunnelled route may be unreachable while the path
+    // is unsatisfied, so the flag must never soften a down path.
+    func testUnsatisfiedPathIgnoresUnchangedTunnelledRouteFlagAndFullyResets() {
+        let original = seededState()
+        let transition = ResolverHealthReducer.reduce(
+            state: original,
+            event: .networkPathObserved(
+                ResolverNetworkPathObservation(
+                    previousKind: .wifi,
+                    previousIsSatisfied: true,
+                    kind: .wifi,
+                    isSatisfied: false,
+                    observedAt: later,
+                    chainedTunnelledDNSCarryUnchanged: true
+                )
+            ),
+            projectingOnto: providerOwnedBase()
+        )
+
+        XCTAssertTrue(transition.effects.contains(
+            .requestResolverRuntimeReset(.full(reason: "network-path-changed", force: true))))
+        XCTAssertTrue(transition.effects.contains(
+            .deliverPendingResolverFailures(reason: "network-path-changed")))
+        XCTAssertTrue(transition.effects.contains(
+            .evaluateProtectionNotification(at: later)))
+        // A down path takes the full reset (which clears backoff itself); the lighter satisfied-only
+        // effect must never appear here.
+        XCTAssertFalse(transition.effects.contains(
+            .resetResolverBackoff(reason: "network-path-changed")))
+    }
+
     func testInitialPathObservationDoesNotCountAsNetworkChangeOrResetEvidence() {
         let original = seededState()
         let transition = ResolverHealthReducer.reduce(

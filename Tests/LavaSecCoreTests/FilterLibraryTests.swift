@@ -82,6 +82,54 @@ final class FilterLibraryTests: XCTestCase {
         XCTAssertFalse(filter.applyFilterFields(from: config))
     }
 
+    func testSameFilterScopedFieldsComparesAllFourFieldsAndIgnoresMetadata() throws {
+        let custom = try CustomBlocklistSource(
+            id: "custom-1",
+            displayName: "Sample",
+            rawURL: "https://example.com/list.txt"
+        )
+        let baseline = Filter(
+            id: "f1",
+            name: "Original",
+            enabledBlocklistIDs: ["a"],
+            customBlocklists: [custom],
+            blockedDomains: ["bad.example"],
+            allowedDomains: ["ok.example"],
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastCompiledToken: "old-token",
+            lastSyncedAt: Date(timeIntervalSince1970: 200)
+        )
+        let metadataOnlyChange = Filter(
+            id: "f1",
+            name: "Renamed",
+            enabledBlocklistIDs: baseline.enabledBlocklistIDs,
+            customBlocklists: baseline.customBlocklists,
+            blockedDomains: baseline.blockedDomains,
+            allowedDomains: baseline.allowedDomains,
+            createdAt: Date(timeIntervalSince1970: 300),
+            lastCompiledToken: "new-token",
+            lastSyncedAt: Date(timeIntervalSince1970: 400)
+        )
+
+        XCTAssertTrue(
+            metadataOnlyChange.hasSameFilterScopedFields(as: baseline),
+            "A rename or warm-token/freshness stamp must not invalidate a prepared switch."
+        )
+
+        var changed = baseline
+        changed.enabledBlocklistIDs.insert("b")
+        XCTAssertFalse(changed.hasSameFilterScopedFields(as: baseline))
+        changed = baseline
+        changed.customBlocklists = []
+        XCTAssertFalse(changed.hasSameFilterScopedFields(as: baseline))
+        changed = baseline
+        changed.blockedDomains.insert("other.example")
+        XCTAssertFalse(changed.hasSameFilterScopedFields(as: baseline))
+        changed = baseline
+        changed.allowedDomains.insert("other.example")
+        XCTAssertFalse(changed.hasSameFilterScopedFields(as: baseline))
+    }
+
     // MARK: - Migration
 
     func testMigratingLegacyWrapsConfigIntoSingleDefaultFilter() {

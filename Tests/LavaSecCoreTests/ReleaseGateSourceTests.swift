@@ -1,12 +1,31 @@
 import XCTest
 
 final class ReleaseGateSourceTests: XCTestCase {
+    func testMetricKitRequiresQAWithoutDebug() throws {
+        let collector = try readSource(.qaMetricKitCollector)
+        XCTAssertTrue(collector.hasPrefix("#if LAVA_QA_TOOLS\n"))
+        XCTAssertTrue(collector.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
+        XCTAssertEqual(collector.components(separatedBy: "#if ").count, 2)
+        XCTAssertEqual(collector.components(separatedBy: "#endif").count, 2)
+        XCTAssertFalse(collector.contains("#else"))
+        XCTAssertTrue(collector.contains("private final class QAMetricKitSubscriber: NSObject"))
+        let app = try readSource(.lavaSecApp)
+        XCTAssertTrue(app.contains("#if LAVA_QA_TOOLS\n        QAMetricKitCollector.start()\n        #endif"))
+        XCTAssertTrue(collector.contains("Bundle.main.bundleIdentifier == \"com.lavasec.dev.qa\""))
+    }
+
+    func testReleaseDNSTierZeroReportsThePersistedPreference() throws {
+        let source = try readSource(.reactNativeAppQueries)
+        XCTAssertTrue(source.contains("model.configuration.chainedUpstreamEnabled"))
+        XCTAssertTrue(source.contains("WireGuard"))
+    }
+
     func testInternalRCTagWorkflowChecksTagAgainstMarketingVersionBeforeDispatch() throws {
         let workflow = try readSource(.tagReleaseWorkflow)
         let guardBlock = try sourceBlock(
             in: workflow,
             startingAt: "- name: Guard — RC tag must match MARKETING_VERSION and prod floor",
-            endingBefore: "- name: Trigger lavasec-runner internal release"
+            endingBefore: "- name: Trigger lavasec-runner builds for"
         )
 
         XCTAssertTrue(workflow.contains("uses: actions/checkout@v4"))
@@ -19,8 +38,12 @@ final class ReleaseGateSourceTests: XCTestCase {
 
     func testLightBuildWorkflowGuardsMarketingVersionAheadOfLatestPublicRelease() throws {
         let workflow = try readSource(.lightBuildWorkflow)
-        // Reads to EOF: `version-guard` is the last job in the file.
-        let jobBlock = try sourceBlock(in: workflow, startingAt: "  version-guard:")
+        // Bounded, NOT read to EOF. `version-guard` stopped being the last job when
+        // `main-red-alarm` was added below it, and an unbounded block would quietly widen every
+        // assertion here to cover two jobs — the negatives especially, which would then fail on
+        // a string the OTHER job is entitled to contain.
+        let jobBlock = try sourceBlock(
+            in: workflow, startingAt: "  version-guard:", endingBefore: "  main-red-alarm:")
 
         XCTAssertTrue(jobBlock.contains("uses: actions/checkout@v7"))
         // Unlike app-compile, this job must run on every PR unconditionally: no `needs:
@@ -46,46 +69,174 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(guardBlock.contains("failing closed"))
     }
 
+    /// The device/Release compile is deliberately gated off regular PRs, so `main` is the only
+    /// place it reports — and on 2026-08-18 it reported red at the merge that broke it and
+    /// stayed red for seven days because nothing watched. This pins the half that was missing.
+    func testLightBuildAlarmsOnARedMainAndClearsOnlyOnAnUnambiguousGreen() throws {
+        let workflow = try readSource(.lightBuildWorkflow)
+        // Reads to EOF: `main-red-alarm` is the last job in the file. Anything added after it
+        // must re-bound this the way `version-guard` above had to be re-bounded.
+        let jobBlock = try sourceBlock(in: workflow, startingAt: "  main-red-alarm:")
+
+        // `push`-only. A context reported on a pull request is the shape that deadlocked the
+        // android-controller required check, and this job has no business gating a PR at all.
+        // The whole `if:` line, not its parts. Both halves are stated in the comment directly
+        // above them in the workflow, so a `contains("always()")` is satisfied by the PROSE and
+        // survives the very edit it exists to catch — verified: swapping the real condition to
+        // `failure()` left that assertion green. `always()`, not `failure()`, because the job
+        // must also run on green to CLOSE the alarm.
+        XCTAssertTrue(
+            jobBlock.contains("if: ${{ always() && github.event_name == 'push' }}"))
+        XCTAssertTrue(jobBlock.contains("needs: [changes, app-compile, wireguard-core-drift, version-guard]"))
+        XCTAssertTrue(jobBlock.contains("group: light-build-main-alarm"))
+        XCTAssertTrue(jobBlock.contains("cancel-in-progress: false"))
+        XCTAssertTrue(jobBlock.contains("Select the current main build result"))
+        XCTAssertTrue(jobBlock.contains("if: ${{ steps.relevant.outputs.current == 'true' }}"))
+
+        // Issue mutations stay explicitly scoped; checkout is for current-source comparison.
+        XCTAssertTrue(jobBlock.contains("GH_REPO: ${{ github.repository }}"))
+
+        // Job-scoped write, so the jobs running repo code on the self-hosted runner keep
+        // read-only credentials. A workflow-level `issues: write` would hand it to all of them.
+        let permissionsBlock = try sourceBlock(
+            in: jobBlock, startingAt: "    permissions:", endingBefore: "    runs-on:")
+        XCTAssertTrue(permissionsBlock.contains("issues: write"))
+
+        // De-duplication is by LABEL, not by title search: `gh issue list --search` reads
+        // GitHub's search index, which lags writes and would open one duplicate per red push
+        // during exactly the burst the de-duplication exists for.
+        XCTAssertTrue(jobBlock.contains("--label \"$label\""))
+        XCTAssertFalse(jobBlock.contains("in:title"))
+
+        // Clearing requires every dependency to have SUCCEEDED. `skipped` and `cancelled` must
+        // leave a standing alarm alone, as must documentation-only or unknown classification.
+        // Executable ordering/health regressions live in light-build-push.test.mjs.
+        XCTAssertTrue(jobBlock.contains("[ \"$DOCS_ONLY\" = false ] || all_succeeded=0"))
+        XCTAssertTrue(jobBlock.contains("[ \"$result\" = \"success\" ] || all_succeeded=0"))
+        XCTAssertTrue(jobBlock.contains("if [ \"$all_succeeded\" -ne 1 ]; then"))
+        XCTAssertTrue(jobBlock.contains("gh issue close"))
+    }
+
+    func testInternalRCTagWorkflowRoutesNativeAndReactNativeBuilds() throws {
+        let workflow = try readSource(.tagReleaseWorkflow)
+        let dispatchBlock = try sourceBlock(
+            in: workflow,
+            startingAt: "- name: Trigger lavasec-runner builds for",
+            endingBefore: nil
+        )
+
+        let executableLines = dispatchBlock
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.hasPrefix("#") }
+        var commands: [String] = []
+        var lineIndex = 0
+
+        while lineIndex < executableLines.count {
+            guard executableLines[lineIndex].hasPrefix("gh workflow run ") else {
+                lineIndex += 1
+                continue
+            }
+
+            var commandParts: [String] = []
+            repeat {
+                let line = executableLines[lineIndex]
+                let continues = line.hasSuffix("\\")
+                commandParts.append(
+                    String(continues ? line.dropLast() : line[...])
+                        .trimmingCharacters(in: .whitespaces)
+                )
+                lineIndex += 1
+                if !continues { break }
+            } while lineIndex < executableLines.count
+
+            commands.append(commandParts.joined(separator: " "))
+        }
+
+        // The executable shell regressions check which command is actually sent.
+        // Keep the output-driven wait matrix bound to those selected lanes.
+        XCTAssertTrue(dispatchBlock.contains("lanes=(qa)"))
+        XCTAssertTrue(dispatchBlock.contains("if [ \"${#lanes[@]}\" -eq 2 ]; then"))
+        XCTAssertTrue(workflow.contains("lane: ${{ fromJSON(needs.dispatch.outputs.lanes) }}"))
+        XCTAssertTrue(workflow.contains("needs: dispatch"))
+        XCTAssertTrue(workflow.contains("fail-fast: false"))
+        XCTAssertTrue(workflow.contains("run: node scripts/wait-rc-build.mjs"))
+        XCTAssertEqual(commands.count, 2)
+        XCTAssertEqual(
+            commands.first { $0.hasPrefix("gh workflow run release.yml ") },
+            "gh workflow run release.yml --repo lavasecurity/lavasec-runner --ref main -f channel=internal -f ui=\"$ui\" -f tag=\"${GITHUB_REF_NAME}\" -f dry_run=false > \"$RUNNER_TEMP/release-url\""
+        )
+        XCTAssertEqual(
+            commands.first { $0.hasPrefix("gh workflow run release-qa.yml ") },
+            "gh workflow run release-qa.yml --repo lavasecurity/lavasec-runner --ref main -f ref=\"${GITHUB_REF_NAME}\" -f ui=\"$ui\" -f dry_run=false > \"$RUNNER_TEMP/qa-url\""
+        )
+    }
+
     func testPhoneQASurfacesAreCompileGatedOutOfRelease() throws {
         let adminQA = try readSource(.adminQAView)
         let settings = try readSource(.settingsView)
         let root = try readSource(.rootView)
-        let viewModel = try readSource(.appViewModel)
+        let viewModel = try readAppViewModelSource()
         // The rage-shake routing lives on DiagnosticsController since the Phase D4 peel.
         let diagnosticsController = try readSource(.diagnosticsController)
         let rageShakeQA = try readSource(.rageShakeQA)
 
         XCTAssertTrue(
             adminQA.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#if DEBUG || LAVA_QA_TOOLS"),
-            "Phone QA views should not be compiled into Release."
+            "Device QA views should not be compiled into Release."
         )
         XCTAssertTrue(
             adminQA.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"),
             "The Admin QA file should close its Release compile gate explicitly."
         )
 
+        // Same whole-file contract for the VPN chaining page. It is a Protection Choices
+        // subpage, so unlike Admin QA it sits among rows that DO ship — which is exactly why
+        // its gate is pinned rather than assumed.
+        let vpnChaining = try readSource(.vpnChainingSettingsView)
+        XCTAssertTrue(
+            vpnChaining.trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasPrefix("#if DEBUG || LAVA_QA_TOOLS"),
+            "The VPN chaining page should not be compiled into Release."
+        )
+        XCTAssertTrue(
+            vpnChaining.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"),
+            "The VPN chaining file should close its Release compile gate explicitly."
+        )
+
+        // Both gated routes live in ONE gate block, so these pin the block as a whole. A new
+        // gated route must be added here in the same diff — that churn is deliberate, and it
+        // is what stops a route being added to the enum while its Release exclusion is not.
         XCTAssertTrue(settings.contains("""
         #if DEBUG || LAVA_QA_TOOLS
             case phoneQA
+            case vpnChaining
         #endif
         """))
         XCTAssertTrue(settings.contains("""
         #if DEBUG || LAVA_QA_TOOLS
                 case .phoneQA:
                     return .requires(.appSettings)
+                case .vpnChaining:
+        """))
+        XCTAssertTrue(settings.contains("""
+                case .vpnChaining:
+                    // Same lock as the other Protection Choices subpages: this page can change the
+                    // data path and holds a WireGuard private key's staging surface.
+                    return .requires(.appSettings)
         #endif
         """))
-        XCTAssertTrue(settings.contains("#if DEBUG || LAVA_QA_TOOLS\n                if viewModel.isAccountDeveloper {"))
+        XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("live?.qaTools&&<Row intent=\"page\" icon=\"hammer\" title=\"Device QA\""))
         XCTAssertTrue(settings.contains("""
         #if DEBUG || LAVA_QA_TOOLS
-        private struct PhoneQASettingsView: View {
+        struct PhoneQASettingsView: View {
         """))
 
         XCTAssertTrue(root.contains("""
         #if DEBUG || LAVA_QA_TOOLS
                     case .phoneQA:
         """))
-        XCTAssertTrue(root.contains("#endif\n            case .bugReport:"))
+        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("#if DEBUG || LAVA_QA_TOOLS"))
         XCTAssertFalse(root.contains("#else\n            case .phoneQA:"))
 
         let rageShakeGate = try sourceBlock(
@@ -128,7 +279,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    @Published var qaProbeSuffixDraft"))
-        XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    @Published private(set) var adminQAStatusMessage"))
+        XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    @Published var adminQAStatusMessage"))
         XCTAssertTrue(viewModel.contains("#if DEBUG || LAVA_QA_TOOLS\n    var qaProbeSummaryText"))
 
         // The Diagnostics MARK region that followed the QA section now opens with the

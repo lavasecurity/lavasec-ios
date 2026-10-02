@@ -36,6 +36,19 @@ final class BackgroundPendingSwitchDrainTests: XCTestCase {
 
     // MARK: - Moot markers cleared WITHOUT driving the engine
 
+    func testExtensionFirstUnknownCredentialAlsoClosesThePendingDrain() async throws {
+        let h = makeFocusSwitchEngineHarness(prefix: "bpsd"); defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: false)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
+        _ = recordMarker(h, target: "f2", requestedAt: Date())
+        try FileManager.default.removeItem(at: SecurityProtectedSurfaceStorage.projectionURL(containerURL: h.dir))
+        let outcome = await BackgroundPendingSwitchDrain.drain(env: h.env)
+        XCTAssertEqual(outcome, .clearedAuthGateClosed)
+        XCTAssertNil(PendingFilterSwitchStore.current(in: h.defaults))
+        let library = try JSONDecoder().decode(FilterLibrary.self, from: Data(contentsOf: h.env.filterLibraryURL))
+        XCTAssertEqual(library.activeFilterID, "f1")
+    }
+
     func testAuthGateClosedClearsMarkerWithoutDrivingEngine() async throws {
         // Same invariant as the foreground reconcile's gate-closed branch: a marker recorded while
         // editing was unprotected must NOT apply once filter editing became auth-protected — not
@@ -44,7 +57,8 @@ final class BackgroundPendingSwitchDrainTests: XCTestCase {
         seedFocusSwitchConfiguration(h, isPaid: true)
         seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
         _ = recordMarker(h, target: "f2", requestedAt: Date(timeIntervalSinceReferenceDate: 5_000))
-        SecurityProtectedSurfaceStorage.saveProtectedSurfaces([.filterEditing], to: h.defaults)
+        SecurityProtectedSurfaceStorage.saveProtectedSurfaces([.filterEditing], to: h.defaults,
+            projectionURL: SecurityProtectedSurfaceStorage.projectionURL(containerURL: h.dir))
 
         let outcome = await BackgroundPendingSwitchDrain.drain(env: h.env)
 
@@ -153,6 +167,30 @@ final class BackgroundPendingSwitchDrainTests: XCTestCase {
                        + "days-old automation out-rank a manual switch made after it (lost update).")
         XCTAssertEqual(h.spy.posted, [FocusFilterSwitchSignal.darwinNotificationName],
                        "The engine's defer path nudges a resident foreground, exactly as an intent's would.")
+    }
+
+    func testReplayDiagnosticUsesDecisionTimeRatherThanOriginalRequestTime() async {
+        let originalRequest = Date(timeIntervalSinceReferenceDate: 49_000)
+        let clearedAt = Date(timeIntervalSinceReferenceDate: 50_000)
+        let decisionAt = clearedAt.addingTimeInterval(1)
+        let h = makeFocusSwitchEngineHarness(
+            prefix: "bpsd",
+            now: Date(timeIntervalSinceReferenceDate: 60_000),
+            diagnosticNow: { decisionAt })
+        defer { cleanupFocusSwitchHarness(h) }
+        seedFocusSwitchConfiguration(h, isPaid: true)
+        seedFocusSwitchLibrary(h, active: "f1", ids: ["f1", "f2"])
+        _ = recordMarker(h, target: "f2", requestedAt: originalRequest)
+        FocusSwitchDiagnostics.clear(
+            in: h.defaults, orderingLockURL: h.env.focusDiagnosticOrderingLockURL,
+            now: { clearedAt })
+
+        let outcome = await BackgroundPendingSwitchDrain.drain(env: h.env)
+
+        XCTAssertEqual(outcome, .drove(.deferred))
+        XCTAssertEqual(
+            FocusSwitchDiagnostics.last(in: h.defaults)?.at, decisionAt,
+            "replay identity must preserve marker time without backdating the diagnostic decision")
     }
 
     func testAlreadyActiveReplayPreservesMarkerIdentityAndPostsNoBanner() async {

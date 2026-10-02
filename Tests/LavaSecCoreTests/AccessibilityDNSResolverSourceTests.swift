@@ -8,11 +8,11 @@ import XCTest
 final class AccessibilityDNSResolverSourceTests: XCTestCase {
 
     /// The primary provider picker inside `DNSResolverSettingsView` — the "DNS Providers"
-    /// section (uniquely identified by its footer) up to the custom-resolver editor.
+    /// section up to the custom-resolver editor.
     private func providerPickerSource() throws -> String {
         try sourceBlock(
             in: try readSource(.dnsResolverSettingsView),
-            startingAt: "LavaSectionGroup(\"DNS Providers\", footer: \"A provider answers",
+            startingAt: "LavaSectionGroup(\"DNS Providers\", footer: nil)",
             endingBefore: "if showsCustomResolverOptions"
         )
     }

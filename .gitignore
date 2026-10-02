@@ -51,3 +51,24 @@ Config/*.local.xcconfig
 
 # ---- Claude Code local scaffolding (git worktrees, local agent state) ----
 .claude/
+
+# Generated full-app RN presentation workspace (native project stays independent).
+/.LavaSecRN.project.json
+/LavaSecRN.xcodeproj/
+/LavaSecRN.xcworkspace/
+ReactNative/native-app/Pods/
+ReactNative/native-app/build/
+ReactNative/native-app/LavaSecRN.xcodeproj/
+ReactNative/native-app/LavaSecRN.xcworkspace/
+ReactNative/native-app/.xcode.env*
+
+# Python bytecode from the offline narration-generator tests
+__pycache__/
+*.pyc
+
+# Local catalog scratch export; the string catalog is the source of truth.
+/.specs/my_catalog_keys.json
+
+# Review captures and narration auditions live in lavasec-infra, not the app tree.
+/ReactNative/evidence/
+/docs/design-revamp/explore-narration-drafts/

@@ -22,11 +22,6 @@ struct BackupPasskeyRegistrationRecord: Equatable {
     let supportsPRF: Bool
 }
 
-struct BackupPasskeyAssertionRecord: Equatable {
-    let credentialID: String
-    let credential: BackupPasskeyAssertionCredential
-}
-
 struct BackupPasskeyCredentialClientExtensionResults: Codable, Equatable {}
 
 struct BackupPasskeyRegistrationCredential: Codable, Equatable {
@@ -51,29 +46,6 @@ struct BackupPasskeyRegistrationCredentialResponse: Codable, Equatable {
     let transports: [String]
 }
 
-struct BackupPasskeyAssertionCredential: Codable, Equatable {
-    let id: String
-    let rawID: String
-    let response: BackupPasskeyAssertionCredentialResponse
-    let clientExtensionResults: BackupPasskeyCredentialClientExtensionResults
-    let type: String
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case rawID = "rawId"
-        case response
-        case clientExtensionResults
-        case type
-    }
-}
-
-struct BackupPasskeyAssertionCredentialResponse: Codable, Equatable {
-    let clientDataJSON: String
-    let authenticatorData: String
-    let signature: String
-    let userHandle: String?
-}
-
 enum BackupPasskeyError: Error, LocalizedError {
     case alreadyInProgress
     case authorizationFailed
@@ -90,27 +62,27 @@ enum BackupPasskeyError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .alreadyInProgress:
-            "Passkey setup is already in progress."
+            "Passkey setup is already in progress.".lavaLocalized
         case .authorizationFailed:
-            "Passkey could not be used. Try again, or continue without Passkey."
+            "Passkey could not be used. Try again, or continue without Passkey.".lavaLocalized
         case .canceled:
-            "Passkey was canceled."
+            "Passkey was canceled.".lavaLocalized
         case .invalidChallenge:
-            "The passkey challenge could not be read. Try again."
+            "The passkey challenge could not be read. Try again.".lavaLocalized
         case .invalidCredentialID:
-            "The saved passkey could not be read. Set up Passkey again."
+            "The saved passkey could not be read. Set up Passkey again.".lavaLocalized
         case .missingAccount:
-            "Sign in before creating a passkey."
+            "Sign in before creating a passkey.".lavaLocalized
         case .noMatchingCredential:
-            "No matching passkey was found. Use Recovery or set up Passkey again."
+            "No matching passkey was found. Use Recovery or set up Passkey again.".lavaLocalized
         case .prfUnavailable:
-            "This passkey can't be used for zero-knowledge backup. Use a passkey provider that supports PRF (iCloud Keychain on iOS 18+), or set up without Passkey and keep your recovery phrase."
+            "This passkey can't be used for zero-knowledge backup. Use a passkey provider that supports PRF (iCloud Keychain on iOS 18+), or set up without Passkey and keep your recovery phrase.".lavaLocalized
         case .randomBytesFailed(let status):
-            "Could not prepare a secure passkey challenge. Security returned status \(status)."
+            "Could not prepare a secure passkey challenge. Security returned status %@.".lavaLocalizedFormat(String(status))
         case .unsupportedCredential:
-            "iOS did not return a passkey credential."
+            "iOS did not return a passkey credential.".lavaLocalized
         case .webCredentialsAssociationUnavailable:
-            "Passkey is not ready on this device yet. Delete and reinstall the latest app build, then try again, or set up without Passkey."
+            "Passkey is not ready on this device yet. Delete and reinstall the latest app build, then try again, or set up without Passkey.".lavaLocalized
         }
     }
 }

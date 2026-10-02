@@ -2,11 +2,11 @@
 
 "notif.body.switchedTo" = "已將篩選器切換至 %@";
 "notif.body.couldNotSwitchTo" = "無法切換至 %@";
-"notif.body.pauseEnded" = "暫停已結束，保護已重新開啟。";
+"notif.body.pauseEnded" = "暫停已結束，防護已重新開啟。";
 "notif.body.reconnectTitle" = "重新連線 Lava";
-"notif.body.reconnectMessage" = "DNS 在此網路上無法解析。點一下即可重新連線保護。";
+"notif.body.reconnectMessage" = "此網路上的 DNS 無法解析。點一下即可重新連線防護。";
 "notif.body.dnsSlowTitle" = "Lava DNS 反應緩慢";
-"notif.body.dnsSlowMessage" = "所選的 DNS 解析器回應緩慢。點一下即可重新連線保護。";
+"notif.body.dnsSlowMessage" = "你的 DNS 供應商回應緩慢。點一下即可重新連線防護。";
 
 /* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
@@ -16,19 +16,19 @@
 "dialog.filterSwitchDisallowed" = "無法切換至 %@。請開啟 Lava 檢查你的篩選器設定。";
 
 /* Live Activity / widget UI (shared via Bundle.module). */
-"widget.state.on" = "Lava Security 已開啟";
-"widget.state.paused" = "Lava Security 已暫停";
-"widget.state.restartingTitle" = "正在重新啟動…";
-"widget.a11y.restarting" = "Lava Security 正在重新啟動";
+"widget.state.on" = "Lava 已開啟";
+"widget.state.paused" = "Lava 已暫停";
+"widget.state.restartingTitle" = "正在重新連線…";
+"widget.a11y.restarting" = "Lava 正在重新連線";
 "widget.status.on" = "開啟";
 "widget.status.paused" = "已暫停";
-"widget.status.restarting" = "正在重新啟動";
-"widget.action.resume" = "繼續";
-"widget.action.restart" = "重新啟動";
+"widget.status.restarting" = "正在重新連線";
+"widget.action.resume" = "恢復";
+"widget.action.restart" = "重新連線";
 "widget.action.pauseForMinutes" = "暫停 %d 分鐘";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
 "widget.action.pauseForMinutesShort" = "%d 分鐘";
-"a11y.shieldGuardian" = "Lava 護盾守衛";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
 "core.domainError.alreadyBlocked" = "%@ 已在你的封鎖網域中。";
@@ -39,16 +39,16 @@
 /* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
 "core.resolver.empty" = "輸入一個 IPv4/6 DNS 伺服器、DoH 網址、DoT 網址、DoQ 網址或 DNS stamp。";
 "core.resolver.unsupported" = "使用一個 IPv4/6 DNS 伺服器、DoH 網址、DoT 網址、DoQ 網址或 sdns:// DNS stamp。";
-"core.resolver.doqUnsupported" = "此裝置不支援 DNS over QUIC。";
+"core.resolver.doqUnsupported" = "這台裝置不支援 DNS over QUIC。";
 "core.resolver.badStamp" = "無法讀取 DNS stamp。請檢查 stamp 後再試一次。";
 "core.resolver.missingDoHPath" = "DNS-over-HTTPS 網址必須包含路徑，例如 /dns-query。";
 "core.resolver.credentialsNotAllowed" = "自訂 DNS 網址不可包含使用者名稱或密碼。";
-"core.resolver.secondaryTransportMismatch" = "次要 DNS 必須與主要 DNS 使用相同的傳輸方式。";
+"core.resolver.secondaryTransportMismatch" = "次要伺服器必須與主要伺服器使用相同的傳輸方式。";
 "core.endpoint.credentialsNotAllowed" = "不支援含使用者名稱或密碼的網址。";
-"core.endpoint.localhostNotAllowed" = "此處無法使用 localhost 作為 DNS 解析器。";
+"core.endpoint.localhostNotAllowed" = "此處無法使用 localhost 作為 DNS 伺服器。";
 "core.endpoint.privateNetworkNotAllowed" = "自訂封鎖清單網址必須使用公開主機。";
-"core.endpoint.unusableResolverAddress" = "請輸入可用的 DNS 解析器位址，不可為迴路、多點傳送或未指定位址。";
-"core.endpoint.invalidResolverHost" = "請輸入有效的 DNS 解析器主機。";
+"core.endpoint.unusableResolverAddress" = "請輸入可用的 DNS 伺服器位址，不可為迴路、多點傳送或未指定位址。";
+"core.endpoint.invalidResolverHost" = "請輸入有效的 DNS 伺服器主機。";
 "core.customBlocklist.invalidURL" = "請輸入有效的封鎖清單網址。";
 "core.customBlocklist.unsupportedScheme" = "自訂封鎖清單必須使用 HTTPS。";
 "core.customBlocklist.missingHost" = "自訂封鎖清單網址必須包含主機。";
@@ -57,18 +57,88 @@
 "core.domain.empty" = "網域是空白的。";
 "core.domain.tooLong" = "網域太長。";
 "core.domain.needsTwoLabels" = "請輸入完整網域，例如 example.com。";
-"core.domain.invalidLabel" = "無效的網域標籤：%@";
+"core.domain.invalidLabel" = "網域名稱中不能使用「%@」。";
 "core.domain.ipNotAllowed" = "此處不支援 IP 位址。";
-"core.filterBudget.exceedsDeviceMemory" = "此選項約需 %1$@ 條過濾規則，超過你裝置可容納的數量（%2$@）。請移除一份清單以開啟保護。";
+"core.filterBudget.exceedsDeviceMemory" = "此選項約需 %1$@ 條過濾規則，超過你裝置可容納的數量（%2$@）。請移除一份封鎖清單以開啟防護。";
 "core.filterBudget.exceedsTierLimit" = "你的封鎖清單已使用約 %1$@／%2$@ 條過濾規則。%3$@";
-"core.filterBudget.action.remove" = "請移除一份清單以開啟保護。";
-"core.filterBudget.action.removeOrUpgrade" = "請移除一份清單，或升級至 Plus。";
+"core.filterBudget.action.remove" = "請移除一份封鎖清單以開啟防護。";
+"core.filterBudget.action.removeOrUpgrade" = "請移除一份封鎖清單，或升級至 Lava Plus。";
 "core.filterBudget.largestSuffix" = " 最大：%@。";
 "core.catalogSync.invalidBlocklistEncoding" = "為 %@ 下載的封鎖清單不是有效的 UTF-8。";
 "core.catalogSync.blocklistTooLarge" = "為 %1$@ 下載的封鎖清單太大（%2$lld 個位元組）。";
 "core.catalogSync.blocklistExceedsRuleLimit" = "%1$@ 的封鎖清單超過 %2$lld 條規則。請縮減其大小或將其移除。";
-"core.catalogSync.noRulesAvailable" = "目前尚無已啟用的已下載過濾器可用。";
+"core.catalogSync.noRulesAvailable" = "目前尚無可用的已下載封鎖清單。";
 "core.catalogSync.customBlocklistUnavailable" = "無法載入自訂封鎖清單「%1$@」。%2$@";
-"core.domainError.freeBlockedLimit" = "免費保護包含 %lld 個額外封鎖的網域。";
-"core.domainError.freeAllowedLimit" = "免費保護包含 %lld 個允許的例外。";
+"core.domainError.freeBlockedLimit" = "免費方案包含 %lld 個額外的已封鎖網域。";
+"core.domainError.freeAllowedLimit" = "免費方案包含 %lld 個允許的例外。";
 "core.backup.lastUploaded" = "上次上傳於 %@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "Lava 的封鎖判定在這台 iPhone 上完成。你所選擇的解析器（目前為 %@）可能會收到已允許的 DNS 請求，並依該提供方的政策處理。";
+"core.disclosure.resolverNetworkProvided" = "Lava 的封鎖判定在這台 iPhone 上完成。這台 iPhone 從 Wi-Fi、行動網路或系統設定取得的 DNS 伺服器可能會收到已允許的 DNS 請求，Lava 的伺服器則不會。";
+"core.disclosure.resolverSelfEntered" = "Lava 的封鎖判定在這台 iPhone 上完成。你設定的自訂 DNS 可能會收到已允許的 DNS 請求。";
+"core.disclosure.dnsScope" = "Lava 檢查的是網域名稱，而不是完整網址、頁面路徑、頁面文字、表單或訊息。它可以封鎖整個網域，但無法只封鎖已放行網域下的某一個頁面。";
+"core.disclosure.vpn" = "iPhone 將其顯示為 VPN，因為 Lava 需要一條本機受保護的通道來檢查網域名稱。你的網頁瀏覽流量不會傳送到 Lava 的伺服器。";
+"core.disclosure.encryptedFallbackRecipient" = "你選擇的加密備援解析器（%@）也可能收到已允許的 DNS 請求。";
+"core.disclosure.chainedRecipient" = "當 Lava 串接到另一個 VPN 時，該 VPN 設定中的 DNS 伺服器是最先可能收到已允許 DNS 請求的一方。Lava 無法說明由誰營運。";
+"core.disclosure.fallbackNetworkProvided" = "這台 iPhone 從網路中取得的 DNS 伺服器同樣可能收到已允許的請求。";
+"core.disclosure.plainFallbackRecipient" = "你選擇的備援解析器（%@）也可能收到已允許的 DNS 請求。它未加密。";
+"core.disclosure.upstreamFilteringRecipient" = "%@ 會進行自己的過濾，因此可能封鎖 Lava 已放行的網域。";
+"core.disclosure.selfEnteredRecipients" = "這些 DNS 伺服器是你自己填寫的，因此 Lava 無法說明由誰營運。你填寫的每個位址都可能收到已允許的 DNS 請求。";
+"core.disclosure.selfEnteredRecipient" = "這台 DNS 伺服器是你自己填寫的，因此 Lava 無法說明由誰營運。";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "Lava 需要處理問題";
+"notif.body.filteringUnavailableMessage" = "所選封鎖清單仍超出規則上限，因此 DNS 已遭封鎖。請開啟 Lava 檢查你的封鎖清單。";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "有一份自訂封鎖清單需要更新，但無法在背景完成，因此 DNS 已遭封鎖。請開啟 Lava 更新你的自訂封鎖清單。";
+
+"widget.action.confirmPause" = "確認";
+"Activity" = "活動";
+"Confirmation" = "確認";
+
+"A saved configuration's key is unavailable. Import it again." = "無法取得已儲存設定的金鑰。請重新匯入。";
+"Choose a different DNS for the second tier." = "請為第二層選擇不同的 DNS。";
+"Choose a valid DNS provider and transport." = "請選擇有效的 DNS 提供者和傳輸方式。";
+"Custom DNS requires Lava Plus." = "自訂 DNS 需要 Lava Plus。";
+"Keep one primary DNS and, optionally, one secondary DNS." = "保留一個主要 DNS，並可選擇加入一個次要 DNS。";
+"No accepted blocklist checksum is available for %@." = "%@ 沒有可接受的封鎖清單校驗碼。";
+"No enabled blocklist source is available for %@." = "%@ 沒有可用的已啟用封鎖清單來源。";
+"No saved Lava Security catalog is available yet." = "尚無已儲存的 Lava Security 目錄。";
+"Supabase Auth returned status %lld." = "Supabase 驗證傳回狀態 %lld。";
+"Supabase Auth returned status %lld: %@" = "Supabase 驗證傳回狀態 %lld：%@";
+"The Lava Security catalog could not be read." = "無法讀取 Lava Security 目錄。";
+"The Lava Security catalog server returned HTTP %lld." = "Lava Security 目錄伺服器傳回 HTTP %lld。";
+"The Supabase Auth endpoint is not valid." = "Supabase 驗證端點無效。";
+"The Supabase Auth response was not valid." = "Supabase 驗證回應無效。";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "下載超過 %lld MB 大小限制（%lld 位元組）。";
+"The downloaded blocklist checksum did not match for %@." = "%@ 下載的封鎖清單校驗碼不符。";
+"The first configuration needs an IP endpoint address." = "第一個設定需要 IP 端點位址。";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "第一個設定的 AllowedIPs 必須包含第二個 VPN 的端點。";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "使用兩個 VPN 節點時，第一個設定的 MTU 必須至少為 1340。";
+"The saved configurations changed. Reopen the editor and try again." = "已儲存的設定已變更。請重新開啟編輯器後再試。";
+"The second configuration needs an IPv4 endpoint address." = "第二個設定需要 IPv4 端點位址。";
+"You can add up to two WireGuard configurations." = "最多可加入兩個 WireGuard 設定。";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@ 是用於標示出處與來源的第三方來源。授權條款：%2$@。擁有者或專案：%3$@。";
+"Third-party source project" = "第三方來源專案";
+
+"Latest encrypted settings backup size is %@." = "最新的加密設定備份大小為 %@。";
+"Added %@" = "已加入 %@";
+"This domain will be blocked after you save." = "儲存後將封鎖此網域。";
+"This exception will take effect after you save." = "儲存後此例外將生效。";
+"Pending setup" = "待設定";
+"Set up encrypted backup for this account." = "為此帳號設定加密備份。";
+"Off" = "關閉";
+"Sign in to set up encrypted backup." = "登入以設定加密備份。";
+"Not uploaded yet" = "尚未上傳";
+"Encrypted locally. Back up now to store a copy online." = "已在本機加密。立即備份即可在線上保存副本。";
+"Ready after sign-in" = "登入後即可使用";
+"Encrypted locally. Sign in to upload." = "已在本機加密。登入即可上傳。";
+"Needs attention" = "需要處理";
+"Domain cannot be added" = "無法加入這個網域";
+"Already blocked" = "已封鎖";
+"Blocked domain limit reached" = "已達封鎖網域上限";
+"Exception cannot be added" = "無法新增這個例外";
+"Already allowed" = "已允許";
+"Allowed exception limit reached" = "已達允許例外上限";

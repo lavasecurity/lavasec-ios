@@ -1,5 +1,6 @@
 import Foundation
 import LavaSecKit
+import LavaSecAppServices
 import SwiftUI
 
 // The customization-preferences feature, peeled out of AppViewModel (Phase D5,
@@ -42,6 +43,22 @@ enum LavaAppearancePreference: String, CaseIterable, Identifiable {
             "Dark"
         case .system:
             "System"
+        }
+    }
+
+    var nativePreference: AppearancePreference {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: .system
+        }
+    }
+
+    init(_ preference: AppearancePreference) {
+        switch preference {
+        case .light: self = .light
+        case .dark: self = .dark
+        case .system: self = .system
         }
     }
 
@@ -201,7 +218,7 @@ final class CustomizationController: ObservableObject {
     @Published private(set) var notifiesProtectionResumed = true
     @Published private(set) var notifiesConnectivity = true
 
-    private let appearancePreferenceDefaultsKeyName = "lavasec.customization.appearance"
+    private let appearancePreferences: AppearancePreferencesService
     private let textSizeMatchesSystemDefaultsKeyName = "lavasec.customization.textSizeMatchesSystem"
     private let textSizeDefaultsKeyName = "lavasec.customization.textSize"
     private let lavaGuardLookDefaultsKey = LavaSecAppGroup.customizationLavaGuardLookDefaultsKeyName
@@ -223,8 +240,9 @@ final class CustomizationController: ObservableObject {
     // back-reference avoids a retain cycle without weak-optional noise on every call.
     private unowned let hub: any CustomizationHubBridging
 
-    init(hub: any CustomizationHubBridging) {
+    init(hub: any CustomizationHubBridging, appearancePreferences: AppearancePreferencesService = AppearancePreferencesService(defaults: .standard)) {
         self.hub = hub
+        self.appearancePreferences = appearancePreferences
     }
 
     // MARK: - Derived presentation
@@ -251,12 +269,10 @@ final class CustomizationController: ObservableObject {
     // MARK: - Customization preferences (appearance, LavaGuard look, icon, haptics)
 
     func setAppearancePreference(_ preference: LavaAppearancePreference) {
-        guard appearancePreference != preference else {
-            return
+        let confirmed = appearancePreferences.setPreference(preference.nativePreference)
+        if confirmed.preference != appearancePreference.nativePreference {
+            appearancePreference = LavaAppearancePreference(confirmed.preference)
         }
-
-        appearancePreference = preference
-        defaults.set(preference.rawValue, forKey: appearancePreferenceDefaultsKeyName)
     }
 
     /// The Dynamic Type size to force app-wide, or `nil` to follow the system (the default).
@@ -470,12 +486,11 @@ final class CustomizationController: ObservableObject {
     // backfill, syncAppIcon, the Live-Activities capability clamp) still never run on the
     // HEADLESS background-refresh instances.
     func loadCustomizationPreferences() {
-        if let rawValue = defaults.string(forKey: appearancePreferenceDefaultsKeyName),
-           let preference = LavaAppearancePreference(rawValue: rawValue) {
-            appearancePreference = preference
-        } else {
-            appearancePreference = .system
-        }
+        // INV-PERSIST-1: nil from locked defaults is not an absent preference. In
+        // particular, never write the Original Guard over a still-protected choice.
+        // pinned: ProtectedPreferenceRecoverySourceTests.testCustomizationLoadDefersBeforeAnyReadOrWrite
+        guard UIApplication.shared.isProtectedDataAvailable else { return }
+        appearancePreference = LavaAppearancePreference(appearancePreferences.refresh().preference)
 
         if defaults.object(forKey: textSizeMatchesSystemDefaultsKeyName) != nil {
             textSizeMatchesSystem = defaults.bool(forKey: textSizeMatchesSystemDefaultsKeyName)

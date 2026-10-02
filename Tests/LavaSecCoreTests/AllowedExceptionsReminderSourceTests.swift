@@ -1,27 +1,6 @@
 import XCTest
 
 final class AllowedExceptionsReminderSourceTests: XCTestCase {
-    func testAllowedExceptionCautionLivesInReviewSheetNotGuardrailPage() throws {
-        let reviewSource = try readSource(.filterReviewFlowView)
-        let confirmationBlock = try sourceBlock(
-            in: reviewSource,
-            startingAt: "struct FilterConfirmationSheet: View",
-            endingBefore: "struct DiffGroup: View"
-        )
-
-        // The "be extra careful" caution is surfaced in the review sheet — gated to
-        // changes that actually add an allowed exception — not as a standalone panel
-        // on the My list cover, and not a separate guardrail page.
-        XCTAssertTrue(confirmationBlock.contains("if !diff.addedAllowedDomains.isEmpty {"))
-        XCTAssertTrue(confirmationBlock.contains("title: \"Be extra careful\""))
-        XCTAssertTrue(confirmationBlock.contains("Allowed exceptions let a site through even when a blocklist would catch it."))
-
-        let filtersSource = try readFiltersSourceAggregate()
-        XCTAssertFalse(filtersSource.contains("AllowedExceptionReminderPanel"))
-        XCTAssertFalse(filtersSource.contains("ProtectionGuardrailsHelpView"))
-        XCTAssertFalse(filtersSource.contains("Learn more about guardrails"))
-    }
-
     func testOverviewBannerRowSupportsOptInWrappingWithCenteredIcon() throws {
         let rootSource = try readSource(.lavaComponents)
         let bannerBlock = try sourceBlock(

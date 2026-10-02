@@ -1,27 +1,77 @@
-# Lava Security iOS Localization
+# Lava Security iOS localization
 
-English is the source locale. Priority locales are:
+English is the source language. The supported language list is owned by
+`Config/supported-locales.json`: `en`, `ja`, `zh-Hant`, `zh-Hans`, `de`, `fr`,
+`es`, `ko`, `pt-BR`, and `it`.
 
-1. 日本語: `ja`
-2. 繁體中文: `zh-Hant`
-3. 简体中文: `zh-Hans`
-4. Deutsch: `de`
-5. Français: `fr`
+## Lookup ownership
 
-Use `Localizable.xcstrings` for app UI strings and `InfoPlist.xcstrings` for Info.plist strings. Keep `Lava Security` as the display name in every locale for the first localized release.
+- App and React Native UI: `LavaSecApp/Localizable.xcstrings`. Generate the React
+  Native table with `node ReactNative/scripts/generate-localizations.mjs`.
+- Permission prompts: `LavaSecApp/InfoPlist.xcstrings`.
+- Intents extension metadata: `LavaSecIntents/Localizable.xcstrings`.
+- Shared errors, notifications, and widgets: `Sources/LavaSecKit/Resources/*.lproj/Localizable.strings`
+  through `LavaCoreStrings` and `Bundle.module`. An app catalog entry does not
+  satisfy a package lookup, or vice versa.
 
-Release UI strings use `Localizable.xcstrings` entries for both direct SwiftUI labels and string values passed through shared components. `LavaStrings.localized(...)` and the `String.lavaLocalized` helpers are for dynamic strings that would otherwise render as verbatim English.
+Use `localized` / `localizedFormat` in React Native, `lavaLocalized` /
+`lavaLocalizedFormat` in native app code, and `LavaCoreStrings` in package code.
+Translate each component before composing a sentence, accessibility label, or
+multiline summary. Runtime values need a catalog format key; interpolating an
+English sentence before lookup creates an unknown key. Preserve argument types
+and positions, including AppIntents `${parameter}` tokens.
 
-The localization check enforces a baseline release-app key set across `en`, `ja`, `zh-Hant`, `zh-Hans`, `de`, and `fr`. Internal QA/debug strings can remain English unless they become visible in release builds.
+Product, provider, protocol, and user-created names remain intact. Reproduced
+upstream license text remains verbatim. App-authored attribution explanations
+are translated. Internal debug/QA-only UI is outside release copy coverage.
 
-Review guidance lives in:
+The Guard page header and tab both resolve the `Guard` key. Traditional Chinese
+uses `防護`; Simplified Chinese uses `防护`.
 
-- `docs/i18n/localization-file-schema.md`
-- `docs/i18n/lava-security-glossary.md`
-- `docs/i18n/translation-review-checklist.md`
+## Required checks
 
-Run the localization check from the repo root:
+Run from the repository root:
 
-```bash
-node apps/ios/scripts/check-localization.mjs
+```sh
+node scripts/check-localization.mjs
+node scripts/check-string-coverage.mjs
+node --test scripts/tests/localization-formats.test.mjs scripts/tests/check-string-coverage.test.mjs
+npm --prefix ReactNative run i18n:check
+npm --prefix ReactNative run test:i18n
 ```
+
+The catalog check validates every key in all supported languages, nonempty
+translated units, scoped identical-English exceptions, and placeholder parity.
+The Swift coverage check validates app, native bridge, Intents, shared, widget,
+and package lookup sites against the bundle that actually resolves them. The
+React Native AST check also finds source copy before it is rendered, including
+accessibility props, errors, enumerable template variants, and runtime English
+sentence interpolation. `npm --prefix ReactNative test` runs these checks along
+with the UI and type suites; CI runs both the native and React Native gates.
+
+## October 2026 audit
+
+The audit traced release UI, native bridge error paths, shared errors, backup
+status, legal summaries, timestamps, dynamic labels, and accessibility copy.
+It added missing translations, localized composed values at their producer, and
+removed the broad English exemption for `Guard`. Regression coverage verifies
+both actual navigation labels in all ten languages and package copy lookup in
+all nine translated languages.
+
+The resulting catalogs contain 1,718 app keys, 4 permission keys, 5 Intents keys,
+and 123 package keys: 1,850 keys with 18,500 nonempty translated units across ten
+languages. The audit added 120 app keys and 43 package keys. All catalog,
+placeholder, generated-table, and source coverage gates pass. The React Native
+source gate scans 72 files in addition to the Swift/native coverage gate.
+
+Validation passed: 5,485 Swift tests, 752 React Native UI tests, TypeScript
+checking, repository guardrail fixtures, the Metro release bundle check, and a
+full Simulator app compile with 60 UIKit regression checks. Device journeys
+were not executed by this compile run.
+
+Catalog completeness and source checks are automated coverage measurements.
+They do not establish native-speaker quality or prove every device layout and
+VoiceOver journey. Translation review and device checks remain necessary when
+shipping changes to copy or layout. Dormant DNS preset metadata and unused
+fallback presentation helpers are not rendered release UI; they retain source
+keys until they acquire a display caller.

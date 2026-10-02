@@ -147,9 +147,10 @@ public actor TransientBootstrapDNSWait<Pending: Sendable> {
     }
 
     /// Admits one request under the INV-DNS-2 bounds. `generation` is the
-    /// caller's CURRENT lifecycle generation: a wait armed under any other
-    /// generation is invisible (`.notHandled` — stale-lifecycle requests take
-    /// the normal fail-closed answer), a same-generation wait that already
+    /// generation of the session that ACCEPTED the request (the caller's
+    /// admission token, not a live re-read — PR #524): a wait armed under any
+    /// other generation is invisible (`.notHandled` — stale-lifecycle requests
+    /// take the normal fail-closed answer), a same-generation wait that already
     /// timed out rejects the latecomer for SERVFAIL, and the 65th request
     /// overflows. Admission never starts the timer. Isolation replaces the old
     /// `dispatchPrecondition` — off-queue misuse is now a compile-time error

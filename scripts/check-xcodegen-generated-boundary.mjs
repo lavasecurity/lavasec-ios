@@ -23,6 +23,7 @@ const targetPolicy = new Map([
         "LavaSecApp/AppIcon-QA.icon",
         "LavaSecApp/AppIcon.icon",
         "LavaSecApp/AppIconAmethyst.icon",
+        "LavaSecApp/AppIconAquamarine.icon",
         "LavaSecApp/AppIconCherryQuartz.icon",
         "LavaSecApp/AppIconEmerald.icon",
         "LavaSecApp/AppIconFireOpal.icon",
@@ -31,6 +32,7 @@ const targetPolicy = new Map([
         "LavaSecApp/Assets.xcassets",
         "LavaSecApp/InfoPlist.xcstrings",
         "LavaSecApp/Localizable.xcstrings",
+        "LavaSecApp/THIRD-PARTY-NOTICES.txt",
       ],
       copyPhases: [
         {
@@ -72,6 +74,7 @@ const targetPolicy = new Map([
     {
       productType: "com.apple.product-type.app-extension",
       packageProducts: [
+        "LavaSecChainedUpstream",
         "LavaSecDNS",
         "LavaSecFilterPipeline",
         "LavaSecKit",
@@ -183,6 +186,9 @@ const approvedBuildSettingKeys = new Map([
       "ENABLE_NS_ASSERTIONS",
       "ENABLE_STRICT_OBJC_MSGSEND",
       "ENABLE_TESTABILITY",
+      // The vendored WireGuard engine has no x86_64 simulator slice, so the whole project
+      // excludes that arch on simulator SDKs. See project.yml for the full reasoning.
+      "EXCLUDED_ARCHS[sdk=iphonesimulator*]",
       "GCC_C_LANGUAGE_STANDARD",
       "GCC_DYNAMIC_NO_PIC",
       "GCC_NO_COMMON_BLOCKS",
@@ -220,6 +226,12 @@ const approvedBuildSettingKeys = new Map([
       "LAVA_GOOGLE_IOS_CLIENT_ID",
       "LAVA_GOOGLE_REVERSED_CLIENT_ID",
       "LAVA_GOOGLE_SERVER_CLIENT_ID",
+      // Chained-upstream keychain sharing (INV-CHAIN-4). Approved for the app and the tunnel
+      // ONLY: they are the write and read sides of the shared upstream record, and the widget
+      // and the App Intents extension have no use for a VPN private key.
+      "LAVA_KEYCHAIN_SHARING_GROUP",
+      "LAVA_KEYCHAIN_SHARING_GROUP_ID",
+      "LAVA_KEYCHAIN_SHARING_GROUP_PREFIX",
       "LAVA_SUPABASE_ANON_KEY",
       "LAVA_SUPABASE_URL",
       "LD_RUNPATH_SEARCH_PATHS",
@@ -235,6 +247,10 @@ const approvedBuildSettingKeys = new Map([
       "APPLICATION_EXTENSION_API_ONLY",
       "CODE_SIGN_ENTITLEMENTS",
       "INFOPLIST_FILE",
+      // See the app's list: the reader half of INV-CHAIN-4.
+      "LAVA_KEYCHAIN_SHARING_GROUP",
+      "LAVA_KEYCHAIN_SHARING_GROUP_ID",
+      "LAVA_KEYCHAIN_SHARING_GROUP_PREFIX",
       "LD_RUNPATH_SEARCH_PATHS",
       "LM_SKIP_METADATA_EXTRACTION",
       "OTHER_LDFLAGS",
@@ -298,6 +314,7 @@ const trackedXCConfigPolicy = new Map([
       settings: new Map([
         ["MARKETING_VERSION", "version"],
         ["LAVA_SOURCE_REVISION", ""],
+        ["LAVA_DNS_PATCH_DOWNLOAD_URL", ""],
         ["DEVELOPMENT_TEAM", ""],
         ["LAVASEC_APP_PROFILE", ""],
         ["LAVASEC_TUNNEL_PROFILE", ""],

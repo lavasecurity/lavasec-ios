@@ -39,7 +39,10 @@ from collections import defaultdict
 
 DEFAULT_DEVICECTL_ID = "YOUR_DEVICE_UUID"
 APP_GROUP = "group.com.lavasec"
-LOG_FILENAME = "vpn-debug-log.jsonl"
+# See the same list in vpn-latency-smoke.py. Debug/QA writes the log under the group
+# container's `Library/` (the only subtree `devicectl` can address); Release keeps the root
+# path. Try both so a default `--pull` works against either build.
+LOG_FILENAMES = ["Library/vpn-debug-log.jsonl", "vpn-debug-log.jsonl"]
 
 # Spans whose sub-spans roll up under a parent, for the decomposition view.
 TURN_ON_SUBSPANS = ["turnOn.prepareSnapshot", "turnOn.persistArtifacts",
@@ -48,12 +51,20 @@ PREPARE_SUBSPANS = ["prepare.catalogSync", "prepare.mergeRules", "prepare.buildS
 
 
 def pull_log(devicectl_id, destination):
-    result = subprocess.run(
-        ["xcrun", "devicectl", "device", "copy", "from", "--device", devicectl_id,
-         "--domain-type", "appGroupDataContainer", "--domain-identifier", APP_GROUP,
-         "--source", LOG_FILENAME, "--destination", str(destination)],
-        check=False, text=True, capture_output=True)
-    return result.returncode == 0 and destination.exists()
+    # Returns the device-side layout actually copied, or None. A one-shot pull here (unlike the
+    # smoke script's baseline+poll), but still report WHICH layout so a stale
+    # `Library/vpn-debug-log.jsonl` left by a prior QA install — the App Group container
+    # `group.com.lavasec` survives reinstalls — is visible rather than silently shadowing the
+    # current build's log. (Codex, #528.)
+    for filename in LOG_FILENAMES:
+        result = subprocess.run(
+            ["xcrun", "devicectl", "device", "copy", "from", "--device", devicectl_id,
+             "--domain-type", "appGroupDataContainer", "--domain-identifier", APP_GROUP,
+             "--source", filename, "--destination", str(destination)],
+            check=False, text=True, capture_output=True)
+        if result.returncode == 0 and destination.exists():
+            return filename
+    return None
 
 
 def read_events(path):
@@ -258,11 +269,15 @@ def main():
         return 0
 
     with tempfile.TemporaryDirectory() as workdir:
-        log_path = pathlib.Path(workdir) / LOG_FILENAME
-        if not pull_log(args.device, log_path):
+        # Basename only: the entries in LOG_FILENAMES are DEVICE-side paths, and one of them
+        # has a `Library/` prefix that does not exist under the temp dir.
+        log_path = pathlib.Path(workdir) / "vpn-debug-log.jsonl"
+        layout = pull_log(args.device, log_path)
+        if not layout:
             print("[report] failed to pull log from device "
                   "(app installed? Debug/QA build? device unlocked?)", file=sys.stderr)
             return 1
+        print(f"[report] pulled log from device layout '{layout}'", file=sys.stderr)
         events = read_events(log_path)
         run(events, args.session)
     return 0

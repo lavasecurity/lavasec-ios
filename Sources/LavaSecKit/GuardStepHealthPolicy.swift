@@ -53,11 +53,13 @@ public enum GuardStepHealthPolicy {
         isProtectionActive: Bool,
         configuredResolver: DNSResolverPreset,
         health: TunnelHealthSnapshot,
-        connectivitySeverity: ProtectionConnectivitySeverity
+        connectivitySeverity: ProtectionConnectivitySeverity?
     ) -> GuardFlowStepStatus {
         guard isProtectionActive else {
             return .inactive
         }
+
+        guard let connectivitySeverity else { return .inactive }
 
         switch connectivitySeverity {
         case .dnsSlow, .needsReconnect, .networkUnavailable:
@@ -78,7 +80,7 @@ public enum GuardStepHealthPolicy {
     public static func dnsDetail(
         configuredResolver: DNSResolverPreset,
         health: TunnelHealthSnapshot,
-        connectivitySeverity: ProtectionConnectivitySeverity
+        connectivitySeverity: ProtectionConnectivitySeverity?
     ) -> String {
         dnsDetailComponents(
             configuredResolver: configuredResolver,
@@ -90,8 +92,10 @@ public enum GuardStepHealthPolicy {
     public static func dnsDetailComponents(
         configuredResolver: DNSResolverPreset,
         health: TunnelHealthSnapshot,
-        connectivitySeverity: ProtectionConnectivitySeverity
+        connectivitySeverity: ProtectionConnectivitySeverity?
     ) -> GuardFlowDNSDetail {
+        guard let connectivitySeverity else { return GuardFlowDNSDetail(name: "Status unavailable") }
+
         switch connectivitySeverity {
         case .usingDeviceDNSFallback:
             return GuardFlowDNSDetail(name: "Device DNS fallback")

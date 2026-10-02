@@ -19,10 +19,10 @@ public struct CachedFilterSnapshotCompiler: Sendable {
     /// Compiles the in-extension runtime snapshot. Delegates to
     /// `StreamingCompactSnapshotCompiler`, which NEVER holds the dirty `DomainRuleSet`
     /// union of all enabled sources in memory — it streams each source's domains into an
-    /// on-disk blob, keeps only the compact entry table (~8 B/rule) resident, and
+    /// on-disk blob, keeps only the compact entry table (~4 B/rule) resident, and
     /// memory-maps the resulting artifact. So the packet-tunnel ~50 MiB jetsam budget is
     /// respected even for a large multi-list configuration, and the result is the same
-    /// 9 B/rule mapped-compact shape the foreground app produces. Over the streaming
+    /// ~5 B/rule mapped-compact shape the foreground app produces. Over the streaming
     /// aggregate budget (`FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount`) it
     /// throws `StreamingCompileBudgetExceeded`; the caller falls back fail-CLOSED and the
     /// app re-prepares the full snapshot.

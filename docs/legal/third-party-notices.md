@@ -81,3 +81,57 @@ manifest carries a per-source `counsel_status` review annotation for bookkeeping
 (not a runtime gate). Aggregated / meta-lists (e.g., StevenBlack, OISD) compile
 multiple upstreams under their own license; Lava links only to their published
 source URLs and never mirrors or modifies the bytes.
+
+## Bundled libraries (code compiled into the app)
+
+Added 2026-07-25 for the chained WireGuard upstream (plan
+`2026-07-22-vpn-upstream-chaining-implementation-plan.md`, D4).
+
+Everything above concerns material the app **fetches at runtime and never
+redistributes**, which is why source-URL-only linking discharges those obligations.
+A bundled library is categorically different: it is compiled into a static library
+that ships inside the app binary, so it is a **binary redistribution**, and the
+permissive licenses in this tree (BSD-2/3-Clause, MIT, ISC, Apache-2.0) all require
+the copyright notice, the condition list, and the warranty disclaimer to be
+reproduced in materials accompanying the distribution. A link is not reproduction.
+
+| Library | License | Owner | Distribution mode |
+| --- | --- | --- | --- |
+| BoringTun | BSD-3-Clause | Cloudflare, Inc. | Vendored source (`ThirdParty/wireguard-core/boringtun/`), compiled from a pinned toolchain into a committed xcframework |
+
+Verbatim license text: [`ThirdParty/wireguard-core/LICENSE-boringtun.txt`](../../ThirdParty/wireguard-core/LICENSE-boringtun.txt).
+WireGuard is a registered trademark of Jason A. Donenfeld; neither BoringTun nor
+Lava Security is sponsored or endorsed by him.
+
+### The full dependency set, and how it stays complete
+
+BoringTun is the anchor project, but it is not the obligation. Every crate compiled
+into the same static library is equally redistributed in binary form, and all of
+them are attributed in the generated notices —
+`ThirdParty/wireguard-core/THIRD-PARTY-NOTICES.txt`, with a byte-identical copy at
+`LavaSecApp/THIRD-PARTY-NOTICES.txt` that ships as an app bundle resource so the
+text travels with the binary.
+
+That completeness is enforced rather than asserted.
+`BundledLibraryAttributionSourceTests` fails if a locked crate is neither attributed
+nor explicitly excluded with a reason, if an attributed crate carries no licence text
+or no copyright holder, if the app copy drifts from the repo copy, or if a production
+target links the engine without the screen rendering its notices.
+
+**Two sources, because `cargo` cannot see one of them.** The Cargo-resolved
+dependencies come from `Cargo.lock`. The Rust **sysroot** crates do not appear there
+at all — they are linked from the precompiled standard library the pinned toolchain
+ships, so `cargo metadata` reports zero of them. They are enumerated by
+`sysroot-crates.json` (an inventory) and licensed by `sysroot-packages.json` (the
+corpus), and the archive itself is read to confirm the inventory matches what is
+actually linked. This section previously described ~35 unattributed crates as an open
+item; the Cargo half was closed by generating the notices, and the sysroot half by
+adding that corpus.
+
+**When the obligation attaches — earlier than the app shipping.** The committed
+xcframework is itself a binary redistribution, and it is inside the public-export
+scope (`scripts/export-public-source.sh` archives the tracked tree; `ThirdParty` is
+not on its denylist). So the duty attaches when this work reaches `main` and the
+next public promotion runs — *not* when the app finally links the engine. That is why
+the notice check runs on the public repo, where no Rust toolchain exists, rather than
+only where `cargo` is available.

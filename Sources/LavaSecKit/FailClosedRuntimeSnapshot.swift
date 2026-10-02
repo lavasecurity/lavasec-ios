@@ -29,6 +29,15 @@ public struct FailClosedRuntimeSnapshot: FilterRuntimeSnapshot {
     public var allowRuleCount: Int { 0 }
     /// No rule artifact is resident while fail-closed; all rule counts are zero.
     public var guardrailRuleCount: Int { 0 }
+    /// No allowance is effective while every lookup is blocked.
+    public var effectiveAllowRuleCount: Int { 0 }
+    /// No partly reachable allow scopes exist while every lookup is blocked.
+    public var allowedSuffixGuardrailCoverage: [String: GuardrailScopeCoverage] { [:] }
+
+    /// THE POSTURE THE ZERO COUNTS CANNOT EXPRESS. All numeric counts are zero here, which reads
+    /// identically to a permissive pass-through — so anything deciding whether the user could
+    /// reach anything must ask this rather than the counts (`FilterLooseningReapplyPolicy`).
+    public var blocksEveryLookup: Bool { true }
 
     /// Creates the block-all snapshot for the given resolver preset.
     public init(resolver: DNSResolverPreset) {

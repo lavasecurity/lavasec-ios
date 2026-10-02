@@ -84,6 +84,8 @@ enum FocusSwitchEnvironment {
             focusSwitchLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.focusFilterSwitchLockFilename),
             configurationWriteLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.configurationWriteLockFilename),
             pendingMarkerLockURL: containerURL.appendingPathComponent(LavaSecAppGroup.pendingFilterSwitchMarkerLockFilename),
+            focusDiagnosticOrderingLockURL: containerURL.appendingPathComponent(
+                LavaSecAppGroup.focusDiagnosticOrderingLockFilename),
             snapshotFilename: LavaSecAppGroup.snapshotFilename,
             compactSnapshotFilename: LavaSecAppGroup.compactSnapshotFilename,
             defaults: LavaSecAppGroup.sharedDefaults,

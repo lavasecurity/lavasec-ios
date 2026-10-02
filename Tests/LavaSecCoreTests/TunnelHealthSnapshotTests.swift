@@ -315,6 +315,71 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.upstreamLatencyHistogram.sampleCount, 0)
     }
 
+    func testHealthRoundTripPreservesChainedCounters() throws {
+        let snapshot = TunnelHealthSnapshot(
+            isChainedUpstreamActive: true,
+            chainedTunnelDNSAnsweredCount: 62,
+            chainedTunnelDNSUnansweredCount: 29,
+            chainedTunnelDNSOutageCount: 1,
+            chainedLinkOutageCount: 3,
+            chainedDataPathTransmitWindowBytes: 262_144,
+            chainedDataPathReceiveWindowBytes: 4_096,
+            chainedDataPathHasHandshake: true
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertTrue(decoded.isChainedUpstreamActive)
+        XCTAssertEqual(decoded.chainedTunnelDNSAnsweredCount, 62)
+        XCTAssertEqual(decoded.chainedTunnelDNSUnansweredCount, 29)
+        XCTAssertEqual(decoded.chainedTunnelDNSOutageCount, 1)
+        XCTAssertEqual(decoded.chainedLinkOutageCount, 3)
+        XCTAssertEqual(decoded.chainedDataPathTransmitWindowBytes, 262_144)
+        XCTAssertEqual(decoded.chainedDataPathReceiveWindowBytes, 4_096)
+        XCTAssertTrue(decoded.chainedDataPathHasHandshake)
+    }
+
+    func testDecodingOldHealthDefaultsChainedCounters() throws {
+        // A snapshot persisted by a build predating Slice 3 has no chained keys; it must decode
+        // to DNS-only defaults, never throw — the health file has to survive an upgrade. Seeds
+        // the keys with non-defaults first so the removal, not a coincidental zero, is what the
+        // assertions prove.
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(
+                    TunnelHealthSnapshot(
+                        isChainedUpstreamActive: true,
+                        chainedTunnelDNSAnsweredCount: 62,
+                        chainedTunnelDNSUnansweredCount: 29,
+                        chainedTunnelDNSOutageCount: 1,
+                        chainedLinkOutageCount: 3,
+                        chainedDataPathTransmitWindowBytes: 262_144,
+                        chainedDataPathReceiveWindowBytes: 4_096,
+                        chainedDataPathHasHandshake: true))) as? [String: Any]
+        )
+        for key in [
+            "isChainedUpstreamActive", "chainedTunnelDNSAnsweredCount",
+            "chainedTunnelDNSUnansweredCount", "chainedTunnelDNSOutageCount",
+            "chainedLinkOutageCount", "chainedDataPathTransmitWindowBytes",
+            "chainedDataPathReceiveWindowBytes", "chainedDataPathHasHandshake",
+        ] {
+            object.removeValue(forKey: key)
+        }
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: data)
+
+        XCTAssertFalse(decoded.isChainedUpstreamActive)
+        XCTAssertEqual(decoded.chainedTunnelDNSAnsweredCount, 0)
+        XCTAssertEqual(decoded.chainedTunnelDNSUnansweredCount, 0)
+        XCTAssertEqual(decoded.chainedTunnelDNSOutageCount, 0)
+        XCTAssertEqual(decoded.chainedLinkOutageCount, 0)
+        XCTAssertEqual(decoded.chainedDataPathTransmitWindowBytes, 0)
+        XCTAssertEqual(decoded.chainedDataPathReceiveWindowBytes, 0)
+        XCTAssertFalse(decoded.chainedDataPathHasHandshake)
+    }
+
     func testHealthRoundTripPreservesNetworkSettingsFailureFields() throws {
         let now = Date(timeIntervalSinceReferenceDate: 800_720_000)
         let snapshot = TunnelHealthSnapshot(
@@ -365,4 +430,56 @@ final class TunnelHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(decoded.lastFailClosedAt, failClosedAt)
         XCTAssertEqual(decoded.lastFailClosedReason, "snapshot-unavailable")
     }
+
+    // MARK: - Latched chained-upstream rotation identity (task #21)
+
+    /// The rotation identity SURVIVES redaction, unlike everything around it.
+    ///
+    /// `redactingChainedFallbackAddresses()` clears its neighbours because they carry the user's
+    /// own resolver addresses and DoH URLs. This is an opaque identifier naming a rotation — no
+    /// key, no endpoint, no address — and a bug report that dropped it would lose the one field
+    /// that says which upstream the reporting session was actually running, which is the whole
+    /// reason it exists.
+    func testTheLatchedUpstreamGenerationSurvivesRedaction() {
+        var snapshot = TunnelHealthSnapshot()
+        snapshot.runningChainedUpstreamGeneration = 42
+        snapshot.chainedFallbackLatchedIdentity = "custom|doh|https://dns.example/private"
+        snapshot.chainedFallbackLatchedAddresses = ["10.0.0.53"]
+
+        let redacted = snapshot.redactingChainedFallbackAddresses()
+
+        XCTAssertEqual(redacted.runningChainedUpstreamGeneration, 42)
+        // The neighbours it is deliberately unlike, asserted so this test fails loudly if the
+        // redaction is ever widened to cover the whole neighbourhood by pattern.
+        XCTAssertTrue(redacted.chainedFallbackLatchedIdentity.isEmpty)
+        XCTAssertTrue(redacted.chainedFallbackLatchedAddresses.isEmpty)
+    }
+
+    /// A snapshot encoded before this field existed decodes to `0`, the field's own
+    /// "none or unknown" — never a spurious generation that would read as a change.
+    func testAnEncodedSnapshotWithoutTheGenerationDecodesToNone() throws {
+        var snapshot = TunnelHealthSnapshot()
+        snapshot.runningChainedUpstreamGeneration = 9
+        let encoded = try JSONEncoder().encode(snapshot)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNotNil(
+            object["runningChainedUpstreamGeneration"],
+            "the field must actually be encoded, or removing it below proves nothing")
+        object.removeValue(forKey: "runningChainedUpstreamGeneration")
+
+        let withoutField = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(TunnelHealthSnapshot.self, from: withoutField)
+        XCTAssertEqual(decoded.runningChainedUpstreamGeneration, 0)
+    }
+
+    /// Round-trips, so the value the tunnel publishes is the value the app reads.
+    func testTheLatchedUpstreamGenerationRoundTrips() throws {
+        var snapshot = TunnelHealthSnapshot()
+        snapshot.runningChainedUpstreamGeneration = .max
+        let decoded = try JSONDecoder().decode(
+            TunnelHealthSnapshot.self, from: try JSONEncoder().encode(snapshot))
+        XCTAssertEqual(decoded.runningChainedUpstreamGeneration, .max)
+    }
+
 }

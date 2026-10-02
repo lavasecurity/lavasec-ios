@@ -5,7 +5,7 @@ import LavaSecKit
 /// Why a backup payload could not be decoded/restored on this build.
 public enum BackupConfigurationPayloadError: Error, Equatable, Sendable {
     /// The payload advertises a schema newer than this build understands. Restoring it
-    /// would decode a lossy subset and then re-seal a downgraded (schema-1) envelope over
+    /// would decode a lossy subset and then re-seal a downgraded payload over
     /// the newer single-envelope backup, permanently clobbering it — so we refuse instead.
     case unsupportedSchemaVersion(Int)
 }
@@ -16,9 +16,9 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     /// restore. A payload whose `schemaVersion` exceeds this is rejected at decode time
     /// (mirrors `ShareableFilterConfiguration.decode(configurationCode:)`) so a future
     /// vN+1 backup is never silently downgraded on a vN device.
-    package static let currentSupportedSchemaVersion = 1
+    package static let currentSupportedSchemaVersion = 3
 
-    /// Schema version stored with this payload; direct initialization preserves the supplied value.
+    /// Schema version stored with this payload, at least 2 when explicit DNS tiers are used.
     public let schemaVersion: Int
     /// Identifiers of curated blocklists selected when the snapshot was made.
     public let enabledBlocklistIDs: Set<String>
@@ -36,6 +36,10 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     public let customResolverName: String?
     /// Whether unresolved primary lookups may fall back to device DNS.
     public let fallbackToDeviceDNS: Bool
+    /// Whether the primary and secondary entries form an explicit ordered DNS ladder.
+    public let usesExplicitDNSTiers: Bool
+    /// Includes inactive DNS rows so backup/restore does not remove saved choices.
+    public let savedDNSResolutionSelections: [DNSResolutionSelection]?
     /// Whether device-DNS fallback should prefer an encrypted system resolver.
     public let usesEncryptedDeviceDNSFallback: Bool
     /// Identifier of the selected fallback resolver preset.
@@ -56,7 +60,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     public let keepLavaGuardProgress: Bool
     /// Lava Guard achievement progress included in the snapshot.
     public let lavaGuardUnlocks: LavaGuardAchievementLedger
-    /// Advisory protection-enabled state captured for restoration.
+    /// Historical hint; reviewed restores preserve the current device's protection intent.
     public let protectionEnabledHint: Bool
     /// Catalog version observed when the snapshot was made, when available.
     public let catalogVersionHint: String?
@@ -76,6 +80,8 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         case customResolverSecondaryAddress
         case customResolverName
         case fallbackToDeviceDNS
+        case usesExplicitDNSTiers
+        case savedDNSResolutionSelections
         case usesEncryptedDeviceDNSFallback
         case fallbackResolverPresetID
         case fallbackCustomResolverAddress
@@ -92,7 +98,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         case filterLibrary
     }
 
-    /// Stores the supplied backup fields without validating cross-field coherence.
+    /// Stores backup fields, requiring schema 2 for explicit DNS tiers.
     public init(
         schemaVersion: Int = 1,
         enabledBlocklistIDs: Set<String>,
@@ -104,7 +110,9 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         customResolverName: String? = nil,
         fallbackToDeviceDNS: Bool = false,
         usesEncryptedDeviceDNSFallback: Bool = false,
-        fallbackResolverPresetID: String = DNSResolverPreset.mullvadDoH.id,
+        usesExplicitDNSTiers: Bool = false,
+        savedDNSResolutionSelections: [DNSResolutionSelection]? = nil,
+        fallbackResolverPresetID: String = DNSResolverPreset.quad9UnfilteredDoH.id,
         fallbackCustomResolverAddress: String? = nil,
         fallbackCustomResolverSecondaryAddress: String? = nil,
         fallbackCustomResolverName: String? = nil,
@@ -118,17 +126,19 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         customBlocklists: [CustomBlocklistSource] = [],
         filterLibrary: FilterLibrary? = nil
     ) {
-        self.schemaVersion = schemaVersion
+        self.schemaVersion = max(schemaVersion, savedDNSResolutionSelections?.contains(where: { !$0.isEnabled }) == true ? 3 : (usesExplicitDNSTiers ? 2 : 1))
         self.enabledBlocklistIDs = enabledBlocklistIDs
         self.allowedDomains = allowedDomains
         self.blockedDomains = blockedDomains
-        self.resolverPresetID = resolverPresetID
+        self.resolverPresetID = DNSResolverPreset.migratedPresetID(resolverPresetID)
         self.customResolverAddress = customResolverAddress
         self.customResolverSecondaryAddress = customResolverSecondaryAddress
         self.customResolverName = customResolverName
         self.fallbackToDeviceDNS = fallbackToDeviceDNS
+        self.usesExplicitDNSTiers = usesExplicitDNSTiers
+        self.savedDNSResolutionSelections = savedDNSResolutionSelections
         self.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback
-        self.fallbackResolverPresetID = fallbackResolverPresetID
+        self.fallbackResolverPresetID = DNSResolverPreset.migratedPresetID(fallbackResolverPresetID)
         self.fallbackCustomResolverAddress = fallbackCustomResolverAddress
         self.fallbackCustomResolverSecondaryAddress = fallbackCustomResolverSecondaryAddress
         self.fallbackCustomResolverName = fallbackCustomResolverName
@@ -149,22 +159,24 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
         let decodedSchemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         // Reject a future-schema payload BEFORE reading any other field, so a vN+1 backup
         // restored on a vN device throws here instead of decoding a lossy subset that a
-        // later re-seal would then write back as a downgraded schema-1 envelope. Older/current
+        // later re-seal would then write back as a downgraded payload. Older/current
         // schemas still decode (additive fields are already tolerant of absence above/below).
         guard decodedSchemaVersion <= Self.currentSupportedSchemaVersion else {
             throw BackupConfigurationPayloadError.unsupportedSchemaVersion(decodedSchemaVersion)
         }
-        self.schemaVersion = decodedSchemaVersion
         self.enabledBlocklistIDs = try container.decode(Set<String>.self, forKey: .enabledBlocklistIDs)
         self.allowedDomains = try container.decode(Set<String>.self, forKey: .allowedDomains)
         self.blockedDomains = try container.decode(Set<String>.self, forKey: .blockedDomains)
-        self.resolverPresetID = try container.decode(String.self, forKey: .resolverPresetID)
+        self.resolverPresetID = DNSResolverPreset.migratedPresetID(try container.decode(String.self, forKey: .resolverPresetID))
         self.customResolverAddress = try container.decodeIfPresent(String.self, forKey: .customResolverAddress)
         self.customResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .customResolverSecondaryAddress)
         self.customResolverName = try container.decodeIfPresent(String.self, forKey: .customResolverName)
         self.fallbackToDeviceDNS = try container.decodeIfPresent(Bool.self, forKey: .fallbackToDeviceDNS) ?? false
+        self.usesExplicitDNSTiers = try container.decodeIfPresent(Bool.self, forKey: .usesExplicitDNSTiers) ?? false
+        self.savedDNSResolutionSelections = try container.decodeIfPresent([DNSResolutionSelection].self, forKey: .savedDNSResolutionSelections)
+        self.schemaVersion = max(decodedSchemaVersion, savedDNSResolutionSelections?.contains(where: { !$0.isEnabled }) == true ? 3 : (usesExplicitDNSTiers ? 2 : 1))
         self.usesEncryptedDeviceDNSFallback = try container.decodeIfPresent(Bool.self, forKey: .usesEncryptedDeviceDNSFallback) ?? false
-        self.fallbackResolverPresetID = DNSResolverPreset.migratedPresetID(try container.decodeIfPresent(String.self, forKey: .fallbackResolverPresetID) ?? DNSResolverPreset.mullvadDoH.id)
+        self.fallbackResolverPresetID = DNSResolverPreset.migratedPresetID(try container.decodeIfPresent(String.self, forKey: .fallbackResolverPresetID) ?? DNSResolverPreset.quad9UnfilteredDoH.id)
         self.fallbackCustomResolverAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverAddress)
         self.fallbackCustomResolverSecondaryAddress = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverSecondaryAddress)
         self.fallbackCustomResolverName = try container.decodeIfPresent(String.self, forKey: .fallbackCustomResolverName)
@@ -198,6 +210,8 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             customResolverName: configuration.customResolverName,
             fallbackToDeviceDNS: configuration.fallbackToDeviceDNS,
             usesEncryptedDeviceDNSFallback: configuration.usesEncryptedDeviceDNSFallback,
+            usesExplicitDNSTiers: configuration.usesExplicitDNSTiers,
+            savedDNSResolutionSelections: configuration.savedDNSResolutionSelections,
             fallbackResolverPresetID: configuration.fallbackResolverPresetID,
             fallbackCustomResolverAddress: configuration.fallbackCustomResolverAddress,
             fallbackCustomResolverSecondaryAddress: configuration.fallbackCustomResolverSecondaryAddress,
@@ -228,11 +242,8 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
     ///
     /// Consequence (intended, best-effort): because a lone protection toggle is skipped, the
     /// sealed/uploaded `protectionEnabledHint` only refreshes at the next CONTENT change, so a
-    /// restore can land on a slightly stale protection state. This is fail-closed — the worst case
-    /// is protection restored OFF when the source had it ON (one tap to re-enable), never the
-    /// reverse — and on a fresh device the hint is largely inert anyway (`restoreProtectionIfNeeded`
-    /// is onboarding-gated and can't auto-start the VPN). The currency win (no marker churn on
-    /// pause/resume) outweighs the hint lag.
+    /// restore can carry a stale protection hint. The mandatory restore review shows that hint
+    /// before confirmation; it is not evidence of the source device's current protection state.
     public func hasSameBackupContent(as other: BackupConfigurationPayload) -> Bool {
         schemaVersion == other.schemaVersion
             && enabledBlocklistIDs == other.enabledBlocklistIDs
@@ -243,6 +254,8 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             && customResolverSecondaryAddress == other.customResolverSecondaryAddress
             && customResolverName == other.customResolverName
             && fallbackToDeviceDNS == other.fallbackToDeviceDNS
+            && usesExplicitDNSTiers == other.usesExplicitDNSTiers
+            && savedDNSResolutionSelections == other.savedDNSResolutionSelections
             && usesEncryptedDeviceDNSFallback == other.usesEncryptedDeviceDNSFallback
             && fallbackResolverPresetID == other.fallbackResolverPresetID
             && fallbackCustomResolverAddress == other.fallbackCustomResolverAddress
@@ -266,17 +279,26 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
 
     /// Rebuilds an app configuration and migrates known custom-list URLs to catalog selections.
     public func restoredConfiguration() -> AppConfiguration {
-        AppConfiguration(
+        var restored = AppConfiguration(
             protectionEnabled: protectionEnabledHint,
             enabledBlocklistIDs: enabledBlocklistIDs,
             allowedDomains: allowedDomains,
             blockedDomains: blockedDomains,
-            resolverPresetID: DNSResolverPreset.migratedPresetID(resolverPresetID),
+            // A BACKUP IS A PERSISTENCE BOUNDARY, so a foreign id gets the same guard the decoder
+            // applies: a backup written by a NEWER build carries a preset this one cannot
+            // represent, and the settings picker and summary both read the raw id (Codex review,
+            // `lavasec-ios-internal` #642).
+            resolverPresetID: AppConfiguration.recognisedPrimaryResolverID(
+                DNSResolverPreset.migratedPresetID(resolverPresetID),
+                customResolverAddress: customResolverAddress,
+                customResolverSecondaryAddress: customResolverSecondaryAddress,
+                customResolverName: customResolverName),
             customResolverAddress: customResolverAddress,
             customResolverSecondaryAddress: customResolverSecondaryAddress,
             customResolverName: customResolverName,
             fallbackToDeviceDNS: fallbackToDeviceDNS,
             usesEncryptedDeviceDNSFallback: usesEncryptedDeviceDNSFallback,
+            usesExplicitDNSTiers: usesExplicitDNSTiers,
             fallbackResolverPresetID: fallbackResolverPresetID,
             fallbackCustomResolverAddress: fallbackCustomResolverAddress,
             fallbackCustomResolverSecondaryAddress: fallbackCustomResolverSecondaryAddress,
@@ -289,5 +311,7 @@ public struct BackupConfigurationPayload: Codable, Equatable, Sendable {
             lavaGuardUnlocks: lavaGuardUnlocks
         )
         .migratingKnownCustomBlocklistsToCatalogSources()
+        restored.savedDNSResolutionSelections = savedDNSResolutionSelections
+        return restored
     }
 }

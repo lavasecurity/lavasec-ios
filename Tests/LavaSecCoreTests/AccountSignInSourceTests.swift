@@ -1,41 +1,45 @@
 import XCTest
 
 final class AccountSignInSourceTests: XCTestCase {
+    func testSuccessfulProviderChangeRefreshesBackupMetadataForTheCurrentAccount() throws {
+        let bridge = try readSource(.appViewModelHubBridges)
+        let signIn = try sourceBlock(in: bridge, startingAt: "func accountDidSignIn() async {",
+                                     endingBefore: "func accountWillBeginDeletion(accountID:")
+        let upload = try XCTUnwrap(signIn.range(of: "await backup.uploadPendingEncryptedBackupIfPossible()"))
+        let refresh = try XCTUnwrap(signIn.range(of: "await backup.refreshRemoteBackupStatus()"))
+        let entitlement = try XCTUnwrap(signIn.range(of: "await plus.syncCurrentLavaSecurityPlusEntitlementIfPossible()"))
+        XCTAssertLessThan(upload.lowerBound, refresh.lowerBound)
+        XCTAssertLessThan(refresh.lowerBound, entitlement.lowerBound)
+    }
+
     func testSettingsAccountEntryAndPageUseBackupTitle() throws {
         let settingsViewSource = try [
             readSource(.settingsView),
             readSource(.accountBackupSettingsView),
         ].joined(separator: "\n")
         let settingsRootBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "struct SettingsView: View",
-            endingBefore: "struct AccountSettingsView: View"
-        )
-        let accountPageBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "struct AccountSettingsView: View",
-            endingBefore: "private struct BackupOptionControl: View"
+            in: readSource(.reactNativeSettingsScreens),
+            startingAt: "export function SettingsScreen()",
+            endingBefore: "export function AccountScreen()"
         )
 
-        XCTAssertTrue(settingsRootBlock.contains("title: \"Account & Backup\""))
+        XCTAssertTrue(settingsRootBlock.contains("title=\"Account & Backup\""))
         XCTAssertTrue(settingsViewSource.contains("return \"Open Account & Backup settings\""))
         XCTAssertFalse(settingsViewSource.contains("return \"Open Account settings\""))
-        XCTAssertFalse(settingsRootBlock.contains("title: \"Account\""))
+        XCTAssertFalse(settingsRootBlock.contains("title=\"Account\""))
         // Title is now folded into the SettingsSubpageContent(title:) scaffold arg (localized there).
-        XCTAssertTrue(accountPageBlock.contains("title: \"Account & Backup\""))
-        XCTAssertFalse(accountPageBlock.contains(".navigationTitle(\"Account\")"))
     }
 
     func testSignInRowsUseProviderSpecificProgressState() throws {
         // The account cluster lives in AccountController since the Phase D3 peel; the
         // view rows observe the `account` environment object.
-        let settingsViewSource = try readSource(.accountBackupSettingsView)
+        let settingsViewSource = try readSource(.reactNativeAppBridge)
         let controllerSource = try readSource(.accountController)
 
         XCTAssertTrue(controllerSource.contains("var isAppleSignInInProgress: Bool"))
         XCTAssertTrue(controllerSource.contains("var isGoogleSignInInProgress: Bool"))
-        XCTAssertTrue(settingsViewSource.contains("isSigningIn: account.isAppleSignInInProgress"))
-        XCTAssertTrue(settingsViewSource.contains("if account.isGoogleSignInInProgress"))
+        XCTAssertTrue(settingsViewSource.contains("m.account.isAppleSignInInProgress"))
+        XCTAssertTrue(settingsViewSource.contains("m.account.isGoogleSignInInProgress"))
         XCTAssertFalse(settingsViewSource.contains("isSigningIn: account.isAccountSignInInProgress"))
         XCTAssertFalse(settingsViewSource.contains("if account.isAccountSignInInProgress"))
     }
@@ -65,7 +69,7 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testConnectedTitlesAreProviderSpecific() throws {
-        let settingsViewSource = try readSource(.accountBackupSettingsView)
+        let settingsViewSource = try readSource(.reactNativeAppBridge)
         // The connection flags + action titles live on AccountController since the
         // Phase D3 peel; the view reads them off the `account` environment object.
         let controllerSource = try readSource(.accountController)
@@ -88,8 +92,8 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(googleTitleBlock.contains("if isGoogleAccountConnected"))
         XCTAssertTrue(googleTitleBlock.contains("return \"Signed in with Google\""))
         XCTAssertFalse(googleTitleBlock.contains("signedInProviderName.map"))
-        XCTAssertTrue(settingsViewSource.contains("if account.isAppleAccountConnected"))
-        XCTAssertTrue(settingsViewSource.contains("if account.isGoogleAccountConnected"))
+        XCTAssertTrue(settingsViewSource.contains("m.account.isAppleAccountConnected"))
+        XCTAssertTrue(settingsViewSource.contains("m.account.isGoogleAccountConnected"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -112,21 +116,15 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertFalse(statusBlock.contains("accounts connected"))
     }
 
-    func testAccountSheetsShowProviderEmailRows() throws {
+    func testAccountSheetShowsProviderEmailRows() throws {
         let settingsViewSource = try readSource(.accountBackupSettingsView)
-        let onboardingSource = try readSource(.onboardingFlowView)
-        // The published connections live on AccountController (Phase D3 peel); both
-        // sheets read them off the `account` environment object.
+        // The published connections live on AccountController (Phase D3 peel); the
+        // sheet reads them off the `account` environment object.
         let controllerSource = try readSource(.accountController)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
-            startingAt: "private struct AccountSheet: View",
+            startingAt: "struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
-        )
-        let onboardingSignedInBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "if account.isAccountSignedIn {",
-            endingBefore: "} else {"
         )
 
         XCTAssertTrue(controllerSource.contains("var accountConnections: [AccountAuthConnection]"))
@@ -136,20 +134,20 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(settingsViewSource.contains("Image(systemName: \"apple.logo\")"))
         XCTAssertTrue(settingsViewSource.contains("GoogleSignInIcon()"))
         XCTAssertFalse(settingsSheetBlock.contains("LavaDetailRow("))
-
-        XCTAssertTrue(onboardingSignedInBlock.contains("OnboardingSignedInAccountRow(connection: connection)"))
-        XCTAssertTrue(onboardingSource.contains("Text(connection.email ??"))
-        XCTAssertTrue(onboardingSource.contains("Image(systemName: \"apple.logo\")"))
-        XCTAssertTrue(onboardingSource.contains("Image(\"GoogleSignInG\")"))
-        XCTAssertFalse(onboardingSignedInBlock.contains("LavaDetailRow("))
+        XCTAssertTrue(settingsSheetBlock.contains("LavaSheetScaffold(spacing: 14)"))
+        XCTAssertFalse(settingsSheetBlock.contains("scrolls: false"))
+        XCTAssertTrue(settingsSheetBlock.contains(".presentationDetents([.medium, .large])"))
+        XCTAssertFalse(settingsSheetBlock.contains("accountSheetHeight"))
+        let host = try readSource(.reactNativeAppHost)
+        XCTAssertTrue(host.contains("sheet.detents = [.medium(), .large()]"))
+        XCTAssertFalse(host.contains("AccountSheet.height(connectionCount:"))
     }
 
     func testAccountSheetProviderRowsMatchActionTypographyTruncateLongEmailsAndSignOutIsNeutral() throws {
         let settingsViewSource = try readSource(.accountBackupSettingsView)
-        let onboardingSource = try readSource(.onboardingFlowView)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
-            startingAt: "private struct AccountSheet: View",
+            startingAt: "struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
         )
         let settingsConnectionRowBlock = try sourceBlock(
@@ -157,35 +155,17 @@ final class AccountSignInSourceTests: XCTestCase {
             startingAt: "private struct AccountConnectionRow: View",
             endingBefore: "private struct GoogleSignInIcon: View"
         )
-        let onboardingSheetBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingAccountSheet: View",
-            endingBefore: "private struct OnboardingSignedInAccountRow: View"
-        )
-        let onboardingConnectionRowBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingSignedInAccountRow: View",
-            endingBefore: "private struct OnboardingAccountActionRow: View"
-        )
 
-        XCTAssertTrue(settingsConnectionRowBlock.contains(".font(.headline)"))
+        XCTAssertTrue(settingsConnectionRowBlock.contains(".font(LavaTypography.rowTitle)"))
         XCTAssertTrue(settingsConnectionRowBlock.contains(".lineLimit(1)"))
         XCTAssertTrue(settingsConnectionRowBlock.contains(".truncationMode(.middle)"))
         XCTAssertFalse(settingsConnectionRowBlock.contains(".fixedSize(horizontal: false, vertical: true)"))
         XCTAssertFalse(settingsConnectionRowBlock.contains(".minimumScaleFactor(0.82)"))
-        XCTAssertTrue(onboardingConnectionRowBlock.contains(".font(.headline)"))
-        XCTAssertTrue(onboardingConnectionRowBlock.contains(".lineLimit(1)"))
-        XCTAssertTrue(onboardingConnectionRowBlock.contains(".truncationMode(.middle)"))
-        XCTAssertFalse(onboardingConnectionRowBlock.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertFalse(onboardingConnectionRowBlock.contains(".minimumScaleFactor(0.82)"))
 
         XCTAssertTrue(settingsSheetBlock.contains("performAppSettingsMutation(reason: \"Edit Account settings\")"))
         XCTAssertTrue(settingsSheetBlock.contains("account.signOutAccount()"))
         XCTAssertTrue(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: LavaStyle.secondaryText)"))
         XCTAssertFalse(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: .red, titleTint: .red)"))
-        XCTAssertTrue(onboardingSheetBlock.contains("Button {\n                                account.signOutAccount()"))
-        XCTAssertTrue(onboardingSheetBlock.contains("title: \"Sign out of all accounts\",\n                                    systemImage: \"rectangle.portrait.and.arrow.right\",\n                                    tint: LavaStyle.ink"))
-        XCTAssertFalse(onboardingSheetBlock.contains("title: \"Sign out of all accounts\",\n                                    systemImage: \"rectangle.portrait.and.arrow.right\",\n                                    tint: .red"))
     }
 
     func testStartingOneProviderSignInPreservesExistingConnectedProviders() throws {
@@ -251,7 +231,7 @@ final class AccountSignInSourceTests: XCTestCase {
         // AccountAuthService — and every link must map to the ONE canonical Supabase
         // identity (currentBackupSession, never the per-provider currentBackupSessions).
         let controllerSource = try readSource(.backupController)
-        let appViewModelSource = try readSource(.appViewModel)
+        let appViewModelSource = try readAppViewModelSource()
         let accountControllerSource = try readSource(.accountController)
         let uploadBlock = try sourceBlock(
             in: controllerSource,
@@ -260,7 +240,7 @@ final class AccountSignInSourceTests: XCTestCase {
         )
         let restoreBlock = try sourceBlock(
             in: controllerSource,
-            startingAt: "func restoreEncryptedBackup(",
+            startingAt: "func confirmPreparedBackupRestore(",
             endingBefore: "func clearEncryptedBackup() async {"
         )
         let fetchBlock = try sourceBlock(
@@ -275,7 +255,7 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(fetchBlock.contains("guard let session = try await hub.currentBackupSession()"))
         XCTAssertFalse(fetchBlock.contains("currentBackupSessions()"))
         XCTAssertFalse(fetchBlock.contains("for session in sessions"))
-        XCTAssertTrue(restoreBlock.contains("if let session = try await hub.currentBackupSession()"))
+        XCTAssertTrue(restoreBlock.contains("hub.currentBackupSession()"))
         XCTAssertFalse(restoreBlock.contains("currentBackupSessions()"))
         XCTAssertFalse(restoreBlock.contains("for session in sessions"))
 
@@ -302,55 +282,62 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertFalse(accountControllerSource.contains("refreshCurrentSessions()"))
     }
 
-    func testAccountDeletionIsExposedFromAccountSheets() throws {
+    func testAccountDeletionIsExposedFromTheAccountSheet() throws {
         let settingsViewSource = try readSource(.accountBackupSettingsView)
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let appViewModelSource = try readSource(.appViewModel)
+        let appViewModelSource = try readAppViewModelSource()
         // The deleteAccount flow lives on AccountController since the Phase D3 peel.
         let accountControllerSource = try readSource(.accountController)
         let serviceSource = try readSource(.accountAuthService)
         let settingsSheetBlock = try sourceBlock(
             in: settingsViewSource,
-            startingAt: "private struct AccountSheet: View",
+            startingAt: "struct AccountSheet: View",
             endingBefore: "private struct AccountConnectionRow: View"
-        )
-        let onboardingSheetBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingAccountSheet: View",
-            endingBefore: "private struct OnboardingSignedInAccountRow: View"
         )
 
         XCTAssertTrue(settingsViewSource.contains("Sign out of all accounts"))
         XCTAssertTrue(settingsViewSource.contains("Delete my Lava account"))
         XCTAssertTrue(settingsViewSource.contains("deleteAccount()"))
-        XCTAssertTrue(onboardingSource.contains("Sign out of all accounts"))
         XCTAssertTrue(settingsSheetBlock.contains(".alert("))
-        XCTAssertTrue(onboardingSheetBlock.contains(".alert("))
         XCTAssertTrue(settingsSheetBlock.contains("Button(\"Cancel\", role: .cancel)"))
-        XCTAssertTrue(onboardingSheetBlock.contains("Button(\"Cancel\", role: .cancel)"))
         XCTAssertTrue(settingsSheetBlock.contains("Button(\"Delete\", role: .destructive)"))
-        XCTAssertTrue(onboardingSheetBlock.contains("Button(\"Delete\", role: .destructive)"))
         XCTAssertFalse(settingsSheetBlock.contains(".confirmationDialog("))
-        XCTAssertFalse(onboardingSheetBlock.contains(".confirmationDialog("))
         XCTAssertTrue(accountControllerSource.contains("@Published private(set) var isAccountDeletionInProgress"))
         XCTAssertTrue(accountControllerSource.contains("func deleteAccount() async -> Bool"))
         // Account deletion still tears down the device-local backup unlock material — the
         // keychain deletes moved to BackupController with the D1 peel, and since the D3
-        // peel the deleting AccountController reports accountWillCompleteDeletion() to
+        // peel the deleting AccountController reports the confirmed deleted account ID to
         // the hub, which routes it to the backup controller (hub-orchestrated; feature
         // controllers never reference each other).
-        XCTAssertTrue(accountControllerSource.contains("hub.accountWillCompleteDeletion()"))
-        XCTAssertTrue(appViewModelSource.contains("backup.deleteLocalUnlockSecretsAfterAccountDeletion()"))
+        XCTAssertTrue(accountControllerSource.contains("hub.accountWillCompleteDeletion(accountID: deletedAccountID)"))
+        XCTAssertTrue(appViewModelSource.contains("backup.deleteLocalUnlockSecretsAfterAccountDeletion(deletedAccountID: accountID)"))
         let backupControllerSource = try readSource(.backupController)
         let accountDeletionBlock = try sourceBlock(
             in: backupControllerSource,
-            startingAt: "func deleteLocalUnlockSecretsAfterAccountDeletion() {",
+            startingAt: "func deleteLocalUnlockSecretsAfterAccountDeletion(deletedAccountID: String) {",
             endingBefore: "private enum RemoteBackupDeletionOutcome {"
         )
-        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deleteRecoveryCode()"))
-        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deleteDeviceSecret()"))
-        XCTAssertTrue(accountDeletionBlock.contains("backupKeychainStore.deletePasskeyCredentialID()"))
-        XCTAssertTrue(serviceSource.contains("func deleteAccount() async throws"))
+        // Both account removal and explicit Off enter the common, durably
+        // retryable cleanup. Independent I/O failures are exercised by the native
+        // backup compatibility harness; this pin owns only cross-controller wiring.
+        XCTAssertTrue(accountDeletionBlock.contains("finishLocalBackupDeletion(intent)"))
+        XCTAssertFalse(accountDeletionBlock.contains("let intent = BackupDeletionIntent("),
+                       "A cleanup fence must not first be created after irreversible account deletion.")
+        let preflight = try sourceBlock(in: backupControllerSource,
+                                        startingAt: "func prepareForAccountDeletion(accountID: String) async throws {",
+                                        endingBefore: "func finishAccountDeletionMaintenance()")
+        XCTAssertLessThan(try XCTUnwrap(preflight.range(of: "await uploadTask?.value")?.lowerBound),
+                          try XCTUnwrap(preflight.range(of: "try backupKeychainStore.saveDeletionIntent(intent)")?.lowerBound))
+        let serverDeletion = try sourceBlock(in: serviceSource,
+                                             startingAt: "func deleteAccount(preparing:", endingBefore: "func signOut()")
+        XCTAssertLessThan(try XCTUnwrap(serverDeletion.range(of: "try await preparing(session.userID)")?.lowerBound),
+                          try XCTUnwrap(serverDeletion.range(of: "try await AccountDeletionClient(urlSession: urlSession).deleteAccount")?.lowerBound))
+        XCTAssertTrue(accountControllerSource.contains("await hub.accountDidFinishDeletion()\n        return succeeded"))
+        XCTAssertTrue(serviceSource.contains("func deleteAccount(preparing: (String) async throws -> Void) async throws -> String?"))
+        XCTAssertTrue(accountControllerSource.contains("hub.accountWillBeginDeletion(accountID: accountID)"))
+        XCTAssertTrue(accountControllerSource.contains("hub.accountDidFinishDeletion()"))
+        XCTAssertTrue(accountDeletionBlock.contains("guard intent.accountID == deletedAccountID else { return }"))
+        XCTAssertTrue(serviceSource.contains("try await preparing(session.userID)"))
+        XCTAssertTrue(serviceSource.contains("return session.userID"))
         XCTAssertTrue(serviceSource.contains("v1/account/delete"))
         XCTAssertTrue(serviceSource.contains("Authorization"))
     }
@@ -365,40 +352,21 @@ final class AccountSignInSourceTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("defer { accountSignInProviderInProgress = nil }"))
     }
 
-    /// The Encrypted Backup action rows gate on sign-in and fade EXACTLY ONCE when disabled.
-    /// A `.buttonStyle(.plain)` row dims its own label when `.disabled()`, so the earlier
-    /// `.plain` + a stacked `.opacity(0.45)` double-dimmed the signed-out rows to a darker grey than
-    /// the Automatic Backup toggle beside them (measured lum 95 vs 136). They now route through the
-    /// shared `LavaCondensedRowButtonStyle`, which owns a single isEnabled-driven fade; and both
-    /// destructive delete rows join Back Up Now / Restore in greying out while signed out, since they
-    /// hard-delete the server copy first and can only fail without a session.
-    func testEncryptedBackupRowsFadeOnceWhenDisabled() throws {
-        let view = try readSource(.accountBackupSettingsView)
-        let components = try readSource(.lavaComponents)
+    /// Retained native rows keep labels readable without compounded opacity.
 
-        // The shared flat-row style fades once via isEnabled — no fill, no stacked opacity.
-        let styleBlock = try sourceBlock(
-            in: components,
+    func testNativeDisabledRowsRemainReadable() throws {
+        let style = try sourceBlock(in: readSource(.lavaScaffold),
             startingAt: "struct LavaCondensedRowButtonStyle: ButtonStyle",
-            endingBefore: "extension View {"
-        )
-        XCTAssertTrue(styleBlock.contains("@Environment(\\.isEnabled) private var isEnabled"))
-        XCTAssertTrue(styleBlock.contains(".opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.45)"))
-
-        // The gated rows adopt the shared style, and the manual `.opacity(...)` that stacked on top of
-        // the plain button's own disabled dimming is gone.
-        XCTAssertTrue(view.contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
-        XCTAssertFalse(view.contains(".opacity(account.isAccountSignedIn ? 1 : 0.45)"))
-
-        // Both destructive delete rows now gate on sign-in alongside the maintenance/in-flight guards,
-        // and no longer use the double-dimming `.plain` style.
-        let deleteButtonBlock = try sourceBlock(
-            in: view,
-            startingAt: "private func backupMaintenanceButton(_ target: BackupMaintenanceAction)",
-            endingBefore: "private var backupMaintenanceConfirmationBinding"
-        )
-        XCTAssertTrue(deleteButtonBlock.contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
-        XCTAssertTrue(deleteButtonBlock.contains(".disabled(!account.isAccountSignedIn || backup.isBackupMaintenanceInProgress || backup.isBackingUpNow)"))
-        XCTAssertFalse(deleteButtonBlock.contains(".buttonStyle(.plain)"))
+            endingBefore: "struct LavaPlainCard<Content: View>: View")
+        XCTAssertTrue(style.contains("@Environment(\\.isEnabled) private var isEnabled"))
+        XCTAssertTrue(style.contains(".opacity(isEnabled && configuration.isPressed ? 0.6 : 1)"))
+        XCTAssertTrue((try readSource(.blocklistPickerView)).contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
     }
+
+    func testSignedOutBackupSetupRemainsUnavailable() throws {
+        let source = try readSource(.reactNativeSettingsScreens)
+        XCTAssertTrue(source.contains("live?.account.signedIn"))
+        XCTAssertTrue(source.contains("backupSetup"))
+    }
+
 }

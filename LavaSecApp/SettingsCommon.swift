@@ -36,6 +36,7 @@ struct SettingsSubpageContent<Content: View>: View {
     let title: String?
     let tier: LavaTier
     let intro: LavaInfoPanel?
+    let introAction: LavaSectionFooterLink?
     let spacing: CGFloat
     let scrolls: Bool
     let refreshAction: (() async -> Void)?
@@ -45,6 +46,7 @@ struct SettingsSubpageContent<Content: View>: View {
         title: String? = nil,
         tier: LavaTier = .calm,
         intro: LavaInfoPanel? = nil,
+        introAction: LavaSectionFooterLink? = nil,
         spacing: CGFloat = SettingsSubpageLayout.spacing,
         scrolls: Bool = true,
         refreshAction: (() async -> Void)? = nil,
@@ -53,6 +55,7 @@ struct SettingsSubpageContent<Content: View>: View {
         self.title = title
         self.tier = tier
         self.intro = intro
+        self.introAction = introAction
         self.spacing = spacing
         self.scrolls = scrolls
         self.refreshAction = refreshAction
@@ -66,7 +69,7 @@ struct SettingsSubpageContent<Content: View>: View {
             refreshAction: refreshAction
         ) {
             if let intro {
-                intro
+                LavaSettingsIntroduction(summary: intro.description ?? intro.title, action: introAction)
             }
             content
         }
@@ -116,12 +119,58 @@ struct SettingsActionRow<Icon: View>: View {
                 .frame(width: 28, height: 28)
 
             Text(title.lavaLocalized)
-                .font(.headline)
+                .font(LavaTypography.rowTitle)
                 .foregroundStyle(titleTint)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
+    }
+}
+
+
+/// One body-only introduction shared by Settings details and diagnostic pages.
+struct LavaSettingsIntroduction: View {
+    let summary: String
+    var action: LavaSectionFooterLink? = nil
+    var conclusion: String? = nil
+    var actionAccessory: LavaNavigationCardAccessory = .chevron
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(summary.lavaLocalized).lavaSupportingText(color: LavaStyle.primaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(LavaSpacing.lg)
+            if let conclusion {
+                Text(conclusion.lavaLocalized).lavaSupportingText(color: LavaStyle.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(LavaSpacing.lg)
+            }
+            if let action {
+                Button(action: action.action) {
+                    LavaNavigationCardLabel(badge: nil, badgeSize: LavaNavigationRowMetrics.glyphPointSize, rowSpacing: LavaSpacing.md,
+                        title: action.title, summary: .none, accessory: actionAccessory)
+                }.buttonStyle(LavaCondensedRowButtonStyle())
+            }
+        }.background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius))
+    }
+}
+
+/// A standalone settings row keeps its explanation on the page surface. Both
+/// native and React settings use the shared small gap and flush helper baseline.
+struct LavaSettingsRow<Content: View>: View {
+    var surface: LavaSurface.Role = .card
+    var footer: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LavaSpacing.sm) {
+            LavaCondensedList(surface: surface) { content() }
+            if let footer {
+                Text(footer.lavaLocalized).lavaQuietNoteText()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 }

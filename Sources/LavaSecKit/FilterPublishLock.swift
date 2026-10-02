@@ -39,6 +39,40 @@ public enum FilterPublishLock {
         return try body()
     }
 
+    /// Run `body` while holding an exclusive (`LOCK_EX`) advisory lock on `lockURL`, or
+    /// return `nil` WITHOUT running it.
+    ///
+    /// BLOCKING like ``withExclusiveLock(at:_:)`` — a foreground writer waits out a
+    /// contending writer instead of failing a save the user is watching — but FAIL-CLOSED
+    /// like ``withTryExclusiveLock(at:_:)``: if `lockURL` is `nil`, the file cannot be
+    /// opened, or `flock` fails, `body` does not run and the caller gets `nil` to turn
+    /// into whatever refusal its vocabulary already has.
+    ///
+    /// The third variant exists rather than a fourth argument to the first because the two
+    /// degrade policies answer different questions, and the filter-publish caller's answer
+    /// is not transferable. There, `body` republishes artifacts a fail-closed READ gate
+    /// re-validates, so running unlocked risks a redundant publish; the lock is an
+    /// optimization and says so. A caller whose `body` DELETES key material has no such
+    /// gate behind it — an unlocked delete is durable and unrecoverable — so for it
+    /// exclusion is the guarantee, not the optimization.
+    /// pinned: FilterPublishLockTests.testARequiredExclusiveLockRefusesRatherThanRunningUnlocked
+    public static func withRequiredExclusiveLock<T>(
+        at lockURL: URL?,
+        _ body: () throws -> T
+    ) rethrows -> T? {
+        guard let lockURL, let descriptor = openLockDescriptor(at: lockURL) else {
+            return nil
+        }
+        defer { close(descriptor) }
+
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            return nil
+        }
+        defer { flock(descriptor, LOCK_UN) }
+
+        return try body()
+    }
+
     /// Try to run `body` while holding a non-blocking exclusive lock
     /// (`LOCK_EX | LOCK_NB`).
     ///
@@ -77,5 +111,35 @@ public enum FilterPublishLock {
     public static func openLockDescriptor(at lockURL: URL) -> Int32? {
         let descriptor = open(lockURL.path, O_CREAT | O_RDWR, mode_t(S_IRUSR | S_IWUSR))
         return descriptor >= 0 ? descriptor : nil
+    }
+
+    /// Try to take a non-blocking exclusive lock and RETURN the held descriptor, or `nil` if the
+    /// lock is contended or unavailable.
+    ///
+    /// The closure-scoped variants above cannot express a lock held across a suspension point: a
+    /// `defer { flock(...) }` inside a synchronous closure unwinds when the closure returns, not
+    /// when an `async` caller's work finishes. A single-flight around an `await`-ing pass therefore
+    /// needs the descriptor itself. Degrade-ABORT like ``withTryExclusiveLock(at:_:)`` — a `nil`
+    /// return means "someone else owns this", never "proceed unlocked".
+    ///
+    /// The caller MUST pair this with ``releaseDescriptor(_:)``, and must not let the descriptor
+    /// escape the scope that releases it. `flock` is released by the kernel on process death, so a
+    /// caller killed mid-pass (a jetsammed BGTask) cannot wedge the lock for the next launch.
+    /// pinned: FilterPublishLockTests.testAHeldDescriptorExcludesASecondTryAcquire
+    public static func tryAcquireExclusiveDescriptor(at lockURL: URL?) -> Int32? {
+        guard let lockURL, let descriptor = openLockDescriptor(at: lockURL) else {
+            return nil
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            return nil
+        }
+        return descriptor
+    }
+
+    /// Release and close a descriptor obtained from ``tryAcquireExclusiveDescriptor(at:)``.
+    public static func releaseDescriptor(_ descriptor: Int32) {
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
     }
 }

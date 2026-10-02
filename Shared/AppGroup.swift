@@ -40,7 +40,60 @@ enum LavaSecAppGroup {
     static let clearNetworkActivityLogMessage = "clear-network-activity-log"
     static let clearIncidentLedgerMessage = "clear-incident-ledger"
     static let flushTunnelHealthMessage = "flush-tunnel-health"
+    static let readTunnelHealthMessage = "read-tunnel-health"
+    static let readProtectionStatusMessage = "read-protection-status"
+    /// Ask the tunnel for CURRENT chained-upstream runtime truth — a prompt, lightweight read sampled
+    /// immediately and about once per second while establishing, then at a lower monitoring cadence
+    /// for a live chained session. The NE's `.connected` status flips when the tunnel process starts,
+    /// before the WireGuard path is proven, and cannot report a later runner replacement or counter
+    /// reset. The JSON ``ChainedHandshakeStatus`` reply supplies that truth without mirror/persist
+    /// churn (unlike ``flushTunnelHealthMessage``).
+    static let chainedHandshakeStatusMessage = "chained-handshake-status"
+
+    /// Source-compatible namespace for the package-owned prompt handshake wire payload.
+    typealias ChainedHandshakeStatus = LavaSecKit.ChainedHandshakeStatus
+
+    /// Ask the tunnel to resolve ONE hostname on the app's behalf.
+    ///
+    /// Exists to break a deadlock, not to offer the app a general resolver. While the resident
+    /// snapshot is fail-closed the tunnel answers every query with the block-all address, so
+    /// the app's own `getaddrinfo` returns 0.0.0.0 — and the artifact download that would END
+    /// the fail-closed state cannot resolve its source. The repair needs the DNS it is
+    /// repairing. The tunnel can still reach the device resolvers (it is what forwards to
+    /// them), so it answers this one question directly.
+    ///
+    /// 🔴 This does NOT change what the tunnel SERVES. The addresses come back over the
+    /// provider-message channel to the container app only; they are never encoded into a DNS
+    /// response, never written to the utun, and never counted as a served query. Every client
+    /// on the device still gets the block-all answer. See INV-DNS-1.
+    static let resolveBootstrapHostMessage = "resolve-bootstrap-host"
+    /// Payload key carrying the single hostname for ``resolveBootstrapHostMessage``.
+    static let resolveBootstrapHostnameKey = "hostname"
+    // QA builds place the debug log one level down, inside the group container's `Library/`.
+    //
+    // Why: `devicectl` can list and copy only the `Library/` subtree of an App Group container —
+    // every root-level path fails in BOTH directions (a `copy to` of a brand-new file at the root
+    // fails too, which is what proves it is path resolution and not the file being absent). That
+    // removed the only cable-side route to this log, and with it the evidence channel the S9
+    // device runbook's §2/§4/§5 columns depend on: `data-path-latched`, `nrg-counters`, and the
+    // chained-latch observables. Moving the QA log into `Library/` restores a USB pull with no
+    // dependence on the in-app bug-report bundle.
+    //
+    // Scope: QA/DEBUG only, so the shipping layout is untouched. Every consumer derives from this
+    // one constant — the writer and rotation lock in `LavaSecDeviceDebugLog`, and the report
+    // bundle's reader in `DiagnosticsController` — so the three cannot drift apart, and the
+    // rotated/lock siblings stay adjacent to the log wherever it lives.
+    // 🔴 THIS PIN USED TO NAME ONLY THE ROTATION TEST, which slices `rotate(_:)`'s body and
+    // asserts flock properties — it never reads this constant, the `#if`, or the `Library/`
+    // prefix. Deleting the QA branch entirely left the whole suite green while silently killing
+    // the cable-side evidence channel this comment is about (sweep, PR #623).
+    // pinned: PacketTunnelDNSRuntimeSourceTests.testTheQADeviceDebugLogLivesInTheLibrarySubtree
+    // pinned: PacketTunnelDNSRuntimeSourceTests.testDeviceDebugLogRotationIsCrossProcessLocked
+    #if DEBUG || LAVA_QA_TOOLS
+    static let vpnDebugLogFilename = "Library/vpn-debug-log.jsonl"
+    #else
     static let vpnDebugLogFilename = "vpn-debug-log.jsonl"
+    #endif
     /// The single previous generation kept by `LavaSecDeviceDebugLog.rotate` (same
     /// `+ ".1"` convention as its `rotatedURL(for:)`). Report/export loaders read it so an
     /// 8 MB rotation landing between an incident and the report can't hide the incident.
@@ -75,6 +128,13 @@ enum LavaSecAppGroup {
     // cancel only recovers if on-demand will bring the tunnel back, and the app
     // persists `protectionEnabled = true` even when arming on-demand fails.
     static let protectionOnDemandConfirmedEnabledDefaultsKeyName = "lavasec.protection.onDemandConfirmedEnabled"
+    // QA-only leak-rig positive control (#8). The Admin/QA menu writes an armed nonce + target
+    // resolver IP; at chained establishment the tunnel emits ONE cleartext DNS query for
+    // `<nonce>.leak-canary.lavasec.invalid` to that resolver on the PHYSICAL path (a deliberate leak
+    // the off-device capture must SEE). Inert in Release: the emitter that reads these is compiled out
+    // behind `#if DEBUG || LAVA_QA_TOOLS`, so a stray value here does nothing.
+    static let leakCanaryArmedNonceKey = "lavasec.qa.leakCanary.armedNonce"
+    static let leakCanaryResolverIPKey = "lavasec.qa.leakCanary.resolverIP"
     // Deadline (Double, timeIntervalSinceReferenceDate) marking a Dynamic Island
     // Restart as in progress. Written by the Restart command, read by the app's
     // status reconcile so it reports `.restarting` (instead of clobbering the
@@ -105,6 +165,8 @@ enum LavaSecAppGroup {
     static let protectionTemporaryPauseSessionIDDefaultsKey = ProtectionPauseStore.Keys.pausedSessionID
     static let protectionCommandRevisionDefaultsKey = ProtectionPauseStore.Keys.commandRevision
     static let protectionCommandLockFilename = "protection-command.lock"
+    static let protectionLifecycleStateFilename = "protection-lifecycle-state.json"
+    static let protectionLifecycleMutationLockFilename = "protection-lifecycle-mutation.lock"
     // Serializes concurrent headless Focus warm-switches (LAV-100 Phase 3). A dedicated lock (not the
     // protection-command lock) so a Focus switch and a Live Activity pause/resume never block each
     // other. (Cross-process write-safety against the FOREGROUND writer is the separate
@@ -124,17 +186,122 @@ enum LavaSecAppGroup {
     // `clearIfMatches` take this shared lock so a record can't interleave a clear's read→remove (which
     // would silently drop a just-recorded Focus request).
     static let pendingFilterSwitchMarkerLockFilename = "focus-filter-marker.lock"
+    // Terminal cross-process ordering lock for Focus diagnostic event capture versus the user's
+    // generation-advancing clear. Kept separate from the long-held focus-switch lock so a synchronous
+    // main-thread clear never waits for a cold compile (PR #626).
+    static let focusDiagnosticOrderingLockFilename = "focus-diagnostic-ordering.lock"
     // Content-addressed pointer-swap substrate for the shared filter-artifact set
     // (LAV-90 Phase 1). The lock arbitrates writer-vs-writer only; the tunnel reads
     // the pointer-swapped set lock-free. App + tunnel share these strings.
     static let filterArtifactPublishLockFilename = "filter-artifact-publish.lock"
+    // Single-flight for the background warm pass. The sidecar warm index is rewritten
+    // WHOLESALE (both writes replace the whole file), so two concurrent passes computing
+    // from the same prior state end with the later write dropping the earlier run's freshly
+    // staged entries — fewer warm artifacts, the opposite of the pass's purpose. Distinct
+    // from the publish lock on purpose: that one arbitrates the pointer flip and is held
+    // briefly, while this is held across a multi-second compile loop, so sharing it would
+    // stall every switch behind a background warm. `flock` is auto-released on process
+    // death, so a jetsammed BGTask cannot wedge it (PR #646).
+    static let backgroundWarmIndexLockFilename = "background-warm-index.lock"
     static let filterArtifactsDirectoryName = "filter-artifacts"
     static let filterArtifactPointerFilename = "current.json"
     static let customizationLavaGuardLookDefaultsKeyName = "lavasec.customization.lavaGuardLook"
     static let latencyOperationIDOptionKeyName = "lavasec.latency.operationID"
 
+    // Chained upstream (Phase 4). Aliased to the LavaSecKit store so the app (writer) and the
+    // tunnel (reader) can never drift on these strings — the same technique the protection
+    // store keys above use. The store itself takes a container URL rather than reaching for
+    // one, because `LavaSecKit` is an SPM target and this enum is pbxproj-membership source
+    // that no package target can see.
+    //
+    // Which identity's records this build addresses. `group.com.lavasec` is NOT config-scoped
+    // — the QA and production builds carry the same App Group entitlement and are installed
+    // side by side — so unlike the key half, whose access group project.yml scopes per
+    // configuration, the file half needs the separation applied to its NAMES. Without it a QA
+    // rotation replaces the generation the production tunnel reads while its key lands in the
+    // QA-only access group, and production reports `noPrivateKeyStored` until reconfigured
+    // (`ChainedUpstreamStoreIdentity` carries the full account).
+    //
+    // Selected by the compilation condition rather than a fourth build setting: project.yml's
+    // QA configuration is the single place that sets LAVA_QA_TOOLS, and it is the SAME
+    // configuration that overrides LAVA_KEYCHAIN_SHARING_GROUP, so the two halves cannot be
+    // namespaced apart. A dedicated `LAVA_CHAINED_UPSTREAM_*` setting would be a third
+    // identity knob to keep in sync with the other two, which is the divergence hazard
+    // `ChainedUpstreamSecretNaming` exists to avoid rather than one to add.
+    // pinned: ChainedUpstreamEntitlementSourceTests.testTheFileHalfIsNamespacedByTheSameConfigurationAsTheKeyHalf
+    #if LAVA_QA_TOOLS
+    static let chainedUpstreamStoreIdentity = ChainedUpstreamStoreIdentity.qa
+    #else
+    static let chainedUpstreamStoreIdentity = ChainedUpstreamStoreIdentity.production
+    #endif
+    static var chainedUpstreamConfigurationFilename: String {
+        ChainedUpstreamSecretNaming.configurationFilename(for: chainedUpstreamStoreIdentity)
+    }
+    static var chainedUpstreamWriteLockFilename: String {
+        ChainedUpstreamSecretNaming.writeLockFilename(for: chainedUpstreamStoreIdentity)
+    }
+    static var chainedLifecycleEvidenceLockFilename: String {
+        switch chainedUpstreamStoreIdentity {
+        case .production: "chained-lifecycle-evidence.lock"
+        case .qa: "chained-lifecycle-evidence.qa.lock"
+        }
+    }
+
+    /// Dedicated marker coordination. This must not share the lifecycle-evidence lock: a
+    /// timed-out Keychain worker may remain inside that lock after the caller has moved on, while
+    /// the provider still has to publish the terminal automatic-start gate before cancelling.
+    static var chainedStartupFailureMarkerLockFilename: String {
+        switch chainedUpstreamStoreIdentity {
+        case .production: "chained-startup-failure-marker.lock"
+        case .qa: "chained-startup-failure-marker.qa.lock"
+        }
+    }
+
+    /// Durable terminal marker, namespaced with the same chained-store identity as its lock and
+    /// upstream configuration. QA and production share the App Group container but must never
+    /// gate one another's tunnel starts.
+    static var chainedStartupFailureMarkerFilename: String {
+        switch chainedUpstreamStoreIdentity {
+        case .production: "chained-startup-failure-marker.json"
+        case .qa: "chained-startup-failure-marker.qa.json"
+        }
+    }
+
     static var containerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
+    }
+
+    static var chainedLifecycleEvidenceLockURL: URL? {
+        containerURL?.appendingPathComponent(chainedLifecycleEvidenceLockFilename)
+    }
+
+    static var chainedStartupFailureMarkerLockURL: URL? {
+        containerURL?.appendingPathComponent(chainedStartupFailureMarkerLockFilename)
+    }
+
+    static var chainedStartupFailureMarkerURL: URL? {
+        containerURL?.appendingPathComponent(chainedStartupFailureMarkerFilename)
+    }
+
+    /// The team-qualified keychain access group the app and the tunnel share for the chained
+    /// upstream, or `nil` when this build cannot share keychain items.
+    ///
+    /// `nil` on an unsigned or local build: `Config/Lava.xcconfig` ships `DEVELOPMENT_TEAM =`
+    /// empty so no team ID lives in the repo, and the resolver refuses the resulting
+    /// prefix-less string rather than handing back a group nothing is entitled to. The store
+    /// is then unconstructible, which is the correct fail-closed outcome — falling back to the
+    /// per-bundle default group would put the app's write somewhere the tunnel cannot see it,
+    /// and the tunnel reports that as "you never configured this" with no error anywhere.
+    ///
+    /// Also `nil` in the widget and the App Intents extension: this file is compiled into all
+    /// four targets by pbxproj membership, but only the app and the tunnel carry the
+    /// `keychain-access-groups` entitlement and the `LavaKeychainSharingGroup` Info.plist key.
+    /// Neither of those two has any business with a VPN private key, and least privilege here
+    /// is the same argument `Package.swift` makes about not putting a crypto archive in a
+    /// process that has no use for it.
+    static var chainedUpstreamKeychainAccessGroup: String? {
+        ChainedUpstreamKeychainAccessGroup.resolved(
+            Bundle.main.object(forInfoDictionaryKey: "LavaKeychainSharingGroup") as? String)
     }
 
     /// The shared app-group `UserDefaults`, falling back to `.standard` if the
@@ -144,8 +311,25 @@ enum LavaSecAppGroup {
         UserDefaults(suiteName: identifier) ?? .standard
     }
 
+    static var securityGateProjectionURL: URL? {
+        containerURL.map { SecurityProtectedSurfaceStorage.projectionURL(containerURL: $0) }
+    }
+
     static func protectionNotificationRequestIdentifier(for identifier: String) -> String {
         "\(protectionNotificationRequestIdentifierPrefix)\(identifier)"
+    }
+
+    static var protectionNotificationHistoryURL: URL? {
+        containerURL?.appendingPathComponent("protection-notification-history.json")
+    }
+
+    static func legacyProtectionNotificationHistory(in defaults: UserDefaults = sharedDefaults) -> ProtectionConnectivityNotificationHistory {
+        ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: defaults.string(forKey: protectionLastDeliveredNotificationIDDefaultsKeyName),
+            lastDeliveredAt: defaults.object(forKey: protectionLastDeliveredNotificationAtDefaultsKeyName) as? Date,
+            unresolvedProblemNotificationID: defaults.string(forKey: protectionUnresolvedProblemNotificationIDDefaultsKeyName),
+            unresolvedProblemKind: defaults.string(forKey: protectionUnresolvedProblemNotificationKindDefaultsKeyName)
+                .flatMap(ProtectionConnectivityNotificationKind.init(rawValue:)))
     }
 
     /// One-time migration of the persisted connectivity-notification state across the
@@ -165,16 +349,28 @@ enum LavaSecAppGroup {
 struct LavaSecProviderMessage: Equatable {
     let kind: String
     let operationID: String?
+    /// Optional string arguments. Defaulted so every existing construction site — and the
+    /// raw-kind decode fallback below — keeps compiling unchanged.
+    var payload: [String: String]?
+
+    init(kind: String, operationID: String?, payload: [String: String]? = nil) {
+        self.kind = kind
+        self.operationID = operationID
+        self.payload = payload
+    }
 }
 
 enum LavaSecProviderMessageCodec {
     private struct Envelope: Codable {
         let kind: String
         let operationID: String?
+        // `decodeIfPresent` by virtue of being Optional: an envelope written by an older
+        // build has no payload key and must still decode.
+        var payload: [String: String]?
     }
 
-    static func encode(kind: String, operationID: String?) -> Data {
-        let envelope = Envelope(kind: kind, operationID: operationID)
+    static func encode(kind: String, operationID: String?, payload: [String: String]? = nil) -> Data {
+        let envelope = Envelope(kind: kind, operationID: operationID, payload: payload)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return (try? encoder.encode(envelope)) ?? Data(kind.utf8)
@@ -182,14 +378,40 @@ enum LavaSecProviderMessageCodec {
 
     static func decode(_ data: Data) -> LavaSecProviderMessage? {
         if let envelope = try? JSONDecoder().decode(Envelope.self, from: data) {
-            return LavaSecProviderMessage(kind: envelope.kind, operationID: envelope.operationID)
+            return LavaSecProviderMessage(
+                kind: envelope.kind, operationID: envelope.operationID, payload: envelope.payload)
         }
 
+        // PRESERVED: a bare kind string. Messages already in flight across an upgrade were
+        // written by a build that sent no envelope at all.
         guard let rawKind = String(data: data, encoding: .utf8) else {
             return nil
         }
 
         return LavaSecProviderMessage(kind: rawKind, operationID: nil)
+    }
+}
+
+/// The tunnel's answer to ``LavaSecAppGroup/resolveBootstrapHostMessage``.
+///
+/// Addresses ONLY — deliberately no TTL, no resolver identity, no query metadata. The app
+/// re-classifies every address through the same public-scope gate it applies to any resolved
+/// host, so a compromised or confused tunnel cannot widen what the app will connect to.
+struct LavaSecBootstrapHostResolution: Equatable, Codable {
+    var ipv4: [String]
+    var ipv6: [String]
+
+    var isEmpty: Bool { ipv4.isEmpty && ipv6.isEmpty }
+
+    func encoded() -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self)) ?? Data()
+    }
+
+    static func decode(_ data: Data?) -> LavaSecBootstrapHostResolution? {
+        guard let data, !data.isEmpty else { return nil }
+        return try? JSONDecoder().decode(LavaSecBootstrapHostResolution.self, from: data)
     }
 }
 
@@ -206,7 +428,16 @@ enum LavaSecDeviceDebugLog {
 
     // ISO8601DateFormatter is documented thread-safe; allocating one per append
     // showed up in heat triage as avoidable per-event cost.
-    nonisolated(unsafe) private static let timestampFormatter = ISO8601DateFormatter()
+    //
+    // Keep milliseconds for the raw log's human-readable display: the transport backlog and brief
+    // stalls this instrumentation explains are often sub-second. Report chronology does NOT parse
+    // this settable wall-clock field; `observationOrder` supplies the reboot-scoped monotonic key,
+    // while shipped whole-second entries remain compatible as physical-order barriers (PR #582).
+    nonisolated(unsafe) private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     static func reset() {
         guard let url = logURL else {
@@ -260,7 +491,18 @@ enum LavaSecDeviceDebugLog {
     // actually peaks, and ADDS a flush timer (a new periodic wake) — net-negative for
     // battery. Per-append CPU is anyway dominated by the JSON encode + timestamp
     // format below, not the syscalls. Deferred; not worth either regression today.
-    static func append(component: String, event: String, details: [String: String] = [:]) {
+    /// - Parameter observation: paired wall and monotonic times captured when the event happened.
+    ///   Defaults to capture at invocation, which is correct for every synchronous caller.
+    ///
+    ///   The transport/pressure sinks hop their append off the data-path queues, so stamping
+    ///   inside this function recorded when the queued block ran rather than when the event
+    ///   occurred — under IO backlog that skews the time and can reorder these entries against
+    ///   the synchronously-logged path/DNS/reconnect lines they exist to be correlated with,
+    ///   which is the whole value of the telemetry (Codex P2, PR #582).
+    static func append(
+        component: String, event: String, details: [String: String] = [:],
+        observation: DeviceLogObservation = DeviceLogObservationClock.capture()
+    ) {
         #if DEBUG || LAVA_QA_TOOLS
         // NRG debug-log lever: count real appends only. Skip the "nrg" component (the
         // nrg-counters flush's own append) so a quiet window can't inherit a synthetic
@@ -276,7 +518,10 @@ enum LavaSecDeviceDebugLog {
         var payload = details
         payload["component"] = component
         payload["event"] = event
-        payload["timestamp"] = timestampFormatter.string(from: Date())
+        payload["timestamp"] = timestampFormatter.string(from: observation.observedAt)
+        // Structural metadata, deliberately not a caller detail or privacy-allowlist key. Assigning
+        // nil removes a spoofed detail with this reserved name when the boot UUID is unavailable.
+        payload["observationOrder"] = observation.order?.serialized
 
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -421,6 +666,133 @@ enum EnergyCounter: String, CaseIterable {
     case sqliteSweepRun   // orphan-domain sweeps actually taken (post-#339 gate)
     // Field thermal signal for UR-53-class "device feels warm" reports.
     case thermalTransition // ProcessInfo.thermalStateDidChange notifications observed
+    // Chained tunnel-DNS evidence (S9 battery; phase-3 plan resolved decision 3). These
+    // are the numerators and denominator the deferred TCP-retry enablement is gated on,
+    // and nothing else in the process can supply them: the outage driver folds a TC
+    // answer into `.answered` on purpose (TC is resolver liveness, not failure), and
+    // `udpTruncatedResponseCount` is mode-agnostic — in DNS-only mode a truncation is
+    // followed by a TCP retry that completes, so the same counter means something
+    // different there.
+    //
+    // TRUNCATION IS TWO POPULATIONS, and the decision needs them apart. The failover loop
+    // continues past a TC answer, so a later resolver can return a complete response:
+    // that resolution SAW truncation but resolved, and no TCP retry would have helped it.
+    // Only the shape where truncation was seen and no resolver ever completed is evidence
+    // that the deferred retry is worth building. Counting them as one number inflates the
+    // gate by however well failover is already working (Codex, PR #520).
+    case chainedDNSResolution           // tunnelled resolutions attempted (the denominator)
+    case chainedDNSTruncatedAnswer      // of those, ones that saw a TC answer at all
+    case chainedDNSTruncatedUnresolved  // of THOSE, ones no resolver ever completed
+    case chainedDNSSilentTimeout        // ...and ones a resolver's SILENCE ended (see below)
+    case chainedDNSUnparseableTimeout   // ...and the same, for queries with no name to key
+    // Chained DNS fallback (T1) doing work: resolutions whose SERVING resolver address is a
+    // member of the session-latched alternative-DNS set. Against `chainedDNSResolution` this reads
+    // as the fallback rescue rate — the answer to "is the alternative DNS actually carrying
+    // traffic, or is T0 fine". Attributed by ADDRESS MEMBERSHIP, not by "a failover happened"
+    // (which mis-counts a backed-off primary and a second-conf-resolver rescue); no query name.
+    case chainedDNSFallbackRescue
+    // One extra attempt spent on a forwarded resolution that never reached the wire, before it
+    // was allowed to answer. Read against `chainedDNSResolution` for "how often is a local refusal
+    // being rescued rather than surfacing as a dead page".
+    //
+    // 🔴 NOT LIFECYCLE-GUARDED, unlike that denominator, and the difference is accepted rather than
+    // overlooked. PR #575 moved `chainedDNSFallbackRescue` under the same token guard as its
+    // denominator so a teardown boundary could not strand the numerator above it; this one bumps
+    // at retry-SCHEDULE time on the resolver pool, where those tokens are not in hand. The skew is
+    // bounded at two per resolution and only for resolutions straddling a teardown, so the ratio
+    // stays readable — but read it as "retries scheduled", not "retries inside this lifecycle"
+    // (Kilo, PR #623).
+    case chainedDNSPreWireRetry
+    // Chained tunnel-DNS REPLY SHAPE: resolutions in which some resolver answered NOERROR with
+    // NO answer records. Split by whether an authority section backs the negative (RFC 2308
+    // §2.2), because unsplit the number says nothing — ordinary NODATA is most of DNS (every
+    // AAAA for an IPv4-only host is one).
+    //
+    // DIAGNOSTIC ONLY. `unbacked` means "no answer records and no authority records" and nothing
+    // more: RFC 2308 §2.2's type 3 NODATA has exactly that shape and is a legitimate negative,
+    // so a climbing unbacked count is a HINT that the VPN's resolver may be completing lookups
+    // without resolving them — never a verdict, and nothing in the resolution path may act on it
+    // (`TunnelledPlainDNSResolution` records it and fails over on none of it; Codex, PR #589).
+    // The shape is still worth counting because it moved NO existing counter: rc8 in the field
+    // (build 1787707228, 2026-08-26) held `chainedDNSSilentTimeout` and
+    // `chainedDNSFallbackRescue` at 0 with `tunnelDNSAnswered` climbing while every connection
+    // on the device failed, and the shape had to be inferred twice from counters that did not
+    // move. Counted on EVERY resolution, T1 configured or not — the route with no T1 yet
+    // is the one whose capture most needs to say this.
+    //
+    // Unbacked is a strict subset of empty, structurally (both bumped together below), so the
+    // two are never added.
+    case chainedDNSEmptyAnswer
+    case chainedDNSUnbackedEmptyAnswer
+
+    // THE ADDRESS QUERY IS THE ONE THAT COSTS THE USER A PAGE, and neither counter above can
+    // see it. `emptyAnswer(in:)` reads the header alone — answer count, authority count — and
+    // never the QUESTION, so an AAAA NODATA for a v4-only host (most of DNS, entirely benign)
+    // and an A NODATA for a public name (the client gets no address at all) are one number.
+    //
+    // Field 2026-08-28, build 1787899086: 230 empty answers across 1266 resolutions, with
+    // `chainedDNSUnbackedEmptyAnswer` at 0. Read as benign for that reason — and the reading was
+    // an assumption, not a measurement, because the split that would have settled it did not
+    // exist. Meanwhile reddit.com resolved and then loaded nothing, on a Wi-Fi with no IPv6, with
+    // every other counter healthy. That is exactly the shape the family was added for.
+    //
+    // NXDOMAIN rides alongside because for an ADDRESS query the two are the same event to the
+    // client, and this file's neighbour in `TunnelledPlainDNSResolution` records that the
+    // unsolved MagicDNS shape answers public names NXDOMAIN rather than NODATA — counting only
+    // the empty case would have missed it.
+    case chainedDNSEmptyIPv4AddressAnswer
+    case chainedDNSNXDomainIPv4Address
+
+    // ANSWER-SIDE ROUTING CLASS, the fact left after the family above came back empty. The
+    // 2026-08-29 capture (build 1787960023) has the resolver answering 39 lookups in the
+    // minute before the failure with zero empty A answers, zero A-NXDOMAINs and zero
+    // unanswered queries, while pages for names it had just resolved did not load. So the
+    // answers existed; what no counter could say is what was IN them.
+    //
+    // It matters because of the route, not the DNS: chained mode carries `100.64.0.0/10`
+    // and the DNS network into the tunnel and sends everything else direct. A public name
+    // answered with a CGNAT or RFC1918 address therefore sends that connection somewhere the
+    // browser is not expecting — resolves fine, never loads. Membership per resolution, not
+    // per address (see `IPv4AnswerAddressClasses`), so one lookup answered `A 1.2.3.4` and
+    // `A 100.64.0.5` bumps public AND cgnat exactly once each and the four never sum to
+    // something a reader can mistake for an address count.
+    //
+    // ONLY THE PUBLIC TERM STANDS ALONE. The other three answer "was this address routable for
+    // the browser", never "was the NAME a public one", and each has a legitimate reading that
+    // lifts it exactly like the poisoning they were added to detect (Codex, PR #619):
+    //
+    //   - CGNAT: MagicDNS answers TAILNET names from `100.64.0.0/10` correctly, and every device
+    //     lookup crosses this path in chained mode, so one `ping myhost` lifts it.
+    //   - PRIVATE: a split conf may route an RFC1918 range and place its resolver inside it
+    //     (`ChainedTunnelResolverSelectionTests.testSplitSelectsOnlyTheResolversAllowedIPsCovers`
+    //     keeps `10.8.0.1` under `10.0.0.0/8`), so an internal name answered `10.x` is correct.
+    //   - SPECIAL: a filtering upstream — which is what a chained exit node often is — answers a
+    //     name it blocks with `0.0.0.0`, the same convention this app's own block answer uses.
+    //
+    // The conf's SEARCH DOMAINS are what would separate a tailnet or internal name from a public
+    // one, and they are discarded before they reach here: `ChainedTunnelResolverSelection` admits
+    // only usable resolver ADDRESSES from `DNS =`. So a non-zero minute in any of the three is a
+    // POINTER to the names `domain-history` recorded in that minute, not a verdict on its own.
+    //
+    // That pairing is not guaranteed either. These counters run unconditionally in a QA build,
+    // while the name log is gated on Domain Logs (`keepDomainDiagnostics`) and is cleared when
+    // the user turns the setting off, so an archive can carry a header-only CSV beside a climbing
+    // count. WITH NO NAMES TO PAIR AGAINST, all three read as UNRESOLVED — not as the benign
+    // explanation above, and not as poisoning. Reading them either way from the number alone is
+    // how a capture sends the next investigation to the wrong place.
+    //
+    // Plumbing the search domains through the latch is its own slice — it is what would let these
+    // three stand alone.
+    case chainedDNSAnswerPublicIPv4Address
+    case chainedDNSAnswerCGNATIPv4Address
+    case chainedDNSAnswerPrivateIPv4Address
+    case chainedDNSAnswerSpecialIPv4Address
+    /// A resolution whose well-formed, resolved reply carried at least one AAAA address.
+    ///
+    /// The IPv6 half the IPv4 classes above cannot express. Without it a v6 answer bumped no
+    /// address counter, so the 2026-09-17/19 captures could not tell how much of the traffic was
+    /// v6 — part of why the v6-shaped escape went unseen. Membership, never an address.
+    case chainedDNSAnswerIPv6Address
 }
 
 final class EnergyCounters: @unchecked Sendable {
@@ -431,11 +803,103 @@ final class EnergyCounters: @unchecked Sendable {
     private var counts: [EnergyCounter: Int] = [:]
     private var doqHandshakeMsSum = 0
     private var sqliteWALFrames: Int64 = 0
+    /// Distinct query names (the driver's own opaque keys) that timed out this window,
+    /// bounded by ``chainedDNSDistinctNameSlots``. Cleared with the counters at each flush
+    /// AND on ``activate()``, so neither a busy window nor a previous tunnel session can
+    /// leave a saturated set behind for the next one to be measured against.
+    private var chainedDNSSilentTimeoutNameKeys: Set<UInt64> = []
+    /// The resolver port registry's own cumulative tallies, stamped for the next flush.
+    ///
+    /// LEVELS, not counts, and that is why they live here rather than in `counts`: they are the
+    /// registry's running totals, so a `+=` would sum a level with itself every tick and grow
+    /// quadratically. They also survive a flush, because the registry does.
+    private var chainedResolverPortRefusedAtCapacity = 0
+    private var chainedResolverPortRefusedAtGraceCapacity = 0
+    private var chainedResolverPortEvictedWhileLive = 0
+    private var chainedResolverPortLiveClaims = 0
     private var lastCPUTimeMs = 0.0
     private var thermalObserver: (any NSObjectProtocol)?
     private var windowStartedAt = Date()
     private var lastFlushAt = Date()
     private static let flushInterval: TimeInterval = 60
+    /// How many distinct timed-out names one window distinguishes before saturating.
+    ///
+    /// Small on purpose. The question decision 3 asks is "one domain or many", so the
+    /// useful resolution is near the bottom of the range: 1 is the trap, 2+ is a resolver
+    /// problem, and 8 gives room to see a spread without the count becoming a set an
+    /// attacker's subdomains can grow. A saturated window reports the cap and is read as
+    /// "at least this many", which is exactly what the rate needs.
+    private static let chainedDNSDistinctNameSlots = 8
+
+    /// What a resolution's truncation, if any, cost it — derived once at the call site
+    /// from the result, because the OBSERVATION deliberately cannot tell: a TC answer
+    /// classifies `.answered` (TC is resolver liveness, the trap decision 3 exists to
+    /// name), so the driver's answered count folds truncations in with plain successes.
+    enum ChainedDNSTruncation {
+        case notSeen
+        /// Saw a TC answer, and a later resolver in the route still returned a complete
+        /// response. The failover already handled it; a TCP retry would have added
+        /// nothing, so this must not count toward the retry gate.
+        case rescuedByFailover
+        /// Saw a TC answer and no resolver ever completed. THIS is the shape the deferred
+        /// retry would have rescued, and the only one that should move the gate.
+        case unresolved
+    }
+
+    /// What SHAPE of empty NOERROR, if any, a resolution saw — the resolution decides it
+    /// (`TunnelledPlainDNSResolution.Verdict`), because the split is RFC 2308 §2.2's and needs
+    /// the wire message, which no counter here ever sees.
+    enum ChainedDNSEmptyAnswer {
+        case notSeen
+        /// NOERROR with no answers and a non-empty authority section (RFC 2308 type 1 / type 2).
+        case backed
+        /// NOERROR with no answers and an empty authority section (RFC 2308 type 3). Legitimate,
+        /// merely uninformative — the count is a hint to a human reading a capture, not a verdict.
+        case unbacked
+    }
+
+    /// What T0 said about an IPv4 ADDRESS query that came back with no address — the
+    /// resolution decides it (`TunnelledPlainDNSResolution.Verdict.ipv4AddressNegative`), because
+    /// the split needs the QUESTION and no counter here ever sees one.
+    enum ChainedDNSIPv4AddressNegative {
+        case none
+        case emptyAnswer
+        case nameDoesNotExist
+    }
+
+    /// Which routing classes an IPv4 ADDRESS answer carried — decided by the resolution
+    /// (`TunnelledPlainDNSResolution.Verdict.ipv4AddressClasses`), because classifying needs
+    /// the answer bytes and no counter here ever sees one. Membership, so the four flags are
+    /// independent and a single resolution can set several.
+    struct ChainedDNSIPv4AddressClasses {
+        var containsPublicRoutable = false
+        var containsCarrierGradeNAT = false
+        var containsPrivateUse = false
+        var containsSpecialUse = false
+
+        static let none = ChainedDNSIPv4AddressClasses()
+    }
+
+    /// A resolution that ended with a resolver's SILENCE — at least one selected resolver
+    /// timed out and none completed — split by whether there is a name to attribute it to.
+    /// The split is load-bearing, not bookkeeping — see
+    /// ``recordChainedDNSResolution(truncation:timeout:emptyAnswer:)``.
+    ///
+    /// "At least one", NOT "every", and the distinction is deliberate. A resolution where one
+    /// resolver refused locally (`.sendFailed`, `.socketUnavailable`) and another timed out
+    /// still belongs here: a query WAS sent and its budget elapsed, which is the evidence
+    /// this rate is about, and a sibling's local failure does not erase it — the same
+    /// reasoning `TunnelledPlainDNSResolution` uses to classify that shape `.unanswered`
+    /// (pinned by `testAMixedLocalFailureAndTimeoutIsStillUnanswered`).
+    ///
+    /// A resolution where EVERY attempt failed locally is already excluded, and not by this
+    /// type: no timeout means no `.unanswered` observation, so nothing reaches here. The
+    /// earlier wording said "every selected resolver stayed silent", which described neither
+    /// the computation nor the intent (Codex, PR #520).
+    enum ChainedDNSTimeout {
+        case named(nameKey: UInt64)
+        case unparseableQuery
+    }
 
     // `bump` is compiled into every process that links Shared (app, tunnel, intents), but only
     // the tunnel drives `flushIfDue` (its 60 s Focus poll). Counting in a process that never
@@ -454,6 +918,12 @@ final class EnergyCounters: @unchecked Sendable {
         counts = [:]
         doqHandshakeMsSum = 0
         sqliteWALFrames = 0
+        // Per-session like every count above it, and missed when this set was added: a
+        // stop/start inside one un-killed extension process would otherwise carry the
+        // previous session's distinct names into the next session's first window, where
+        // a single new timeout could be reported against a set already saturated by a
+        // session that has ended — the ceiling read as a measurement (Codex, Kilo, #520).
+        chainedDNSSilentTimeoutNameKeys.removeAll(keepingCapacity: true)
         // CPU baseline: rusage is process-cumulative, so the first window's delta must
         // start at activation, not at zero, or it would inherit pre-activation CPU.
         lastCPUTimeMs = Self.processCPUTimeMs()
@@ -509,6 +979,37 @@ final class EnergyCounters: @unchecked Sendable {
         return user + system
     }
 
+    /// The process's physical memory footprint, read from the same ledger jetsam judges.
+    ///
+    /// ONE syscall per 60 s flush, and the peak comes from the kernel rather than from sampling.
+    /// A sampling loop would be both less accurate — the spike that kills a process lands between
+    /// samples — and a cost paid on the DNS-serving path that `INV-MEM-1` keeps clear.
+    ///
+    /// The peak field arrives only on `TASK_VM_INFO_REV1` and later, so its presence is decided by
+    /// the count the kernel wrote back, never assumed. Reading it unconditionally would hand a log
+    /// line whatever happened to sit past the end of a short struct.
+    private static func processMemoryFootprint() -> TunnelMemoryFootprint? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), rebound, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        // The bound is computed from the FIELD, not from `TASK_VM_INFO_REV1_COUNT` — that is a C
+        // macro Swift does not import, and hardcoding its value would rot silently the next time
+        // the struct grows. `count` is what the kernel actually wrote back, in `natural_t` units.
+        let peakFieldEnd = MemoryLayout<task_vm_info_data_t>
+            .offset(of: \.ledger_phys_footprint_peak)
+            .map { ($0 + MemoryLayout<UInt64>.size) / MemoryLayout<natural_t>.size }
+        let peak: UInt64? = peakFieldEnd.flatMap {
+            count >= mach_msg_type_number_t($0) ? UInt64(info.ledger_phys_footprint_peak) : nil
+        }
+        return TunnelMemoryFootprint(bytes: UInt64(info.phys_footprint), peakBytes: peak)
+    }
+
     private static func thermalStateLabel(_ state: ProcessInfo.ThermalState) -> String {
         switch state {
         case .nominal: return "nominal"
@@ -524,6 +1025,161 @@ final class EnergyCounters: @unchecked Sendable {
     func bump(_ counter: EnergyCounter) {
         lock.lock()
         if isActive { counts[counter, default: 0] += 1 }
+        lock.unlock()
+    }
+
+    // Record EVERY term of ONE tunnelled resolution — denominator, truncation, timeout —
+    // under ONE lock.
+    //
+    // ONE CALL IS THE POINT, not a convenience. A rate is only computable if its terms
+    // land in the same 60 s window, and the terms are not available at the same moment:
+    // the denominator is known when the resolution starts, the outcome only after a
+    // failover loop that spends a full UDP timeout per silent resolver. Counting the
+    // denominator at entry (the first shape of this code) let a resolution that straddled
+    // a flush emit its denominator in one `nrg-counters` line and its numerator in the
+    // next — so a window could report a numerator larger than its own denominator, or a
+    // denominator with no outcome, and the per-window rates were not computable at all
+    // (Codex, PR #520). Every caller therefore records at its EXIT, and every exit
+    // records: a resolution refused before the wire is a resolution with no outcome terms.
+    //
+    // Passing the terms as values rather than as separate calls is what keeps them in one
+    // window BY CONSTRUCTION — two calls under two locks reintroduce the same straddle in
+    // miniature, since a flush can land between them.
+    //
+    // The distinct-name figure moves under that same lock for the older reason the DoQ
+    // pair below does: a concurrent flush must not snapshot a count without it.
+    //
+    // The distinct-name figure is what makes the rate answerable. Resolved decision 3
+    // turns on telling two situations apart that produce the same timeout count: ONE
+    // fragmenting or OPT-ignoring domain retried by a browser (the trap — must not arm
+    // anything, and must not motivate a TCP retry either), versus a resolver failing
+    // across the board. The outage driver cannot answer it: its own distinct-name set
+    // deliberately stops growing at 2, because 2 is the only count its declaration
+    // depends on and an unbounded set is a memory surface a chosen-traffic attacker
+    // fills for free (`INV-MEM-1`).
+    //
+    // So this keeps its own set, SATURATING at a fixed slot count for the same reason —
+    // fixed residency, no growth an attacker can steer, and no name ever held: the caller
+    // passes the driver's own opaque `nameKey` hash, so "distinct" means here exactly
+    // what it means there, and the debug-log privacy audit (no queried domains, ever) is
+    // satisfied by construction rather than by redaction.
+    //
+    // AN UNPARSEABLE QUERY IS NOT A NAMELESS DOMAIN. Its timeout carries no name to key,
+    // and folding every such query into one shared key would manufacture precisely the
+    // shape this measurement exists to detect — many timeouts on one apparent distinct
+    // name is the "one fragmenting domain" signature (Codex, PR #520). So it gets its own
+    // counter, out of the per-domain rate, matching the report path in the provider, which
+    // drops the same observations because they are outside the evidence stream the
+    // question is scoped to.
+    //
+    // AND IT SHOULD READ ZERO. The serving path parse-gates before dispatch — an
+    // unparseable payload is answered with a parse failure and never reaches resolution —
+    // so a nameless timeout is not something chosen traffic can produce here. That makes
+    // this counter a CANARY rather than a rate: non-zero in a battery log means a query
+    // reached the tunnelled executor without a parseable question, which is a finding in
+    // itself. It is counted rather than ignored precisely because the resolution type can
+    // represent the case (`Observation.unanswered` carries `String?`) and silence about an
+    // impossible state is how the state stops being impossible.
+    /// The resolver port registry's cumulative pressure tallies, stamped for the next flush.
+    ///
+    /// LEVELS, not counts — these are the registry's own running totals, so they are STORED rather
+    /// than accumulated. Emitted beside the per-window counters with no `PerMin`, because a rate
+    /// over a cumulative level is meaningless. Difference two captures to get a window.
+    func recordChainedResolverPortPressure(
+        refusedAtCapacity: Int, refusedAtGraceCapacity: Int, evictedWhileLive: Int, liveClaims: Int
+    ) {
+        lock.lock()
+        if isActive {
+            chainedResolverPortRefusedAtCapacity = refusedAtCapacity
+            chainedResolverPortRefusedAtGraceCapacity = refusedAtGraceCapacity
+            chainedResolverPortEvictedWhileLive = evictedWhileLive
+            chainedResolverPortLiveClaims = liveClaims
+        }
+        lock.unlock()
+    }
+
+    /// One extra attempt spent on a resolution that had not reached the wire.
+    func recordChainedDNSPreWireRetry() {
+        lock.lock()
+        if isActive {
+            counts[.chainedDNSPreWireRetry, default: 0] += 1
+        }
+        lock.unlock()
+    }
+
+    func recordChainedDNSResolution(
+        truncation: ChainedDNSTruncation, timeout: ChainedDNSTimeout?,
+        emptyAnswer: ChainedDNSEmptyAnswer = .notSeen,
+        ipv4AddressNegative: ChainedDNSIPv4AddressNegative = .none,
+        ipv4AddressClasses: ChainedDNSIPv4AddressClasses = .none,
+        hasIPv6AnswerAddress: Bool = false
+    ) {
+        lock.lock()
+        if isActive {
+            counts[.chainedDNSResolution, default: 0] += 1
+            switch emptyAnswer {
+            case .notSeen:
+                break
+            case .backed:
+                counts[.chainedDNSEmptyAnswer, default: 0] += 1
+            case .unbacked:
+                // Deliberately BOTH, the same containment the truncation arm makes structural:
+                // unbacked is a subset of empty, and bumping only the subset is what lets a later
+                // reader add the two together and double-count one resolution.
+                counts[.chainedDNSEmptyAnswer, default: 0] += 1
+                counts[.chainedDNSUnbackedEmptyAnswer, default: 0] += 1
+            }
+            switch ipv4AddressNegative {
+            case .none:
+                break
+            case .emptyAnswer:
+                counts[.chainedDNSEmptyIPv4AddressAnswer, default: 0] += 1
+            case .nameDoesNotExist:
+                counts[.chainedDNSNXDomainIPv4Address, default: 0] += 1
+            }
+            // Independent, not a switch: the classes are membership flags and one answer can
+            // legitimately carry several. A resolution that carried none of them (not an A
+            // query, or an answer with no address records) bumps nothing here — the negative
+            // family above is what describes that case.
+            if ipv4AddressClasses.containsPublicRoutable {
+                counts[.chainedDNSAnswerPublicIPv4Address, default: 0] += 1
+            }
+            if ipv4AddressClasses.containsCarrierGradeNAT {
+                counts[.chainedDNSAnswerCGNATIPv4Address, default: 0] += 1
+            }
+            if ipv4AddressClasses.containsPrivateUse {
+                counts[.chainedDNSAnswerPrivateIPv4Address, default: 0] += 1
+            }
+            if ipv4AddressClasses.containsSpecialUse {
+                counts[.chainedDNSAnswerSpecialIPv4Address, default: 0] += 1
+            }
+            if hasIPv6AnswerAddress {
+                counts[.chainedDNSAnswerIPv6Address, default: 0] += 1
+            }
+            switch truncation {
+            case .notSeen:
+                break
+            case .rescuedByFailover:
+                counts[.chainedDNSTruncatedAnswer, default: 0] += 1
+            case .unresolved:
+                // Deliberately BOTH: unresolved is a subset of "saw a TC answer", and
+                // making the containment structural here is what stops a later reader
+                // adding the two together and double-counting the same resolution.
+                counts[.chainedDNSTruncatedAnswer, default: 0] += 1
+                counts[.chainedDNSTruncatedUnresolved, default: 0] += 1
+            }
+            switch timeout {
+            case nil:
+                break
+            case .named(let nameKey):
+                counts[.chainedDNSSilentTimeout, default: 0] += 1
+                if chainedDNSSilentTimeoutNameKeys.count < Self.chainedDNSDistinctNameSlots {
+                    chainedDNSSilentTimeoutNameKeys.insert(nameKey)
+                }
+            case .unparseableQuery:
+                counts[.chainedDNSUnparseableTimeout, default: 0] += 1
+            }
+        }
         lock.unlock()
     }
 
@@ -551,6 +1207,11 @@ final class EnergyCounters: @unchecked Sendable {
         let snapshot = counts
         let handshakeMsSum = doqHandshakeMsSum
         let walFrames = sqliteWALFrames
+        let chainedTimeoutNames = chainedDNSSilentTimeoutNameKeys.count
+        let portRefusedAtCapacity = chainedResolverPortRefusedAtCapacity
+        let portRefusedAtGraceCapacity = chainedResolverPortRefusedAtGraceCapacity
+        let portEvictedWhileLive = chainedResolverPortEvictedWhileLive
+        let portLiveClaims = chainedResolverPortLiveClaims
         // Process CPU (user+system) consumed inside this window. The tunnel is the only
         // process that flushes, so this is the DNS-serving process's compute footprint —
         // the field-side stand-in for the wired Activity Monitor attribution the UR-53
@@ -561,6 +1222,7 @@ final class EnergyCounters: @unchecked Sendable {
         counts = [:]
         doqHandshakeMsSum = 0
         sqliteWALFrames = 0
+        chainedDNSSilentTimeoutNameKeys.removeAll(keepingCapacity: true)
         windowStartedAt = now
         lastFlushAt = now
         lock.unlock()
@@ -579,7 +1241,41 @@ final class EnergyCounters: @unchecked Sendable {
         // (WAL frames × 4 KB page), the process CPU spent, and the device thermal state at
         // flush time. Counts + durations only — never a queried domain (the
         // LavaSecDeviceDebugLog privacy audit).
+        // Distinct timed-out names, saturating at the slot count — read as "at least this
+        // many". Emitted only when there were timeouts at all, so a quiet window does not
+        // carry a zero that reads like a measurement.
+        if snapshot[.chainedDNSSilentTimeout, default: 0] > 0 {
+            details["chainedDNSSilentTimeoutNames"] = "\(chainedTimeoutNames)"
+            details["chainedDNSSilentTimeoutNamesSaturated"] =
+                "\(chainedTimeoutNames >= Self.chainedDNSDistinctNameSlots)"
+        }
+        // THE PORT REGISTRY'S OWN PRESSURE, which was counted and never read: `refusedAtCapacity`
+        // existed only for tests, so on device a capacity refusal and a genuine socket failure were
+        // the same silent `.socketUnavailable`. Reading it here is what identified the cause.
+        //
+        // LEVELS, so no `PerMin`: difference two captures to get a window.
+        // - `refusedAtCapacity` nonzero means SIXTEEN SIMULTANEOUSLY-LIVE claims, i.e. the
+        //   concurrency argument behind `capacity` has broken. A bug report, not a capacity signal.
+        // - `refusedAtGraceCapacity` nonzero means the grace backstop fired, which needs a release
+        //   rate ~200x the observed one. It says `graceCapacity` is mis-sized, not that the device
+        //   is unhealthy.
+        // - `liveClaims` is the occupancy the bound is measured against, so a reader sees the
+        //   headroom instead of inferring it from refusals.
+        // - `evictedWhileLive` is a provable zero, retained as a regression tripwire for the
+        //   evict-oldest policy the refusal replaced.
+        details["chainedResolverPortRefusedAtCapacity"] = "\(portRefusedAtCapacity)"
+        details["chainedResolverPortRefusedAtGraceCapacity"] = "\(portRefusedAtGraceCapacity)"
+        details["chainedResolverPortEvictedWhileLive"] = "\(portEvictedWhileLive)"
+        details["chainedResolverPortLiveClaims"] = "\(portLiveClaims)"
         details["sqliteWalKB"] = "\(walFrames * 4)"
+        // MEMORY, because a jetsam kill cannot log its own cause — the process is gone. The peak
+        // is what gets a process killed, so it is reported alongside the instantaneous reading and
+        // is what the percentage is taken from (PR #578).
+        if let footprint = Self.processMemoryFootprint() {
+            details["footprintMB"] = "\(footprint.megabytes)"
+            details["footprintPeakMB"] = footprint.peakMegabytes.map { "\($0)" } ?? "nil"
+            details["footprintPctOfCeiling"] = "\(footprint.percentOfReferenceCeiling)"
+        }
         details["cpuMs"] = String(format: "%.0f", cpuDeltaMs)
         details["cpuMsPerMin"] = String(format: "%.1f", cpuDeltaMs / elapsed * 60)
         details["thermalState"] = Self.thermalStateLabel(ProcessInfo.processInfo.thermalState)

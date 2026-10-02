@@ -32,12 +32,18 @@ struct FocusSwitchEngineHarness {
 /// Builds a harness with an injectable, frozen `now` (engine records/diagnostics become deterministic).
 func makeFocusSwitchEngineHarness(
     prefix: String = "focus-switch",
-    now: Date = Date(timeIntervalSinceReferenceDate: 10_000)
+    now: Date = Date(timeIntervalSinceReferenceDate: 10_000),
+    diagnosticNow: (@Sendable () -> Date)? = nil,
+    onHeadlessValidationCompleted: @escaping @Sendable () -> Void = {},
+    onHeadlessCommitCompleted: @escaping @Sendable () -> Void = {},
+    notifySwitchOutcome: @escaping @Sendable (_ committed: Bool, _ filterName: String) async -> Void = { _, _ in }
 ) -> FocusSwitchEngineHarness {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("\(prefix)-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let defaultsSuiteName = "\(prefix)-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: defaultsSuiteName)!
+    SecurityProtectedSurfaceStorage.reconcileAuthentication(.absent, in: defaults,
+        projectionURL: SecurityProtectedSurfaceStorage.projectionURL(containerURL: dir))
     let spy = FocusSwitchSignalSpy()
     let env = HeadlessFocusFilterSwitchEngine.Environment(
         containerURL: dir,
@@ -49,6 +55,7 @@ func makeFocusSwitchEngineHarness(
         focusSwitchLockURL: dir.appendingPathComponent("focus.lock"),
         configurationWriteLockURL: dir.appendingPathComponent("config-write.lock"),
         pendingMarkerLockURL: dir.appendingPathComponent("marker.lock"),
+        focusDiagnosticOrderingLockURL: dir.appendingPathComponent("diagnostic-ordering.lock"),
         snapshotFilename: "filter-snapshot.json",
         // Must match `LavaSecAppGroup.compactSnapshotFilename` (and the `FilterArtifactStore`
         // default) so the harness env names the same compact artifact `stageFocusSwitchWarmArtifact`
@@ -58,8 +65,12 @@ func makeFocusSwitchEngineHarness(
         defaults: defaults,
         catalogSyncFreshnessInterval: 7 * 24 * 60 * 60,
         now: { now },
+        diagnosticNow: diagnosticNow ?? { now },
+        onHeadlessValidationCompleted: onHeadlessValidationCompleted,
+        onHeadlessCommitCompleted: onHeadlessCommitCompleted,
         postSignal: { spy.post($0) },
-        log: { _, _ in }
+        log: { _, _ in },
+        notifySwitchOutcome: notifySwitchOutcome
     )
     return FocusSwitchEngineHarness(
         env: env, defaults: defaults, defaultsSuiteName: defaultsSuiteName, spy: spy, dir: dir

@@ -1,9 +1,52 @@
 import XCTest
 
 final class LavaSecurityPlusSourceTests: XCTestCase {
+    /// A transient/cold `Transaction.currentEntitlements` empty read must not demote a paying subscriber.
+    /// The store tags each reading's confidence and the controller routes the demote through
+    /// `EntitlementApplicationPolicy`; only authoritative (`.confirmed`) readings — purchase, restore
+    /// (post `AppStore.sync()`), and `Transaction.updates` — may strip a previously-entitled user. The
+    /// executable behavior lives in `EntitlementApplicationPolicyTests`; these pins hold the app-side
+    /// wiring (store + controller are outside the SPM test target).
+    func testATransientEmptyEntitlementReadingCannotDemoteAPaidUser() throws {
+        let controllerSource = try readSource(.lavaSecurityPlusController)
+        let storeSource = try readSource(.lavaSecurityPlusStore)
+
+        // Controller: the demote decision is delegated to the policy and the PERSIST uses its result,
+        // never the raw computed flag — that is what makes an unconfirmed empty read a no-op.
+        XCTAssertTrue(controllerSource.contains(
+            "confidence: EntitlementReadingConfidence"))
+        XCTAssertTrue(controllerSource.contains(
+            "EntitlementApplicationPolicy.resolvedHasLavaSecurityPlus("))
+        XCTAssertTrue(controllerSource.contains("try hub.persistPaidPlanFlag(resolvedHasLavaSecurityPlus)"))
+        XCTAssertFalse(controllerSource.contains("try hub.persistPaidPlanFlag(hasLavaSecurityPlus)"))
+
+        // Controller: the bare startup / Upgrade-screen refresh is UNCONFIRMED (no preceding sync); the
+        // user-initiated purchase and restore are CONFIRMED.
+        XCTAssertTrue(controllerSource.contains(
+            "refreshEntitlements(confidence: .unconfirmed)"))
+        XCTAssertTrue(controllerSource.contains(
+            "applyLavaSecurityPlusEntitlement(entitlement, confidence: .unconfirmed)"))
+        XCTAssertTrue(controllerSource.contains(
+            "applyLavaSecurityPlusEntitlement(entitlement, confidence: .confirmed)"))
+
+        // Store: restore confirms only AFTER AppStore.sync(); the transaction-update push is authoritative.
+        XCTAssertTrue(storeSource.contains(
+            "try await AppStore.sync()\n        // Post-`AppStore.sync()`"))
+        XCTAssertTrue(storeSource.contains("refreshEntitlements(confidence: .confirmed)"))
+        XCTAssertTrue(storeSource.contains("setEntitlement(entitlement, confidence: .confirmed)"))
+        // The change notification carries the confidence so a closure-fired demote is classified too.
+        XCTAssertTrue(storeSource.contains(
+            "entitlementChanged?(nextEntitlement, confidence)"))
+        // A `.confirmed` lapse that equals a value an earlier `.unconfirmed` read stored must still be
+        // delivered (not swallowed by a value-only guard), so a real Transaction.updates expiry demotes.
+        XCTAssertTrue(storeSource.contains("EntitlementApplicationPolicy.shouldDeliverReading("))
+        XCTAssertTrue(storeSource.contains("previousConfidence: deliveredEntitlementConfidence"))
+        XCTAssertTrue(storeSource.contains("deliveredEntitlementConfidence = confidence"))
+    }
+
     func testUpgradeScreenUsesRealPlusProductsAndRestoreActions() throws {
         let settingsSource = try readSource(.upgradeSettingsView)
-        let viewModelSource = try readSource(.appViewModel)
+        let viewModelSource = try readAppViewModelSource()
         // The billing cluster lives in LavaSecurityPlusController since the Phase D2 peel;
         // the view actions route through the `plus` environment object.
         let controllerSource = try readSource(.lavaSecurityPlusController)
@@ -12,7 +55,7 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
         XCTAssertTrue(settingsSource.contains("plus.purchaseLavaSecurityPlus"))
         XCTAssertTrue(settingsSource.contains("plus.restoreLavaSecurityPlusPurchases"))
-        XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Security Plus\")"))
+        XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Plus\".lavaLocalized)"))
         XCTAssertTrue(settingsSource.contains(".navigationBarTitleDisplayMode(.large)"))
         XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")"))
         // Retinted to lavaOrangeText for WCAG contrast (visual a11y Task 3) — still the orange role.
@@ -66,18 +109,18 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
             endingBefore: "struct LavaPlusUpgradeDestination"
         )
         let thankYouMascotBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct UpgradeThankYouMascot: View",
-            endingBefore: "private struct UpgradeEntitlementCheckingView"
+            in: readSource(.softShieldGuardian),
+            startingAt: "struct GuardianThankYouAnimation: View",
+            endingBefore: "struct SoftShieldGuardian: View"
         )
-        XCTAssertTrue(thankYouBlock.contains("UpgradeThankYouMascot()"))
+        XCTAssertTrue(thankYouBlock.contains("GuardianThankYouAnimation(size: 96, shieldStyle: customization.lavaGuardLook)"))
         XCTAssertFalse(thankYouBlock.contains("SoftShieldGuardian(size: 96, state: .grateful"))
-        XCTAssertTrue(thankYouMascotBlock.contains("@State private var mascotState: GuardianMascotState = .awake"))
-        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: 96, state: mascotState, shieldStyle: customization.lavaGuardLook)"))
+        XCTAssertTrue(thankYouMascotBlock.contains("@State private var state: GuardianMascotState = .awake"))
+        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: size, state: state, shieldStyle: shieldStyle)"))
         XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 650_000_000)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("mascotState = .grateful"))
+        XCTAssertTrue(thankYouMascotBlock.contains("state = .grateful"))
         XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 900_000_000)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("guard !Task.isCancelled else {\n                    return\n                }\n                mascotState = .awake"))
+        XCTAssertTrue(thankYouMascotBlock.contains("guard !Task.isCancelled else { return }\n                state = .awake"))
         XCTAssertTrue(thankYouBlock.contains("Thank you for your support"))
         XCTAssertTrue(thankYouBlock.contains("Lava Security Plus is active"))
 
@@ -290,11 +333,13 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(handleBlock.contains("if let entitlement = activeEntitlement("))
-        XCTAssertTrue(handleBlock.contains("setEntitlement(entitlement)"))
-        XCTAssertTrue(handleBlock.contains("_ = await refreshEntitlements()"))
+        // A `Transaction.updates` push is authoritative, so both the immediate apply and the
+        // empty-re-read fallback are `.confirmed` (a real revocation/expiry must still demote).
+        XCTAssertTrue(handleBlock.contains("setEntitlement(entitlement, confidence: .confirmed)"))
+        XCTAssertTrue(handleBlock.contains("_ = await refreshEntitlements(confidence: .confirmed)"))
         XCTAssertLessThan(
-            try XCTUnwrap(handleBlock.range(of: "setEntitlement(entitlement)")?.lowerBound),
-            try XCTUnwrap(handleBlock.range(of: "_ = await refreshEntitlements()")?.lowerBound)
+            try XCTUnwrap(handleBlock.range(of: "setEntitlement(entitlement, confidence: .confirmed)")?.lowerBound),
+            try XCTUnwrap(handleBlock.range(of: "_ = await refreshEntitlements(confidence: .confirmed)")?.lowerBound)
         )
         XCTAssertTrue(handleBlock.contains("await transaction.finish()"))
     }

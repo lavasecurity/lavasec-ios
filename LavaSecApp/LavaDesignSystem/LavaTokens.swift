@@ -5,32 +5,32 @@ enum LavaStyle {
     typealias RGB = (red: CGFloat, green: CGFloat, blue: CGFloat)
 
     static let safeGreen = adaptiveColor(
-        light: (0.16, 0.47, 0.34),
-        dark: (0.45, 0.86, 0.63)
+        light: (0.141176, 0.403922, 0.262745),
+        dark: (0.505882, 0.749020, 0.615686)
     )
     static let safeControlGreen = adaptiveColor(
-        light: (0.16, 0.47, 0.34),
-        dark: (0.13, 0.50, 0.32)
+        light: (0.156863, 0.419608, 0.270588),
+        dark: (0.168627, 0.321569, 0.231373)
     )
     static let softGreen = adaptiveColor(
-        light: (0.91, 0.97, 0.94),
-        dark: (0.10, 0.22, 0.17)
+        light: (0.878431, 0.925490, 0.854902),
+        dark: (0.145098, 0.211765, 0.172549)
     )
     static let panelActionGreen = adaptiveColor(
-        light: (0.12, 0.40, 0.28),
-        dark: (0.45, 0.86, 0.63)
+        light: (0.141176, 0.403922, 0.262745),
+        dark: (0.505882, 0.749020, 0.615686)
     )
     static let panelActionFill = adaptiveColor(
-        light: (0.82, 0.93, 0.87),
-        dark: (0.12, 0.29, 0.21)
+        light: (0.878431, 0.925490, 0.854902),
+        dark: (0.145098, 0.211765, 0.172549)
     )
     static let panelActionPressedFill = adaptiveColor(
-        light: (0.75, 0.88, 0.81),
-        dark: (0.15, 0.35, 0.25)
+        light: (0.819608, 0.886275, 0.788235),
+        dark: (0.188235, 0.294118, 0.223529)
     )
     static let quietControl = adaptiveColor(
-        light: (0.38, 0.46, 0.42),
-        dark: (0.22, 0.30, 0.26)
+        light: (0.349020, 0.407843, 0.356863),
+        dark: (0.231373, 0.274510, 0.247059)
     )
     static let lavaOrange = adaptiveColor(
         light: (0.95, 0.34, 0.18),
@@ -57,31 +57,42 @@ enum LavaStyle {
         dark: (0.68, 0.28, 0.15)
     )
     static let cream = adaptiveColor(
-        light: (1.00, 0.98, 0.94),
-        dark: (0.11, 0.10, 0.09)
+        light: (1.000000, 0.980392, 0.945098),
+        dark: (0.078431, 0.078431, 0.078431)
     )
     static let ink = adaptiveColor(
-        light: (0.13, 0.23, 0.20),
-        dark: (0.92, 0.96, 0.93)
+        light: (0.149020, 0.227451, 0.168627),
+        dark: (0.964706, 0.945098, 0.898039)
     )
-    static let primaryText = Color(uiColor: .label)
-    static let secondaryText = Color(uiColor: .secondaryLabel)
-    static let tertiaryText = Color(uiColor: .tertiaryLabel)
+    static let primaryText = ink
+    /// System chrome has neutral ink; green denotes an affirmative action.
+    static let navigationForeground = adaptiveColor(
+        light: (0.0, 0.0, 0.0),
+        dark: (1.0, 1.0, 1.0)
+    )
+    static let secondaryText = adaptiveColor(
+        light: (0.349020, 0.407843, 0.356863),
+        dark: (0.741176, 0.741176, 0.713725)
+    )
+    static let tertiaryText = adaptiveColor(
+        light: (0.407843, 0.458824, 0.415686),
+        dark: (0.588235, 0.607843, 0.584314)
+    )
     static let groupedBackground = adaptiveColor(
-        light: (0.96, 0.98, 0.96),
-        dark: (0.04, 0.07, 0.06)
+        light: (0.980392, 0.972549, 0.941176),
+        dark: (0.078431, 0.078431, 0.078431)
     )
     static let cardBackground = adaptiveColor(
-        light: (1.00, 1.00, 1.00),
-        dark: (0.17, 0.17, 0.18)
+        light: (0.941176, 0.933333, 0.890196),
+        dark: (0.141176, 0.141176, 0.141176)
     )
     static let panelBackground = adaptiveColor(
-        light: (0.98, 1.00, 0.98),
-        dark: (0.01, 0.05, 0.035)
+        light: (0.941176, 0.933333, 0.890196),
+        dark: (0.141176, 0.141176, 0.141176)
     )
     static let panelStroke = adaptiveColor(
-        light: (0.72, 0.86, 0.76),
-        dark: (0.16, 0.32, 0.24)
+        light: (0.780392, 0.831373, 0.772549),
+        dark: (0.270588, 0.270588, 0.270588)
     )
     static let guardianSleepGray = adaptiveColor(
         light: (0.67, 0.71, 0.69),
@@ -105,6 +116,28 @@ enum LavaStyle {
     /// "Not now" rather than a branded primary. Destructive roles stay `dangerRed`.
     static let confirmationButtonTint = primaryText
 
+    // Shared interaction materials. Keep these roles across the RN and native hosts.
+    static let actionForeground = adaptiveColor(
+        light: (1.000000, 0.980392, 0.945098),
+        dark: (0.929412, 0.952941, 0.921569)
+    )
+    static let pressedSurface = adaptiveColor(
+        light: (0.890196, 0.898039, 0.850980),
+        dark: (0.188235, 0.203922, 0.188235)
+    )
+    static let disabledSurface = adaptiveColor(
+        light: (0.898039, 0.898039, 0.854902),
+        dark: (0.188235, 0.200000, 0.188235)
+    )
+    static let separator = adaptiveColor(
+        light: (0.823529, 0.839216, 0.792157),
+        dark: (0.231373, 0.250980, 0.231373)
+    )
+    static let focusRing = adaptiveColor(
+        light: (0.141176, 0.403922, 0.262745),
+        dark: (0.505882, 0.749020, 0.615686)
+    )
+
     private static func adaptiveColor(light: RGB, dark: RGB) -> Color {
         Color(uiColor: UIColor { traits in
             let rgb = traits.userInterfaceStyle == .dark ? dark : light
@@ -116,17 +149,17 @@ enum LavaStyle {
 enum LavaSurface {
     enum Role {
         case card
+        case success
         case panel
         case selection(isSelected: Bool)
     }
 
-    static let cardCornerRadius: CGFloat = 20
+    static let cardCornerRadius: CGFloat = 24
+    static let outlineWidth: CGFloat = 1
     static let compactCornerRadius: CGFloat = 16
     static let selectionCornerRadius: CGFloat = 12
-    /// Action-control corner radius. Reconciles the prior button-style disagreement
-    /// (panel defaulted to 10, standalone used 12) to one value — 12, matching
-    /// `selectionCornerRadius` and the dominant explicit call-site usage.
-    static let controlCornerRadius: CGFloat = 12
+    /// Shared rounded action geometry across native sheets and the RN interface.
+    static let controlCornerRadius: CGFloat = 16
     /// Shared action-button height. The panel/standalone/secondary action button
     /// styles all render at this single height so sibling buttons line up without
     /// any per-call-site hand adjustments (UR-4: Clear/Disable backup no longer
@@ -150,16 +183,27 @@ struct LavaSurfaceBackground: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
+        // Keep the inset outline outside the content clip. Applying that clip
+        // again to the outline would multiply antialiased coverage at its edge.
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         switch role {
         case .card:
             content
                 .background(LavaSurface.cardBackground, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        case .success:
+            content
+                .background(LavaStyle.softGreen, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         case .panel:
             content
-                .background(LavaSurface.panelBackground, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .background(LavaSurface.panelBackground, in: shape)
+                .clipShape(shape)
                 .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(borderTint ?? LavaSurface.panelStroke, lineWidth: 1)
+                    // Ordinary information uses a soft surface. An explicit warning or
+                    // selected-Guard accent keeps its intentional, inset outline.
+                    if let borderTint {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(borderTint, lineWidth: 1)
+                    }
                 }
         case .selection(let isSelected):
             content
@@ -175,7 +219,7 @@ extension View {
     func lavaSurface(_ role: LavaSurface.Role, cornerRadius: CGFloat? = nil, borderTint: Color? = nil) -> some View {
         let resolvedCornerRadius: CGFloat
         switch role {
-        case .card:
+        case .card, .success:
             resolvedCornerRadius = cornerRadius ?? LavaSurface.cardCornerRadius
         case .panel:
             resolvedCornerRadius = cornerRadius ?? LavaSurface.cardCornerRadius
@@ -201,6 +245,13 @@ enum LavaSpacing {
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
     static let xl: CGFloat = 18
+    /// Information surfaces share compact insets, including Guard's stable spotlight.
+    static let infoPanelHorizontalInset: CGFloat = 16
+    static let infoPanelVerticalInset: CGFloat = 12
+    /// Keeps a quiet action close to its explanation without changing its touch target.
+    static let explanationToLink: CGFloat = 8
+    /// Expands a quiet link's real target without adding a blank row to text flow.
+    static let quietLinkInteractionInset: CGFloat = 12
     static let screenHorizontal: CGFloat = 18
     static let screenTop: CGFloat = 16
     static let screenBottom: CGFloat = 96
@@ -220,14 +271,43 @@ enum LavaSpacing {
 /// Dynamic-Type-scaling semantic fonts except the fixed metric numeral. Prefer the matching
 /// `View.lava…Text()` modifier at call sites; the raw `Font` here is for APIs that take a `Font`
 /// (e.g. `LavaCondensedListItem.titleFont`).
+/// Outcome identity shared by native views, bridge payloads and generated UI tokens.
+enum LavaOutcomeSymbol {
+    static let blocked = "xmark.circle.fill"
+    static let allowed = "arrow.right.circle.fill"
+    /// Stroke-only counterparts for dense filter-content lists (blocklists,
+    /// blocked and allowed domains). The shape matches the filled semantic above
+    /// with the fill removed; a filled, tinted mark reads too heavy in a list, so
+    /// these rows draw the outline in the ordinary label color. Keep both pairs in
+    /// one definition so the blocked/allowed shape cannot drift between the filter
+    /// detail and the import review.
+    static let blockedOutline = "xmark.circle"
+    static let allowedOutline = "arrow.right.circle"
+}
+
 enum LavaTypography {
-    /// Primary text of a list / table ROW. `.subheadline` semibold (15 pt). The single row-title
-    /// size — every data-row title resolves here so screens can't each pick their own.
+    /// Primary value/title within a story panel, shared by filter identity states.
+    static let primaryValue = Font.title2.bold()
+
+    /// Repeated row content sits below section headings in size, with matching semibold emphasis.
+    /// Use the system subheadline ramp; never shrink individual long values to fit.
     static let rowTitle = Font.subheadline.weight(.semibold)
+
+    /// Quiet row metadata shares the title size and Dynamic Type ramp.
+    static let rowMetadata = Font.subheadline
 
     /// Title of a tappable ENTRY CARD or navigation row (the surfaces that OPEN a list/detail).
     /// One step above a row title: `.headline` (17 pt semibold).
     static let cardTitle = Font.headline
+
+    /// Prominent actions retain their 17pt semibold emphasis when row content is quieter.
+    static let actionLabel = Font.headline
+
+    /// Functional group headings retain the same 17pt semibold face in both hosts.
+    static let sectionLabel = Font.headline
+
+    /// Readable labels above editable fields and their read-only review values.
+    static let fieldLabel = Font.footnote.weight(.semibold)
 
     /// Large rounded numeral for an overview metric block's headline value (e.g.
     /// the "blocked today" count). Apply `.monospacedDigit()` at the call site so
@@ -237,21 +317,37 @@ enum LavaTypography {
 
 // MARK: - Row metrics
 
-/// Shared minimum height for settings / scaffold table rows. Standardizes the
-/// touch target across toggle rows, system-link rows, and inline action rows so
-/// sibling rows line up instead of each taking its content's intrinsic height
-/// (UR-28: the Live Activities toggle row and the Language "open in Settings"
-/// row no longer disagree). Anchored to a one-line info panel — a `LavaInfoCard`'s
-/// 16pt top + bottom padding around a single ~22pt `.headline` line (e.g. the "Off"
-/// status panel, ≈ 54pt) — so a single-line row sits level with a status panel
-/// beside it. The earlier 40pt floor was below that natural panel height, so the
-/// `LavaInfoPanel` floor never bound and panels read taller than the rows; 54
-/// makes the floor bind and the two line up.
+/// Shared row geometry for settings, toggles, and embedded navigation rows.
+/// Single-line rows share a 58pt floor. Content keeps its 12pt vertical insets;
+/// accessory touch targets are centered separately, without adding those insets
+/// around their invisible hit area. Wrapped content grows naturally above the floor.
 enum LavaRowHeight {
-    static let standard: CGFloat = 54
+    static let standard: CGFloat = 58
+    /// A minimum inset around content that wraps; applied before the shared row floor.
+    static let verticalInset: CGFloat = 12
     /// Horizontal inset shared by every row, so content lines up whether the row is a
     /// standalone control card or sits inside a condensed list.
     static let horizontalInset: CGFloat = 16
+}
+
+/// Utility-row glyphs share the same optical sizes in native and React Native.
+/// The content-safe-area origin of a full-size presented sheet is its header origin.
+/// Circular controls have the same inset from the top and the nearest side.
+enum LavaFullSheetMetrics {
+    static let headerInset: CGFloat = 18
+    static let headerBottomInset: CGFloat = 12
+}
+
+/// Scoped identity artwork; list headings and navigation glyphs keep their own sizes.
+/// Both metric groups are parsed by ReactNative/scripts/generate-tokens.mjs, so they
+/// stay declared even where no native view consumes them directly.
+enum LavaFilterIdentityMetrics {
+    static let emojiPointSize: CGFloat = 18
+}
+
+enum LavaNavigationRowMetrics {
+    static let glyphPointSize: CGFloat = 20
+    static let accessoryPointSize: CGFloat = 12
 }
 
 // MARK: - Depth semantics
@@ -318,4 +414,46 @@ private struct LavaTierMetadataModifier: ViewModifier {
             content
         }
     }
+}
+
+/// Shared native and React Native toolbar geometry, including SF Symbol optical sizes.
+enum LavaToolbarMetrics {
+    static let buttonSize: CGFloat = 44
+    static let iconFrameSize: CGFloat = 24
+    // Matches the system navigation back chevron so custom flow-back buttons (import flow,
+    // backup, custom resolver, bug report) are visually consistent with screens that use the
+    // native back button — was 22pt, which read noticeably larger than the system chevron.
+    static let chevronIconPointSize: CGFloat = 17
+    static let xmarkIconPointSize: CGFloat = 15
+    static let plusIconPointSize: CGFloat = 18
+    static let checkmarkIconPointSize: CGFloat = 17
+    static let framedIconPointSize: CGFloat = 15
+    static let wideIconPointSize: CGFloat = 15
+    static let framedIconVerticalOffset: CGFloat = -1
+}
+
+/// A ranking destination is distinct from a time-series chart or filter funnel.
+enum LavaGlyphSymbol {
+    static let ranking = "lava.ranking"
+}
+
+/// Three ordered horizontal bars, shared by native and RN destination rows.
+struct LavaRankingGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let thickness = rect.height * 0.08
+        for (index, length) in [CGFloat(0.8), 0.56, 0.32].enumerated() {
+            let bar = CGRect(x: rect.minX + rect.width * 0.1,
+                             y: rect.minY + rect.height * (0.2 + CGFloat(index) * 0.3) - thickness / 2,
+                             width: rect.width * length, height: thickness)
+            path.addRoundedRect(in: bar, cornerSize: CGSize(width: thickness / 2, height: thickness / 2))
+        }
+        return path
+    }
+}
+
+/// Shared by the live Guard panel and its onboarding handoff.
+enum LavaGuardMetrics {
+    static let mascotSize: CGFloat = 96
+    static let mascotSlotHeight: CGFloat = 104
 }

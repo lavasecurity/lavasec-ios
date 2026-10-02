@@ -17,6 +17,7 @@ const includedRoots = [
   "Sources/LavaSecFilterPipeline",
   "Sources/LavaSecPresentation",
   "Sources/LavaSecAppServices",
+  "Sources/LavaSecChainedUpstream",
 ];
 
 async function makeRepository(t, baselineContents) {
@@ -116,6 +117,24 @@ test("allows equal and decreased baseline counts", async (t) => {
   assert.match(equalResult.output, /baseline count did not increase: 2 -> 2/);
   assert.equal(decreasedResult.status, 0, decreasedResult.output);
   assert.match(decreasedResult.output, /baseline count did not increase: 2 -> 1/);
+});
+
+test("large unrelated binary changes do not exhaust the source scan and cannot hide a protected suppression", async (t) => {
+  const root = await makeRepository(t, baseline(1));
+  const base = commitAll(root, "existing baseline");
+  // A source promotion carries engine archives and images. --text would expand
+  // an unrelated binary beyond the bounded Git output buffer if all paths were diffed.
+  await writeFixtureFile(root, "ThirdParty/engine.a", Buffer.alloc(65 * 1024 * 1024));
+  const assetHead = commitAll(root, "large engine asset outside missing-doc scope");
+  const assetResult = runChecker(root, ["--base", base, "--head", assetHead]);
+  assert.equal(assetResult.status, 0, assetResult.output);
+  await writeFixtureFile(root, "Sources/LavaSecKit/Hidden.swift",
+    "// swiftlint:disable:next missing_docs\npublic struct Hidden {}\n");
+  const suppressedHead = commitAll(root, "suppression alongside the large asset");
+  const suppressedResult = runChecker(root, ["--base", base, "--head", suppressedHead]);
+  assert.notEqual(suppressedResult.status, 0);
+  assert.match(suppressedResult.output,
+    /head introduces missing-doc suppression in Sources\/LavaSecKit\/Hidden\.swift:1/);
 });
 
 test("rejects replacing an existing baseline identity at equal count", async (t) => {

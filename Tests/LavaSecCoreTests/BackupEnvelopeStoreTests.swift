@@ -8,12 +8,14 @@ final class BackupEnvelopeStoreTests: XCTestCase {
         private(set) var data: [String: Data] = [:]
         private(set) var dates: [String: Date] = [:]
         private(set) var removedKeys: [String] = []
+        var refusesRemoval = false
 
         func data(forKey key: String) -> Data? { data[key] }
         func date(forKey key: String) -> Date? { dates[key] }
         func set(_ value: Data, forKey key: String) { data[key] = value }
         func set(_ value: Date, forKey key: String) { dates[key] = value }
         func removeObject(forKey key: String) {
+            guard !refusesRemoval else { return }
             data[key] = nil
             dates[key] = nil
             removedKeys.append(key)
@@ -27,6 +29,49 @@ final class BackupEnvelopeStoreTests: XCTestCase {
             ciphertextByteSize: ciphertextByteSize,
             createdAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
+    }
+
+    func testDeletionDoesNotReportSuccessWhenStorageRetainsMalformedMaterial() {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        storage.set(Data("malformed".utf8), forKey: BackupEnvelopeStore.Keys.envelope)
+        storage.refusesRemoval = true
+        XCTAssertFalse(store.deleteEnvelope())
+        storage.refusesRemoval = false
+        XCTAssertTrue(store.deleteEnvelope())
+    }
+
+    func testCheckpointRestoresExactEnvelopeAndUploadEvidence() throws {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        let original = makeEnvelope(ciphertextByteSize: 2_000)
+        try store.saveEnvelope(original)
+        let originalBytes = storage.data[BackupEnvelopeStore.Keys.envelope]
+        let uploadedAt = Date(timeIntervalSince1970: 1_700_500_000)
+        store.recordUpload(at: uploadedAt)
+        let checkpoint = store.checkpoint()
+        try store.saveEnvelope(makeEnvelope(ciphertextByteSize: 3_000))
+        store.clearUploadMarker()
+        store.restoreCheckpoint(checkpoint)
+        XCTAssertEqual(store.loadEnvelope(), original)
+        XCTAssertEqual(storage.data[BackupEnvelopeStore.Keys.envelope], originalBytes)
+        XCTAssertEqual(store.lastUploadedAt(), uploadedAt)
+        XCTAssertEqual(store.currentState(), .synced(estimatedByteSize: 3_024, uploadedAt: uploadedAt))
+    }
+
+    func testCheckpointPreservesAbsenceAndMalformedEnvelopeWithoutInventingUploadEvidence() throws {
+        for bytes: Data? in [nil, Data("legacy-unreadable-envelope".utf8)] {
+            let storage = InMemoryBackupEnvelopeStorage()
+            let store = BackupEnvelopeStore(storage: storage)
+            if let bytes { storage.set(bytes, forKey: BackupEnvelopeStore.Keys.envelope) }
+            let checkpoint = store.checkpoint()
+            try store.saveEnvelope(makeEnvelope())
+            store.recordUpload(at: Date())
+            store.restoreCheckpoint(checkpoint)
+            XCTAssertEqual(storage.data[BackupEnvelopeStore.Keys.envelope], bytes)
+            XCTAssertNil(store.lastUploadedAt())
+            XCTAssertEqual(store.currentState(), .off)
+        }
     }
 
     func testStorageKeysMatchLegacyDefaultsKeys() {
@@ -167,10 +212,27 @@ final class BackupEnvelopeStoreTests: XCTestCase {
         try store.saveEnvelope(makeEnvelope(ciphertextByteSize: 2_000))
         store.recordUpload(at: Date(timeIntervalSince1970: 1_700_500_000))
 
-        store.deleteEnvelope()
+        XCTAssertTrue(store.deleteEnvelope())
 
         XCTAssertNil(store.loadEnvelope())
         XCTAssertNil(store.lastUploadedAt())
         XCTAssertEqual(store.currentState(), .off)
     }
+
+    func testDeleteEnvelopeDoesNotConfirmFailedPersistence() throws {
+        let storage = InMemoryBackupEnvelopeStorage()
+        let store = BackupEnvelopeStore(storage: storage)
+        try store.saveEnvelope(makeEnvelope())
+        store.recordUpload(at: Date(timeIntervalSince1970: 1_700_500_000))
+        storage.refusesRemoval = true
+
+        XCTAssertFalse(store.deleteEnvelope())
+        XCTAssertNotNil(store.loadEnvelope())
+        XCTAssertNotNil(store.lastUploadedAt())
+
+        storage.refusesRemoval = false
+        XCTAssertTrue(store.deleteEnvelope())
+        XCTAssertEqual(store.currentState(), .off)
+    }
+
 }
