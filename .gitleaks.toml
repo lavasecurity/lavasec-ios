@@ -1,17 +1,15 @@
 # gitleaks configuration for lavasec-ios.
 #
-# Extends the default ruleset and allowlists the SPECIFIC synthetic credential
-# strings that live in our unit-test fixtures. These are matched by value (not
-# by whole-file path), so the files stay fully scanned: a real secret
-# accidentally committed to either file would still be caught. There are no real
-# secrets in this repository. Verified 2026-06-15.
+# Extends the default ruleset and allowlists specific synthetic fixture strings
+# and public dependency checksums. Exceptions match values, not whole-file paths,
+# so every file remains scanned for accidentally committed credentials.
 title = "lavasec-ios gitleaks config"
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Synthetic credential fixtures (matched by value; no real secrets)"
+description = "Synthetic credential fixtures and public dependency checksums (exact values)"
 regexes = [
   # LatencyTraceTests.swift — fake auth headers / JWT asserting diagnostics get
   # REDACTED (the test checks "eyJ"/"Bearer" never reach output).
@@ -23,4 +21,7 @@ regexes = [
   # for zero-knowledge backup decryption (sequential-byte inputs, not real keys).
   '''ICEiIyQlJicoKSorEQFga6I''',
   '''EBESExQVFhcYGRobycnbdOcUa8Av''',
+  # Public React Native 0.87.1 podspec checksum in the iOS review host lockfile.
+  # CocoaPods SPEC CHECKSUMS entry for React-cxxstableapi; not a credential.
+  '''^1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f$''',
 ]
