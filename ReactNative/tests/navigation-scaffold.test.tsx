@@ -1,8 +1,25 @@
 import {act,renderHook,waitFor} from '@testing-library/react-native';
 import {AccessibilityInfo,Platform} from 'react-native';
-import {ordinaryPushPresentation,useOrdinaryPushPresentation,useReducedMotionPreference} from '../review/navigation-scaffold';
+import {floatingTabMinimizeBehavior,ordinaryPushPresentation,useOrdinaryPushPresentation,useReducedMotionPreference} from '../review/navigation-scaffold';
 
 afterEach(()=>jest.restoreAllMocks());
+
+test.each([
+  ['18.6',undefined],
+  ['26.0','none'],
+  ['26.7','none'],
+  ['27.0','onScrollDown'],
+  ['27.0.1','onScrollDown'],
+  ['28.1','onScrollDown'],
+] as const)('floating tab minimization respects the nested-stack boundary on iOS %s',(version,expected)=>{
+  jest.spyOn(Platform,'Version','get').mockReturnValue(version);
+  expect(floatingTabMinimizeBehavior()).toBe(expected);
+});
+
+test('the iOS floating-tab behavior is not applied to Android',()=>{
+  jest.replaceProperty(Platform,'OS','android');
+  expect(floatingTabMinimizeBehavior()).toBeUndefined();
+});
 
 test('ordinary push and swipe use the native title transition while preserving explicit cross-fade',()=>{
   expect(ordinaryPushPresentation(false)).toEqual({animation:'default',animationMatchesGesture:false,fullScreenGestureEnabled:false});

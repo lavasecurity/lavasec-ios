@@ -58,7 +58,7 @@ function mockNativeNavigator() {
 }
 jest.mock('@react-navigation/native-stack',()=>({createNativeStackNavigator:()=>mockNativeNavigator()}));
 jest.mock('@react-navigation/bottom-tabs/unstable',()=>({createNativeBottomTabNavigator:()=>mockNativeNavigator()}));
-jest.mock('../review/navigation-scaffold',()=>({useOrdinaryPushPresentation:()=>({})}));
+jest.mock('../review/navigation-scaffold',()=>({...jest.requireActual('../review/navigation-scaffold'),useOrdinaryPushPresentation:()=>({})}));
 jest.mock('../review/scaffold',()=>({fullScreenModalPresentation:{},fullSheetPresentation:{},toolbarButton:jest.fn()}));
 jest.mock('../review/primitives',()=>{
   const React=require('react');const {Text,View}=require('react-native');

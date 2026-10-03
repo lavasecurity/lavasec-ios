@@ -16,7 +16,7 @@ import {AppearanceStore} from './appearance-store';
 import {ReviewContext, useReview, LiveRenderBoundary, usePreviewFixtureState} from './ReviewContext';
 import {protectedActionNames} from './session';
 import {fullScreenModalPresentation, fullSheetPresentation, toolbarButton} from './scaffold';
-import {useOrdinaryPushPresentation} from './navigation-scaffold';
+import {floatingTabMinimizeBehavior,useOrdinaryPushPresentation} from './navigation-scaffold';
 import {PresentationCover} from './PresentationCover';
 import {lavaTokens} from '../src/generated/tokens';
 import {LavaAppearanceContext, useLavaColorScheme} from '../src/appearance';
@@ -73,10 +73,12 @@ function RootStack({root}: {root: 'Guard' | 'Settings'}) {
   const rgb = (color: readonly number[]) => `rgb(${color.map(value => Math.round(value * 255)).join(',')})`;
   // Use headerLargeTitleEnabled, not the deprecated headerLargeTitle alias:
   // native-stack keys animated header-height handling on the supported option.
-  // Native-stack/UIKit own the header material and scroll-edge treatment.
-  // Do not force transparent/opaque paint or replace the title with a custom view.
+  // native-stack 7.18.10 clears large-title bars but paints inline bars with
+  // theme.colors.card. Share the clear native appearance across both modes so
+  // the page background and UIKit's scroll-edge treatment continue behind it.
   return <Stack.Navigator initialRouteName={root === 'Guard' && reviewGallery ? 'Components' : root}
     screenOptions={{statusBarHidden: false, statusBarStyle: scheme === 'dark' ? 'light' : 'dark', headerLargeTitleEnabled: true, headerShadowVisible: false,
+    headerStyle: {backgroundColor: 'transparent'},
     headerBackButtonDisplayMode: 'minimal',
     ...(!interactive?{gestureEnabled:false}:{}),
     headerTintColor: rgb(lavaTokens.colors.navigationForeground[scheme]),
@@ -206,8 +208,9 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
     error={appState.error ?? (!app ? 'The full Lava runtime is missing from this installation.' : null)} retry={() => void app?.refresh()} />;
   if (fullApp && !bootstrapped.current) return <LavaAppearanceContext.Provider value={dark?'dark':'light'}>{unavailable}</LavaAppearanceContext.Provider>;
   return <ReviewContext.Provider value={{app, live, onboardingPreview, appearance, look, setLook, draft, setDraft, savedDraft, setSavedDraft, session, setSession, activityExample, reviewGallery}}>
-    <LavaAppearanceContext.Provider value={dark?'dark':'light'}><PresentationContext.Provider value={live?.presentation??{locale:"en",textScales:null}}><SafeAreaProvider><View style={{flex:1}}><View testID="lava-render-frame" style={{flex:1}} pointerEvents={presentationPaused?'none':'auto'} accessibilityElementsHidden={fullApp&&(!live||presentationPaused)} importantForAccessibility={fullApp&&(!live||presentationPaused)?'no-hide-descendants':'auto'}><NavigationContainer ref={navigation} onReady={()=>{recordNavigationTurn();navigateNativeRequest();}} onStateChange={recordNavigationTurn} theme={{...base, colors: {...base.colors, primary: rgb(green), background: rgb(background)}}}>
+    <LavaAppearanceContext.Provider value={dark?'dark':'light'}><PresentationContext.Provider value={live?.presentation??{locale:"en",textScales:null}}><SafeAreaProvider><View style={{flex:1}}><View testID="lava-render-frame" style={{flex:1}} pointerEvents={presentationPaused?'none':'auto'} accessibilityElementsHidden={fullApp&&(!live||presentationPaused)} importantForAccessibility={fullApp&&(!live||presentationPaused)?'no-hide-descendants':'auto'}><NavigationContainer ref={navigation} onReady={()=>{recordNavigationTurn();navigateNativeRequest();}} onStateChange={recordNavigationTurn} theme={{...base, colors: {...base.colors, primary: rgb(green), background: rgb(background), card: rgb(background)}}}>
       <Tabs.Navigator screenOptions={({route}) => ({headerShown: false, tabBarActiveTintColor: rgb(green),
+        tabBarMinimizeBehavior: floatingTabMinimizeBehavior(),
         // Native tabs have input authority only with an active projection. A
         // protected Settings entry additionally waits for native authentication.
         tabBarSelectionEnabled: !(app&&(!appState.snapshot||presentationPaused||AppState.currentState!=='active'))

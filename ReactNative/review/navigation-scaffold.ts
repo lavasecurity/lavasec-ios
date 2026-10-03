@@ -1,6 +1,17 @@
 import {useEffect,useState} from 'react';
 import {AccessibilityInfo,AppState,Platform} from 'react-native';
 import type {NativeStackNavigationOptions} from '@react-navigation/native-stack';
+import type {NativeBottomTabNavigationOptions} from '@react-navigation/bottom-tabs/unstable';
+
+export function floatingTabMinimizeBehavior():NativeBottomTabNavigationOptions['tabBarMinimizeBehavior'] {
+  if(Platform.OS!=='ios')return undefined;
+  const major=parseInt(String(Platform.Version),10);
+  // Nested native stacks do not expose their scroll view to UIKit minimization
+  // on iOS 26 (react-native-screens #4145). Keep that bar expanded; enable the
+  // native effect from iOS 27, where our nested-stack UI regressions pass.
+  if(major>=27)return 'onScrollDown';
+  return major===26?'none':undefined;
+}
 
 /** UIKit owns ordinary page and navigation-bar transitions together. */
 export function ordinaryPushPresentation(crossFade:boolean):NativeStackNavigationOptions {

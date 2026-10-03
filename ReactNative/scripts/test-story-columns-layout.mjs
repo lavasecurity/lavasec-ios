@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import ts from 'typescript';
+import vm from 'node:vm';
 
 // Exercise the installed Yoga engine with Fabric's style-update semantics.
 // Jest's host views cannot detect a cached vertical flex basis becoming a width.
@@ -73,6 +74,45 @@ const families=[
   const file=oldStory??path.join(baseline??path.join(root,'review'),family.file);
   return {...family,style:readStyle(file,family.key,family.fallback),stackedStyle:baseline&&family.alwaysBefore?readStyle(file,family.fallback):''};
 });
+// Evaluate the actual column JSX once, then freeze its props while Yoga resizes
+// the native parent. This catches the first frame before a Dimensions event can
+// reach JS; an ordinary rerender-at-each-width test cannot exercise that gap.
+function storyPresentation(scale){
+  const file=oldStory??path.join(baseline??path.join(root,'review'),'story-scaffold.tsx');
+  const source=sourceFile(file);let component,styles;
+  walk(source,node=>{
+    if(ts.isFunctionDeclaration(node)&&node.name?.text==='StoryColumns')component=node;
+    if(ts.isCallExpression(node)&&node.expression.getText(source)==='StyleSheet.create')styles=node.arguments[0];
+  });
+  assert(component&&styles,'StoryColumns and its production styles must be available.');
+  const tokens={exports:{}};
+  vm.runInNewContext(ts.transpileModule(readFileSync(path.join(root,'src/generated/tokens.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,tokens);
+  const values={lavaTokens:tokens.exports.lavaTokens};
+  const evaluate=(expression,context)=>vm.runInNewContext(ts.transpileModule(`var value=${expression};value;`,{}).outputText,context);
+  const foundation=evaluate(foundationObject.getText(foundationSource),values);
+  const context={foundation,space:foundation.space};
+  const s=Object.fromEntries(['stack','columns','column'].map(name=>{
+    const expression=styles.properties.find(item=>item.name?.getText(source)===name)?.initializer;
+    assert(expression,`Missing StoryColumns style: ${name}`);
+    return [name,evaluate(expression.getText(source),context)];
+  }));
+  const jsx={exports:{},foundation,space:foundation.space,s,View:'View',
+    useTextScale:()=>scale,useWindowDimensions:()=>({width:852,height:393,scale:3,fontScale:scale}),
+    React:{createElement:(type,props,...children)=>({type,props,children})}};
+  vm.runInNewContext(ts.transpileModule(component.getText(source),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText,jsx);
+  const frame=jsx.exports.StoryColumns({primary:'primary',secondary:'secondary'});
+  const flatten=style=>Object.assign({},...(Array.isArray(style)?style.flat(Infinity):[style]).filter(Boolean));
+  const nativeStyle=style=>Object.entries(flatten(style)).map(([name,value])=>{
+    if(setters[name])return `${setters[name]}(node,${value});`;
+    if(name==='flexDirection')return `YGNodeStyleSetFlexDirection(node,${{row:'YGFlexDirectionRow',column:'YGFlexDirectionColumn'}[value]});`;
+    if(name==='flexWrap')return `YGNodeStyleSetFlexWrap(node,${{wrap:'YGWrapWrap',nowrap:'YGWrapNoWrap'}[value]});`;
+    if(name==='alignItems')return `YGNodeStyleSetAlignItems(node,${{'flex-start':'YGAlignFlexStart',stretch:'YGAlignStretch'}[value]});`;
+    if(['gap','rowGap','columnGap'].includes(name))return `YGNodeStyleSetGap(node,${{gap:'YGGutterAll',rowGap:'YGGutterRow',columnGap:'YGGutterColumn'}[name]},${value});`;
+    assert.fail(`Unsupported column layout property: ${name}`);
+  }).join('\n');
+  return [frame,...frame.children].map(view=>nativeStyle(view.props.style));
+}
+const resumeStyles=[1,2].map(storyPresentation);
 const yoga=path.join(root,'node_modules/react-native/ReactCommon/yoga');
 function cppFiles(directory){return readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?cppFiles(path.join(directory,entry.name)):entry.name.endsWith('.cpp')?[path.join(directory,entry.name)]:[]);}
 const directory=mkdtempSync(path.join(tmpdir(),'lava-story-yoga-'));
@@ -103,6 +143,7 @@ void clearColumn(YGNodeRef node){
   YGNodeStyleSetWidth(node,YGUndefined);YGNodeStyleSetMinWidth(node,YGUndefined);
 }
 ${families.map((family,index)=>`void wideColumn${index}(YGNodeRef node){clearColumn(node);${family.style}}\nvoid stackedColumn${index}(YGNodeRef node){clearColumn(node);${family.stackedStyle}}`).join('\n')}
+${resumeStyles.map((styles,index)=>styles.map((style,part)=>`void resumeStyle${index}_${part}(YGNodeRef node){${style}}`).join('\n')).join('\n')}
 YGSize measuredContent(YGNodeConstRef node,float width,YGMeasureMode mode,float,YGMeasureMode){
   return {mode==YGMeasureModeUndefined?240:width,*static_cast<float*>(YGNodeGetContext(node))};
 }
@@ -149,13 +190,40 @@ void scenario(const char* name,void(*wideColumn)(YGNodeRef),void(*stackedColumn)
   }
   YGNodeFreeRecursive(root);
 }
+void resumeScenario(int scale,void(*rootStyle)(YGNodeRef),void(*primaryStyle)(YGNodeRef),void(*secondaryStyle)(YGNodeRef)){
+  auto root=YGNodeNew(),primary=YGNodeNew(),secondary=YGNodeNew();
+  auto primaryContent=YGNodeNew(),secondaryContent=YGNodeNew();
+  YGNodeInsertChild(root,primary,0);YGNodeInsertChild(root,secondary,1);
+  YGNodeInsertChild(primary,primaryContent,0);YGNodeInsertChild(secondary,secondaryContent,0);
+  rootStyle(root);primaryStyle(primary);secondaryStyle(secondary);
+  // Production lanes are containers: measured descendants supply their height
+  // through the wrapper's layout/cache path, not a definite wrapper height.
+  float primaryHeight=216,secondaryHeight=929;
+  YGNodeSetContext(primaryContent,&primaryHeight);YGNodeSetContext(secondaryContent,&secondaryHeight);
+  YGNodeSetMeasureFunc(primaryContent,measuredContent);YGNodeSetMeasureFunc(secondaryContent,measuredContent);
+  for(float width:{698.f,361.f,988.f,288.f,698.f,361.f}){
+    // Only native geometry changes; both child identities and all JS styles stay frozen.
+    fabricProps(root,[width](auto node){YGNodeStyleSetWidth(node,width);});calculate(root);
+    float a=YGNodeLayoutGetWidth(primary),b=YGNodeLayoutGetWidth(secondary);
+    float x=YGNodeLayoutGetLeft(secondary),y=YGNodeLayoutGetTop(secondary);
+    bool paired=scale==1&&width>=698;
+    std::printf("StoryColumns frozen JS at text scale %d, native width %.0f: parts %.0f/%.0f, second at %.0f/%.0f\\n",scale,width,a,b,x,y);
+    require(paired?(near(a,(width-32)/2)&&near(a,b)&&near(x,a+32)&&near(y,0))
+                  :(near(a,width)&&near(b,width)&&near(x,0)&&near(y,232)),
+            "First native resize frame must fit columns before JS receives new dimensions.");
+    require(near(YGNodeLayoutGetHeight(primary),216)&&near(YGNodeLayoutGetHeight(secondary),929),
+            "Geometry-only reflow must retain existing content height.");
+  }
+  YGNodeFreeRecursive(root);
+}
 int main(){
   ${families.flatMap((family,index)=>[family.heights,[family.heights[0]*(family.hero?3:2),family.heights[1]]].map(heights=>`scenario("${family.name}",wideColumn${index},stackedColumn${index},${family.gap},${heights[0]},${heights[1]},${!!family.reverse},${!!family.hero});`)).join('\n')}
+  ${resumeStyles.map((_,index)=>`resumeScenario(${index?2:1},resumeStyle${index}_0,resumeStyle${index}_1,resumeStyle${index}_2);`).join('\n')}
   return failures?1:0;
 }
 `);
   const binary=path.join(directory,'story-columns');
-  execFileSync('clang++',['-std=c++20','-O0',`-I${yoga}`,fixture,...cppFiles(path.join(yoga,'yoga')),'-o',binary],{stdio:'inherit'});
+  execFileSync(process.env.CXX??'c++',['-std=c++20','-O0',`-I${yoga}`,fixture,...cppFiles(path.join(yoga,'yoga')),'-o',binary],{stdio:'inherit'});
   execFileSync(binary,[],{stdio:'inherit'});
   console.log(`Real-Yoga responsive scaffold transitions passed in ${((Date.now()-started)/1000).toFixed(1)}s.`);
 }finally{rmSync(directory,{recursive:true,force:true});}

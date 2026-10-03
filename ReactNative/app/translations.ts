@@ -1718,7 +1718,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS ist ein öffentlicher Resolver, der vom HaGeZi-Projekt betrieben wird.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google und Google Public DNS sind Marken von Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, das Apple-Logo, iPhone und App Store sind Marken von Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google ist eine Marke von Google LLC."
+    "Google is a trademark of Google LLC.": "Google ist eine Marke von Google LLC.",
+    "Uninstall profile": "Profil entfernen",
+    "Remove Lava’s System DNS profile?": "Das System-DNS-Profil von Lava entfernen?"
   },
   "en": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ list wasn’t imported because it’s no longer available.",
@@ -3438,7 +3440,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS is a public resolver operated by the HaGeZi project.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google and Google Public DNS are trademarks of Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google is a trademark of Google LLC."
+    "Google is a trademark of Google LLC.": "Google is a trademark of Google LLC.",
+    "Uninstall profile": "Uninstall profile",
+    "Remove Lava’s System DNS profile?": "Remove Lava’s System DNS profile?"
   },
   "fr": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ liste n’a pas été importée, car elle n’est plus disponible.",
@@ -5158,7 +5162,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS est un résolveur public exploité par le projet HaGeZi.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google et Google Public DNS sont des marques de Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, le logo Apple, iPhone et App Store sont des marques d’Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google est une marque de Google LLC."
+    "Google is a trademark of Google LLC.": "Google est une marque de Google LLC.",
+    "Uninstall profile": "Désinstaller le profil",
+    "Remove Lava’s System DNS profile?": "Supprimer le profil DNS système de Lava ?"
   },
   "ja": {
     "%@ list wasn’t imported because it’s no longer available.": "%@件のリストは提供が終了したため、インポートされませんでした。",
@@ -6878,7 +6884,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNSはHaGeZiプロジェクトが運営する公開リゾルバーです。",
     "Google and Google Public DNS are trademarks of Google LLC.": "GoogleおよびGoogle Public DNSはGoogle LLCの商標です。",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple、Appleロゴ、iPhone、App StoreはApple Inc.の商標です。",
-    "Google is a trademark of Google LLC.": "GoogleはGoogle LLCの商標です。"
+    "Google is a trademark of Google LLC.": "GoogleはGoogle LLCの商標です。",
+    "Uninstall profile": "プロファイルを削除",
+    "Remove Lava’s System DNS profile?": "LavaのシステムDNSプロファイルを削除しますか？"
   },
   "zh-Hans": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ 个列表已不再提供，因此未导入。",
@@ -8598,7 +8606,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS 是由 HaGeZi 项目运营的公共解析器。",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google 和 Google Public DNS 是 Google LLC 的商标。",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple、Apple 标志、iPhone 和 App Store 是 Apple Inc. 的商标。",
-    "Google is a trademark of Google LLC.": "Google 是 Google LLC 的商标。"
+    "Google is a trademark of Google LLC.": "Google 是 Google LLC 的商标。",
+    "Uninstall profile": "卸载描述文件",
+    "Remove Lava’s System DNS profile?": "要移除 Lava 的系统 DNS 描述文件吗？"
   },
   "zh-Hant": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ 個清單已不再提供，因此未匯入。",
@@ -10318,7 +10328,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS 是由 HaGeZi 專案營運的公用解析器。",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google 和 Google Public DNS 是 Google LLC 的商標。",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple、Apple 標誌、iPhone 和 App Store 是 Apple Inc. 的商標。",
-    "Google is a trademark of Google LLC.": "Google 是 Google LLC 的商標。"
+    "Google is a trademark of Google LLC.": "Google 是 Google LLC 的商標。",
+    "Uninstall profile": "移除描述檔",
+    "Remove Lava’s System DNS profile?": "要移除 Lava 的系統 DNS 描述檔嗎？"
   },
   "es": {
     "%@ list wasn’t imported because it’s no longer available.": "No se importó %@ lista porque ya no está disponible.",
@@ -12038,7 +12050,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS es un resolutor público gestionado por el proyecto HaGeZi.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google y Google Public DNS son marcas comerciales de Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, el logotipo de Apple, iPhone y App Store son marcas comerciales de Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google es una marca comercial de Google LLC."
+    "Google is a trademark of Google LLC.": "Google es una marca comercial de Google LLC.",
+    "Uninstall profile": "Desinstalar perfil",
+    "Remove Lava’s System DNS profile?": "¿Eliminar el perfil de DNS del sistema de Lava?"
   },
   "ko": {
     "%@ list wasn’t imported because it’s no longer available.": "%@개 목록은 더 이상 제공되지 않아 가져오지 않았습니다.",
@@ -13758,7 +13772,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS는 HaGeZi 프로젝트에서 운영하는 공개 리졸버입니다.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google 및 Google Public DNS는 Google LLC의 상표입니다.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, Apple 로고, iPhone 및 App Store는 Apple Inc.의 상표입니다.",
-    "Google is a trademark of Google LLC.": "Google은 Google LLC의 상표입니다."
+    "Google is a trademark of Google LLC.": "Google은 Google LLC의 상표입니다.",
+    "Uninstall profile": "프로파일 제거",
+    "Remove Lava’s System DNS profile?": "Lava의 시스템 DNS 프로파일을 제거할까요?"
   },
   "pt-BR": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ lista não foi importada porque não está mais disponível.",
@@ -15478,7 +15494,9 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS é um resolvedor público operado pelo projeto HaGeZi.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google e Google Public DNS são marcas comerciais da Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, o logotipo da Apple, iPhone e App Store são marcas comerciais da Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google é uma marca comercial da Google LLC."
+    "Google is a trademark of Google LLC.": "Google é uma marca comercial da Google LLC.",
+    "Uninstall profile": "Desinstalar perfil",
+    "Remove Lava’s System DNS profile?": "Remover o perfil de DNS do sistema do Lava?"
   },
   "it": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ lista non è stata importata perché non è più disponibile.",
@@ -17198,6 +17216,8 @@ export const translations: Record<string, Record<string,string>> = {
     "HaGeZi DNS is a public resolver operated by the HaGeZi project.": "HaGeZi DNS è un resolver pubblico gestito dal progetto HaGeZi.",
     "Google and Google Public DNS are trademarks of Google LLC.": "Google e Google Public DNS sono marchi di Google LLC.",
     "Apple, the Apple logo, iPhone, and App Store are trademarks of Apple Inc.": "Apple, il logo Apple, iPhone e App Store sono marchi di Apple Inc.",
-    "Google is a trademark of Google LLC.": "Google è un marchio di Google LLC."
+    "Google is a trademark of Google LLC.": "Google è un marchio di Google LLC.",
+    "Uninstall profile": "Disinstalla profilo",
+    "Remove Lava’s System DNS profile?": "Rimuovere il profilo DNS di sistema di Lava?"
   }
 };

@@ -39,11 +39,13 @@ export function StoryNavigationLine({children,testID,attention=false}:PropsWithC
 }
 export function StoryStack({children}:PropsWithChildren){return <View style={s.stack}>{children}</View>;}
 export function StoryColumns({primary,secondary}: {primary:ReactNode;secondary:ReactNode}){
-  const {width}=useWindowDimensions();const scale=useTextScale();
-  const wide=width/scale>=foundation.layout.wideThreshold;
-  return <View testID="story.columns" style={[s.stack,wide&&s.columns]}>
-    <View testID="story.column.primary" style={[s.stack,wide&&s.column]}>{primary}</View>
-    <View testID="story.column.secondary" style={[s.stack,wide&&s.column]}>{secondary}</View>
+  const scale=useTextScale();
+  // Native geometry can resize before RN delivers window dimensions after
+  // phone unlock. Keep both lanes mounted and let Yoga wrap on that first pass.
+  const column={flexBasis:(foundation.layout.compactThreshold-space.screenHorizontal)*scale};
+  return <View testID="story.columns" style={[s.stack,s.columns]}>
+    <View testID="story.column.primary" style={[s.stack,s.column,column]}>{primary}</View>
+    <View testID="story.column.secondary" style={[s.stack,s.column,column]}>{secondary}</View>
   </View>;
 }
 // The route owns the green surface. Explanation and controls remain together
@@ -335,7 +337,7 @@ export function SetupCodeField({onChange}:{onChange:(code:string)=>void}){
 
 const s=StyleSheet.create({
   centeredRow:{flexDirection:'row',alignItems:'center',gap:space.sm},identityAccessory:{width:foundation.control.glyph,minHeight:foundation.control.glyph},
-  stack:{gap:foundation.story.gap},flex:{flex:1,minWidth:0},columns:{flexDirection:'row',alignItems:'flex-start',gap:space.lg*2},column:foundation.layout.horizontalPart,
+  stack:{gap:foundation.story.gap},flex:{flex:1,minWidth:0},columns:{flexDirection:'row',flexWrap:'wrap',alignItems:'flex-start',columnGap:space.lg*2},column:foundation.layout.horizontalPart,
   surface:{borderRadius:foundation.radius.surface,borderCurve:'continuous',backgroundColor:colors.cardBackground},
   inset:{padding:space.lg+space.xs,gap:space.lg},
   tileInset:{padding:foundation.story.tileInset,gap:foundation.story.gap},
