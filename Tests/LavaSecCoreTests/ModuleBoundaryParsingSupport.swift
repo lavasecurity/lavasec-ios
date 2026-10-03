@@ -20,6 +20,7 @@ struct YAMLBoundaryParser {
         "LavaSecNetworking",
         "LavaSecDNS",
         "LavaSecFilterPipeline",
+        "LavaSecChainedUpstream",
         "LavaSecPresentation",
         "LavaSecAppServices",
         "LavaSecCore",

@@ -6,23 +6,23 @@
 "notif.body.reconnectTitle" = "Lavaを再接続";
 "notif.body.reconnectMessage" = "このネットワークでDNSを解決できません。タップして保護を再接続してください。";
 "notif.body.dnsSlowTitle" = "LavaのDNSが遅くなっています";
-"notif.body.dnsSlowMessage" = "選択中のDNSリゾルバの応答が遅くなっています。タップして保護を再接続してください。";
+"notif.body.dnsSlowMessage" = "選択中のDNSプロバイダーの応答が遅くなっています。タップして保護を再接続してください。";
 
 /* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
 "dialog.filterSwitchedTo" = "%@ に切り替えました。";
-"dialog.filterAlreadyActive" = "%@ はすでに有効なフィルターです。";
+"dialog.filterAlreadyActive" = "%@はすでに使用中のフィルターです。";
 "dialog.filterWillApplyAutomatically" = "%@ は自動的に適用されます。";
 "dialog.filterSwitchDisallowed" = "%@ に切り替えられませんでした。Lava を開いてフィルター設定を確認してください。";
 
 /* Live Activity / widget UI (shared via Bundle.module). */
-"widget.state.on" = "Lava Security はオンです";
-"widget.state.paused" = "Lava Security は一時停止中です";
-"widget.state.restartingTitle" = "再起動中…";
-"widget.a11y.restarting" = "Lava Security を再起動しています";
+"widget.state.on" = "Lavaはオンです";
+"widget.state.paused" = "Lavaは一時停止中です";
+"widget.state.restartingTitle" = "再接続中…";
+"widget.a11y.restarting" = "Lavaが再接続しています";
 "widget.status.on" = "オン";
 "widget.status.paused" = "一時停止中";
-"widget.status.restarting" = "再起動中";
+"widget.status.restarting" = "再接続中";
 /* The trailing space is DELIBERATE and load-bearing, not a typo: on-device bisection
    (2026-07-21, lavasec-ios-internal#434/#435) showed the Live Activity button renderer draws
    short SPACE-LESS ja values ("再開", "15分") as a bare truncation ellipsis while every ja value
@@ -32,7 +32,7 @@
    without re-verifying ja on device. Record: lavasec-infra
    plans/2026-07-21-live-activity-ja-label-probe-removal-contract.md. */
 "widget.action.resume" = "再開 ";
-"widget.action.restart" = "再起動";
+"widget.action.restart" = "再接続";
 "widget.action.pauseForMinutes" = "%d 分間一時停止";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase:
    widget.action.pauseForMinutes. The TRAILING space is deliberate — the same render rescue as
@@ -41,11 +41,11 @@
    space made a break point whose final segment — bare 分, a short space-less ja run — collapsed
    exactly like the unspaced values did. Trailing space, no internal space. */
 "widget.action.pauseForMinutesShort" = "%d分 ";
-"a11y.shieldGuardian" = "Lava シールドガーディアン";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
-"core.domainError.alreadyBlocked" = "%@ はすでにブロック中のドメインにあります。";
-"core.domainError.alreadyAllowed" = "%@ はすでに許可された例外にあります。";
+"core.domainError.alreadyBlocked" = "%@はすでにブロックするドメインに含まれています。";
+"core.domainError.alreadyAllowed" = "%@はすでに許可する例外に含まれています。";
 "core.domainError.blockedLimit" = "ブロックするドメインは追加で最大 %lld 件まで保持できます。";
 "core.domainError.allowedLimit" = "許可する例外は最大 %lld 件まで保持できます。";
 
@@ -56,12 +56,12 @@
 "core.resolver.badStamp" = "DNSスタンプを読み込めませんでした。スタンプを確認してもう一度お試しください。";
 "core.resolver.missingDoHPath" = "DNS-over-HTTPSのURLには/dns-queryなどのパスを含める必要があります。";
 "core.resolver.credentialsNotAllowed" = "カスタムDNSのURLにユーザー名やパスワードを含めることはできません。";
-"core.resolver.secondaryTransportMismatch" = "セカンダリDNSはプライマリDNSと同じトランスポートを使用する必要があります。";
+"core.resolver.secondaryTransportMismatch" = "セカンダリサーバーはプライマリサーバーと同じトランスポートを使用する必要があります。";
 "core.endpoint.credentialsNotAllowed" = "ユーザー名やパスワードを含むURLはサポートされていません。";
-"core.endpoint.localhostNotAllowed" = "ここではlocalhostをDNSリゾルバとして使用できません。";
+"core.endpoint.localhostNotAllowed" = "ここではlocalhostをDNSサーバーとして使用できません。";
 "core.endpoint.privateNetworkNotAllowed" = "カスタムブロックリストのURLには公開ホストを使用する必要があります。";
-"core.endpoint.unusableResolverAddress" = "ループバック、マルチキャスト、または不特定のアドレスではなく、使用可能なDNSリゾルバのアドレスを入力してください。";
-"core.endpoint.invalidResolverHost" = "有効なDNSリゾルバのホストを入力してください。";
+"core.endpoint.unusableResolverAddress" = "ループバック、マルチキャスト、または不特定のアドレスではなく、使用可能なDNSサーバーのアドレスを入力してください。";
+"core.endpoint.invalidResolverHost" = "有効なDNSサーバーのホストを入力してください。";
 "core.customBlocklist.invalidURL" = "有効なブロックリストのURLを入力してください。";
 "core.customBlocklist.unsupportedScheme" = "カスタムブロックリストにはHTTPSを使用する必要があります。";
 "core.customBlocklist.missingHost" = "カスタムブロックリストのURLにはホストを含める必要があります。";
@@ -70,18 +70,88 @@
 "core.domain.empty" = "ドメインが空です。";
 "core.domain.tooLong" = "ドメインが長すぎます。";
 "core.domain.needsTwoLabels" = "example.comのような完全なドメインを入力してください。";
-"core.domain.invalidLabel" = "無効なドメインラベル：%@";
+"core.domain.invalidLabel" = "「%@」はドメイン名に使用できません。";
 "core.domain.ipNotAllowed" = "ここではIPアドレスはサポートされていません。";
-"core.filterBudget.exceedsDeviceMemory" = "この選択には約%1$@件のフィルタルールが必要で、デバイスが保持できる上限（%2$@）を超えています。リストを削除して保護をオンにしてください。";
-"core.filterBudget.exceedsTierLimit" = "ブロックリストはフィルタルール%2$@件のうち約%1$@件を使用しています。%3$@";
-"core.filterBudget.action.remove" = "リストを削除して保護をオンにしてください。";
-"core.filterBudget.action.removeOrUpgrade" = "リストを削除するか、Plusにアップグレードしてください。";
+"core.filterBudget.exceedsDeviceMemory" = "この選択には約%1$@件のフィルタールールが必要で、デバイスが保持できる上限（%2$@）を超えています。ブロックリストを削除して保護をオンにしてください。";
+"core.filterBudget.exceedsTierLimit" = "ブロックリストはフィルタールール%2$@件のうち約%1$@件を使用しています。%3$@";
+"core.filterBudget.action.remove" = "ブロックリストを削除して保護をオンにしてください。";
+"core.filterBudget.action.removeOrUpgrade" = "ブロックリストを削除するか、Lava Plusにアップグレードしてください。";
 "core.filterBudget.largestSuffix" = " 最大：%@。";
 "core.catalogSync.invalidBlocklistEncoding" = "ダウンロードした%@のブロックリストは有効なUTF-8ではありません。";
 "core.catalogSync.blocklistTooLarge" = "ダウンロードした%1$@のブロックリストが大きすぎます（%2$lldバイト）。";
 "core.catalogSync.blocklistExceedsRuleLimit" = "%1$@のブロックリストに%2$lld件を超えるルールがあります。サイズを減らすか、削除してください。";
-"core.catalogSync.noRulesAvailable" = "有効なダウンロード済みフィルタはまだありません。";
+"core.catalogSync.noRulesAvailable" = "ダウンロード済みのブロックリストはまだありません。";
 "core.catalogSync.customBlocklistUnavailable" = "カスタムブロックリスト「%1$@」を読み込めませんでした。%2$@";
-"core.domainError.freeBlockedLimit" = "無料の保護には、追加でブロックできるドメインが%lld件含まれています。";
-"core.domainError.freeAllowedLimit" = "無料の保護には、許可する例外が%lld件含まれています。";
+"core.domainError.freeBlockedLimit" = "無料プランには、追加でブロックできるドメインが%lld件含まれています。";
+"core.domainError.freeAllowedLimit" = "無料プランには、許可する例外が%lld件含まれています。";
 "core.backup.lastUploaded" = "最終アップロード：%@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "Lava のブロック判定はこの iPhone 上で行われます。選択中のリゾルバ（現在は %@）は、許可された DNS クエリを受け取ることがあり、その場合は提供元のポリシーに従って扱われます。";
+"core.disclosure.resolverNetworkProvided" = "Lava のブロック判定はこの iPhone 上で行われます。この iPhone が Wi-Fi、モバイル通信、またはシステム設定から取得した DNS サーバーが、許可された DNS クエリを受け取ることがあります。Lava のサーバーが受け取ることはありません。";
+"core.disclosure.resolverSelfEntered" = "Lava のブロック判定はこの iPhone 上で行われます。あなたが設定したカスタム DNS が、許可された DNS クエリを受け取ることがあります。";
+"core.disclosure.dnsScope" = "Lava が確認するのはドメイン名であり、完全な URL、ページのパス、ページ本文、フォーム、メッセージは確認しません。ドメイン全体をブロックできますが、許可したドメイン内の特定のページだけをブロックすることはできません。";
+"core.disclosure.vpn" = "ドメイン名を確認するためにローカルの保護された経路が必要なため、iPhone はこれを VPN と表示します。閲覧トラフィックが Lava のサーバーに送信されることはありません。";
+"core.disclosure.encryptedFallbackRecipient" = "選択した暗号化フォールバック（%@）も、許可された DNS クエリを受け取ることがあります。";
+"core.disclosure.chainedRecipient" = "Lava が別の VPN に連結されている間、許可された DNS クエリを最初に受け取る可能性があるのは、その VPN の構成に記載された DNS サーバーです。誰が運用しているかを Lava は把握できません。";
+"core.disclosure.fallbackNetworkProvided" = "この iPhone がネットワークから取得した DNS サーバーも、許可された DNS クエリを受け取ることがあります。";
+"core.disclosure.plainFallbackRecipient" = "選択したフォールバック（%@）も、許可された DNS クエリを受け取ることがあります。これは暗号化されていません。";
+"core.disclosure.upstreamFilteringRecipient" = "%@ は独自のフィルタリングを行うため、Lava が許可したドメインをブロックすることがあります。";
+"core.disclosure.selfEnteredRecipients" = "これらの DNS サーバーはあなた自身が入力したものなので、誰が運用しているかを Lava は把握できません。入力したどのアドレスも、許可された DNS クエリを受け取ることがあります。";
+"core.disclosure.selfEnteredRecipient" = "この DNS サーバーはあなた自身が入力したものなので、誰が運用しているかを Lava は把握できません。";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "Lavaの確認が必要です";
+"notif.body.filteringUnavailableMessage" = "選択したブロックリストがまだルール上限を超えているため、DNSをブロックしています。Lavaを開いてブロックリストを見直してください。";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "カスタムブロックリストの更新をバックグラウンドで実行できないため、DNSをブロックしています。Lavaを開いてカスタムブロックリストを更新してください。";
+
+"widget.action.confirmPause" = "確認 ";
+"Activity" = "アクティビティ";
+"Confirmation" = "確認";
+
+"A saved configuration's key is unavailable. Import it again." = "保存済みの構成の鍵を利用できません。再度インポートしてください。";
+"Choose a different DNS for the second tier." = "第2層には別のDNSを選んでください。";
+"Choose a valid DNS provider and transport." = "有効なDNSプロバイダーと通信方式を選んでください。";
+"Custom DNS requires Lava Plus." = "カスタムDNSにはLava Plusが必要です。";
+"Keep one primary DNS and, optionally, one secondary DNS." = "プライマリDNSを1つ設定し、必要に応じてセカンダリDNSを1つ追加してください。";
+"No accepted blocklist checksum is available for %@." = "%@に有効なブロックリストのチェックサムがありません。";
+"No enabled blocklist source is available for %@." = "%@に有効なブロックリストのソースがありません。";
+"No saved Lava Security catalog is available yet." = "保存済みのLava Securityカタログはまだありません。";
+"Supabase Auth returned status %lld." = "Supabase認証からステータス%lldが返されました。";
+"Supabase Auth returned status %lld: %@" = "Supabase認証からステータス%lldが返されました：%@";
+"The Lava Security catalog could not be read." = "Lava Securityカタログを読み込めませんでした。";
+"The Lava Security catalog server returned HTTP %lld." = "Lava SecurityカタログサーバーからHTTP %lldが返されました。";
+"The Supabase Auth endpoint is not valid." = "Supabase認証のエンドポイントが無効です。";
+"The Supabase Auth response was not valid." = "Supabase認証の応答が無効でした。";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "ダウンロードが%lld MBの上限を超えました（%lldバイト）。";
+"The downloaded blocklist checksum did not match for %@." = "%@のダウンロード済みブロックリストのチェックサムが一致しませんでした。";
+"The first configuration needs an IP endpoint address." = "1つ目の構成にはIPのエンドポイントアドレスが必要です。";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "1つ目の構成のAllowedIPsに、2つ目のVPNのエンドポイントを含めてください。";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "VPNを2段接続するには、1つ目の構成のMTUが1340以上である必要があります。";
+"The saved configurations changed. Reopen the editor and try again." = "保存済みの構成が変更されました。エディタを開き直して再試行してください。";
+"The second configuration needs an IPv4 endpoint address." = "2つ目の構成にはIPv4のエンドポイントアドレスが必要です。";
+"You can add up to two WireGuard configurations." = "WireGuard構成は2つまで追加できます。";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@は帰属と出典を示すために表示する第三者ソースです。ライセンス：%2$@。所有者またはプロジェクト：%3$@。";
+"Third-party source project" = "第三者ソースプロジェクト";
+
+"Latest encrypted settings backup size is %@." = "最新の暗号化設定バックアップのサイズは%@です。";
+"Added %@" = "%@を追加しました";
+"This domain will be blocked after you save." = "保存すると、このドメインがブロックされます。";
+"This exception will take effect after you save." = "保存すると、この例外が有効になります。";
+"Pending setup" = "設定待ち";
+"Set up encrypted backup for this account." = "このアカウントの暗号化バックアップを設定します。";
+"Off" = "オフ";
+"Sign in to set up encrypted backup." = "暗号化バックアップを設定するにはサインインしてください。";
+"Not uploaded yet" = "まだアップロードされていません";
+"Encrypted locally. Back up now to store a copy online." = "ローカルで暗号化されています。今すぐバックアップして、コピーをオンラインに保存しましょう。";
+"Ready after sign-in" = "サインイン後に利用可能";
+"Encrypted locally. Sign in to upload." = "ローカルで暗号化されています。アップロードするにはサインインしてください。";
+"Needs attention" = "確認が必要です";
+"Domain cannot be added" = "このドメインを追加できません";
+"Already blocked" = "すでにブロック済み";
+"Blocked domain limit reached" = "ブロックするドメインの上限に達しました";
+"Exception cannot be added" = "この例外を追加できません";
+"Already allowed" = "すでに許可済み";
+"Allowed exception limit reached" = "許可する例外の上限に達しました";

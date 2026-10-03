@@ -19,6 +19,20 @@ final class SharedFilterStatePersistenceTests: XCTestCase {
         return lib
     }
 
+    /// Two-filter library with a caller-chosen active id — `activeFilterID` is set at init, so a
+    /// concurrent-switch state has to be built rather than mutated.
+    private func library(generation: Int, activeFilterID: String) -> FilterLibrary {
+        var lib = FilterLibrary(
+            filters: [
+                Filter(id: "f1", name: "F1", enabledBlocklistIDs: ["s1"]),
+                Filter(id: "f2", name: "F2", enabledBlocklistIDs: ["s1"]),
+            ],
+            activeFilterID: activeFilterID
+        )
+        lib.configurationGeneration = generation
+        return lib
+    }
+
     func testWritesBothFilesAndBumpsGenerationPastOnDisk() throws {
         let urls = makeURLs()
         defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
@@ -47,6 +61,93 @@ final class SharedFilterStatePersistenceTests: XCTestCase {
         XCTAssertEqual(onDiskLibrary.activeFilterID, "f1")
     }
 
+    // MARK: In-lock active-filter precondition
+
+    /// A library-only replace may only touch an IDLE filter. The caller's own
+    /// `activeFilterID` cannot answer that: a headless Focus/Shortcut switch commits from another
+    /// process and the foreground adopts it asynchronously, so the snapshot can name the previous
+    /// filter while disk names the new one. This is the state that models exactly that skew — disk
+    /// says `f2` is active, the writer's in-memory library still says `f1`.
+    func testRefusesWhenTheTargetIsActiveOnDiskEvenThoughTheCallerThinksOtherwise() throws {
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+
+        // Disk: a concurrent switch made f2 active.
+        try JSONEncoder().encode(library(generation: 4, activeFilterID: "f2")).write(to: urls.library)
+
+        // Caller: still holds the pre-switch snapshot naming f1, and wants to overwrite f2
+        // believing it idle.
+        XCTAssertThrowsError(
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: config(generation: 4),
+                library: library(generation: 4),      // activeFilterID == "f1"
+                configurationURL: urls.config,
+                filterLibraryURL: urls.library,
+                refusesIfOnDiskActiveFilterIs: "f2"
+            )
+        ) { error in
+            let changed = error as? SharedFilterStatePersistence.ActiveFilterChangedError
+            XCTAssertEqual(changed?.activeFilterID, "f2")
+        }
+
+        // And nothing was written: the refusal must precede both file writes.
+        let stillOnDisk = try JSONDecoder().decode(FilterLibrary.self, from: Data(contentsOf: urls.library))
+        XCTAssertEqual(stillOnDisk.activeFilterID, "f2")
+        XCTAssertEqual(stillOnDisk.configurationGeneration, 4, "A refused write must not bump the generation.")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: urls.config.path),
+            "A refused write must not create the configuration either."
+        )
+    }
+
+    func testAllowsTheWriteWhenTheTargetIsNotTheOnDiskActiveFilter() throws {
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+        try JSONEncoder().encode(library(generation: 4)).write(to: urls.library) // active == f1
+
+        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+            configuration: config(generation: 4),
+            library: library(generation: 4),
+            configurationURL: urls.config,
+            filterLibraryURL: urls.library,
+            refusesIfOnDiskActiveFilterIs: "f2"   // replacing an idle filter
+        )
+        XCTAssertEqual(written.configuration.configurationGeneration, 5)
+    }
+
+    /// Absent precondition must behave exactly as before for every existing caller.
+    func testOmittingThePreconditionLeavesTheWriteUnchanged() throws {
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+        try JSONEncoder().encode(library(generation: 4, activeFilterID: "f2")).write(to: urls.library)
+
+        // The same state that the precondition refuses is written happily without it.
+        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+            configuration: config(generation: 4),
+            library: library(generation: 4),
+            configurationURL: urls.config,
+            filterLibraryURL: urls.library
+        )
+        XCTAssertEqual(written.configuration.configurationGeneration, 5)
+    }
+
+    /// An unreadable library must not read as "not the active filter" and let the write through.
+    func testUnreadableLibraryDoesNotSatisfyThePrecondition() throws {
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+        // No library file at all: onDiskActiveFilterID is nil, so the precondition cannot match and
+        // the write proceeds — the caller's own in-memory guard is what covers this case, and the
+        // INV-PERSIST-1 fence covers the exists-but-unreadable one.
+        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+            configuration: config(generation: 1),
+            library: library(generation: 1),
+            configurationURL: urls.config,
+            filterLibraryURL: urls.library,
+            refusesIfOnDiskActiveFilterIs: "f1"
+        )
+        XCTAssertEqual(written.configuration.configurationGeneration, 2)
+    }
+
     func testRejectsAdvancedBeyondWhenOnDiskAdvancedPastFence() throws {
         let urls = makeURLs()
         defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
@@ -68,6 +169,62 @@ final class SharedFilterStatePersistenceTests: XCTestCase {
         // The on-disk config (the newer writer's) must be untouched — never clobbered or re-bumped.
         let onDisk = try JSONDecoder().decode(AppConfiguration.self, from: Data(contentsOf: urls.config))
         XCTAssertEqual(onDisk.configurationGeneration, 5)
+    }
+
+    func testStaleIdleEditCannotSwitchDiskBackFromAThirdFilter() throws {
+        let urls = makeURLs()
+        defer { try? FileManager.default.removeItem(at: urls.config.deletingLastPathComponent()) }
+
+        func threeFilterLibrary(generation: Int, active: String, editedB: Bool) -> FilterLibrary {
+            var result = FilterLibrary(
+                filters: [
+                    Filter(id: "a", name: "A", enabledBlocklistIDs: ["a-source"]),
+                    Filter(
+                        id: "b",
+                        name: "B",
+                        enabledBlocklistIDs: [editedB ? "b-edited-source" : "b-source"]
+                    ),
+                    Filter(id: "c", name: "C", enabledBlocklistIDs: ["c-source"]),
+                ],
+                activeFilterID: active
+            )
+            result.configurationGeneration = generation
+            return result
+        }
+
+        // A headless process switched disk A → C while the resident app still held A. That app
+        // then edits idle B. The target-only `refusesIf...: B` check correctly passes because C is
+        // active, so the reciprocal generation fence is what must stop its stale whole pair from
+        // switching disk C → A and clobbering C's committed selection.
+        try JSONEncoder().encode(config(generation: 9)).write(to: urls.config)
+        try JSONEncoder().encode(
+            threeFilterLibrary(generation: 9, active: "c", editedB: false)
+        ).write(to: urls.library)
+
+        XCTAssertThrowsError(
+            try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                configuration: config(generation: 8),
+                library: threeFilterLibrary(generation: 8, active: "a", editedB: true),
+                configurationURL: urls.config,
+                filterLibraryURL: urls.library,
+                rejectsAdvancedBeyond: 8,
+                refusesIfOnDiskActiveFilterIs: "b"
+            )
+        ) { error in
+            XCTAssertTrue(error is SharedFilterStatePersistence.StaleBaseGenerationError)
+        }
+
+        let survivingConfiguration = try JSONDecoder().decode(
+            AppConfiguration.self,
+            from: Data(contentsOf: urls.config)
+        )
+        let survivingLibrary = try JSONDecoder().decode(
+            FilterLibrary.self,
+            from: Data(contentsOf: urls.library)
+        )
+        XCTAssertEqual(survivingConfiguration.configurationGeneration, 9)
+        XCTAssertEqual(survivingLibrary.activeFilterID, "c")
+        XCTAssertEqual(survivingLibrary.filter(id: "b")?.enabledBlocklistIDs, ["b-source"])
     }
 
     func testAcceptsOnDiskEqualToFence() throws {

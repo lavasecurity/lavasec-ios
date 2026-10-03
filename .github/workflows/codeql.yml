@@ -11,13 +11,16 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    # Only when Swift / project / package inputs change — a docs or asset merge shouldn't pay the
+    # Only when native or RN app/build inputs change — a docs or asset merge shouldn't pay the
     # macOS build. (The weekly schedule re-scans the whole tree regardless.)
     paths:
       - '**/*.swift'
       - 'LavaSec.xcodeproj/**'
+      - 'project.yml'
       - '**/Package.swift'
       - '**/Package.resolved'
+      - 'ReactNative/**'
+      - 'scripts/**'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '27 4 * * 1' # weekly, Monday 04:27 UTC
@@ -35,13 +38,8 @@ jobs:
     # Public repo only. The internal mirror carries the same file but must not run the (costly)
     # Swift analysis — the public lane is authoritative for code scanning.
     if: ${{ github.repository == 'lavasecurity/lavasec-ios' }}
+    # Public source analysis uses hosted macOS, matching the public app build.
     runs-on: macos-26
-    # CodeQL's manual-build step (a full `xcodebuild` of the app) is the entire cost and
-    # runs ~35-44 min on macos-26. At 45 there was almost no headroom, so normal slow-runner
-    # variance pushed the build past the ceiling: the job was killed at the 45-min mark
-    # (conclusion `cancelled`) before the Analyze step ran — a silent code-scanning gap on
-    # busy merge days. 60 restores margin. This lane is advisory (off the PR critical path)
-    # and public-repo macOS is free, so the higher ceiling costs nothing.
     timeout-minutes: 60
     permissions:
       contents: read
@@ -74,10 +72,21 @@ jobs:
           languages: swift
           build-mode: manual
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '3.3.12'
+          bundler: '4.0.16'
+          working-directory: ReactNative
+      - name: Prepare canonical RN app workspace
+        run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/prepare-full-app.sh "$RUNNER_TEMP/lava-rn-prepare" "$RUNNER_TEMP/lava-rn-evidence"
+
       - name: Build LavaSec
         run: |
-          xcodebuild \
-            -project LavaSec.xcodeproj \
+          ci/run-with-maintenance-lock.sh -- xcodebuild \
+            -workspace ReactNative/native-app/LavaSecRN.xcworkspace \
             -scheme LavaSec \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \

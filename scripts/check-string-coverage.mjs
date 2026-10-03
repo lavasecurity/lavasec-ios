@@ -4,7 +4,7 @@
 //
 // (1) User-facing strings at localizing call sites must exist in a bundle the running
 //     target can read:
-//       - LavaSecApp sources  -> app catalog (Localizable/InfoPlist.xcstrings) OR LavaSecCore .strings
+//       - LavaSecApp + ReactNative/native-app sources -> app Localizable.xcstrings
 //       - LavaSecWidget + Shared sources -> LavaSecKit .strings ONLY (the widget extension's
 //         Resources phase is empty; it reads LavaSecKit via Bundle.module, NOT the app catalog)
 //       - AppIntents metadata -> the registering target's catalog (app or LavaSecIntents)
@@ -29,23 +29,26 @@ const scanDirs = [
   path.join(iosRoot, "LavaSecWidget"),
   path.join(iosRoot, "Shared"),
   path.join(iosRoot, "LavaSecIntents"),
+  path.join(iosRoot, "ReactNative", "native-app"),
+  path.join(iosRoot, "Sources"),
 ];
 const coreStringsFile = path.join(
   iosRoot, "Sources", "LavaSecKit", "Resources", "en.lproj", "Localizable.strings"
 );
 
 const ALLOWED = new Set([
-  "Account", "Password", "Apple", "Cloudflare", "Filter", "DNS", "DoH",
-  "Google", "Guard", "Internet", "Lava", "Lava Security", "Lava Security Plus",
+  "Read access changed.", // Stable command cancellation signal, never displayed.
+  "Apple", "Cloudflare", "DNS", "DoH",
+  "Google", "Lava", "Lava Security", "Lava Security Plus",
   "Lava Guard", "Lava Plus", "Plus", "Core", "Balanced", "Extra", "Quad9", "TCP",
-  "VPN", "LavaSec", "OK", "iOS", "Face ID", "Touch ID",
+  "VPN", "LavaSec", "iOS", "Face ID", "Touch ID",
 ]);
 
 const unesc = (s) =>
   s.replace(/\\(["nt\\])/g, (_, c) => (c === "n" ? "\n" : c === "t" ? "\t" : c));
 
 const catalogKeys = new Set();
-for (const f of ["Localizable.xcstrings", "InfoPlist.xcstrings"]) {
+for (const f of ["Localizable.xcstrings"]) {
   const j = JSON.parse(fs.readFileSync(path.join(iosRoot, "LavaSecApp", f), "utf8"));
   for (const k of Object.keys(j.strings ?? {})) catalogKeys.add(k);
 }
@@ -62,20 +65,22 @@ const intentsKeys = new Set();
 }
 const appKnown = new Set([...catalogKeys, ...ALLOWED]);                 // AppIntents metadata + app UI
 const coreKnown = new Set([...coreKeys, ...ALLOWED]);                   // widget/extension (Bundle.module)
-const appOrCore = new Set([...catalogKeys, ...coreKeys, ...ALLOWED]);   // app UI (app bundle or LavaSecCore)
+// Ordinary app UI and .lavaLocalized resolve from Bundle.main; neither the InfoPlist
+// table nor the package's separate resource bundle can satisfy these lookups.
 // LavaSecIntents validates strictly against its own catalog (intentsKeys) — see the loop.
 
 const L = `"((?:[^"\\\\]|\\\\.)*)"`;
 const labels =
   "(?:title|summary|subtitle|footer|label|description|placeholder|actionTitle|disableTitle|disableActionTitle|clearTitle|clearActionTitle|detail|text|reason)";
 const sitePatterns = [
+  `\\bCommandError\\(\\s*${L}`,
   `\\bText\\(\\s*${L}`, `\\bLabel\\(\\s*${L}`, `\\bButton\\(\\s*${L}\\s*[\\),]`,
   `\\.navigation(?:Bar)?Title\\(\\s*${L}`, `\\bToggle\\(\\s*${L}`, `\\bSection\\(\\s*${L}`,
   `\\bTextField\\(\\s*${L}`, `\\bSecureField\\(\\s*${L}`, `\\.accessibilityLabel\\(\\s*${L}`,
   `\\.accessibilityHint\\(\\s*${L}`, `\\.accessibilityValue\\(\\s*${L}`,
   `\\b(?:alert|confirmationDialog)\\(\\s*${L}`, `\\bLink\\(\\s*${L}`, `\\bMenu\\(\\s*${L}`,
   `\\bPicker\\(\\s*${L}`, `\\bStepper\\(\\s*${L}`, `\\.help\\(\\s*${L}`,
-  `\\.searchable\\([^)]*?prompt:\\s*${L}`, `\\bLavaSectionGroup\\(\\s*${L}`, `\\b${labels}:\\s*${L}`,
+  `\\.searchable\\([^)]*?prompt:\\s*${L}`, `\\bLava(?:SectionGroup|QuietFooter)\\(\\s*${L}`, `\\b${labels}:\\s*${L}`,
 ].map((p) => new RegExp(p, "g"));
 // AppIntents metadata resolves from the registering app target -> validate against the app catalog.
 const appIntentsPatterns = [
@@ -266,7 +271,7 @@ function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) out.push(...walk(p));
-    else if (e.name.endsWith(".swift") && !e.name.includes("AdminQA")) out.push(p);
+    else if (e.name.endsWith(".swift") && !e.name.includes("AdminQA") && e.name !== "RNFullAppUITests.swift") out.push(p);
   }
   return out;
 }
@@ -284,16 +289,19 @@ for (const file of scanDirs.flatMap(walk)) {
   const txt = stripDebugOnly(fs.readFileSync(file, "utf8"));
   const rel = path.relative(iosRoot, file);
   const isIntents = rel.startsWith("LavaSecIntents");
+  const isPackage = rel.startsWith("Sources");
   const isExt = rel.startsWith("LavaSecWidget") || rel.startsWith("Shared");
   // LavaSecIntents strings resolve ONLY from the extension's own catalog (AppIntents
   // metadata is compile-time bundle-scoped) — not coreKeys/ALLOWED, so e.g. a literal
   // like "Filter" must be in the extension catalog, not merely allowlisted.
-  const general = isIntents ? intentsKeys : isExt ? coreKnown : appOrCore;
+  const general = isIntents ? intentsKeys : isExt ? coreKnown : appKnown;
   const generalLabel = isIntents
     ? "LavaSecIntents catalog"
-    : isExt ? "LavaSecCore .strings" : "app catalog or LavaSecCore";
+    : isExt ? "LavaSecCore .strings" : "app catalog";
 
-  const patterns = file.endsWith("Presentation.swift") ? [...sitePatterns, presReturn] : sitePatterns;
+  // Package models carry English display keys that app callers localize, while their
+  // LavaCoreStrings lookups must resolve in Bundle.module. Scan those refs below.
+  const patterns = isPackage ? [] : file.endsWith("Presentation.swift") ? [...sitePatterns, presReturn] : sitePatterns;
   for (const re of patterns) {
     re.lastIndex = 0;
     let m;
@@ -306,13 +314,13 @@ for (const file of scanDirs.flatMap(walk)) {
   // branch literal so a non-bare-literal arg can't smuggle an uncatalogued user-facing string.
   labelTernary.lastIndex = 0;
   let tm;
-  while ((tm = labelTernary.exec(txt)) !== null) {
+  while (!isPackage && (tm = labelTernary.exec(txt)) !== null) {
     for (const raw of litsInArg(txt, tm.index + tm[0].length)) {
       const s = clean(raw);
       if (s && !general.has(s)) flag(missing, s, `${rel} [needs: ${generalLabel}]`);
     }
   }
-  for (const re of appIntentsPatterns) {
+  for (const re of isPackage ? [] : appIntentsPatterns) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(txt)) !== null) {

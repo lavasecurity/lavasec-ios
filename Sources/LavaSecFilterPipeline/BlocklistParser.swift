@@ -30,7 +30,8 @@ package enum BlocklistParsingRules {
     // filter; bumped to orphan caches parsed under the old cap. (The streaming byte-parse
     // added alongside is output-identical for LF/CR/CRLF text and would not require a
     // bump on its own.)
-    package static let rulesVersion = 3
+    // v4: retain Google subdomain rules outside the existing sign-in exception.
+    package static let rulesVersion = 4
 }
 
 /// A blocklist line that could not be converted into a rule.

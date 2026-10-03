@@ -1,5 +1,6 @@
 import XCTest
 @testable import LavaSecCore
+@testable import LavaSecFilterPipeline
 @testable import LavaSecKit
 
 final class WarmFilterSnapshotLoaderTests: XCTestCase {
@@ -64,6 +65,32 @@ final class WarmFilterSnapshotLoaderTests: XCTestCase {
             backgroundWarmIndex: BackgroundWarmIndex()
         )
         XCTAssertNil(result, "A Plus enabled-custom-list filter must take the cold path on switch-back, not warm reuse (Codex #29).")
+    }
+
+    func testSwitchCompletionFiresOnceForEveryCandidateOutcome() async throws {
+        let h = makeFocusSwitchEngineHarness()
+        defer { cleanupFocusSwitchHarness(h) }
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        let outcomes: [(String?, String?, Bool)] = [
+            (staged.token, "unused-sidecar", true),
+            ("missing-library", staged.token, true),
+            ("missing-library", "missing-sidecar", false),
+            (nil, nil, false)
+        ]
+        for (libraryToken, sidecarToken, shouldReuse) in outcomes {
+            let target = Filter(id: "target", name: "Target", lastCompiledToken: libraryToken)
+            let index = BackgroundWarmIndex(entries: sidecarToken.map {
+                [target.id: BackgroundWarmIndexEntry(token: $0, syncedAt: Date())]
+            } ?? [:])
+            let completed = DispatchSemaphore(value: 0)
+            let result = await WarmFilterSnapshotLoader.reusableSnapshotForSwitch(
+                target: target, configuration: staged.configuration, containerURL: h.dir,
+                cacheURL: h.env.catalogCacheURL, freshnessMaxAge: 3600,
+                backgroundWarmIndex: index, onCompleted: { completed.signal() })
+            XCTAssertEqual(result != nil, shouldReuse)
+            XCTAssertEqual(completed.wait(timeout: .now()), .success, "Completion must fire even when the first of two candidates succeeds.")
+            XCTAssertEqual(completed.wait(timeout: .now()), .timedOut, "Completion belongs to the whole lookup, not each candidate.")
+        }
     }
 
     /// Precision (Codex #29 refinements): the guard must gate on BOTH `allowsCustomBlocklists` (a lapsed Plus

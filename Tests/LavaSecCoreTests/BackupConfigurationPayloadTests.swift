@@ -99,7 +99,7 @@ final class BackupConfigurationPayloadTests: XCTestCase {
         XCTAssertEqual(configuration.enabledBlocklistIDs, ["blocklistproject-basic", customSource.id])
         XCTAssertEqual(configuration.allowedDomains, ["school.example"])
         XCTAssertEqual(configuration.blockedDomains, ["casino.example"])
-        XCTAssertEqual(configuration.resolverPresetID, DNSResolverPreset.quad9SecureDoH.id)
+        XCTAssertEqual(configuration.resolverPresetID, DNSResolverPreset.quad9UnfilteredDoH.id)
         XCTAssertTrue(configuration.fallbackToDeviceDNS)
         XCTAssertFalse(configuration.keepFilteringCounts)
         XCTAssertFalse(configuration.keepDomainDiagnostics)
@@ -310,5 +310,62 @@ final class BackupConfigurationPayloadTests: XCTestCase {
         XCTAssertFalse(json.contains("ads.example.com"))
         XCTAssertFalse(json.contains("0.0.0.0"))
         XCTAssertFalse(json.contains("latest.txt"))
+    }
+
+    /// A BACKUP IS A PERSISTENCE BOUNDARY, so a foreign resolver id gets the same guard the
+    /// decoder applies.
+    ///
+    /// `restoredConfiguration()` rebuilds through the memberwise initializer, which deliberately
+    /// does NOT normalise, so this path needs its own call. Without it a backup written by a newer
+    /// build restores an id this build cannot represent, and `DNSResolverSettingsView` and
+    /// `AppViewModel.dnsResolverSummaryText` both read that raw id — rendering "Device + Fallback"
+    /// while `ResolverTierTwo` has no fallback at all (Codex review, PR #642).
+    func testRestoringABackupNormalisesAnUnrecognisedResolverID() throws {
+        let data = Data("""
+        {
+          "enabledBlocklistIDs": [],
+          "allowedDomains": [],
+          "blockedDomains": [],
+          "resolverPresetID": "a-preset-a-later-build-added",
+          "fallbackToDeviceDNS": true,
+          "keepFilteringCounts": true,
+          "keepDomainDiagnostics": false,
+          "keepNetworkActivity": true,
+          "protectionEnabledHint": false
+        }
+        """.utf8)
+
+        let restored = try JSONDecoder()
+            .decode(BackupConfigurationPayload.self, from: data)
+            .restoredConfiguration()
+
+        XCTAssertEqual(
+            restored.resolverPresetID, DNSResolverPreset.device.id,
+            "the restored id is what the settings screen reads, so it has to be the real one")
+        XCTAssertEqual(restored.resolverPreset, .device)
+    }
+
+    /// ...and a backup naming a resolver this build DOES support restores it untouched, so the
+    /// guard is not a blanket rewrite that discards a user's real choice on every restore.
+    func testRestoringABackupKeepsARecognisedResolverID() throws {
+        let data = Data("""
+        {
+          "enabledBlocklistIDs": [],
+          "allowedDomains": [],
+          "blockedDomains": [],
+          "resolverPresetID": "google-public-dns",
+          "fallbackToDeviceDNS": true,
+          "keepFilteringCounts": true,
+          "keepDomainDiagnostics": false,
+          "keepNetworkActivity": true,
+          "protectionEnabledHint": false
+        }
+        """.utf8)
+
+        let restored = try JSONDecoder()
+            .decode(BackupConfigurationPayload.self, from: data)
+            .restoredConfiguration()
+
+        XCTAssertEqual(restored.resolverPresetID, DNSResolverPreset.google.id)
     }
 }

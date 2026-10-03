@@ -23,7 +23,15 @@ DEFAULT_XCODEBUILD_UDID = "YOUR_DEVICE_UDID"
 BUNDLE_ID = "com.lavasec.app"
 APP_GROUP = "group.com.lavasec"
 PROJECT_DIR = pathlib.Path(__file__).resolve().parent.parent
-LOG_FILENAME = "vpn-debug-log.jsonl"
+# This script builds/installs and drives a DEBUG build (`build()` uses -configuration Debug),
+# and Debug/QA builds write the log inside the group container's `Library/` — the only subtree
+# `devicectl` can address (LavaSecAppGroup.vpnDebugLogFilename). So the smoke reads exactly that
+# QA layout and ignores the Release root path entirely: reading the QA layout means a stale root
+# `vpn-debug-log.jsonl` left by a prior Release install (the App Group container survives
+# reinstalls) can never shadow the fresh probe log, and there is no ambiguity to pin. (Codex,
+# #528.) The two-layout fallback lives in vpn-latency-report.py, which reads whatever build is
+# installed rather than driving a known one.
+QA_LOG_FILENAME = "Library/vpn-debug-log.jsonl"
 
 REQUIRED_EVENTS = [
     "app-init",
@@ -79,10 +87,12 @@ def run(cmd, check=True, capture=False):
 
 
 def build(udid):
+    run(["bash", str(PROJECT_DIR / "ReactNative/scripts/prepare-full-app.sh"),
+         str(PROJECT_DIR / ".build/rn-prepare"), str(PROJECT_DIR / ".build/rn-evidence")])
     print("[smoke] building Debug app for device...")
     run([
         "xcodebuild", "build",
-        "-project", str(PROJECT_DIR / "LavaSec.xcodeproj"),
+        "-workspace", str(PROJECT_DIR / "ReactNative/native-app/LavaSecRN.xcworkspace"),
         "-scheme", "LavaSec",
         "-destination", f"platform=iOS,id={udid}",
         "-configuration", "Debug",
@@ -94,7 +104,7 @@ def build(udid):
 def built_app_path(udid):
     result = run([
         "xcodebuild",
-        "-project", str(PROJECT_DIR / "LavaSec.xcodeproj"),
+        "-workspace", str(PROJECT_DIR / "ReactNative/native-app/LavaSecRN.xcworkspace"),
         "-scheme", "LavaSec",
         "-destination", f"platform=iOS,id={udid}",
         "-configuration", "Debug",
@@ -123,11 +133,14 @@ def launch(devicectl_id):
 
 
 def pull_log(devicectl_id, destination):
+    # Reads only the QA layout (QA_LOG_FILENAME). Because the smoke drives a Debug build that
+    # writes exactly there, the baseline and every poll read the same device-side file by
+    # construction, and a stale Release-root log can never shadow the probe log.
     result = run(["xcrun", "devicectl", "device", "copy", "from",
                   "--device", devicectl_id,
                   "--domain-type", "appGroupDataContainer",
                   "--domain-identifier", APP_GROUP,
-                  "--source", LOG_FILENAME,
+                  "--source", QA_LOG_FILENAME,
                   "--destination", str(destination)], check=False, capture=True)
     return result.returncode == 0 and destination.exists()
 
@@ -263,6 +276,7 @@ def main():
         if pull_log(args.device, baseline_path):
             with open(baseline_path, errors="ignore") as handle:
                 baseline_lines = sum(1 for _ in handle)
+            print(f"[smoke] baseline from '{QA_LOG_FILENAME}' ({baseline_lines} lines)")
 
         launch(args.device)
         events, error = wait_for_probe(args.device, baseline_lines, args.timeout, workdir)

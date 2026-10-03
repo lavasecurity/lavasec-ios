@@ -4,6 +4,24 @@ import XCTest
 @testable import LavaSecKit
 
 final class CompactFilterSnapshotTests: XCTestCase {
+    func testGuardedChildRemainsInCompactProtectedSummaryUnderAllowedParent() throws {
+        let snapshot = CompactFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(
+                configuration: AppConfiguration(allowedDomains: ["example.com"]), catalog: nil
+            ),
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            resolver: .google,
+            blockRules: CompactDomainRuleSet(suffixDomains: ["evil.example.com"]),
+            allowRules: CompactDomainRuleSet(suffixDomains: ["example.com"]),
+            nonAllowableThreatRules: CompactDomainRuleSet(suffixDomains: ["evil.example.com"])
+        )
+
+        XCTAssertEqual(snapshot.summary.blockedDomainRuleCount, 1)
+        XCTAssertEqual(snapshot.decision(forNormalizedDomain: "evil.example.com").reason, .threatGuardrail)
+        XCTAssertEqual(snapshot.decision(forNormalizedDomain: "safe.example.com").action, .allow)
+        XCTAssertEqual(try CompactFilterSnapshot.readSummary(from: snapshot.encodedData()).blockedDomainRuleCount, 1)
+    }
+
     func testReadSyncBootstrapInfoMatchesSummaryWithoutDecoding() throws {
         let snapshot = CompactFilterSnapshot(
             identity: PreparedFilterSnapshotIdentity.make(
@@ -37,7 +55,7 @@ final class CompactFilterSnapshotTests: XCTestCase {
 
     func testDecodeRejectsUnsortedRuleTable() throws {
         // Two subdomain (suffix) rules of equal length → blockRules has 0 exact + 2
-        // suffix entries (6 bytes each), byte-sorted as a/b. The binary-search lookup
+        // suffix entries (4-byte offsets each), byte-sorted as a/b. The binary-search lookup
         // relies on that order, so a corrupted (unsorted) table must fail CLOSED.
         var blockRules = DomainRuleSet()
         try blockRules.insert(domain: "a.example.com", matchesSubdomains: true)
@@ -51,18 +69,82 @@ final class CompactFilterSnapshotTests: XCTestCase {
         XCTAssertNoThrow(try CompactFilterSnapshot.decode(from: data), "the sorted table must decode fine")
 
         // Layout: magic(8) + version(4) + metaLen(4) + meta(N) + blockRules table
-        // [exactCount(4) + suffixCount(4) + suffix entries…]. Swap the two 6-byte
-        // suffix-entry records to break the sorted order.
+        // [exactCount(4) + suffixCount(4) + suffix entries…]. Swap the two 4-byte
+        // suffix-entry offsets to break the sorted order.
         var bytes = [UInt8](data)
         let metaLen = Int(UInt32(bytes[12]) | (UInt32(bytes[13]) << 8) | (UInt32(bytes[14]) << 16) | (UInt32(bytes[15]) << 24))
         let entryStart = 24 + metaLen
-        for offset in 0..<6 {
-            bytes.swapAt(entryStart + offset, entryStart + 6 + offset)
+        for offset in 0..<4 {
+            bytes.swapAt(entryStart + offset, entryStart + 4 + offset)
         }
 
         XCTAssertThrowsError(try CompactFilterSnapshot.decode(from: Data(bytes))) { error in
             XCTAssertEqual(error as? CompactFilterSnapshotError, .invalidRuleTable)
         }
+    }
+
+    /// 🔴 The migration-safety gate of the 8→4-byte entry-table change (#538). The on-disk entry
+    /// layout went from 6 bytes (UInt32 offset + UInt16 length) to a bare 4-byte UInt32 offset
+    /// into a length-prefixed blob, and `fileVersion` bumped 1→2. The ONLY thing stopping the
+    /// v2 reader from misparsing a v1 artifact a prior build left on disk is the
+    /// `version == fileVersion` guard on EVERY read path. Without this test, dropping the version
+    /// bump or loosening the guard to `<=` keeps the whole suite green (round-trips stay
+    /// internally consistent) while a v1 artifact is read as 4-byte entries — wrong domains, i.e.
+    /// fail-open filtering (INV-DNS-1). Pins the absolute version AND rejection at all readers.
+    func testDecodeRejectsAStaleV1Artifact() throws {
+        var blockRules = DomainRuleSet()
+        try blockRules.insert(domain: "a.example.com", matchesSubdomains: true)
+        let prepared = PreparedFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(
+                configuration: AppConfiguration(enabledBlocklistIDs: ["source-a"]), catalog: nil),
+            snapshot: FilterSnapshot(blockRules: blockRules)
+        )
+        var bytes = [UInt8](try CompactFilterSnapshot(preparedSnapshot: prepared).encodedData())
+
+        // The version is a little-endian UInt32 at bytes 8..<12 (after the 8-byte magic). A
+        // freshly encoded artifact carries the CURRENT version — pin its absolute value so a
+        // silently-reverted bump is caught here, not only in the relative manifest checks.
+        XCTAssertEqual(bytes[8...11].map { $0 }, [2, 0, 0, 0], "fileVersion must be 2")
+        XCTAssertNoThrow(try CompactFilterSnapshot.decode(from: Data(bytes)))
+
+        // Rewrite the version to 1 (the pre-#538 layout) and confirm every reader rejects it.
+        bytes[8] = 1
+        let v1 = Data(bytes)
+        XCTAssertThrowsError(try CompactFilterSnapshot.decode(from: v1)) {
+            XCTAssertEqual($0 as? CompactFilterSnapshotError, .unsupportedVersion(1))
+        }
+        XCTAssertThrowsError(try CompactFilterSnapshot.readSummary(from: v1)) {
+            XCTAssertEqual($0 as? CompactFilterSnapshotError, .unsupportedVersion(1))
+        }
+        XCTAssertThrowsError(try CompactFilterSnapshot.readSyncBootstrapInfo(from: v1)) {
+            XCTAssertEqual($0 as? CompactFilterSnapshotError, .unsupportedVersion(1))
+        }
+    }
+
+    /// The defining constraint of the 4-byte format: the domain length rides in the blob as a
+    /// single UInt8 prefix, so a maximum-length normalized domain (DNS caps at 253 bytes) must
+    /// still round-trip. A regression in the prefix (an off-by-one, or reverting to a 2-byte
+    /// length that then misreads the offset) breaks this. (#538)
+    func testMaxLengthDomainRoundTripsThroughTheOneBytePrefix() throws {
+        let label = String(repeating: "a", count: 63)                 // max DNS label
+        let maxDomain = "\(label).\(label).\(label).\(String(repeating: "b", count: 61))" // 253 bytes
+        XCTAssertEqual(maxDomain.utf8.count, 253)
+
+        let rules = CompactDomainRuleSet(exactDomains: [maxDomain, "short.example.com"], suffixDomains: [])
+        let snapshot = CompactFilterSnapshot(
+            identity: PreparedFilterSnapshotIdentity.make(
+                configuration: AppConfiguration(enabledBlocklistIDs: []), catalog: nil),
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            resolver: .google,
+            blockRules: rules,
+            allowRules: CompactDomainRuleSet(exactDomains: [], suffixDomains: []),
+            nonAllowableThreatRules: CompactDomainRuleSet(exactDomains: [], suffixDomains: [])
+        )
+        let decoded = try CompactFilterSnapshot.decode(from: snapshot.encodedData())
+        XCTAssertTrue(decoded.blockRules.containsNormalized(maxDomain),
+            "a 253-byte domain must survive the 1-byte length prefix")
+        XCTAssertTrue(decoded.blockRules.containsNormalized("short.example.com"))
+        XCTAssertFalse(decoded.blockRules.containsNormalized("not.present.example.com"))
     }
 
     func testCompactSnapshotRoundTripPreservesDecisionOrdering() throws {
@@ -451,7 +533,7 @@ final class CompactFilterSnapshotTests: XCTestCase {
         XCTAssertEqual(summary.blockedDomainRuleCount, 3)
     }
 
-    func testCompactSummarySubtractsAllowedExceptionEvenWhenGuardrailMatches() throws {
+    func testCompactSummaryKeepsBlockedRuleWhenGuardrailOverridesAllowance() throws {
         var blockRules = DomainRuleSet()
         try blockRules.insert(domain: "danger.example.com", matchesSubdomains: true)
 
@@ -478,7 +560,7 @@ final class CompactFilterSnapshotTests: XCTestCase {
 
         XCTAssertEqual(summary.blockRuleCount, 1)
         XCTAssertEqual(summary.allowRuleCount, 1)
-        XCTAssertEqual(summary.blockedDomainRuleCount, 0)
+        XCTAssertEqual(summary.blockedDomainRuleCount, 1)
     }
 
     func testCompactSummaryRecomputesStoredProtectedCount() throws {

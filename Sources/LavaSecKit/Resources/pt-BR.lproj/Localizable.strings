@@ -6,7 +6,7 @@
 "notif.body.reconnectTitle" = "Reconectar o Lava";
 "notif.body.reconnectMessage" = "O DNS não está respondendo nesta rede. Toque para reconectar a proteção.";
 "notif.body.dnsSlowTitle" = "O DNS do Lava está lento";
-"notif.body.dnsSlowMessage" = "O resolvedor de DNS selecionado está respondendo lentamente. Toque para reconectar a proteção.";
+"notif.body.dnsSlowMessage" = "Seu provedor de DNS está respondendo lentamente. Toque para reconectar a proteção.";
 
 /* Switch Filter App Intent result dialogs (Shortcuts/Siri/Automations), pre-resolved to the
    pinned app language so Shortcuts renders them in the app's language, not the system locale. */
@@ -16,19 +16,19 @@
 "dialog.filterSwitchDisallowed" = "Não foi possível trocar para %@. Abra a Lava para verificar as configurações de filtro.";
 
 /* Live Activity / widget UI (shared via Bundle.module). */
-"widget.state.on" = "Lava Security está ativada";
-"widget.state.paused" = "Lava Security está pausado";
-"widget.state.restartingTitle" = "Reiniciando…";
-"widget.a11y.restarting" = "Lava Security está reiniciando";
+"widget.state.on" = "O Lava está ativado";
+"widget.state.paused" = "O Lava está pausado";
+"widget.state.restartingTitle" = "Reconectando…";
+"widget.a11y.restarting" = "O Lava está reconectando";
 "widget.status.on" = "Ativada";
 "widget.status.paused" = "Pausado";
-"widget.status.restarting" = "Reiniciando";
+"widget.status.restarting" = "Reconectando";
 "widget.action.resume" = "Retomar";
-"widget.action.restart" = "Reiniciar";
+"widget.action.restart" = "Reconectar";
 "widget.action.pauseForMinutes" = "Pausar por %d min";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
 "widget.action.pauseForMinutesShort" = "%d min";
-"a11y.shieldGuardian" = "Guardião escudo do Lava";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
 "core.domainError.alreadyBlocked" = "%@ já está nos seus domínios bloqueados.";
@@ -43,12 +43,12 @@
 "core.resolver.badStamp" = "Não foi possível ler o DNS stamp. Verifique o stamp e tente novamente.";
 "core.resolver.missingDoHPath" = "As URLs de DNS-over-HTTPS precisam incluir um caminho, como /dns-query.";
 "core.resolver.credentialsNotAllowed" = "As URLs de DNS personalizadas não podem incluir nomes de usuário ou senhas.";
-"core.resolver.secondaryTransportMismatch" = "O DNS secundário precisa usar o mesmo transporte do DNS primário.";
+"core.resolver.secondaryTransportMismatch" = "O servidor secundário precisa usar o mesmo transporte do servidor primário.";
 "core.endpoint.credentialsNotAllowed" = "URLs com nomes de usuário ou senhas não são compatíveis.";
-"core.endpoint.localhostNotAllowed" = "O localhost não pode ser usado como resolvedor DNS aqui.";
+"core.endpoint.localhostNotAllowed" = "O localhost não pode ser usado como servidor DNS aqui.";
 "core.endpoint.privateNetworkNotAllowed" = "As URLs de listas de bloqueio personalizadas precisam usar um host público.";
-"core.endpoint.unusableResolverAddress" = "Insira um endereço de resolvedor DNS válido, não um endereço de loopback, multicast ou não especificado.";
-"core.endpoint.invalidResolverHost" = "Insira um host de resolvedor DNS válido.";
+"core.endpoint.unusableResolverAddress" = "Insira um endereço de servidor DNS válido, não um endereço de loopback, multicast ou não especificado.";
+"core.endpoint.invalidResolverHost" = "Insira um host de servidor DNS válido.";
 "core.customBlocklist.invalidURL" = "Insira uma URL de lista de bloqueio válida.";
 "core.customBlocklist.unsupportedScheme" = "As listas de bloqueio personalizadas precisam usar HTTPS.";
 "core.customBlocklist.missingHost" = "A URL da lista de bloqueio personalizada precisa incluir um host.";
@@ -57,18 +57,88 @@
 "core.domain.empty" = "O domínio está vazio.";
 "core.domain.tooLong" = "O domínio é muito longo.";
 "core.domain.needsTwoLabels" = "Insira um domínio completo, como example.com.";
-"core.domain.invalidLabel" = "Rótulo de domínio inválido: %@";
+"core.domain.invalidLabel" = "“%@” não é válido em um nome de domínio.";
 "core.domain.ipNotAllowed" = "Endereços IP não são compatíveis aqui.";
-"core.filterBudget.exceedsDeviceMemory" = "Esta seleção precisa de cerca de %1$@ regras de filtro, mais do que seu dispositivo comporta (%2$@). Remova uma lista para ativar a proteção.";
+"core.filterBudget.exceedsDeviceMemory" = "Esta seleção precisa de cerca de %1$@ regras de filtro, mais do que seu dispositivo comporta (%2$@). Remova uma lista de bloqueio para ativar a proteção.";
 "core.filterBudget.exceedsTierLimit" = "Suas listas de bloqueio usam cerca de %1$@ de %2$@ regras de filtro. %3$@";
-"core.filterBudget.action.remove" = "Remova uma lista para ativar a proteção.";
-"core.filterBudget.action.removeOrUpgrade" = "Remova uma lista ou faça upgrade para o Plus.";
+"core.filterBudget.action.remove" = "Remova uma lista de bloqueio para ativar a proteção.";
+"core.filterBudget.action.removeOrUpgrade" = "Remova uma lista de bloqueio ou assine o Lava Plus.";
 "core.filterBudget.largestSuffix" = " Maior: %@.";
 "core.catalogSync.invalidBlocklistEncoding" = "A lista de bloqueio baixada de %@ não é um UTF-8 válido.";
 "core.catalogSync.blocklistTooLarge" = "A lista de bloqueio baixada de %1$@ é muito grande (%2$lld bytes).";
 "core.catalogSync.blocklistExceedsRuleLimit" = "A lista de bloqueio de %1$@ tem mais de %2$lld regras. Reduza o tamanho dela ou remova-a.";
-"core.catalogSync.noRulesAvailable" = "Ainda não há filtros baixados e ativados disponíveis.";
+"core.catalogSync.noRulesAvailable" = "Ainda não há listas de bloqueio baixadas disponíveis.";
 "core.catalogSync.customBlocklistUnavailable" = "Não foi possível carregar a lista de bloqueio personalizada “%1$@”. %2$@";
-"core.domainError.freeBlockedLimit" = "A proteção gratuita inclui %lld domínios bloqueados adicionais.";
-"core.domainError.freeAllowedLimit" = "A proteção gratuita inclui %lld exceções permitidas.";
+"core.domainError.freeBlockedLimit" = "O plano gratuito inclui %lld domínios bloqueados adicionais.";
+"core.domainError.freeAllowedLimit" = "O plano gratuito inclui %lld exceções permitidas.";
 "core.backup.lastUploaded" = "Último envio %@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "As decisões de bloqueio do Lava acontecem neste iPhone. O provedor de DNS que você escolheu, atualmente %@, pode receber solicitações DNS permitidas, tratadas conforme a política desse provedor.";
+"core.disclosure.resolverNetworkProvided" = "As decisões de bloqueio do Lava acontecem neste iPhone. Os servidores DNS que este iPhone obteve de um Wi-Fi, da rede móvel ou dos ajustes do sistema podem receber solicitações DNS permitidas. Um servidor do Lava nunca.";
+"core.disclosure.resolverSelfEntered" = "As decisões de bloqueio do Lava acontecem neste iPhone. O DNS personalizado que você configurou pode receber solicitações DNS permitidas.";
+"core.disclosure.dnsScope" = "O Lava verifica nomes de domínio, não URLs completos, caminhos de página, texto de página, formulários ou mensagens. Ele pode bloquear um domínio inteiro, mas não uma única página de um domínio permitido.";
+"core.disclosure.vpn" = "O iPhone chama isto de VPN porque o Lava precisa de um caminho local protegido para verificar nomes de domínio. Seu tráfego de navegação não é enviado a servidores do Lava.";
+"core.disclosure.encryptedFallbackRecipient" = "O DNS alternativo criptografado que você escolheu (%@) também pode receber solicitações DNS permitidas.";
+"core.disclosure.chainedRecipient" = "Enquanto o Lava está encadeado a outra VPN, os servidores DNS da configuração dessa VPN são os primeiros que podem receber solicitações DNS permitidas. O Lava não pode dizer quem os opera.";
+"core.disclosure.fallbackNetworkProvided" = "Os servidores DNS que este iPhone obteve da rede também podem receber solicitações permitidas.";
+"core.disclosure.plainFallbackRecipient" = "O DNS alternativo que você escolheu (%@) também pode receber solicitações DNS permitidas. Ele não é criptografado.";
+"core.disclosure.upstreamFilteringRecipient" = "O %@ aplica a própria filtragem, portanto pode bloquear um domínio que o Lava permitiu.";
+"core.disclosure.selfEnteredRecipients" = "Você mesmo inseriu esses servidores DNS, então o Lava não pode dizer quem os opera. Cada endereço que você inseriu pode receber solicitações DNS permitidas.";
+"core.disclosure.selfEnteredRecipient" = "Você mesmo inseriu esse servidor DNS, então o Lava não pode dizer quem o opera.";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "O Lava precisa de atenção";
+"notif.body.filteringUnavailableMessage" = "As listas de bloqueio selecionadas ainda excedem o limite de regras, então o DNS está bloqueado. Abra o Lava para revisar suas listas de bloqueio.";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "Uma lista de bloqueio personalizada precisa de uma atualização que não pode ser feita em segundo plano, então o DNS está bloqueado. Abra o Lava para atualizar suas listas de bloqueio personalizadas.";
+
+"widget.action.confirmPause" = "Confirmar";
+"Activity" = "Atividade";
+"Confirmation" = "Confirmação";
+
+"A saved configuration's key is unavailable. Import it again." = "A chave de uma configuração salva está indisponível. Importe-a novamente.";
+"Choose a different DNS for the second tier." = "Escolha um DNS diferente para o segundo nível.";
+"Choose a valid DNS provider and transport." = "Escolha um provedor de DNS e um transporte válidos.";
+"Custom DNS requires Lava Plus." = "DNS personalizado requer Lava Plus.";
+"Keep one primary DNS and, optionally, one secondary DNS." = "Mantenha um DNS principal e, opcionalmente, um secundário.";
+"No accepted blocklist checksum is available for %@." = "Nenhuma soma de verificação aceita está disponível para a lista de %@.";
+"No enabled blocklist source is available for %@." = "Nenhuma fonte de lista ativada está disponível para %@.";
+"No saved Lava Security catalog is available yet." = "Ainda não há um catálogo salvo do Lava Security.";
+"Supabase Auth returned status %lld." = "A autenticação do Supabase retornou o status %lld.";
+"Supabase Auth returned status %lld: %@" = "A autenticação do Supabase retornou o status %lld: %@";
+"The Lava Security catalog could not be read." = "Não foi possível ler o catálogo do Lava Security.";
+"The Lava Security catalog server returned HTTP %lld." = "O servidor do catálogo do Lava Security retornou HTTP %lld.";
+"The Supabase Auth endpoint is not valid." = "O endpoint de autenticação do Supabase é inválido.";
+"The Supabase Auth response was not valid." = "A resposta de autenticação do Supabase era inválida.";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "O download excedeu o limite de %lld MB (%lld bytes).";
+"The downloaded blocklist checksum did not match for %@." = "A soma de verificação da lista baixada de %@ não corresponde.";
+"The first configuration needs an IP endpoint address." = "A primeira configuração precisa de um endereço IP de endpoint.";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "AllowedIPs da primeira configuração deve incluir o endpoint da segunda VPN.";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "Para dois saltos VPN, o MTU da primeira configuração deve ser de pelo menos 1340.";
+"The saved configurations changed. Reopen the editor and try again." = "As configurações salvas mudaram. Reabra o editor e tente novamente.";
+"The second configuration needs an IPv4 endpoint address." = "A segunda configuração precisa de um endereço IPv4 de endpoint.";
+"You can add up to two WireGuard configurations." = "Você pode adicionar até duas configurações WireGuard.";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@ é uma fonte de terceiros exibida para atribuição e identificação. Licença: %2$@. Proprietário ou projeto: %3$@.";
+"Third-party source project" = "Projeto de origem de terceiros";
+
+"Latest encrypted settings backup size is %@." = "O tamanho do último backup criptografado das configurações é %@.";
+"Added %@" = "%@ adicionado";
+"This domain will be blocked after you save." = "Este domínio será bloqueado após salvar.";
+"This exception will take effect after you save." = "Esta exceção entrará em vigor após salvar.";
+"Pending setup" = "Configuração pendente";
+"Set up encrypted backup for this account." = "Configure o backup criptografado para esta conta.";
+"Off" = "Desativado";
+"Sign in to set up encrypted backup." = "Entre para configurar o backup criptografado.";
+"Not uploaded yet" = "Ainda não enviado";
+"Encrypted locally. Back up now to store a copy online." = "Criptografado localmente. Faça backup agora para guardar uma cópia on-line.";
+"Ready after sign-in" = "Pronto após o login";
+"Encrypted locally. Sign in to upload." = "Criptografado localmente. Entre para enviar.";
+"Needs attention" = "Requer atenção";
+"Domain cannot be added" = "Não é possível adicionar este domínio";
+"Already blocked" = "Já bloqueado";
+"Blocked domain limit reached" = "Limite de domínios bloqueados atingido";
+"Exception cannot be added" = "Não é possível adicionar esta exceção";
+"Already allowed" = "Já permitido";
+"Allowed exception limit reached" = "Limite de exceções permitidas atingido";

@@ -54,20 +54,20 @@ final class FilterPreparationPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(Policy.stepCount, 4.0, accuracy: 0.001)
 
         // Each phase begins at its quarter boundary...
-        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.0), 0.0, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.05), 0.0, accuracy: 0.001)
         XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.42), 1.0 / 4, accuracy: 0.001)
         XCTAssertEqual(Policy.equalStepsProgress(phase: .saving, rawProgress: 0.86), 2.0 / 4, accuracy: 0.001)
 
         // ...and fills to the next boundary at the top of its raw range.
-        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.42), 1.0 / 4, accuracy: 0.001)
-        XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.86), 2.0 / 4, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.2), 1.0 / 4, accuracy: 0.001)
+        XCTAssertEqual(Policy.equalStepsProgress(phase: .compiling, rawProgress: 0.72), 2.0 / 4, accuracy: 0.001)
 
         // Saving now tops out at 3/4 — the terminal Success step (set by the caller as progress 1)
         // owns the final quarter 3/4 → 1, so the Success fill is a clean quarter, not a jump.
         XCTAssertEqual(Policy.equalStepsProgress(phase: .saving, rawProgress: 1.0), 3.0 / 4, accuracy: 0.001)
 
         // A mid-phase checkpoint stays inside that phase's own quarter.
-        let downloadMid = Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.2)
+        let downloadMid = Policy.equalStepsProgress(phase: .downloading, rawProgress: 0.125)
         XCTAssertGreaterThan(downloadMid, 0)
         XCTAssertLessThan(downloadMid, 1.0 / 4)
 

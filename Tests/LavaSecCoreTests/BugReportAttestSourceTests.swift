@@ -24,7 +24,7 @@ final class BugReportAttestSourceTests: XCTestCase {
         // hardening) and applied to each endpoint attempt.
         XCTAssertTrue(submitAndAttestBlock.contains("let bodyHash = Data(SHA256.hash(data: data))"))
         XCTAssertTrue(submitAndAttestBlock.contains("await Self.acquireAppAttestation(bodyHash: bodyHash)"))
-        XCTAssertTrue(submitAndAttestBlock.contains("attestation?.apply(to: &request)"))
+        XCTAssertTrue(submitAndAttestBlock.contains("attestation.apply(to: &request)"))
         // A 429 maps to a friendly, actionable message, not the raw HTTP dump.
         XCTAssertTrue(submitAndAttestBlock.contains("httpResponse.statusCode == 429"))
         XCTAssertTrue(submitAndAttestBlock.contains("Please wait a moment and try again."))
@@ -39,7 +39,7 @@ final class BugReportAttestSourceTests: XCTestCase {
         XCTAssertTrue(submitAndAttestBlock.contains("request.timeoutInterval = appAttestChallengeTimeout"))
     }
 
-    func testAppAttestClientUsesDeviceCheckAndDegradesGracefully() throws {
+    func testAppAttestClientUsesDeviceCheckAndFailsExplicitlyWithinDeadline() throws {
         let source = try readSource(.diagnosticsController)
         let clientBlock = try sourceBlock(
             in: source,
@@ -52,23 +52,19 @@ final class BugReportAttestSourceTests: XCTestCase {
 
         XCTAssertTrue(clientBlock.contains("DCAppAttestService.shared"))
         XCTAssertTrue(clientBlock.contains("service.isSupported"))
-        XCTAssertTrue(clientBlock.contains("generateKey()"))
-        XCTAssertTrue(clientBlock.contains("attestKey(keyId, clientDataHash: clientDataHash)"))
+        XCTAssertTrue(clientBlock.contains("service.generateKey { keyId, error in"))
+        XCTAssertTrue(clientBlock.contains("service.attestKey(keyId, clientDataHash: clientDataHash)"))
         // Replay hardening: clientDataHash = SHA256( utf8(challenge) ‖ bodyHash ), where
         // bodyHash = SHA256(request body). Must stay byte-identical to the server recompute
         // in backend/worker/src/app-attest.ts, so pin the exact construction here.
         XCTAssertTrue(clientBlock.contains("var clientData = Data(challenge.utf8)"))
         XCTAssertTrue(clientBlock.contains("clientData.append(bodyHash)"))
         XCTAssertTrue(clientBlock.contains("SHA256.hash(data: clientData)"))
-        // Both fail-open paths are present: unsupported hardware (Simulator / no Secure
-        // Enclave) and any thrown error during key-gen/attestation. The caller then submits
-        // unattested. Assert the two guards plus a count of exactly two `return nil` in the
-        // tightly-bounded enum — so deleting either fail-open path fails the test, without a
-        // brittle whitespace-exact multi-line match that a re-indent would break.
-        XCTAssertTrue(clientBlock.contains("guard service.isSupported else {"))
-        XCTAssertTrue(clientBlock.contains("} catch {"))
-        XCTAssertEqual(clientBlock.components(separatedBy: "return nil").count - 1, 2,
-                       "AppAttestClient should have exactly two fail-open `return nil` paths")
+        XCTAssertTrue(clientBlock.contains("throw BugReportAttestationError.unsupported"))
+        XCTAssertTrue(clientBlock.contains("asyncAfter(deadline: .now() + 10)"))
+        XCTAssertTrue(clientBlock.contains("reply.finish(.failure(.service))"))
+        XCTAssertTrue(clientBlock.contains("continuation = nil"))
+        XCTAssertFalse(clientBlock.contains("return nil"))
     }
 
     // MARK: - helpers

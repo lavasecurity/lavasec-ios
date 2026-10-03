@@ -18,13 +18,24 @@ package enum DeepLinkEffect: CaseIterable, Sendable {
 }
 
 /// Where an `import` deeplink drops the user inside the importer. Mirrors the
-/// app-side `ImportFiltersStartMode`, but carries **no payload** — the filter
-/// code is always supplied in-app (scanned, pasted, or typed), so an untrusted
-/// configuration never travels inside a URL.
-public enum LavaImportDeepLinkEntry: String, Equatable, Sendable {
+/// app-side `ImportFiltersStartMode`.
+///
+/// `chooser`, `scan`, and `enterCode` are payload-free on-ramps. `sharedConfiguration`
+/// carries a configuration already decoded by ``ShareableFilterLink`` from the
+/// fragment of the canonical import link — the only place a payload may ride,
+/// because URL fragments are never transmitted in HTTP requests.
+///
+/// Carrying a payload does **not** widen what a link may do. The effect stays
+/// ``DeepLinkEffect/stage``, so a shared configuration can only ever be opened
+/// for review behind the importer's own confirmation and auth gates. The `LF1-`
+/// integrity tag is a corruption guard, not a signature: nothing here attests to
+/// *who* authored a payload, only that it arrived intact.
+/// pinned: AppDeepLinkEffectTests.testCarryingAPayloadDoesNotUpgradeTheEffect
+public enum LavaImportDeepLinkEntry: Equatable, Sendable {
     case chooser
     case scan
     case enterCode
+    case sharedConfiguration(ShareableFilterConfiguration)
 
     /// Maps the path component that follows `import/`. The bare `import` route
     /// has no component and resolves to `.chooser` in the parser, so only the
@@ -44,12 +55,14 @@ public enum LavaImportDeepLinkEntry: String, Equatable, Sendable {
 public enum LavaSettingsDeepLink: Equatable, Sendable {
     case account
     case upgrade
+    case customization
     case dnsResolver
     case privacyData
     case security
     case feedback
     case legalNotices
     case nerdStats
+    case networkActivity
 
     public init?(pathComponent: String) {
         switch pathComponent {
@@ -57,6 +70,8 @@ public enum LavaSettingsDeepLink: Equatable, Sendable {
             self = .account
         case "upgrade":
             self = .upgrade
+        case "customization":
+            self = .customization
         case "dns-resolver":
             self = .dnsResolver
         case "privacy-data", "clear-local-logs":
@@ -69,6 +84,8 @@ public enum LavaSettingsDeepLink: Equatable, Sendable {
             self = .legalNotices
         case "nerd-stats":
             self = .nerdStats
+        case "network-activity":
+            self = .networkActivity
         default:
             return nil
         }
@@ -77,6 +94,7 @@ public enum LavaSettingsDeepLink: Equatable, Sendable {
 
 public enum LavaAppDeepLink: Equatable, Sendable {
     case guardPanel
+    case explore
     case filters
     case activity
     case settings(LavaSettingsDeepLink?)
@@ -87,7 +105,7 @@ public enum LavaAppDeepLink: Equatable, Sendable {
     /// deeplink cannot compromise the hot path.
     package var effect: DeepLinkEffect {
         switch self {
-        case .guardPanel, .filters, .activity, .settings:
+        case .guardPanel, .explore, .filters, .activity, .settings:
             return .navigate
         case .importFilters:
             return .stage
@@ -106,6 +124,9 @@ public enum LavaAppDeepLink: Equatable, Sendable {
                 return nil
             }
             self = .guardPanel
+        case "explore":
+            guard components.count == 1 else { return nil }
+            self = .explore
         case "filters":
             guard components.count == 1 else {
                 return nil
@@ -131,10 +152,27 @@ public enum LavaAppDeepLink: Equatable, Sendable {
             }
             self = .settings(settingsRoute)
         case "import":
+            // A shared configuration may arrive **only** in the fragment of the
+            // canonical https import link, and only on the bare route. Every byte
+            // of that validation belongs to `ShareableFilterLink`; re-implementing
+            // fragment handling here would create a second, unaudited way in.
+            //
+            // A malformed payload fails the whole link rather than falling back to
+            // `.chooser` — silently swallowing a corrupted share would look like a
+            // working link to the recipient.
+            if Self.carriesFragment(url) {
+                guard components.count == 1,
+                      let configuration = try? ShareableFilterLink.decode(url.absoluteString)
+                else {
+                    return nil
+                }
+                self = .importFilters(.sharedConfiguration(configuration))
+                return
+            }
+
             // Bare `import` opens the method chooser; `import/<entry>` jumps to a
-            // specific entry. The route never carries a filter code — it only
-            // surfaces the importer, which sanitizes + reviews + auth-gates any
-            // apply in-app.
+            // specific entry. Neither carries a code — they only surface the
+            // importer, which sanitizes + reviews + auth-gates any apply in-app.
             if components.count == 1 {
                 self = .importFilters(.chooser)
                 return
@@ -149,6 +187,13 @@ public enum LavaAppDeepLink: Equatable, Sendable {
         default:
             return nil
         }
+    }
+
+    /// Whether `url` has a fragment at all — including an empty one, so a bare
+    /// trailing `#` is treated as a malformed payload rather than a clean route.
+    /// Reads the percent-encoded form to match `ShareableFilterLink`'s own check.
+    private static func carriesFragment(_ url: URL) -> Bool {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedFragment != nil
     }
 
     private static func routeComponents(from url: URL) -> [String] {

@@ -14,6 +14,66 @@ public enum HeadlessFocusSwitchOutcome: String, Equatable, Sendable {
     case disallowed
 }
 
+/// Lock-protected mutable cell shared only by the publish callback and its awaiting caller.
+private final class FocusSwitchDiagnosticEventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var event: FocusSwitchDiagnosticEvent?
+
+    func store(_ event: FocusSwitchDiagnosticEvent) {
+        lock.lock()
+        self.event = event
+        lock.unlock()
+    }
+
+    func load() -> FocusSwitchDiagnosticEvent? {
+        lock.lock()
+        defer { lock.unlock() }
+        return event
+    }
+}
+
+/// Records the pair actually written at the publication boundary, including on a later flip error.
+/// The awaiting caller uses its generation to fence a rollback against concurrent newer writers.
+private final class FocusSwitchCommittedStateBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: (configuration: AppConfiguration, library: FilterLibrary)?
+
+    func store(_ value: (configuration: AppConfiguration, library: FilterLibrary)) {
+        lock.lock()
+        state = value
+        lock.unlock()
+    }
+
+    func load() -> (configuration: AppConfiguration, library: FilterLibrary)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+}
+
+/// Immutable callback context. `UserDefaults` is documented thread-safe but lacks a Sendable
+/// conformance; every access is additionally ordered by the dedicated cross-process lock.
+private final class FocusSwitchDiagnosticEventCapture: @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let orderingLockURL: URL
+    private let now: @Sendable () -> Date
+
+    init(
+        now: @escaping @Sendable () -> Date,
+        defaults: UserDefaults,
+        orderingLockURL: URL
+    ) {
+        self.now = now
+        self.defaults = defaults
+        self.orderingLockURL = orderingLockURL
+    }
+
+    func capture() -> FocusSwitchDiagnosticEvent? {
+        FocusSwitchDiagnostics.captureEvent(
+            in: defaults, orderingLockURL: orderingLockURL, now: now)
+    }
+}
+
 /// The pure, extension-safe engine for a Focus-driven warm filter switch.
 ///
 /// This is the relocation of `AppViewModel.performHeadlessFocusFilterSwitch` out of the app target so a
@@ -49,12 +109,23 @@ public enum HeadlessFocusFilterSwitchEngine {
         internal let configurationWriteLockURL: URL
         /// Cross-process lock for the pending-switch MARKER record/clear (LAV-100 Phase 4).
         internal let pendingMarkerLockURL: URL
+        /// Terminal cross-process order for diagnostic event capture versus generation clear.
+        internal let focusDiagnosticOrderingLockURL: URL
         internal let snapshotFilename: String
         internal let compactSnapshotFilename: String
         internal let defaults: UserDefaults
         internal let catalogSyncFreshnessInterval: TimeInterval
         /// Clock, injectable for tests.
         internal let now: @Sendable () -> Date
+        /// Clock for Release-visible diagnostic event timestamps. Kept separate from `now` because
+        /// replay uses `now` for the original pending-marker identity.
+        internal let diagnosticNow: @Sendable () -> Date
+        /// Test seam invoked after a warm lookup or final catalog validation has captured its diagnostic
+        /// event, but before the enclosing async caller resumes.
+        internal let onHeadlessValidationCompleted: @Sendable () -> Void
+        /// Test seam invoked after a successful publish but before the async commit call returns to
+        /// its caller.
+        internal let onHeadlessCommitCompleted: @Sendable () -> Void
         /// Post a Darwin notification by name. Production: `DarwinProtectionSignalNotifier().postNotification`.
         /// Used for both the tunnel-reload signal (after a commit) and the foreground reconcile nudge.
         internal let postSignal: @Sendable (String) -> Void
@@ -83,11 +154,14 @@ public enum HeadlessFocusFilterSwitchEngine {
         /// closed/backgrounded-only + permission, then posts; the Shortcuts/automation caller's closure
         /// additionally DROPS `committed == false` (its thrown error is that caller's failure feedback —
         /// see `FocusSwitchEnvironment.OutcomeFeedback`). Default no-op (tests / the in-app caller, which
-        /// has nothing to notify — the user sees the switch in-UI). Takes the resolved filter NAME (the
-        /// engine has the library) so the closure needs no library access.
+        /// has nothing to notify — the user sees the switch in-UI). Takes the resolved emoji + name display label (the
+        /// engine has the library) so the closure needs no library access. Stored names and diagnostics
+        /// remain unchanged; identity artwork belongs only to user-facing feedback.
         internal let notifySwitchOutcome: @Sendable (_ committed: Bool, _ filterName: String) async -> Void
 
         /// Creates an environment from the shared files, locks, defaults, and callback seams.
+        /// - Parameter focusDiagnosticOrderingLockURL: Dedicated terminal lock shared by diagnostic
+        ///   event capture and generation-advancing clears.
         public init(
             containerURL: URL,
             configurationURL: URL,
@@ -98,11 +172,15 @@ public enum HeadlessFocusFilterSwitchEngine {
             focusSwitchLockURL: URL,
             configurationWriteLockURL: URL,
             pendingMarkerLockURL: URL,
+            focusDiagnosticOrderingLockURL: URL,
             snapshotFilename: String,
             compactSnapshotFilename: String,
             defaults: UserDefaults,
             catalogSyncFreshnessInterval: TimeInterval,
             now: @escaping @Sendable () -> Date = { Date() },
+            diagnosticNow: @escaping @Sendable () -> Date = { Date() },
+            onHeadlessValidationCompleted: @escaping @Sendable () -> Void = {},
+            onHeadlessCommitCompleted: @escaping @Sendable () -> Void = {},
             postSignal: @escaping @Sendable (String) -> Void = { DarwinProtectionSignalNotifier().postNotification(named: $0) },
             log: @escaping @Sendable (_ event: String, _ details: [String: String]) -> Void = { _, _ in },
             notifySwitchOutcome: @escaping @Sendable (_ committed: Bool, _ filterName: String) async -> Void = { _, _ in },
@@ -118,11 +196,15 @@ public enum HeadlessFocusFilterSwitchEngine {
             self.focusSwitchLockURL = focusSwitchLockURL
             self.configurationWriteLockURL = configurationWriteLockURL
             self.pendingMarkerLockURL = pendingMarkerLockURL
+            self.focusDiagnosticOrderingLockURL = focusDiagnosticOrderingLockURL
             self.snapshotFilename = snapshotFilename
             self.compactSnapshotFilename = compactSnapshotFilename
             self.defaults = defaults
             self.catalogSyncFreshnessInterval = catalogSyncFreshnessInterval
             self.now = now
+            self.diagnosticNow = diagnosticNow
+            self.onHeadlessValidationCompleted = onHeadlessValidationCompleted
+            self.onHeadlessCommitCompleted = onHeadlessCommitCompleted
             self.postSignal = postSignal
             self.log = log
             self.notifySwitchOutcome = notifySwitchOutcome
@@ -151,20 +233,25 @@ public enum HeadlessFocusFilterSwitchEngine {
     /// foreground reconcile cold-compiles against the new catalog), not a commit wedge (Codex round-16).
     private struct CatalogMovedError: Error {}
 
-    /// Thrown by the in-lock `commitBeforeFlip` when the caller-supplied `replaySupersededVeto`
-    /// reports the REPLAYED request superseded by a manual switch that COMPLETED between the replay's
-    /// off-lock pre-check and this flip (Codex PR #410 P1). Distinct from `SupersededError`: the
-    /// generation fence has already passed, so OUR config write is the newest on disk and must be
-    /// ROLLED BACK to restore the user's manual selection (the CatalogMovedError posture), not left
-    /// standing (the SupersededError posture).
+    /// A newer manual switch vetoed a replay before it could write any state (PR #410).
     private struct ReplaySupersededError: Error {}
 
-    /// Thrown by the in-lock generation fence when a concurrent (foreground) writer advanced the on-disk
-    /// configuration generation PAST the one this commit wrote, between our config write and the pointer
-    /// flip. Aborts the flip so we never clobber the newer writer's pointer with our stale-basis artifact —
-    /// a generation-fenced CAS for the flip, matching the background catalog-refresh's `supersededWhileLocked`
-    /// (LAV-100 Phase 4 P4c review). Distinct from `CatalogMovedError` so the clean-defer log is honest.
+    /// Another writer advanced the loaded configuration generation before this commit.
     private struct SupersededError: Error {}
+
+    /// No side state was committed. Preserve the boundary's reason for local diagnostics.
+    private enum PublicationDeferredError: Error {
+        case incomplete, cancelled, contended, superseded
+
+        var diagnosticReason: String {
+            switch self {
+            case .incomplete: "deferred-publication-incomplete"
+            case .cancelled: "deferred-publication-cancelled"
+            case .contended: "deferred-publication-contended"
+            case .superseded: "deferred-publication-superseded"
+            }
+        }
+    }
 
     /// The engine's decision: the public outcome plus the SPECIFIC branch reason (e.g.
     /// "deferred-no-warm-artifact", "committed", "disallowed-auth-to-edit"). The reason is recorded into the
@@ -172,10 +259,37 @@ public enum HeadlessFocusFilterSwitchEngine {
     private struct SwitchDecision {
         let outcome: HeadlessFocusSwitchOutcome
         let reason: String
-        init(_ outcome: HeadlessFocusSwitchOutcome, _ reason: String) {
+        /// Captured when the engine decides, before any outcome notification or consent-gated write.
+        let diagnosticEvent: FocusSwitchDiagnosticEvent?
+        init(
+            _ outcome: HeadlessFocusSwitchOutcome,
+            _ reason: String,
+            diagnosticEvent: FocusSwitchDiagnosticEvent?
+        ) {
             self.outcome = outcome
             self.reason = reason
+            self.diagnosticEvent = diagnosticEvent
         }
+    }
+
+    private static func makeDecision(
+        _ outcome: HeadlessFocusSwitchOutcome, _ reason: String, env: Environment
+    ) -> SwitchDecision {
+        SwitchDecision(
+            outcome,
+            reason,
+            diagnosticEvent: FocusSwitchDiagnostics.captureEvent(
+                in: env.defaults,
+                orderingLockURL: env.focusDiagnosticOrderingLockURL,
+                now: env.diagnosticNow))
+    }
+
+    private static func makeDecision(
+        _ outcome: HeadlessFocusSwitchOutcome,
+        _ reason: String,
+        diagnosticEvent: FocusSwitchDiagnosticEvent?
+    ) -> SwitchDecision {
+        SwitchDecision(outcome, reason, diagnosticEvent: diagnosticEvent)
     }
 
     /// Serialized headless Focus-switch entry. Concurrent invocations (two intents firing) are serialized
@@ -184,7 +298,7 @@ public enum HeadlessFocusFilterSwitchEngine {
     @discardableResult
     public static func performSwitch(toFilterID id: String, env: Environment) async -> HeadlessFocusSwitchOutcome {
         env.log("focus-switch-begin", ["filterID": id])
-        let decision = await withFocusSwitchLock(at: env.focusSwitchLockURL) { () async -> SwitchDecision in
+        let decision = await withCrossProcessLock(at: env.focusSwitchLockURL) { () async -> SwitchDecision in
             let decision = await runLocked(toFilterID: id, env: env)
             // Record the diagnostic INSIDE the focus-switch lock so the LAST engine decision is also the last
             // diagnostic write: two concurrent intents serialize on the flock, so whichever runs last (and is
@@ -193,10 +307,49 @@ public enum HeadlessFocusFilterSwitchEngine {
             // (panel P3). Always-on (NOT QA-gated, so it survives in Release): a privacy-safe record of this
             // attempt's outcome AND the specific branch reason, surfaced in the redacted bug report so the
             // closed-app path is diagnosable on internal TestFlight without a device or the QA device log.
-            FocusSwitchDiagnostics.record(
-                FocusSwitchDiagnosticRecord(outcome: decision.outcome.rawValue, targetFilterID: id, at: env.now(), reason: decision.reason),
-                in: env.defaults
-            )
+            //
+            // GATED ON STANDING CONSENT. The user's "keep local records" choice must stop the WRITE,
+            // not just be followed by a clear — otherwise turning Network Activity off erases this
+            // slot and the very next Focus edge writes it straight back (MECE panel, PR #625). The
+            // 🔴 THE CONSENT CHECK AND THE WRITE ARE ONE CRITICAL SECTION, under the SAME
+            // cross-process lock the settings path uses to persist the toggle. Read and write used
+            // to be separate: the settings process could persist `keepNetworkActivity == false`
+            // and clear the slots in between, and this write then put a record back that the user
+            // had just withdrawn consent for. An earlier revision of this comment called that an
+            // accepted residual — it is not, because the lock to close it was already in hand
+            // (Codex, PR #625).
+            //
+            // 🔴 THE CONFIGURATION IS DECODED INSIDE THE RESOLVER, NOT VIA `loadState`. `flock`
+            // is per open-file-description, so a helper that opens this same lock file would block
+            // this process against itself — which is why the resolver decodes rather than
+            // delegating. (This comment said "inline" while the decode lived here; it moved into
+            // `withResolvedConsent` and the comment did not follow — Kilo, PR #626.)
+            //
+            // 🔴 AND IT FAILS CLOSED. An unreadable or undecodable configuration must read as
+            // consent WITHHELD: a default `AppConfiguration()` carries `keepNetworkActivity ==
+            // true`, so trusting it turns "we could not tell" into "consent granted", the one
+            // direction a consent gate must never fail. This file already refuses to COMMIT a
+            // switch on that signal; a diagnostic write deserves no weaker rule.
+            // pinned: HeadlessFocusFilterSwitchEngineTests.testAnUnreadableConfigurationWritesNoDiagnostic
+            // A deferred intent must not wait behind the same configuration writer just to
+            // record its outcome. Under contention omit this optional record, never the marker.
+            _ = FocusSwitchDiagnostics.tryWithResolvedConsent(
+                configurationURL: env.configurationURL,
+                lockURL: env.configurationWriteLockURL
+            ) { consented in
+                if let diagnosticEvent = decision.diagnosticEvent {
+                    FocusSwitchDiagnostics.record(
+                        FocusSwitchDiagnosticRecord(
+                            outcome: decision.outcome.rawValue,
+                            targetFilterID: id,
+                            at: diagnosticEvent.at,
+                            reason: decision.reason,
+                            clearGeneration: diagnosticEvent.clearGeneration),
+                        keepingLocalRecords: consented,
+                        in: env.defaults
+                    )
+                }
+            }
             return decision
         }
         env.log("focus-switch-finished", ["filterID": id, "outcome": decision.outcome.rawValue, "reason": decision.reason])
@@ -229,16 +382,19 @@ public enum HeadlessFocusFilterSwitchEngine {
         // dropped — founder 2026-06-29), but it is OFF whenever filter editing requires authentication (an
         // unattended switch would otherwise bypass that gate). A gated-out request is NOT recorded — it must
         // not happen now or on a later reconcile.
-        guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults) else {
+        guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults,
+            projectionURL: SecurityProtectedSurfaceStorage.projectionURL(containerURL: env.containerURL)) else {
             // The switch is refused while filter editing is auth-locked — tell the user the auto-switch
             // they expected did NOT happen (only when we can name the target; an unknown id is an edge we
             // stay silent on). The closure gates on the toggle + closed/backgrounded + permission; the
             // Shortcuts/automation caller's closure drops this refusal (its thrown error is that caller's
             // failure feedback — see FocusSwitchEnvironment.OutcomeFeedback).
-            if let name = library0.filter(id: id)?.name {
-                await env.notifySwitchOutcome(false, name)
+            let decision = makeDecision(.disallowed, "disallowed-auth-to-edit", env: env)
+            if let target = library0.filter(id: id) {
+                await env.notifySwitchOutcome(false,
+                    FilterIdentityPolicy.displayName(name: target.name, emoji: target.emoji))
             }
-            return SwitchDecision(.disallowed, "disallowed-auth-to-edit")
+            return decision
         }
 
         // A reseeded/migrated load mirrored Balanced into `configuration` WITHOUT persisting (the
@@ -247,14 +403,16 @@ public enum HeadlessFocusFilterSwitchEngine {
         // for a target id derived from the reseeded library — would let default rules/settings be written
         // over the user's real state at a winning generation. Refuse so the foreground applies the real
         // switch after its migration commits; a later Focus edge re-fires against the migrated library.
-        guard !loaded.didReseed else { return SwitchDecision(.disallowed, "disallowed-config-fallback-or-reseed") }
+        guard !loaded.didReseed else {
+            return makeDecision(.disallowed, "disallowed-config-fallback-or-reseed", env: env)
+        }
 
         var library = library0
 
         // Target must exist + be switchable (not over the tier's filter cap).
         guard library.filter(id: id) != nil,
               !library.isFrozen(filterID: id, maxFilters: configuration.limits.maxFilters) else {
-            return SwitchDecision(.disallowed, "disallowed-target-unavailable")
+            return makeDecision(.disallowed, "disallowed-target-unavailable", env: env)
         }
 
         // Already-active: the newest Focus intent's target is what's already on disk. RECORD it anyway
@@ -264,9 +422,10 @@ public enum HeadlessFocusFilterSwitchEngine {
         // Funneled through recordMarker: a REPLAY's best-effort record is compare-and-record, so it
         // silently yields to a newer intent's marker instead of erasing it.
         guard id != library.activeFilterID else {
+            let decision = makeDecision(.alreadyActive, "already-active", env: env)
             recordMarker(PendingFilterSwitchRequest(targetFilterID: id, requestedAt: now), env: env)
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.alreadyActive, "already-active")
+            return decision
         }
 
         // Record the durable marker FIRST — the correctness guarantee for everything below. If the write
@@ -277,11 +436,13 @@ public enum HeadlessFocusFilterSwitchEngine {
         // Release-diagnosable).
         let request = PendingFilterSwitchRequest(targetFilterID: id, requestedAt: now)
         guard recordMarker(request, env: env) else {
-            env.log("record-failed-fail-closed", ["filterID": id])
-            return SwitchDecision(
+            let decision = makeDecision(
                 .disallowed,
-                env.replayExpectedMarker != nil ? "disallowed-replay-marker-changed" : "disallowed-record-failed"
+                env.replayExpectedMarker != nil ? "disallowed-replay-marker-changed" : "disallowed-record-failed",
+                env: env
             )
+            env.log("record-failed-fail-closed", ["filterID": id])
+            return decision
         }
 
         // STATE-AGNOSTIC commit (founder 2026-06-29): the engine no longer defers on a coarse
@@ -297,46 +458,76 @@ public enum HeadlessFocusFilterSwitchEngine {
         // configuration (the config its token was compiled against), NOT the current active config.
         guard let target = library.filter(id: id),
               let plan = FilterSwitchPlan.make(toFilterID: id, configuration: configuration, library: library) else {
+            let decision = makeDecision(.deferred, "deferred-plan-unavailable", env: env)
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-plan-unavailable")
+            return decision
         }
 
         // Warm-only immediate commit. No valid warm artifact ⇒ defer (the foreground cold-compiles on
         // next activation; the headless path never cold-compiles in an App Intent's short window).
         let warmIndex = loadWarmIndex(env: env)
+        let diagnosticCapture = FocusSwitchDiagnosticEventCapture(
+            now: env.diagnosticNow,
+            defaults: env.defaults,
+            orderingLockURL: env.focusDiagnosticOrderingLockURL)
+        let validationCompleted = env.onHeadlessValidationCompleted
+        let warmLookupEvent = FocusSwitchDiagnosticEventBox()
         guard let reusable = await WarmFilterSnapshotLoader.reusableSnapshotForSwitch(
             target: target,
             configuration: plan.configuration,
             containerURL: env.containerURL,
             cacheURL: env.catalogCacheURL,
             freshnessMaxAge: env.catalogSyncFreshnessInterval,
-            backgroundWarmIndex: warmIndex
+            backgroundWarmIndex: warmIndex,
+            onCompleted: {
+                if let event = diagnosticCapture.capture() {
+                    warmLookupEvent.store(event)
+                }
+                validationCompleted()
+            }
         ) else {
+            let decision = makeDecision(
+                .deferred,
+                "deferred-no-warm-artifact",
+                diagnosticEvent: warmLookupEvent.load() ?? diagnosticCapture.capture())
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-no-warm-artifact")
+            return decision
         }
 
         // Final catalog re-validation before the flip: a BACKGROUND catalog refresh could have committed
         // a new latest.json since the warm load. On a move, DEFER (the foreground cold-compiles against the
         // new catalog).
-        guard await WarmFilterSnapshotLoader.stillReusableAgainstCachedCatalog(
+        let catalogValidationEvent = FocusSwitchDiagnosticEventBox()
+        let catalogStillReusable = await WarmFilterSnapshotLoader.stillReusableAgainstCachedCatalog(
             reusable.preparedSnapshot,
             configuration: plan.configuration,
             cacheURL: env.catalogCacheURL,
-            freshnessMaxAge: env.catalogSyncFreshnessInterval
-        ) else {
+            freshnessMaxAge: env.catalogSyncFreshnessInterval,
+            onCompleted: {
+                if let event = diagnosticCapture.capture() {
+                    catalogValidationEvent.store(event)
+                }
+                validationCompleted()
+            }
+        )
+        guard catalogStillReusable else {
+            let decision = makeDecision(
+                .deferred,
+                "deferred-catalog-moved",
+                diagnosticEvent: catalogValidationEvent.load() ?? diagnosticCapture.capture())
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-catalog-moved")
+            return decision
         }
 
         // Snapshot the pre-switch state so a partial commit can be rolled back to a CONSISTENT on-disk
         // selection (mirrors the foreground switch's failure rollback).
         let previousConfiguration = configuration
         let previousLibrary = library
+        let commitAttemptEvent = diagnosticCapture.capture()
         do {
-            // Commit via the SHARED publish path, exactly as the foreground warm reuse does: config
-            // (generation-bumped, config-leads-pointer) + library, then a pointer FLIP to the already
-            // staged warm dir. Take BOTH halves from the same atomic plan so the synced pair matches.
+            // Stage the rules first, then commit the pair and pointer in one synchronous locked
+            // section. No selection change is visible while staging or waiting for the publish actor.
+            // Take both halves from the same plan so their filter-scoped fields match.
             configuration = plan.configuration
             library = plan.library
 
@@ -350,7 +541,7 @@ public enum HeadlessFocusFilterSwitchEngine {
             let basisSnapshot = reusable.preparedSnapshot
             let basisConfiguration = plan.configuration
             let replayVeto = env.replaySupersededVeto
-            try await commit(
+            let committedEvent = try await commit(
                 preparedSnapshot: reusable.preparedSnapshot,
                 configuration: &configuration,
                 library: &library,
@@ -359,7 +550,7 @@ public enum HeadlessFocusFilterSwitchEngine {
                 commitBeforeFlip: { @Sendable in
                     // REPLAY-ONLY supersession veto (Codex PR #410 P1), after the generation fence:
                     // a manual switch that COMPLETED between a replay's off-lock pre-check and this
-                    // flip left its stamp visible by now — abort with a rollback so the drain never
+                    // flip left its stamp visible by now — abort before writing so the drain never
                     // commits an old automation over the user's just-persisted manual selection.
                     // (A manual switch completing AFTER our config load is caught by the generation
                     // fence instead.) nil for fresh intents — see Environment.replaySupersededVeto.
@@ -387,6 +578,7 @@ public enum HeadlessFocusFilterSwitchEngine {
             // Darwin signal wakes its reconcile promptly to adopt the committed target and clear the marker.
             // (Under Phase 3 commits were inactive-only, so the next foreground activation reconciled; the
             // state-agnostic path needs the explicit wake.)
+            let decision = makeDecision(.committed, "committed", diagnosticEvent: committedEvent)
             env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
             // Tell the user the headless switch landed — "Switched to <name>" — but only when the app is
             // closed/backgrounded (the closure's gate); a foreground app shows the change in-UI, so a banner
@@ -394,55 +586,37 @@ public enum HeadlessFocusFilterSwitchEngine {
             // late background switch still surfaces. Gated inside on permission + the shared
             // filterChanged toggle (both the Focus extension and the Shortcuts/automation intent post
             // committed switches under that one category — founder 2026-07-12).
-            await env.notifySwitchOutcome(true, target.name)
-            return SwitchDecision(.committed, "committed")
-        } catch is ReplaySupersededError {
-            // CLEAN DEFER + ROLLBACK: the replay's in-lock supersession veto fired — a manual switch
-            // COMPLETED between the replay's off-lock pre-check and this flip, and the generation fence
-            // has already certified OUR config write as the newest on disk, so rolling back is what
-            // RESTORES the user's manual selection (unlike SupersededError, where the newer on-disk
-            // state is someone else's and must be left standing). Same fenced rollback as the
-            // catalog-moved arm; the kept (now-superseded) marker is dropped by the next reconcile's
-            // supersession check. (Codex PR #410 P1.)
-            let fencedGeneration = configuration.configurationGeneration
-            configuration = previousConfiguration
-            library = previousLibrary
-            try? writeConfigurationOnly(configuration: &configuration, library: &library, expectedBaseGeneration: fencedGeneration, env: env)
-            env.log("headless-commit-deferred-replay-superseded", ["filterID": id])
-            env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-replay-superseded-inlock")
-        } catch is CatalogMovedError {
-            // CLEAN DEFER: the in-lock veto aborted the flip before any pointer change. Roll the on-disk
-            // config+library back to the previous filter so the selection stays consistent with the un-flipped
-            // pointer, then defer: the kept marker drives the foreground reconcile to cold-compile the target
-            // against the NEW catalog. FENCE the rollback against our own write — the config write released its
-            // lock before the publish lock, so a foreground writer could have advanced the generation in that
-            // gap; `try?` swallows the resulting StaleBaseGenerationError abort, leaving the newer state intact
-            // (panel P1). `configuration.configurationGeneration` is the generation our commit wrote (this
-            // throw originates in commitBeforeFlip, AFTER the config write).
-            let fencedGeneration = configuration.configurationGeneration
-            configuration = previousConfiguration
-            library = previousLibrary
-            try? writeConfigurationOnly(configuration: &configuration, library: &library, expectedBaseGeneration: fencedGeneration, env: env)
-            env.log("headless-commit-deferred-catalog-moved", ["filterID": id])
-            env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-catalog-moved-inlock")
-        } catch let supersedingWriterError where
-            supersedingWriterError is SupersededError ||
-            supersedingWriterError is SharedFilterStatePersistence.StaleBaseGenerationError {
-            // CLEAN DEFER — and DO NOT roll back. A concurrent (foreground) writer is NEWER, caught at one of
-            // two points: StaleBaseGenerationError — the on-disk generation advanced past our loaded base
-            // BEFORE our config write, so nothing of ours was written; or SupersededError — it advanced
-            // between our config write and the flip, so our flip never happened. Either way the newer on-disk
-            // state is authoritative; rolling back to OUR previous (older) state would bump the generation
-            // again and OVERWRITE the newer selection — silently losing the user's update (Codex P1/P2).
-            // Leave the newer on-disk state untouched and defer. The kept marker drives the foreground
-            // reconcile, where lastForegroundSwitch decides whether this Focus request or the newer manual
-            // switch wins.
-            env.log("headless-commit-deferred-superseded", ["filterID": id])
-            env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
-            return SwitchDecision(.deferred, "deferred-superseded")
+            await env.notifySwitchOutcome(true,
+                FilterIdentityPolicy.displayName(name: target.name, emoji: target.emoji))
+            return decision
         } catch {
+            let diagnosticFailure = error as? FocusSwitchDiagnosticFailure
+            let commitError = diagnosticFailure?.underlying ?? error
+            let failureEvent = diagnosticFailure?.event ?? commitAttemptEvent
+            if commitError is ReplaySupersededError || commitError is CatalogMovedError ||
+                commitError is PublicationDeferredError || commitError is CancellationError {
+                // Every veto/abort happens before the pair write. Keep the previous selection
+                // byte-for-byte, and leave the durable marker for a later warm/foreground retry.
+                let reason: String
+                switch commitError {
+                case is ReplaySupersededError: reason = "deferred-replay-superseded-inlock"
+                case is CatalogMovedError: reason = "deferred-catalog-moved-inlock"
+                case let deferred as PublicationDeferredError: reason = deferred.diagnosticReason
+                default: reason = PublicationDeferredError.cancelled.diagnosticReason
+                }
+                let decision = makeDecision(.deferred, reason, diagnosticEvent: failureEvent)
+                env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
+                return decision
+            }
+            if commitError is SupersededError ||
+                commitError is SharedFilterStatePersistence.StaleBaseGenerationError {
+                // CLEAN DEFER without rollback: the newer on-disk writer is authoritative.
+                let decision = makeDecision(
+                    .deferred, "deferred-superseded", diagnosticEvent: failureEvent)
+                env.log("headless-commit-deferred-superseded", ["filterID": id])
+                env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)
+                return decision
+            }
             // The config+library MAY have been written BEFORE the artifact pointer flip, so a throw can leave
             // disk SELECTING the target while the pointer still names the previous artifact. Roll the on-disk
             // config+library back so the selection is consistent with the un-flipped pointer; the kept marker
@@ -450,12 +624,14 @@ public enum HeadlessFocusFilterSwitchEngine {
             // `configuration.configurationGeneration` holds the loaded base if the write itself threw (nothing
             // landed), or the generation we wrote if the flip threw — either way a foreground writer that
             // advanced past it wins and the rollback is skipped rather than clobbering the user's update.
+            let decision = makeDecision(
+                .deferred, "deferred-commit-failed", diagnosticEvent: failureEvent)
             let fencedGeneration = configuration.configurationGeneration
             configuration = previousConfiguration
             library = previousLibrary
             do {
                 try writeConfigurationOnly(configuration: &configuration, library: &library, expectedBaseGeneration: fencedGeneration, env: env)
-                env.log("headless-commit-failed-rolled-back", ["filterID": id, "error": "\(error)"])
+                env.log("headless-commit-failed-rolled-back", ["filterID": id, "error": "\(commitError)"])
             } catch is SharedFilterStatePersistence.StaleBaseGenerationError {
                 // A newer writer advanced past our write between the failure and the rollback — leave the newer
                 // on-disk state (rolling back would clobber it). Same posture as the superseded clean-defer arm.
@@ -463,19 +639,20 @@ public enum HeadlessFocusFilterSwitchEngine {
             } catch let rollbackError {
                 env.log("headless-commit-rollback-failed", [
                     "filterID": id,
-                    "commitError": "\(error)",
+                    "commitError": "\(commitError)",
                     "rollbackError": "\(rollbackError)"
                 ])
             }
-            return SwitchDecision(.deferred, "deferred-commit-failed")
+            return decision
         }
     }
 
-    // MARK: - Commit (mirrors AppViewModel.persistSharedState / persistConfigurationOnly)
+    // MARK: - Commit
 
-    /// Mirror of `AppViewModel.persistSharedState(preparedSnapshot:schedulesAutomaticBackup:false:commitBeforeFlip:)`:
-    /// sync the active filter, stamp its compiled token, write the config+library pair through the single
-    /// shared writer (config leads pointer), then flip the artifact pointer to the staged warm dir.
+    /// Stages rules before advancing the selection. The paired write and pointer flip then execute
+    /// synchronously under configuration → publication locks, without an actor suspension between them.
+    /// Issue #719: an App Intent must not advance selection and then wait behind another publisher.
+    /// pinned: HeadlessFocusFilterSwitchEngineTests.testContendedPublicationDefersWithoutAdvancingTheSavedSelection
     private static func commit(
         preparedSnapshot: PreparedFilterSnapshot,
         configuration: inout AppConfiguration,
@@ -483,81 +660,95 @@ public enum HeadlessFocusFilterSwitchEngine {
         warmIndex: BackgroundWarmIndex,
         env: Environment,
         commitBeforeFlip: @escaping @Sendable () throws -> Void
-    ) async throws {
-        let didRewriteArtifacts = preparedSnapshot.summary.coversEnabledBlocklists(in: configuration)
-
-        // Keep the library's active filter in lockstep with the configuration we're persisting, and record
-        // the compiled token so GC keeps this filter's compiled directory warm.
-        library.syncActiveFilter(from: configuration)
-        if didRewriteArtifacts {
+    ) async throws -> FocusSwitchDiagnosticEvent? {
+        let diagnosticCapture = FocusSwitchDiagnosticEventCapture(
+            now: env.diagnosticNow,
+            defaults: env.defaults,
+            orderingLockURL: env.focusDiagnosticOrderingLockURL)
+        let committedState = FocusSwitchCommittedStateBox()
+        // A pointer write can fail after a successful pair write. Preserve that exact generation
+        // for the caller's existing rollback fence; a newer writer must still win.
+        defer {
+            if let written = committedState.load() {
+                configuration = written.configuration
+                library = written.library
+            }
+        }
+        do {
+            guard preparedSnapshot.summary.coversEnabledBlocklists(in: configuration) else {
+                throw PublicationDeferredError.incomplete
+            }
+            library.syncActiveFilter(from: configuration)
             let token = FilterArtifactStore.versionedToken(for: preparedSnapshot)
             library.mutateFilter(id: library.activeFilterID) { $0.lastCompiledToken = token }
-        }
 
-        // Bump the supersession generation + write filter-library.json and configuration.json atomically in
-        // the fail-safe order, BEFORE flipping the artifact pointer. The ordering + generation-token +
-        // library-stamp logic lives in the single shared writer so the foreground and headless paths can
-        // never drift.
-        let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
-            configuration: configuration,
-            library: library,
-            configurationURL: env.configurationURL,
-            filterLibraryURL: env.filterLibraryURL,
-            crossProcessLockURL: env.configurationWriteLockURL,
-            // Generation-fenced CAS against the LOADED BASE: the extension loaded its base, then awaited warm
-            // validation; a foreground writer could have advanced the on-disk config in that window. Abort
-            // rather than write our stale device-global config back over theirs (Codex P2). `configuration`
-            // here is `plan.configuration`, whose generation is the loaded base (FilterSwitchPlan.make does
-            // not bump). The catch in runLocked treats the resulting throw as a clean defer (nothing written).
-            rejectsAdvancedBeyond: configuration.configurationGeneration
-        )
-        configuration = written.configuration
-        library = written.library
-
-        guard didRewriteArtifacts else { return }
-        // Generation-fenced CAS for the FLIP. The cross-process lock (P4c) makes the read-gen + 2-file
-        // writes one atomic slice, but it is RELEASED before persistArtifacts takes the publish lock — so a
-        // foreground writer that wins the config-write lock in that gap (now that the switch is state-agnostic,
-        // a concurrent foreground write is routine) would advance the on-disk generation past ours. Re-read it UNDER the
-        // publish lock immediately before the flip (folded into commitBeforeFlip, which runs there) and
-        // abort if it advanced, so we never clobber the newer writer's pointer with our stale-basis
-        // artifact. Mirrors the background catalog-refresh's `supersededWhileLocked`; without it the race is
-        // still fail-closed + self-healing, but this closes the asymmetry (P4c review P2).
-        let writtenGeneration = written.configuration.configurationGeneration
-        let configurationURL = env.configurationURL
-        let service = FilterSnapshotPreparationService(cacheDirectoryURL: env.catalogCacheURL)
-        _ = try await service.persistArtifacts(
-            preparedSnapshot,
-            containerURL: env.containerURL,
-            snapshotFilename: env.snapshotFilename,
-            compactSnapshotFilename: env.compactSnapshotFilename,
-            publishLockURL: env.publishLockURL,
-            lockMode: .blocking,
-            supersededWhileLocked: nil,
-            commitBeforeFlip: {
-                // Generation fence BEFORE the catalog-basis veto: when a foreground supersession AND a catalog
-                // move coincide, SupersededError must win — it defers WITHOUT rolling back, so the newer
-                // foreground config is preserved. A catalog-only move (no supersession) still throws
-                // CatalogMovedError after the fence passes and rolls back safely (panel P2 / round 5).
-                guard SharedFilterStatePersistence.onDiskConfigurationGeneration(at: configurationURL) <= writtenGeneration else {
-                    throw SupersededError()
-                }
-                try commitBeforeFlip()
-            },
-            additionalRetainedTokens: library.retainedWarmArtifactTokens(
-                maxFilters: configuration.limits.maxFilters,
-                backgroundWarmIndex: warmIndex
+            let plannedConfiguration = configuration
+            let plannedLibrary = library
+            let configurationURL = env.configurationURL
+            let libraryURL = env.filterLibraryURL
+            let loadedGeneration = configuration.configurationGeneration
+            let service = FilterSnapshotPreparationService(cacheDirectoryURL: env.catalogCacheURL)
+            let completedEvent = FocusSwitchDiagnosticEventBox()
+            let outcome = try await service.persistArtifacts(
+                preparedSnapshot,
+                containerURL: env.containerURL,
+                snapshotFilename: env.snapshotFilename,
+                compactSnapshotFilename: env.compactSnapshotFilename,
+                publishLockURL: env.publishLockURL,
+                configurationWriteLockURL: env.configurationWriteLockURL,
+                lockMode: .tryOrAbort,
+                commitBeforeFlip: {
+                    // Prefer the newer-writer veto over the catalog/replay checks. All checks run
+                    // before the pair changes, under both locks, after artifact staging has finished.
+                    guard SharedFilterStatePersistence.onDiskConfigurationGeneration(at: configurationURL) <= loadedGeneration else {
+                        throw SupersededError()
+                    }
+                    try commitBeforeFlip()
+                    let written = try SharedFilterStatePersistence.writeConfigurationAndLibrary(
+                        configuration: plannedConfiguration,
+                        library: plannedLibrary,
+                        configurationURL: configurationURL,
+                        filterLibraryURL: libraryURL,
+                        // Already held by persistArtifacts. Reacquiring this flock would deadlock.
+                        crossProcessLockURL: nil,
+                        rejectsAdvancedBeyond: loadedGeneration
+                    )
+                    committedState.store(written)
+                },
+                onPublished: {
+                    if let event = diagnosticCapture.capture() { completedEvent.store(event) }
+                },
+                diagnosticFailureEvent: { diagnosticCapture.capture() },
+                additionalRetainedTokens: library.retainedWarmArtifactTokens(
+                    maxFilters: configuration.limits.maxFilters,
+                    backgroundWarmIndex: warmIndex
+                )
             )
-        )
+            switch outcome {
+            case .published: break
+            case .abortedCancelled: throw PublicationDeferredError.cancelled
+            case .abortedContended: throw PublicationDeferredError.contended
+            case .abortedSuperseded: throw PublicationDeferredError.superseded
+            }
+            env.onHeadlessCommitCompleted()
+            return completedEvent.load()
+        } catch let cancellation as CancellationError {
+            throw cancellation
+        } catch let diagnosticFailure as FocusSwitchDiagnosticFailure {
+            throw diagnosticFailure
+        } catch {
+            guard let event = diagnosticCapture.capture() else { throw error }
+            throw FocusSwitchDiagnosticFailure(underlying: error, event: event)
+        }
     }
 
     /// Mirror of `AppViewModel.persistConfigurationOnly(schedulesAutomaticBackup: false)`: bump the
     /// generation + write the config+library pair via the single shared writer, no artifact flip. Used to
     /// roll the on-disk selection back to the previous filter after a vetoed/failed commit.
     ///
-    /// `expectedBaseGeneration` fences the rollback against OUR OWN write (panel P1): the config write
-    /// released its cross-process lock before the publish lock, so a foreground writer could have advanced the
-    /// on-disk generation in the gap. Passing the generation THIS commit wrote means the rollback reverts only
+    /// `expectedBaseGeneration` fences the rollback against our own write: publication has released its
+    /// locks before the error reaches this caller, so another writer may have advanced the generation.
+    /// Passing the generation this commit wrote means the rollback reverts only
     /// if nobody advanced past it; otherwise it aborts (`StaleBaseGenerationError`) and leaves the newer
     /// state, rather than re-bumping the generation and clobbering the user's update.
     private static func writeConfigurationOnly(
@@ -639,7 +830,13 @@ public enum HeadlessFocusFilterSwitchEngine {
     /// Serialize concurrent headless Focus switches with a dedicated app-group flock. Degrade-OPEN if the
     /// lock file is unavailable (same posture as `LavaProtectionCommandService`). The flock is bound to the
     /// open file description, so it stays held across the `await` body and is released on close.
-    private static func withFocusSwitchLock<T>(
+    /// Holds a cross-process advisory lock for the duration of `body`.
+    ///
+    /// 🔴 NOT RE-ENTRANT. `flock` is per open-file-description, so taking the SAME lock again
+    /// inside `body` — via a helper that opens the file itself, such as `loadState` or
+    /// `writeConfigurationAndLibrary` — blocks this process against itself. Anything that needs
+    /// state while holding a lock must read it inline.
+    private static func withCrossProcessLock<T>(
         at lockURL: URL,
         _ body: () async -> T
     ) async -> T {

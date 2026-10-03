@@ -59,6 +59,12 @@ public struct DomainRuleSet: Equatable, Codable, Sendable {
         }
     }
 
+    /// Exact entry membership, preserving the distinction between a host and its suffix scope.
+    /// Streaming budget callers use this before allocating a new retained rule.
+    package func containsRule(_ rule: DomainRule) -> Bool {
+        rule.matchesSubdomains ? suffixDomains.contains(rule.domain) : exactDomains.contains(rule.domain)
+    }
+
     /// Validates and inserts a hostname, throwing when it is not a valid domain rule.
     public mutating func insert(domain: String, matchesSubdomains: Bool = true) throws {
         insert(try DomainRule(domain: domain, matchesSubdomains: matchesSubdomains))
@@ -89,6 +95,24 @@ public struct DomainRuleSet: Equatable, Codable, Sendable {
         return filtered
     }
 
+    /// Keeps only threat scopes that intersect an allowed suffix. A threat host
+    /// below an allowance retains its own rule; an allowance below a threat
+    /// suffix retains the allowed scope. Each lookup walks hostname labels, so
+    /// large guardrails never scan every allowed exception for each threat rule.
+    package func threatOverlap(withAllowedSuffixes allowedRules: DomainRuleSet) -> DomainRuleSet {
+        var overlap = DomainRuleSet()
+        for domain in exactDomains where allowedRules.containsNormalized(domain) {
+            overlap.exactDomains.insert(domain)
+        }
+        for domain in suffixDomains where allowedRules.containsNormalized(domain) {
+            overlap.suffixDomains.insert(domain)
+        }
+        for domain in allowedRules.suffixDomains where containsCoveringSuffixRule(domain) {
+            overlap.suffixDomains.insert(domain)
+        }
+        return overlap
+    }
+
     /// Validates a hostname and reports whether an exact or enclosing suffix rule matches it.
     public func contains(_ rawDomain: String) -> Bool {
         guard let normalized = try? DomainName.normalize(rawDomain) else {
@@ -115,6 +139,67 @@ public struct DomainRuleSet: Equatable, Codable, Sendable {
         return false
     }
 
+    /// Counts allow entries whose full matching scope is not covered by threat rules.
+    /// A threat at an exact host cannot neutralize a suffix allow: its other descendants
+    /// remain reachable. This walks only the allow set, without copying the threat set.
+    public func effectiveAllowRuleCount(nonAllowableThreatRules: DomainRuleSet) -> Int {
+        exactDomains.reduce(0) { count, domain in
+            count + (nonAllowableThreatRules.containsNormalized(domain) ? 0 : 1)
+        } + suffixDomains.reduce(0) { count, domain in
+            count + (nonAllowableThreatRules.containsCoveringSuffixRule(domain) ? 0 : 1)
+        }
+    }
+
+    /// Nonredundant threat scopes inside each suffix allow that remains partly reachable.
+    /// Retains at most one bounded depth/kind histogram per suffix allow, never the threat table.
+    public func allowedSuffixGuardrailCoverage(nonAllowableThreatRules: DomainRuleSet) -> [String: GuardrailScopeCoverage] {
+        var counts: [String: GuardrailScopeCoverage] = [:]
+        for domain in suffixDomains where !nonAllowableThreatRules.containsCoveringSuffixRule(domain) {
+            counts[domain] = GuardrailScopeCoverage()
+        }
+        guard !counts.isEmpty else { return counts }
+
+        for domain in nonAllowableThreatRules.exactDomains {
+            // An enclosing suffix already covers this exact host; removing it opens nothing.
+            guard !nonAllowableThreatRules.containsCoveringSuffixRule(domain) else { continue }
+            Self.recordGuardrailScope(domain, matchesSubdomains: false, in: &counts)
+        }
+        for domain in nonAllowableThreatRules.suffixDomains {
+            if let dot = domain.firstIndex(of: "."),
+               nonAllowableThreatRules.containsCoveringSuffixRule(String(domain[domain.index(after: dot)...])) {
+                continue
+            }
+            Self.recordGuardrailScope(domain, matchesSubdomains: true, in: &counts)
+        }
+        return counts
+    }
+
+    /// Shared with compact tables, which decode one threat host at a time.
+    package static func recordGuardrailScope(
+        _ domain: String, matchesSubdomains: Bool, in counts: inout [String: GuardrailScopeCoverage]
+    ) {
+        var remainder = domain
+        var depth = 0
+        while true {
+            if counts[remainder] != nil {
+                counts[remainder]?.record(depth: depth, matchesSubdomains: matchesSubdomains)
+            }
+            guard let dot = remainder.firstIndex(of: ".") else { break }
+            remainder = String(remainder[remainder.index(after: dot)...])
+            depth += 1
+        }
+    }
+
+    private func containsCoveringSuffixRule(_ normalizedDomain: String) -> Bool {
+        var remainder = normalizedDomain
+        if suffixDomains.contains(remainder) { return true }
+        while let dotIndex = remainder.firstIndex(of: ".") {
+            remainder = String(remainder[remainder.index(after: dotIndex)...])
+            if suffixDomains.contains(remainder) { return true }
+        }
+        return false
+    }
+
     /// Counts blocked rules after subtracting allow rules that reduce protection outside threat guardrails.
     public func effectiveBlockedDomainRuleCount(
         allowRules: DomainRuleSet,
@@ -130,55 +215,44 @@ public struct DomainRuleSet: Equatable, Codable, Sendable {
         blockRules: DomainRuleSet,
         nonAllowableThreatRules: DomainRuleSet
     ) -> Int {
-        exactDomains.reduce(0) { count, domain in
-            count + (Self.allowedRuleReducesProtection(
-                domain,
-                matchesSubdomains: false,
-                blockRules: blockRules,
-                nonAllowableThreatRules: nonAllowableThreatRules
-            ) ? 1 : 0)
-        } + suffixDomains.reduce(0) { count, domain in
-            count + (Self.allowedRuleReducesProtection(
-                domain,
-                matchesSubdomains: true,
-                blockRules: blockRules,
-                nonAllowableThreatRules: nonAllowableThreatRules
-            ) ? 1 : 0)
+        var reducing = exactDomains.reduce(0) { count, domain in
+            count + (blockRules.containsNormalized(domain)
+                && !nonAllowableThreatRules.containsNormalized(domain) ? 1 : 0)
         }
+        var needsDescendant = Set<String>()
+        for domain in suffixDomains where !nonAllowableThreatRules.containsCoveringSuffixRule(domain) {
+            if blockRules.containsCoveringSuffixRule(domain) {
+                // A covered parent leaves some descendants reachable unless a
+                // threat suffix covers the entire allowed scope (checked above).
+                reducing += 1
+            } else {
+                needsDescendant.insert(domain)
+            }
+        }
+        guard !needsDescendant.isEmpty else { return reducing }
+
+        // Walk each block rule once, rather than scanning millions of rules for
+        // every allowed parent. Guarded descendants never reduce protection.
+        for domain in blockRules.exactDomains where !nonAllowableThreatRules.containsNormalized(domain) {
+            reducing += Self.consumeAllowedSuffixes(covering: domain, from: &needsDescendant)
+            if needsDescendant.isEmpty { return reducing }
+        }
+        for domain in blockRules.suffixDomains where !nonAllowableThreatRules.containsCoveringSuffixRule(domain) {
+            reducing += Self.consumeAllowedSuffixes(covering: domain, from: &needsDescendant)
+            if needsDescendant.isEmpty { return reducing }
+        }
+        return reducing
     }
 
-    private static func allowedRuleReducesProtection(
-        _ normalizedDomain: String,
-        matchesSubdomains: Bool,
-        blockRules: DomainRuleSet,
-        nonAllowableThreatRules: DomainRuleSet
-    ) -> Bool {
-        if nonAllowableThreatRules.containsNormalized(normalizedDomain) {
-            return false
+    private static func consumeAllowedSuffixes(covering domain: String, from remaining: inout Set<String>) -> Int {
+        var matches = 0
+        var remainder = domain
+        while true {
+            if remaining.remove(remainder) != nil { matches += 1 }
+            guard let dot = remainder.firstIndex(of: ".") else { break }
+            remainder = String(remainder[remainder.index(after: dot)...])
         }
-
-        if matchesSubdomains && nonAllowableThreatRules.hasRuleAtOrBelow(normalizedDomain) {
-            return false
-        }
-
-        if blockRules.containsNormalized(normalizedDomain) {
-            return true
-        }
-
-        guard matchesSubdomains else {
-            return false
-        }
-
-        return blockRules.hasRuleAtOrBelow(normalizedDomain)
-    }
-
-    private func hasRuleAtOrBelow(_ normalizedDomain: String) -> Bool {
-        exactDomains.contains { Self.domain($0, isEqualToOrSubdomainOf: normalizedDomain) }
-            || suffixDomains.contains { Self.domain($0, isEqualToOrSubdomainOf: normalizedDomain) }
-    }
-
-    private static func domain(_ domain: String, isEqualToOrSubdomainOf parentDomain: String) -> Bool {
-        domain == parentDomain || domain.hasSuffix(".\(parentDomain)")
+        return matches
     }
 
     /// Builds a deduplicated set from a sequence of validated rules.

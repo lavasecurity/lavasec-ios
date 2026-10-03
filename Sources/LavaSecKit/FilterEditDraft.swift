@@ -2,10 +2,10 @@ import Foundation
 
 /// The in-progress edits to a user's filter configuration, before they are
 /// confirmed and applied. Mirrors the saved `AppConfiguration` selection so the
-/// UI can show a pending diff. Lives in LavaSecCore so the pure draft-mutation
+/// UI can show a pending diff. Lives in LavaSecKit so the pure draft-mutation
 /// logic (`FilterEditDraftEditor`) is unit-testable; the `@Published` wiring and
-/// the begin/confirm/cancel + snapshot-rebuild orchestration stay in the app's
-/// view model.
+/// the draft-session lifecycle is owned by the app's FilterDraftController;
+/// confirmed snapshot publication remains in native application transactions.
 public struct FilterEditDraft: Equatable {
     public var enabledBlocklistIDs: Set<String>
     public var customBlocklists: [CustomBlocklistSource]
@@ -51,7 +51,7 @@ public struct DomainDraftResult: Equatable {
         DomainDraftResult(
             normalizedDomain: domain,
             isAccepted: true,
-            title: "Added \(domain)",
+            title: LavaCoreStrings.localizedFormat("Added %@", domain),
             message: message
         )
     }
@@ -83,22 +83,22 @@ public enum FilterEditDraftEditor {
         do {
             normalized = try DomainName.normalize(rawDomain)
         } catch {
-            return (draft, .rejected(title: "Domain cannot be added", message: error.localizedDescription))
+            return (draft, .rejected(title: LavaCoreStrings.localized("Domain cannot be added"), message: error.localizedDescription))
         }
 
         guard !draft.blockedDomains.contains(normalized) else {
-            return (draft, .rejected(title: "Already blocked", message: LavaCoreStrings.localizedFormat("core.domainError.alreadyBlocked", normalized)))
+            return (draft, .rejected(title: LavaCoreStrings.localized("Already blocked"), message: LavaCoreStrings.localizedFormat("core.domainError.alreadyBlocked", normalized)))
         }
 
         guard draft.blockedDomains.count < maxBlockedDomains else {
             return (draft, .rejected(
-                title: "Blocked domain limit reached",
+                title: LavaCoreStrings.localized("Blocked domain limit reached"),
                 message: LavaCoreStrings.localizedFormat("core.domainError.freeBlockedLimit", maxBlockedDomains)
             ))
         }
 
         draft.blockedDomains.insert(normalized)
-        return (draft, .accepted(normalized, message: "This domain will be blocked after you save."))
+        return (draft, .accepted(normalized, message: LavaCoreStrings.localized("This domain will be blocked after you save.")))
     }
 
     public static func removeBlockedDomain(_ domain: String, from draft: FilterEditDraft) -> FilterEditDraft {
@@ -131,22 +131,22 @@ public enum FilterEditDraftEditor {
 
         let validation = validator.validate(rawDomain)
         guard validation.isAllowed, let domain = validation.normalizedDomain else {
-            return (draft, .rejected(title: "Exception cannot be added", message: validation.message))
+            return (draft, .rejected(title: LavaCoreStrings.localized("Exception cannot be added"), message: validation.message))
         }
 
         guard !draft.allowedDomains.contains(domain) else {
-            return (draft, .rejected(title: "Already allowed", message: LavaCoreStrings.localizedFormat("core.domainError.alreadyAllowed", domain)))
+            return (draft, .rejected(title: LavaCoreStrings.localized("Already allowed"), message: LavaCoreStrings.localizedFormat("core.domainError.alreadyAllowed", domain)))
         }
 
         guard draft.allowedDomains.count < maxAllowedDomains else {
             return (draft, .rejected(
-                title: "Allowed exception limit reached",
+                title: LavaCoreStrings.localized("Allowed exception limit reached"),
                 message: LavaCoreStrings.localizedFormat("core.domainError.freeAllowedLimit", maxAllowedDomains)
             ))
         }
 
         draft.allowedDomains.insert(domain)
-        return (draft, .accepted(domain, message: "This exception will take effect after you save."))
+        return (draft, .accepted(domain, message: LavaCoreStrings.localized("This exception will take effect after you save.")))
     }
 
     public static func removeAllowedDomain(_ domain: String, from draft: FilterEditDraft) -> FilterEditDraft {

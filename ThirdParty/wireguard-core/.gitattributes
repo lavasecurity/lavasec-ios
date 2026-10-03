@@ -1,0 +1,11 @@
+# Keep generated artifacts byte-preserving: no line-ending normalization or textconv.
+# The internal scripts/check-wireguard-core-drift.sh rebuild verifies byte identity.
+# The QA-enablement scan excludes only the three compiled Rust archives; its --text
+# diff still scans headers, plist, toolchain metadata and unexpected files in build/.
+#
+# Deliberately OUTSIDE build/. Living inside it made this file unverifiable: it is
+# hand-maintained, so the rebuild preserved it byte-for-byte and it matched in both drift
+# manifests; it sat beside generated artifacts without its own provenance check; and its own `* binary`
+# rule matched itself, so even an ordinary `git diff` of it was opaque. A file that governs
+# how the artifacts are stored should not be one of the things the artifact gate cannot see.
+build/** binary

@@ -1,0 +1,1111 @@
+{
+  "schemaVersion": 1,
+  "description": "Licence corpus for the Rust sysroot crates statically linked into ThirdParty/wireguard-core/build/LavaSecWGCore.xcframework. These are NOT Cargo-resolved dependencies — they are pulled in from the pinned toolchain's precompiled standard library, so they are absent from Cargo.lock and cargo-metadata cannot see them, which is why this corpus is committed rather than derived. They ARE written into third-party-notices-index.json: the generator appends these entries to the same crate array as the Cargo-resolved ones, so the index is the union of both and must not be read as Cargo-only.",
+  "toolchain": "1.94.0",
+  "rustcVersion": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "rustcCommitHash": "4a4ef493e3a1488c6e321570238084b38948f6db",
+  "rustcCommitDate": "2026-03-02",
+  "rustcHost": "aarch64-apple-darwin",
+  "rustcLlvmVersion": "21.1.8",
+  "targets": [
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "aarch64-apple-darwin"
+  ],
+  "vendoredCrates": {
+    "note": "Crates the pinned toolchain builds from a VENDORED source tree rather than in-tree, so every slice's archive carries /rust/deps/<crate>-<version> path records for them and their versions are provable from the committed binaries. Declared here rather than derived from those records, because the version gate needs an expectation INDEPENDENT of the evidence it is testing: deriving the expected set from the observations meant a crate that lost its markers in every slice simply dropped out of the expectation and went unchecked. Changing this list is a reviewable diff and is only legitimate as part of a toolchain bump — the pinned toolchain is recorded in `toolchain`/`rustcCommitHash` above, so a list that no longer matches the archives fails the gate in both directions: a declared crate missing from any slice, and an observed vendored crate absent from this list.",
+    "crates": [
+      "addr2line",
+      "cfg_if",
+      "gimli",
+      "hashbrown",
+      "libc",
+      "memchr",
+      "miniz_oxide",
+      "object",
+      "rustc_demangle"
+    ]
+  },
+  "appliesTo": {
+    "artifact": "ThirdParty/wireguard-core/build/LavaSecWGCore.xcframework",
+    "slices": [
+      "ios-arm64",
+      "ios-arm64-simulator",
+      "macos-arm64"
+    ],
+    "evidence": "Each slice's liblavasec_wireguard_core.a has 450 `ar t` members (449 excluding __.SYMDEF). Every member name of the form <crate>-<16 hex>.* was matched against lib<crate>-<16 hex>.rlib in lib/rustlib/<target>/lib of the pinned toolchain. Exactly 19 crates match in every slice and the NAME set is identical across all three (the metadata hashes differ per target, as expected). Apple `nm` and `xcrun llvm-nm` cannot read these objects (LLVM-17 reader vs LLVM-21 fat-LTO bitcode); `ar t` was used.",
+    "sysrootMemberCount": {
+      "ios-arm64": 386,
+      "ios-arm64-simulator": 386,
+      "macos-arm64": 386
+    },
+    "note": "386 of the 450 `ar t` members per slice carry a crate name listed in sysroot-crates.json (384 once the two Cargo-resolved copies of libc and cfg_if are excluded), and 366 of those come from compiler_builtins alone, whose 144 C/asm objects carry bare-hash member names. The measured breakdown, with each definition, is in resolutionSummary.sysrootMemberCount."
+  },
+  "generatedFrom": [
+    {
+      "id": "COPYRIGHT-library.html",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/share/doc/rust/COPYRIGHT-library.html",
+      "bytes": 425661,
+      "sha256": "af70aaabed1b73e872f14f9130db37e09f3f4d73a5f7c598b9173697a5d2729f",
+      "packagesListed": 35,
+      "role": "std-scoped copyright notices; supplied the in-tree licence basis and full verbatim texts for 5 of the 19"
+    },
+    {
+      "id": "COPYRIGHT.html",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/share/doc/rust/COPYRIGHT.html",
+      "bytes": 13854550,
+      "sha256": "339573987987fb12edfd4ad47fe65976af4ccf6a0c54b379eb42fccc6dceb2a5",
+      "packagesListed": 1449,
+      "role": "whole-toolchain copyright notices; supplied verbatim texts for 4 gap crates once library/Cargo.lock disambiguated their versions, plus the addr2line texts"
+    },
+    {
+      "id": "library/Cargo.lock",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/lib/rustlib/src/rust/library/Cargo.lock",
+      "bytes": 12040,
+      "sha256": "f14fb9ee9032ecb2610578650e071d106c7c34fe990878522914d30a15abbf79",
+      "role": "AUTHORITATIVE version pins for the crates std was built against; obtained by installing the rust-src component for the pinned 1.94.0 toolchain (`rustup component add rust-src --toolchain 1.94.0-aarch64-apple-darwin`)"
+    },
+    {
+      "id": "library/compiler-builtins/LICENSE.txt",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt",
+      "bytes": 15078,
+      "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b",
+      "role": "the only authentic licence text for compiler_builtins"
+    },
+    {
+      "id": "library/compiler-builtins/compiler-builtins/Cargo.toml",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins/Cargo.toml",
+      "bytes": 2116,
+      "sha256": "4633d08478ed8eb8ddb27ca271c44146edec3eaef9780af471ccb590f2105f57",
+      "role": "declared SPDX expression and version for compiler_builtins"
+    },
+    {
+      "id": "share/doc/rust/licenses/",
+      "path": "/Users/imjmln/.rustup/toolchains/1.94.0-aarch64-apple-darwin/share/doc/rust/licenses",
+      "role": "SPDX canonical texts (12 files) shipped by the toolchain; Apache-2.0.txt, MIT.txt, Unicode-3.0.txt and LLVM-exception.txt are referenced by this corpus"
+    },
+    {
+      "id": "upstream gimli-rs/addr2line 0.25.1",
+      "path": "https://raw.githubusercontent.com/gimli-rs/addr2line/0.25.1/",
+      "role": "LICENSE-MIT, LICENSE-APACHE and Cargo.toml, fetched only to confirm that the toolchain's addr2line-0.24.2 texts are byte-identical for 0.25.1 and that the SPDX expression is unchanged"
+    }
+  ],
+  "resolutionSummary": {
+    "totalLinkedSysrootCrates": 19,
+    "resolvedFromToolchainDocsAlone": {
+      "count": 5,
+      "packages": [
+        "cfg_if",
+        "gimli",
+        "hashbrown",
+        "libc",
+        "rustc_demangle"
+      ]
+    },
+    "requiredRustSrc": {
+      "count": 14,
+      "packages": [
+        "addr2line",
+        "adler2",
+        "alloc",
+        "compiler_builtins",
+        "core",
+        "memchr",
+        "miniz_oxide",
+        "object",
+        "panic_abort",
+        "rustc_std_workspace_alloc",
+        "rustc_std_workspace_core",
+        "std",
+        "std_detect",
+        "unwind"
+      ],
+      "note": "rust-src (library/Cargo.lock and the in-tree manifests) was installed for this task and is the authoritative source for the versions std was built against."
+    },
+    "versionCouldOnlyComeFromLibraryCargoLock": {
+      "count": 5,
+      "packages": [
+        "addr2line",
+        "adler2",
+        "memchr",
+        "miniz_oxide",
+        "object"
+      ],
+      "note": "These are the crates the shipped documents genuinely cannot pin: absent from COPYRIGHT-library.html and listed in COPYRIGHT.html at 2-5 candidate versions each (or, for addr2line, not at the linked version at all)."
+    },
+    "requiredUpstreamSource": {
+      "count": 1,
+      "packages": [
+        "addr2line"
+      ]
+    },
+    "unresolved": {
+      "count": 0,
+      "packages": []
+    },
+    "absentFromBothOutOfTreeLists": {
+      "packages": [
+        "compiler_builtins",
+        "std_detect"
+      ],
+      "note": "Named in neither COPYRIGHT-library.html's nor COPYRIGHT.html's out-of-tree package list, at any version. Both are in-tree crates and were resolved from the rust-src tree."
+    },
+    "absentFromCopyrightLibraryHtmlOutOfTreeList": {
+      "packages": [
+        "addr2line",
+        "adler2",
+        "alloc",
+        "compiler_builtins",
+        "core",
+        "memchr",
+        "miniz_oxide",
+        "object",
+        "panic_abort",
+        "rustc_std_workspace_alloc",
+        "rustc_std_workspace_core",
+        "std",
+        "std_detect",
+        "unwind"
+      ],
+      "note": "Of these, the eight rust-lang/rust in-tree crates (alloc, core, panic_abort, rustc_std_workspace_alloc, rustc_std_workspace_core, std, std_detect, unwind) are still covered by that document's 'In-tree files' section; only addr2line, adler2, memchr, miniz_oxide, object and compiler_builtins are uncovered by it entirely."
+    },
+    "sysrootMemberCount": {
+      "$comment": [
+        "Measured with scripts/lib/ar-archive.mjs against the committed slices, not asserted.",
+        "The previous value (240 per slice) matched no definition of the count and is corrected here.",
+        "byInventoryName: every member whose crate name appears in sysroot-crates.json. This",
+        "includes the Cargo-resolved copies of libc and cfg_if, which share a name with a sysroot",
+        "crate and appear as separate members (the sysroot copy keeps a version string; the Cargo",
+        "copy does not, because strip = \"debuginfo\" removed its DWARF).",
+        "sysrootOnly: the same count with those two Cargo copies excluded.",
+        "compilerBuiltins is broken out because it alone is the large majority."
+      ],
+      "byInventoryName": {
+        "ios-arm64": 386,
+        "ios-arm64-simulator": 386,
+        "macos-arm64": 386
+      },
+      "sysrootOnly": {
+        "ios-arm64": 384,
+        "ios-arm64-simulator": 384,
+        "macos-arm64": 384
+      },
+      "compilerBuiltins": {
+        "ios-arm64": 366,
+        "ios-arm64-simulator": 366,
+        "macos-arm64": 366
+      },
+      "totalMembersPerSlice": 450
+    }
+  },
+  "licenseTexts": {
+    "apache-2-0-074e6e32c86a": {
+      "spdx": "Apache-2.0",
+      "title": "Apache-2.0 — shared text, identical across 8 packages (alloc, core, panic_abort, rustc_std_workspace_alloc, rustc_std_workspace_core, std, std_detect, unwind)",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280,
+      "provenance": [
+        "toolchain file share/doc/rust/licenses/Apache-2.0.txt"
+      ],
+      "text": "Apache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n1. Definitions.\n\n\"License\" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.\n\n\"Licensor\" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.\n\n\"Legal Entity\" shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, \"control\" means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.\n\n\"You\" (or \"Your\") shall mean an individual or Legal Entity exercising permissions granted by this License.\n\n\"Source\" form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.\n\n\"Object\" form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.\n\n\"Work\" shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).\n\n\"Derivative Works\" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.\n\n\"Contribution\" shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, \"submitted\" means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as \"Not a Contribution.\"\n\n\"Contributor\" shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.\n\n2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.\n\n3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.\n\n4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:\n\n     (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and\n\n     (b) You must cause any modified files to carry prominent notices stating that You changed the files; and\n\n     (c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and\n\n     (d) If the Work includes a \"NOTICE\" text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.\n\n     You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.\n\n5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.\n\n6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.\n\n7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.\n\n8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.\n\n9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.\n\nEND OF TERMS AND CONDITIONS\n\nAPPENDIX: How to apply the Apache License to your work.\n\nTo apply the Apache License to your work, attach the following boilerplate notice, with the fields enclosed by brackets \"[]\" replaced with your own identifying information. (Don't include the brackets!)  The text should be enclosed in the appropriate comment syntax for the file format. We also recommend that a file or class name and description of purpose be included on the same \"printed page\" as the copyright notice for easier identification within third-party archives.\n\nCopyright [yyyy] [name of copyright owner]\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\nhttp://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n"
+    },
+    "mit-b85dcd3e453d": {
+      "spdx": "MIT",
+      "title": "MIT — shared text, identical across 8 packages (alloc, core, panic_abort, rustc_std_workspace_alloc, rustc_std_workspace_core, std, std_detect, unwind)",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+      "bytes": 1078,
+      "provenance": [
+        "toolchain file share/doc/rust/licenses/MIT.txt"
+      ],
+      "text": "MIT License\n\nCopyright (c) <year> <copyright holders>\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n"
+    },
+    "unicode-3-0-f5062c9a188d": {
+      "spdx": "Unicode-3.0",
+      "title": "Unicode License v3",
+      "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443",
+      "bytes": 1995,
+      "provenance": [
+        "toolchain file share/doc/rust/licenses/Unicode-3.0.txt"
+      ],
+      "text": "UNICODE LICENSE V3\n\nCOPYRIGHT AND PERMISSION NOTICE\n\nCopyright © 1991-2024 Unicode, Inc.\n\nNOTICE TO USER: Carefully read the following legal agreement. BY\nDOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR\nSOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE\nTERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT\nDOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.\n\nPermission is hereby granted, free of charge, to any person obtaining a\ncopy of data files and any associated documentation (the \"Data Files\") or\nsoftware and any associated documentation (the \"Software\") to deal in the\nData Files or Software without restriction, including without limitation\nthe rights to use, copy, modify, merge, publish, distribute, and/or sell\ncopies of the Data Files or Software, and to permit persons to whom the\nData Files or Software are furnished to do so, provided that either (a)\nthis copyright and permission notice appear with all copies of the Data\nFiles or Software, or (b) this copyright and permission notice appear in\nassociated Documentation.\n\nTHE DATA FILES AND SOFTWARE ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY\nKIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\nTHIRD PARTY RIGHTS.\n\nIN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE\nBE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,\nOR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,\nWHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,\nARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA\nFILES OR SOFTWARE.\n\nExcept as contained in this notice, the name of a copyright holder shall\nnot be used in advertising or otherwise to promote the sale, use or other\ndealings in these Data Files or Software without prior written\nauthorization of the copyright holder.\n"
+    },
+    "llvm-exception-e34c58338bd8": {
+      "spdx": "LLVM-exception",
+      "title": "LLVM Exceptions to the Apache 2.0 License",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+      "bytes": 919,
+      "provenance": [
+        "toolchain file share/doc/rust/licenses/LLVM-exception.txt"
+      ],
+      "text": "---- LLVM Exceptions to the Apache 2.0 License ----\n\n   As an exception, if, as a result of your compiling your source code, portions\n   of this Software are embedded into an Object form of such source code, you\n   may redistribute such embedded portions in such Object form without complying\n   with the conditions of Sections 4(a), 4(b) and 4(d) of the License.\n\n   In addition, if you combine or link compiled forms of this Software with\n   software that is licensed under the GPLv2 (\"Combined Software\") and if a\n   court of competent jurisdiction determines that the patent provision (Section\n   3), the indemnity provision (Section 9) or other Section of the License\n   conflicts with the conditions of the GPLv2, you may retroactively and\n   prospectively choose to deem waived or otherwise exclude such Section(s) of\n   the License, but only in their entirety and only with respect to the Combined\n   Software.\n"
+    },
+    "mit-and-apache-2-0-with-llvm-exception-ab6eec6caf0f": {
+      "spdx": "MIT AND Apache-2.0 WITH LLVM-exception",
+      "title": "compiler-builtins LICENSE.txt (MIT + Apache-2.0 + LLVM exception + third-party derivation notices)",
+      "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b",
+      "bytes": 15078,
+      "provenance": [
+        "rust-src file library/compiler-builtins/LICENSE.txt"
+      ],
+      "text": "The compiler-builtins crate is available for use under both the MIT license\nand the Apache-2.0 license with the LLVM exception (MIT AND Apache-2.0 WITH\nLLVM-exception).\n\nThe libm crate is available for use under the MIT license.\n\nAs a contributor, you agree that your code may be used under any of the\nfollowing: the MIT license, the Apache-2.0 license, or the Apache-2.0 license\nwith the LLVM exception. In other words, original (non-derivative) work is\nlicensed under MIT OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception. This is\nthe default license for all other source in this repository.\n\nText of the relevant licenses is provided below:\n\n------------------------------------------------------------------------------\nMIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n------------------------------------------------------------------------------\n                                 Apache License\n                           Version 2.0, January 2004\n                        http://www.apache.org/licenses/\n\n    TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n    1. Definitions.\n\n      \"License\" shall mean the terms and conditions for use, reproduction,\n      and distribution as defined by Sections 1 through 9 of this document.\n\n      \"Licensor\" shall mean the copyright owner or entity authorized by\n      the copyright owner that is granting the License.\n\n      \"Legal Entity\" shall mean the union of the acting entity and all\n      other entities that control, are controlled by, or are under common\n      control with that entity. For the purposes of this definition,\n      \"control\" means (i) the power, direct or indirect, to cause the\n      direction or management of such entity, whether by contract or\n      otherwise, or (ii) ownership of fifty percent (50%) or more of the\n      outstanding shares, or (iii) beneficial ownership of such entity.\n\n      \"You\" (or \"Your\") shall mean an individual or Legal Entity\n      exercising permissions granted by this License.\n\n      \"Source\" form shall mean the preferred form for making modifications,\n      including but not limited to software source code, documentation\n      source, and configuration files.\n\n      \"Object\" form shall mean any form resulting from mechanical\n      transformation or translation of a Source form, including but\n      not limited to compiled object code, generated documentation,\n      and conversions to other media types.\n\n      \"Work\" shall mean the work of authorship, whether in Source or\n      Object form, made available under the License, as indicated by a\n      copyright notice that is included in or attached to the work\n      (an example is provided in the Appendix below).\n\n      \"Derivative Works\" shall mean any work, whether in Source or Object\n      form, that is based on (or derived from) the Work and for which the\n      editorial revisions, annotations, elaborations, or other modifications\n      represent, as a whole, an original work of authorship. For the purposes\n      of this License, Derivative Works shall not include works that remain\n      separable from, or merely link (or bind by name) to the interfaces of,\n      the Work and Derivative Works thereof.\n\n      \"Contribution\" shall mean any work of authorship, including\n      the original version of the Work and any modifications or additions\n      to that Work or Derivative Works thereof, that is intentionally\n      submitted to Licensor for inclusion in the Work by the copyright owner\n      or by an individual or Legal Entity authorized to submit on behalf of\n      the copyright owner. For the purposes of this definition, \"submitted\"\n      means any form of electronic, verbal, or written communication sent\n      to the Licensor or its representatives, including but not limited to\n      communication on electronic mailing lists, source code control systems,\n      and issue tracking systems that are managed by, or on behalf of, the\n      Licensor for the purpose of discussing and improving the Work, but\n      excluding communication that is conspicuously marked or otherwise\n      designated in writing by the copyright owner as \"Not a Contribution.\"\n\n      \"Contributor\" shall mean Licensor and any individual or Legal Entity\n      on behalf of whom a Contribution has been received by Licensor and\n      subsequently incorporated within the Work.\n\n    2. Grant of Copyright License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      copyright license to reproduce, prepare Derivative Works of,\n      publicly display, publicly perform, sublicense, and distribute the\n      Work and such Derivative Works in Source or Object form.\n\n    3. Grant of Patent License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      (except as stated in this section) patent license to make, have made,\n      use, offer to sell, sell, import, and otherwise transfer the Work,\n      where such license applies only to those patent claims licensable\n      by such Contributor that are necessarily infringed by their\n      Contribution(s) alone or by combination of their Contribution(s)\n      with the Work to which such Contribution(s) was submitted. If You\n      institute patent litigation against any entity (including a\n      cross-claim or counterclaim in a lawsuit) alleging that the Work\n      or a Contribution incorporated within the Work constitutes direct\n      or contributory patent infringement, then any patent licenses\n      granted to You under this License for that Work shall terminate\n      as of the date such litigation is filed.\n\n    4. Redistribution. You may reproduce and distribute copies of the\n      Work or Derivative Works thereof in any medium, with or without\n      modifications, and in Source or Object form, provided that You\n      meet the following conditions:\n\n      (a) You must give any other recipients of the Work or\n          Derivative Works a copy of this License; and\n\n      (b) You must cause any modified files to carry prominent notices\n          stating that You changed the files; and\n\n      (c) You must retain, in the Source form of any Derivative Works\n          that You distribute, all copyright, patent, trademark, and\n          attribution notices from the Source form of the Work,\n          excluding those notices that do not pertain to any part of\n          the Derivative Works; and\n\n      (d) If the Work includes a \"NOTICE\" text file as part of its\n          distribution, then any Derivative Works that You distribute must\n          include a readable copy of the attribution notices contained\n          within such NOTICE file, excluding those notices that do not\n          pertain to any part of the Derivative Works, in at least one\n          of the following places: within a NOTICE text file distributed\n          as part of the Derivative Works; within the Source form or\n          documentation, if provided along with the Derivative Works; or,\n          within a display generated by the Derivative Works, if and\n          wherever such third-party notices normally appear. The contents\n          of the NOTICE file are for informational purposes only and\n          do not modify the License. You may add Your own attribution\n          notices within Derivative Works that You distribute, alongside\n          or as an addendum to the NOTICE text from the Work, provided\n          that such additional attribution notices cannot be construed\n          as modifying the License.\n\n      You may add Your own copyright statement to Your modifications and\n      may provide additional or different license terms and conditions\n      for use, reproduction, or distribution of Your modifications, or\n      for any such Derivative Works as a whole, provided Your use,\n      reproduction, and distribution of the Work otherwise complies with\n      the conditions stated in this License.\n\n    5. Submission of Contributions. Unless You explicitly state otherwise,\n      any Contribution intentionally submitted for inclusion in the Work\n      by You to the Licensor shall be under the terms and conditions of\n      this License, without any additional terms or conditions.\n      Notwithstanding the above, nothing herein shall supersede or modify\n      the terms of any separate license agreement you may have executed\n      with Licensor regarding such Contributions.\n\n    6. Trademarks. This License does not grant permission to use the trade\n      names, trademarks, service marks, or product names of the Licensor,\n      except as required for reasonable and customary use in describing the\n      origin of the Work and reproducing the content of the NOTICE file.\n\n    7. Disclaimer of Warranty. Unless required by applicable law or\n      agreed to in writing, Licensor provides the Work (and each\n      Contributor provides its Contributions) on an \"AS IS\" BASIS,\n      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n      implied, including, without limitation, any warranties or conditions\n      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n      PARTICULAR PURPOSE. You are solely responsible for determining the\n      appropriateness of using or redistributing the Work and assume any\n      risks associated with Your exercise of permissions under this License.\n\n    8. Limitation of Liability. In no event and under no legal theory,\n      whether in tort (including negligence), contract, or otherwise,\n      unless required by applicable law (such as deliberate and grossly\n      negligent acts) or agreed to in writing, shall any Contributor be\n      liable to You for damages, including any direct, indirect, special,\n      incidental, or consequential damages of any character arising as a\n      result of this License or out of the use or inability to use the\n      Work (including but not limited to damages for loss of goodwill,\n      work stoppage, computer failure or malfunction, or any and all\n      other commercial damages or losses), even if such Contributor\n      has been advised of the possibility of such damages.\n\n    9. Accepting Warranty or Additional Liability. While redistributing\n      the Work or Derivative Works thereof, You may choose to offer,\n      and charge a fee for, acceptance of support, warranty, indemnity,\n      or other liability obligations and/or rights consistent with this\n      License. However, in accepting such obligations, You may act only\n      on Your own behalf and on Your sole responsibility, not on behalf\n      of any other Contributor, and only if You agree to indemnify,\n      defend, and hold each Contributor harmless for any liability\n      incurred by, or claims asserted against, such Contributor by reason\n      of your accepting any such warranty or additional liability.\n\n    END OF TERMS AND CONDITIONS\n\n    APPENDIX: How to apply the Apache License to your work.\n\n      To apply the Apache License to your work, attach the following\n      boilerplate notice, with the fields enclosed by brackets \"[]\"\n      replaced with your own identifying information. (Don't include\n      the brackets!)  The text should be enclosed in the appropriate\n      comment syntax for the file format. We also recommend that a\n      file or class name and description of purpose be included on the\n      same \"printed page\" as the copyright notice for easier\n      identification within third-party archives.\n\n    Licensed under the Apache License, Version 2.0 (the \"License\");\n    you may not use this file except in compliance with the License.\n    You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n    Unless required by applicable law or agreed to in writing, software\n    distributed under the License is distributed on an \"AS IS\" BASIS,\n    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n    See the License for the specific language governing permissions and\n    limitations under the License.\n\n\n---- LLVM Exceptions to the Apache 2.0 License ----\n\nAs an exception, if, as a result of your compiling your source code, portions\nof this Software are embedded into an Object form of such source code, you\nmay redistribute such embedded portions in such Object form without complying\nwith the conditions of Sections 4(a), 4(b) and 4(d) of the License.\n\nIn addition, if you combine or link compiled forms of this Software with\nsoftware that is licensed under the GPLv2 (\"Combined Software\") and if a\ncourt of competent jurisdiction determines that the patent provision (Section\n3), the indemnity provision (Section 9) or other Section of the License\nconflicts with the conditions of the GPLv2, you may retroactively and\nprospectively choose to deem waived or otherwise exclude such Section(s) of\nthe License, but only in their entirety and only with respect to the Combined\nSoftware.\n------------------------------------------------------------------------------\n\nPortions of this software are derived from third-party works licensed under\nterms compatible with the above Apache-2.0 WITH LLVM-exception AND MIT\nlicense:\n\n* compiler-builtins is derived from LLVM's compiler-rt (https://llvm.org/).\n  Work derived from compiler-rt prior to 2019-01-19 is usable under the MIT\n  license, with the following copyright:\n\n      Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT\n\n  The relevant CREDITS.TXT is located at\n  https://github.com/llvm/llvm-project/blob/main/compiler-rt/CREDITS.TXT.\n\n* Work derived from compiler-rt after 2019-01-19 is usable under the\n  Apache-2.0 license with the LLVM exception.\n\n* The bundled `math` module is from the libm crate, usable under the MIT\n  license. For further details and copyrights, see see libm/LICENSE.txt at\n  https://github.com/rust-lang/compiler-builtins.\n\nAdditionally, some source files may contain comments with specific copyrights\nor licenses.\n"
+    },
+    "apache-2-0-769f80b5bcb4": {
+      "spdx": "Apache-2.0",
+      "title": "Apache-2.0 — shared text, identical across 6 packages (addr2line, cfg_if, gimli, hashbrown, object, rustc_demangle)",
+      "sha256": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb",
+      "bytes": 10846,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'cfg-if-1.0.4' → notice file 'LICENSE-APACHE'",
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'gimli-0.32.3' → notice file 'LICENSE-APACHE'",
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'hashbrown-0.16.1' → notice file 'LICENSE-APACHE'",
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'rustc-demangle-0.1.26' → notice file 'LICENSE-APACHE'",
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'addr2line-0.24.2' → notice file 'LICENSE-APACHE'",
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'object-0.37.3' → notice file 'LICENSE-APACHE'",
+        "matches https://raw.githubusercontent.com/gimli-rs/addr2line/0.25.1/LICENSE-APACHE in full, except that this extraction carries no trailing newline — the upstream file ends with one. Verbatim in content, one byte shorter. Scope: this comparison was made against ONE of the 6 packages sharing this text; the bodies are byte-equal to each other, which is why they are deduplicated here."
+      ],
+      "text": "                              Apache License\n                        Version 2.0, January 2004\n                     http://www.apache.org/licenses/\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n1. Definitions.\n\n   \"License\" shall mean the terms and conditions for use, reproduction,\n   and distribution as defined by Sections 1 through 9 of this document.\n\n   \"Licensor\" shall mean the copyright owner or entity authorized by\n   the copyright owner that is granting the License.\n\n   \"Legal Entity\" shall mean the union of the acting entity and all\n   other entities that control, are controlled by, or are under common\n   control with that entity. For the purposes of this definition,\n   \"control\" means (i) the power, direct or indirect, to cause the\n   direction or management of such entity, whether by contract or\n   otherwise, or (ii) ownership of fifty percent (50%) or more of the\n   outstanding shares, or (iii) beneficial ownership of such entity.\n\n   \"You\" (or \"Your\") shall mean an individual or Legal Entity\n   exercising permissions granted by this License.\n\n   \"Source\" form shall mean the preferred form for making modifications,\n   including but not limited to software source code, documentation\n   source, and configuration files.\n\n   \"Object\" form shall mean any form resulting from mechanical\n   transformation or translation of a Source form, including but\n   not limited to compiled object code, generated documentation,\n   and conversions to other media types.\n\n   \"Work\" shall mean the work of authorship, whether in Source or\n   Object form, made available under the License, as indicated by a\n   copyright notice that is included in or attached to the work\n   (an example is provided in the Appendix below).\n\n   \"Derivative Works\" shall mean any work, whether in Source or Object\n   form, that is based on (or derived from) the Work and for which the\n   editorial revisions, annotations, elaborations, or other modifications\n   represent, as a whole, an original work of authorship. For the purposes\n   of this License, Derivative Works shall not include works that remain\n   separable from, or merely link (or bind by name) to the interfaces of,\n   the Work and Derivative Works thereof.\n\n   \"Contribution\" shall mean any work of authorship, including\n   the original version of the Work and any modifications or additions\n   to that Work or Derivative Works thereof, that is intentionally\n   submitted to Licensor for inclusion in the Work by the copyright owner\n   or by an individual or Legal Entity authorized to submit on behalf of\n   the copyright owner. For the purposes of this definition, \"submitted\"\n   means any form of electronic, verbal, or written communication sent\n   to the Licensor or its representatives, including but not limited to\n   communication on electronic mailing lists, source code control systems,\n   and issue tracking systems that are managed by, or on behalf of, the\n   Licensor for the purpose of discussing and improving the Work, but\n   excluding communication that is conspicuously marked or otherwise\n   designated in writing by the copyright owner as \"Not a Contribution.\"\n\n   \"Contributor\" shall mean Licensor and any individual or Legal Entity\n   on behalf of whom a Contribution has been received by Licensor and\n   subsequently incorporated within the Work.\n\n2. Grant of Copyright License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   copyright license to reproduce, prepare Derivative Works of,\n   publicly display, publicly perform, sublicense, and distribute the\n   Work and such Derivative Works in Source or Object form.\n\n3. Grant of Patent License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   (except as stated in this section) patent license to make, have made,\n   use, offer to sell, sell, import, and otherwise transfer the Work,\n   where such license applies only to those patent claims licensable\n   by such Contributor that are necessarily infringed by their\n   Contribution(s) alone or by combination of their Contribution(s)\n   with the Work to which such Contribution(s) was submitted. If You\n   institute patent litigation against any entity (including a\n   cross-claim or counterclaim in a lawsuit) alleging that the Work\n   or a Contribution incorporated within the Work constitutes direct\n   or contributory patent infringement, then any patent licenses\n   granted to You under this License for that Work shall terminate\n   as of the date such litigation is filed.\n\n4. Redistribution. You may reproduce and distribute copies of the\n   Work or Derivative Works thereof in any medium, with or without\n   modifications, and in Source or Object form, provided that You\n   meet the following conditions:\n\n   (a) You must give any other recipients of the Work or\n       Derivative Works a copy of this License; and\n\n   (b) You must cause any modified files to carry prominent notices\n       stating that You changed the files; and\n\n   (c) You must retain, in the Source form of any Derivative Works\n       that You distribute, all copyright, patent, trademark, and\n       attribution notices from the Source form of the Work,\n       excluding those notices that do not pertain to any part of\n       the Derivative Works; and\n\n   (d) If the Work includes a \"NOTICE\" text file as part of its\n       distribution, then any Derivative Works that You distribute must\n       include a readable copy of the attribution notices contained\n       within such NOTICE file, excluding those notices that do not\n       pertain to any part of the Derivative Works, in at least one\n       of the following places: within a NOTICE text file distributed\n       as part of the Derivative Works; within the Source form or\n       documentation, if provided along with the Derivative Works; or,\n       within a display generated by the Derivative Works, if and\n       wherever such third-party notices normally appear. The contents\n       of the NOTICE file are for informational purposes only and\n       do not modify the License. You may add Your own attribution\n       notices within Derivative Works that You distribute, alongside\n       or as an addendum to the NOTICE text from the Work, provided\n       that such additional attribution notices cannot be construed\n       as modifying the License.\n\n   You may add Your own copyright statement to Your modifications and\n   may provide additional or different license terms and conditions\n   for use, reproduction, or distribution of Your modifications, or\n   for any such Derivative Works as a whole, provided Your use,\n   reproduction, and distribution of the Work otherwise complies with\n   the conditions stated in this License.\n\n5. Submission of Contributions. Unless You explicitly state otherwise,\n   any Contribution intentionally submitted for inclusion in the Work\n   by You to the Licensor shall be under the terms and conditions of\n   this License, without any additional terms or conditions.\n   Notwithstanding the above, nothing herein shall supersede or modify\n   the terms of any separate license agreement you may have executed\n   with Licensor regarding such Contributions.\n\n6. Trademarks. This License does not grant permission to use the trade\n   names, trademarks, service marks, or product names of the Licensor,\n   except as required for reasonable and customary use in describing the\n   origin of the Work and reproducing the content of the NOTICE file.\n\n7. Disclaimer of Warranty. Unless required by applicable law or\n   agreed to in writing, Licensor provides the Work (and each\n   Contributor provides its Contributions) on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n   implied, including, without limitation, any warranties or conditions\n   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n   PARTICULAR PURPOSE. You are solely responsible for determining the\n   appropriateness of using or redistributing the Work and assume any\n   risks associated with Your exercise of permissions under this License.\n\n8. Limitation of Liability. In no event and under no legal theory,\n   whether in tort (including negligence), contract, or otherwise,\n   unless required by applicable law (such as deliberate and grossly\n   negligent acts) or agreed to in writing, shall any Contributor be\n   liable to You for damages, including any direct, indirect, special,\n   incidental, or consequential damages of any character arising as a\n   result of this License or out of the use or inability to use the\n   Work (including but not limited to damages for loss of goodwill,\n   work stoppage, computer failure or malfunction, or any and all\n   other commercial damages or losses), even if such Contributor\n   has been advised of the possibility of such damages.\n\n9. Accepting Warranty or Additional Liability. While redistributing\n   the Work or Derivative Works thereof, You may choose to offer,\n   and charge a fee for, acceptance of support, warranty, indemnity,\n   or other liability obligations and/or rights consistent with this\n   License. However, in accepting such obligations, You may act only\n   on Your own behalf and on Your sole responsibility, not on behalf\n   of any other Contributor, and only if You agree to indemnify,\n   defend, and hold each Contributor harmless for any liability\n   incurred by, or claims asserted against, such Contributor by reason\n   of your accepting any such warranty or additional liability.\n\nEND OF TERMS AND CONDITIONS\n\nAPPENDIX: How to apply the Apache License to your work.\n\n   To apply the Apache License to your work, attach the following\n   boilerplate notice, with the fields enclosed by brackets \"[]\"\n   replaced with your own identifying information. (Don't include\n   the brackets!)  The text should be enclosed in the appropriate\n   comment syntax for the file format. We also recommend that a\n   file or class name and description of purpose be included on the\n   same \"printed page\" as the copyright notice for easier\n   identification within third-party archives.\n\nCopyright [yyyy] [name of copyright owner]\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n\thttp://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License."
+    },
+    "mit-84e1bbfebd74": {
+      "spdx": "MIT",
+      "title": "MIT — shared text, identical across 2 packages (cfg_if, rustc_demangle)",
+      "sha256": "84e1bbfebd74e4196cfa0ea5cf58e677aa24b47c6661adbb19fb07920d089d1d",
+      "bytes": 1056,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'cfg-if-1.0.4' → notice file 'LICENSE-MIT'",
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'rustc-demangle-0.1.26' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Copyright (c) 2014 Alex Crichton\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "mit-033a9383ff21": {
+      "spdx": "MIT",
+      "title": "gimli-0.32.3 :: LICENSE-MIT",
+      "sha256": "033a9383ff21d1e4811d98dd2e0081b0ba0d9c9a31d6c7ba9e63e3488479bf29",
+      "bytes": 1070,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'gimli-0.32.3' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Copyright (c) 2015 The Rust Project Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "mit-ae9791f02f2b": {
+      "spdx": "MIT",
+      "title": "hashbrown-0.16.1 :: LICENSE-MIT",
+      "sha256": "ae9791f02f2bbe0ce17b434753af97be6e5284b6f8e9f22db3c1f0f11b2e015a",
+      "bytes": 1059,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'hashbrown-0.16.1' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Copyright (c) 2016 Amanieu d'Antras\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "apache-2-0-95bd3988beee": {
+      "spdx": "Apache-2.0",
+      "title": "libc-0.2.178 :: LICENSE-APACHE",
+      "sha256": "95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc",
+      "bytes": 9722,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'libc-0.2.178' → notice file 'LICENSE-APACHE'"
+      ],
+      "text": "                              Apache License\n                        Version 2.0, January 2004\n                     http://www.apache.org/licenses/\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n1. Definitions.\n\n   \"License\" shall mean the terms and conditions for use, reproduction,\n   and distribution as defined by Sections 1 through 9 of this document.\n\n   \"Licensor\" shall mean the copyright owner or entity authorized by\n   the copyright owner that is granting the License.\n\n   \"Legal Entity\" shall mean the union of the acting entity and all\n   other entities that control, are controlled by, or are under common\n   control with that entity. For the purposes of this definition,\n   \"control\" means (i) the power, direct or indirect, to cause the\n   direction or management of such entity, whether by contract or\n   otherwise, or (ii) ownership of fifty percent (50%) or more of the\n   outstanding shares, or (iii) beneficial ownership of such entity.\n\n   \"You\" (or \"Your\") shall mean an individual or Legal Entity\n   exercising permissions granted by this License.\n\n   \"Source\" form shall mean the preferred form for making modifications,\n   including but not limited to software source code, documentation\n   source, and configuration files.\n\n   \"Object\" form shall mean any form resulting from mechanical\n   transformation or translation of a Source form, including but\n   not limited to compiled object code, generated documentation,\n   and conversions to other media types.\n\n   \"Work\" shall mean the work of authorship, whether in Source or\n   Object form, made available under the License, as indicated by a\n   copyright notice that is included in or attached to the work\n   (an example is provided in the Appendix below).\n\n   \"Derivative Works\" shall mean any work, whether in Source or Object\n   form, that is based on (or derived from) the Work and for which the\n   editorial revisions, annotations, elaborations, or other modifications\n   represent, as a whole, an original work of authorship. For the purposes\n   of this License, Derivative Works shall not include works that remain\n   separable from, or merely link (or bind by name) to the interfaces of,\n   the Work and Derivative Works thereof.\n\n   \"Contribution\" shall mean any work of authorship, including\n   the original version of the Work and any modifications or additions\n   to that Work or Derivative Works thereof, that is intentionally\n   submitted to Licensor for inclusion in the Work by the copyright owner\n   or by an individual or Legal Entity authorized to submit on behalf of\n   the copyright owner. For the purposes of this definition, \"submitted\"\n   means any form of electronic, verbal, or written communication sent\n   to the Licensor or its representatives, including but not limited to\n   communication on electronic mailing lists, source code control systems,\n   and issue tracking systems that are managed by, or on behalf of, the\n   Licensor for the purpose of discussing and improving the Work, but\n   excluding communication that is conspicuously marked or otherwise\n   designated in writing by the copyright owner as \"Not a Contribution.\"\n\n   \"Contributor\" shall mean Licensor and any individual or Legal Entity\n   on behalf of whom a Contribution has been received by Licensor and\n   subsequently incorporated within the Work.\n\n2. Grant of Copyright License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   copyright license to reproduce, prepare Derivative Works of,\n   publicly display, publicly perform, sublicense, and distribute the\n   Work and such Derivative Works in Source or Object form.\n\n3. Grant of Patent License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   (except as stated in this section) patent license to make, have made,\n   use, offer to sell, sell, import, and otherwise transfer the Work,\n   where such license applies only to those patent claims licensable\n   by such Contributor that are necessarily infringed by their\n   Contribution(s) alone or by combination of their Contribution(s)\n   with the Work to which such Contribution(s) was submitted. If You\n   institute patent litigation against any entity (including a\n   cross-claim or counterclaim in a lawsuit) alleging that the Work\n   or a Contribution incorporated within the Work constitutes direct\n   or contributory patent infringement, then any patent licenses\n   granted to You under this License for that Work shall terminate\n   as of the date such litigation is filed.\n\n4. Redistribution. You may reproduce and distribute copies of the\n   Work or Derivative Works thereof in any medium, with or without\n   modifications, and in Source or Object form, provided that You\n   meet the following conditions:\n\n   (a) You must give any other recipients of the Work or\n       Derivative Works a copy of this License; and\n\n   (b) You must cause any modified files to carry prominent notices\n       stating that You changed the files; and\n\n   (c) You must retain, in the Source form of any Derivative Works\n       that You distribute, all copyright, patent, trademark, and\n       attribution notices from the Source form of the Work,\n       excluding those notices that do not pertain to any part of\n       the Derivative Works; and\n\n   (d) If the Work includes a \"NOTICE\" text file as part of its\n       distribution, then any Derivative Works that You distribute must\n       include a readable copy of the attribution notices contained\n       within such NOTICE file, excluding those notices that do not\n       pertain to any part of the Derivative Works, in at least one\n       of the following places: within a NOTICE text file distributed\n       as part of the Derivative Works; within the Source form or\n       documentation, if provided along with the Derivative Works; or,\n       within a display generated by the Derivative Works, if and\n       wherever such third-party notices normally appear. The contents\n       of the NOTICE file are for informational purposes only and\n       do not modify the License. You may add Your own attribution\n       notices within Derivative Works that You distribute, alongside\n       or as an addendum to the NOTICE text from the Work, provided\n       that such additional attribution notices cannot be construed\n       as modifying the License.\n\n   You may add Your own copyright statement to Your modifications and\n   may provide additional or different license terms and conditions\n   for use, reproduction, or distribution of Your modifications, or\n   for any such Derivative Works as a whole, provided Your use,\n   reproduction, and distribution of the Work otherwise complies with\n   the conditions stated in this License.\n\n5. Submission of Contributions. Unless You explicitly state otherwise,\n   any Contribution intentionally submitted for inclusion in the Work\n   by You to the Licensor shall be under the terms and conditions of\n   this License, without any additional terms or conditions.\n   Notwithstanding the above, nothing herein shall supersede or modify\n   the terms of any separate license agreement you may have executed\n   with Licensor regarding such Contributions.\n\n6. Trademarks. This License does not grant permission to use the trade\n   names, trademarks, service marks, or product names of the Licensor,\n   except as required for reasonable and customary use in describing the\n   origin of the Work and reproducing the content of the NOTICE file.\n\n7. Disclaimer of Warranty. Unless required by applicable law or\n   agreed to in writing, Licensor provides the Work (and each\n   Contributor provides its Contributions) on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n   implied, including, without limitation, any warranties or conditions\n   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n   PARTICULAR PURPOSE. You are solely responsible for determining the\n   appropriateness of using or redistributing the Work and assume any\n   risks associated with Your exercise of permissions under this License.\n\n8. Limitation of Liability. In no event and under no legal theory,\n   whether in tort (including negligence), contract, or otherwise,\n   unless required by applicable law (such as deliberate and grossly\n   negligent acts) or agreed to in writing, shall any Contributor be\n   liable to You for damages, including any direct, indirect, special,\n   incidental, or consequential damages of any character arising as a\n   result of this License or out of the use or inability to use the\n   Work (including but not limited to damages for loss of goodwill,\n   work stoppage, computer failure or malfunction, or any and all\n   other commercial damages or losses), even if such Contributor\n   has been advised of the possibility of such damages.\n\n9. Accepting Warranty or Additional Liability. While redistributing\n   the Work or Derivative Works thereof, You may choose to offer,\n   and charge a fee for, acceptance of support, warranty, indemnity,\n   or other liability obligations and/or rights consistent with this\n   License. However, in accepting such obligations, You may act only\n   on Your own behalf and on Your sole responsibility, not on behalf\n   of any other Contributor, and only if You agree to indemnify,\n   defend, and hold each Contributor harmless for any liability\n   incurred by, or claims asserted against, such Contributor by reason\n   of your accepting any such warranty or additional liability.\n\nEND OF TERMS AND CONDITIONS"
+    },
+    "mit-98ed3581f1f1": {
+      "spdx": "MIT",
+      "title": "libc-0.2.178 :: LICENSE-MIT",
+      "sha256": "98ed3581f1f1338414ec61cb65850f41e456b450ce210620d05933d7d0f63bc6",
+      "bytes": 1075,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'libc-0.2.178' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Copyright (c) 2014-2020 The Rust Project Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "0bsd-a21c914647d3": {
+      "spdx": "0BSD",
+      "title": "adler2-2.0.1 :: LICENSE-0BSD",
+      "sha256": "a21c914647d33e48cb4d213dfb0749dbb45491514da9d3a8ffc4763cf456217d",
+      "bytes": 664,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'adler2-2.0.1' → notice file 'LICENSE-0BSD'"
+      ],
+      "text": "Copyright (C) Jonas Schievink <jonasschievink@gmail.com>\n\nPermission to use, copy, modify, and/or distribute this software for\nany purpose with or without fee is hereby granted.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\nWITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\nMERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR\nANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\nWHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN\nAN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT\nOF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE."
+    },
+    "apache-2-0-3c160092b803": {
+      "spdx": "Apache-2.0",
+      "title": "adler2-2.0.1 :: LICENSE-APACHE",
+      "sha256": "3c160092b8035532532ee61cb3f8a4b8d4f3d31438db0992c0ec845bc2dd820f",
+      "bytes": 10859,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'adler2-2.0.1' → notice file 'LICENSE-APACHE'"
+      ],
+      "text": "                              Apache License\n                        Version 2.0, January 2004\n                     https://www.apache.org/licenses/LICENSE-2.0\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n1. Definitions.\n\n   \"License\" shall mean the terms and conditions for use, reproduction,\n   and distribution as defined by Sections 1 through 9 of this document.\n\n   \"Licensor\" shall mean the copyright owner or entity authorized by\n   the copyright owner that is granting the License.\n\n   \"Legal Entity\" shall mean the union of the acting entity and all\n   other entities that control, are controlled by, or are under common\n   control with that entity. For the purposes of this definition,\n   \"control\" means (i) the power, direct or indirect, to cause the\n   direction or management of such entity, whether by contract or\n   otherwise, or (ii) ownership of fifty percent (50%) or more of the\n   outstanding shares, or (iii) beneficial ownership of such entity.\n\n   \"You\" (or \"Your\") shall mean an individual or Legal Entity\n   exercising permissions granted by this License.\n\n   \"Source\" form shall mean the preferred form for making modifications,\n   including but not limited to software source code, documentation\n   source, and configuration files.\n\n   \"Object\" form shall mean any form resulting from mechanical\n   transformation or translation of a Source form, including but\n   not limited to compiled object code, generated documentation,\n   and conversions to other media types.\n\n   \"Work\" shall mean the work of authorship, whether in Source or\n   Object form, made available under the License, as indicated by a\n   copyright notice that is included in or attached to the work\n   (an example is provided in the Appendix below).\n\n   \"Derivative Works\" shall mean any work, whether in Source or Object\n   form, that is based on (or derived from) the Work and for which the\n   editorial revisions, annotations, elaborations, or other modifications\n   represent, as a whole, an original work of authorship. For the purposes\n   of this License, Derivative Works shall not include works that remain\n   separable from, or merely link (or bind by name) to the interfaces of,\n   the Work and Derivative Works thereof.\n\n   \"Contribution\" shall mean any work of authorship, including\n   the original version of the Work and any modifications or additions\n   to that Work or Derivative Works thereof, that is intentionally\n   submitted to Licensor for inclusion in the Work by the copyright owner\n   or by an individual or Legal Entity authorized to submit on behalf of\n   the copyright owner. For the purposes of this definition, \"submitted\"\n   means any form of electronic, verbal, or written communication sent\n   to the Licensor or its representatives, including but not limited to\n   communication on electronic mailing lists, source code control systems,\n   and issue tracking systems that are managed by, or on behalf of, the\n   Licensor for the purpose of discussing and improving the Work, but\n   excluding communication that is conspicuously marked or otherwise\n   designated in writing by the copyright owner as \"Not a Contribution.\"\n\n   \"Contributor\" shall mean Licensor and any individual or Legal Entity\n   on behalf of whom a Contribution has been received by Licensor and\n   subsequently incorporated within the Work.\n\n2. Grant of Copyright License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   copyright license to reproduce, prepare Derivative Works of,\n   publicly display, publicly perform, sublicense, and distribute the\n   Work and such Derivative Works in Source or Object form.\n\n3. Grant of Patent License. Subject to the terms and conditions of\n   this License, each Contributor hereby grants to You a perpetual,\n   worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n   (except as stated in this section) patent license to make, have made,\n   use, offer to sell, sell, import, and otherwise transfer the Work,\n   where such license applies only to those patent claims licensable\n   by such Contributor that are necessarily infringed by their\n   Contribution(s) alone or by combination of their Contribution(s)\n   with the Work to which such Contribution(s) was submitted. If You\n   institute patent litigation against any entity (including a\n   cross-claim or counterclaim in a lawsuit) alleging that the Work\n   or a Contribution incorporated within the Work constitutes direct\n   or contributory patent infringement, then any patent licenses\n   granted to You under this License for that Work shall terminate\n   as of the date such litigation is filed.\n\n4. Redistribution. You may reproduce and distribute copies of the\n   Work or Derivative Works thereof in any medium, with or without\n   modifications, and in Source or Object form, provided that You\n   meet the following conditions:\n\n   (a) You must give any other recipients of the Work or\n       Derivative Works a copy of this License; and\n\n   (b) You must cause any modified files to carry prominent notices\n       stating that You changed the files; and\n\n   (c) You must retain, in the Source form of any Derivative Works\n       that You distribute, all copyright, patent, trademark, and\n       attribution notices from the Source form of the Work,\n       excluding those notices that do not pertain to any part of\n       the Derivative Works; and\n\n   (d) If the Work includes a \"NOTICE\" text file as part of its\n       distribution, then any Derivative Works that You distribute must\n       include a readable copy of the attribution notices contained\n       within such NOTICE file, excluding those notices that do not\n       pertain to any part of the Derivative Works, in at least one\n       of the following places: within a NOTICE text file distributed\n       as part of the Derivative Works; within the Source form or\n       documentation, if provided along with the Derivative Works; or,\n       within a display generated by the Derivative Works, if and\n       wherever such third-party notices normally appear. The contents\n       of the NOTICE file are for informational purposes only and\n       do not modify the License. You may add Your own attribution\n       notices within Derivative Works that You distribute, alongside\n       or as an addendum to the NOTICE text from the Work, provided\n       that such additional attribution notices cannot be construed\n       as modifying the License.\n\n   You may add Your own copyright statement to Your modifications and\n   may provide additional or different license terms and conditions\n   for use, reproduction, or distribution of Your modifications, or\n   for any such Derivative Works as a whole, provided Your use,\n   reproduction, and distribution of the Work otherwise complies with\n   the conditions stated in this License.\n\n5. Submission of Contributions. Unless You explicitly state otherwise,\n   any Contribution intentionally submitted for inclusion in the Work\n   by You to the Licensor shall be under the terms and conditions of\n   this License, without any additional terms or conditions.\n   Notwithstanding the above, nothing herein shall supersede or modify\n   the terms of any separate license agreement you may have executed\n   with Licensor regarding such Contributions.\n\n6. Trademarks. This License does not grant permission to use the trade\n   names, trademarks, service marks, or product names of the Licensor,\n   except as required for reasonable and customary use in describing the\n   origin of the Work and reproducing the content of the NOTICE file.\n\n7. Disclaimer of Warranty. Unless required by applicable law or\n   agreed to in writing, Licensor provides the Work (and each\n   Contributor provides its Contributions) on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n   implied, including, without limitation, any warranties or conditions\n   of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n   PARTICULAR PURPOSE. You are solely responsible for determining the\n   appropriateness of using or redistributing the Work and assume any\n   risks associated with Your exercise of permissions under this License.\n\n8. Limitation of Liability. In no event and under no legal theory,\n   whether in tort (including negligence), contract, or otherwise,\n   unless required by applicable law (such as deliberate and grossly\n   negligent acts) or agreed to in writing, shall any Contributor be\n   liable to You for damages, including any direct, indirect, special,\n   incidental, or consequential damages of any character arising as a\n   result of this License or out of the use or inability to use the\n   Work (including but not limited to damages for loss of goodwill,\n   work stoppage, computer failure or malfunction, or any and all\n   other commercial damages or losses), even if such Contributor\n   has been advised of the possibility of such damages.\n\n9. Accepting Warranty or Additional Liability. While redistributing\n   the Work or Derivative Works thereof, You may choose to offer,\n   and charge a fee for, acceptance of support, warranty, indemnity,\n   or other liability obligations and/or rights consistent with this\n   License. However, in accepting such obligations, You may act only\n   on Your own behalf and on Your sole responsibility, not on behalf\n   of any other Contributor, and only if You agree to indemnify,\n   defend, and hold each Contributor harmless for any liability\n   incurred by, or claims asserted against, such Contributor by reason\n   of your accepting any such warranty or additional liability.\n\nEND OF TERMS AND CONDITIONS\n\nAPPENDIX: How to apply the Apache License to your work.\n\n   To apply the Apache License to your work, attach the following\n   boilerplate notice, with the fields enclosed by brackets \"[]\"\n   replaced with your own identifying information. (Don't include\n   the brackets!)  The text should be enclosed in the appropriate\n   comment syntax for the file format. We also recommend that a\n   file or class name and description of purpose be included on the\n   same \"printed page\" as the copyright notice for easier\n   identification within third-party archives.\n\nCopyright [yyyy] [name of copyright owner]\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n\thttps://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License."
+    },
+    "mit-30fefc3a7d6a": {
+      "spdx": "MIT",
+      "title": "adler2-2.0.1 :: LICENSE-MIT",
+      "sha256": "30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652",
+      "bytes": 1022,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'adler2-2.0.1' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Permission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "mit-154c1af2b38e": {
+      "spdx": "MIT",
+      "title": "memchr-2.7.6 :: LICENSE-MIT",
+      "sha256": "154c1af2b38e25e5c18613dfe352eed29b0863cb39e494007822cdeb39150ac5",
+      "bytes": 1080,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'memchr-2.7.6' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "The MIT License (MIT)\n\nCopyright (c) 2015 Andrew Gallant\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE."
+    },
+    "unlicense-ca2abdf69588": {
+      "spdx": "Unlicense",
+      "title": "memchr-2.7.6 :: UNLICENSE",
+      "sha256": "ca2abdf695884c77ea4b4a5b64ca7b732d9d9dbade4eebc1c2e76c53e9e3bc83",
+      "bytes": 1210,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'memchr-2.7.6' → notice file 'UNLICENSE'"
+      ],
+      "text": "This is free and unencumbered software released into the public domain.\n\nAnyone is free to copy, modify, publish, use, compile, sell, or\ndistribute this software, either in source code form or as a compiled\nbinary, for any purpose, commercial or non-commercial, and by any\nmeans.\n\nIn jurisdictions that recognize copyright laws, the author or authors\nof this software dedicate any and all copyright interest in the\nsoftware to the public domain. We make this dedication for the benefit\nof the public at large and to the detriment of our heirs and\nsuccessors. We intend this dedication to be an overt act of\nrelinquishment in perpetuity of all present and future rights to this\nsoftware under copyright law.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.\nIN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR\nOTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,\nARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\nOTHER DEALINGS IN THE SOFTWARE.\n\nFor more information, please refer to <http://unlicense.org/>"
+    },
+    "mit-7427abc63036": {
+      "spdx": "MIT",
+      "title": "miniz_oxide-0.8.9 :: LICENSE",
+      "sha256": "7427abc630365f6335b3ced8b620b6c8a87b3793edea701d15cdde01ec7a6cde",
+      "bytes": 1212,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'miniz_oxide-0.8.9' → notice file 'LICENSE'"
+      ],
+      "text": "MIT License\n\nCopyright 2013-2014 RAD Game Tools and Valve Software\nCopyright 2010-2014 Rich Geldreich and Tenacious Software LLC\nCopyright (c) 2017 Frommi\nCopyright (c) 2017-2024 oyvindln\n\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+    },
+    "apache-2-0-0cec06e0e55f": {
+      "spdx": "Apache-2.0",
+      "title": "miniz_oxide-0.8.9 :: LICENSE-APACHE.md",
+      "sha256": "0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9",
+      "bytes": 10173,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'miniz_oxide-0.8.9' → notice file 'LICENSE-APACHE.md'"
+      ],
+      "text": "\n                                 Apache License\n                           Version 2.0, January 2004\n                        http://www.apache.org/licenses/\n\n   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n   1. Definitions.\n\n      \"License\" shall mean the terms and conditions for use, reproduction,\n      and distribution as defined by Sections 1 through 9 of this document.\n\n      \"Licensor\" shall mean the copyright owner or entity authorized by\n      the copyright owner that is granting the License.\n\n      \"Legal Entity\" shall mean the union of the acting entity and all\n      other entities that control, are controlled by, or are under common\n      control with that entity. For the purposes of this definition,\n      \"control\" means (i) the power, direct or indirect, to cause the\n      direction or management of such entity, whether by contract or\n      otherwise, or (ii) ownership of fifty percent (50%) or more of the\n      outstanding shares, or (iii) beneficial ownership of such entity.\n\n      \"You\" (or \"Your\") shall mean an individual or Legal Entity\n      exercising permissions granted by this License.\n\n      \"Source\" form shall mean the preferred form for making modifications,\n      including but not limited to software source code, documentation\n      source, and configuration files.\n\n      \"Object\" form shall mean any form resulting from mechanical\n      transformation or translation of a Source form, including but\n      not limited to compiled object code, generated documentation,\n      and conversions to other media types.\n\n      \"Work\" shall mean the work of authorship, whether in Source or\n      Object form, made available under the License, as indicated by a\n      copyright notice that is included in or attached to the work\n      (an example is provided in the Appendix below).\n\n      \"Derivative Works\" shall mean any work, whether in Source or Object\n      form, that is based on (or derived from) the Work and for which the\n      editorial revisions, annotations, elaborations, or other modifications\n      represent, as a whole, an original work of authorship. For the purposes\n      of this License, Derivative Works shall not include works that remain\n      separable from, or merely link (or bind by name) to the interfaces of,\n      the Work and Derivative Works thereof.\n\n      \"Contribution\" shall mean any work of authorship, including\n      the original version of the Work and any modifications or additions\n      to that Work or Derivative Works thereof, that is intentionally\n      submitted to Licensor for inclusion in the Work by the copyright owner\n      or by an individual or Legal Entity authorized to submit on behalf of\n      the copyright owner. For the purposes of this definition, \"submitted\"\n      means any form of electronic, verbal, or written communication sent\n      to the Licensor or its representatives, including but not limited to\n      communication on electronic mailing lists, source code control systems,\n      and issue tracking systems that are managed by, or on behalf of, the\n      Licensor for the purpose of discussing and improving the Work, but\n      excluding communication that is conspicuously marked or otherwise\n      designated in writing by the copyright owner as \"Not a Contribution.\"\n\n      \"Contributor\" shall mean Licensor and any individual or Legal Entity\n      on behalf of whom a Contribution has been received by Licensor and\n      subsequently incorporated within the Work.\n\n   2. Grant of Copyright License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      copyright license to reproduce, prepare Derivative Works of,\n      publicly display, publicly perform, sublicense, and distribute the\n      Work and such Derivative Works in Source or Object form.\n\n   3. Grant of Patent License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      (except as stated in this section) patent license to make, have made,\n      use, offer to sell, sell, import, and otherwise transfer the Work,\n      where such license applies only to those patent claims licensable\n      by such Contributor that are necessarily infringed by their\n      Contribution(s) alone or by combination of their Contribution(s)\n      with the Work to which such Contribution(s) was submitted. If You\n      institute patent litigation against any entity (including a\n      cross-claim or counterclaim in a lawsuit) alleging that the Work\n      or a Contribution incorporated within the Work constitutes direct\n      or contributory patent infringement, then any patent licenses\n      granted to You under this License for that Work shall terminate\n      as of the date such litigation is filed.\n\n   4. Redistribution. You may reproduce and distribute copies of the\n      Work or Derivative Works thereof in any medium, with or without\n      modifications, and in Source or Object form, provided that You\n      meet the following conditions:\n\n      (a) You must give any other recipients of the Work or\n          Derivative Works a copy of this License; and\n\n      (b) You must cause any modified files to carry prominent notices\n          stating that You changed the files; and\n\n      (c) You must retain, in the Source form of any Derivative Works\n          that You distribute, all copyright, patent, trademark, and\n          attribution notices from the Source form of the Work,\n          excluding those notices that do not pertain to any part of\n          the Derivative Works; and\n\n      (d) If the Work includes a \"NOTICE\" text file as part of its\n          distribution, then any Derivative Works that You distribute must\n          include a readable copy of the attribution notices contained\n          within such NOTICE file, excluding those notices that do not\n          pertain to any part of the Derivative Works, in at least one\n          of the following places: within a NOTICE text file distributed\n          as part of the Derivative Works; within the Source form or\n          documentation, if provided along with the Derivative Works; or,\n          within a display generated by the Derivative Works, if and\n          wherever such third-party notices normally appear. The contents\n          of the NOTICE file are for informational purposes only and\n          do not modify the License. You may add Your own attribution\n          notices within Derivative Works that You distribute, alongside\n          or as an addendum to the NOTICE text from the Work, provided\n          that such additional attribution notices cannot be construed\n          as modifying the License.\n\n      You may add Your own copyright statement to Your modifications and\n      may provide additional or different license terms and conditions\n      for use, reproduction, or distribution of Your modifications, or\n      for any such Derivative Works as a whole, provided Your use,\n      reproduction, and distribution of the Work otherwise complies with\n      the conditions stated in this License.\n\n   5. Submission of Contributions. Unless You explicitly state otherwise,\n      any Contribution intentionally submitted for inclusion in the Work\n      by You to the Licensor shall be under the terms and conditions of\n      this License, without any additional terms or conditions.\n      Notwithstanding the above, nothing herein shall supersede or modify\n      the terms of any separate license agreement you may have executed\n      with Licensor regarding such Contributions.\n\n   6. Trademarks. This License does not grant permission to use the trade\n      names, trademarks, service marks, or product names of the Licensor,\n      except as required for reasonable and customary use in describing the\n      origin of the Work and reproducing the content of the NOTICE file.\n\n   7. Disclaimer of Warranty. Unless required by applicable law or\n      agreed to in writing, Licensor provides the Work (and each\n      Contributor provides its Contributions) on an \"AS IS\" BASIS,\n      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n      implied, including, without limitation, any warranties or conditions\n      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n      PARTICULAR PURPOSE. You are solely responsible for determining the\n      appropriateness of using or redistributing the Work and assume any\n      risks associated with Your exercise of permissions under this License.\n\n   8. Limitation of Liability. In no event and under no legal theory,\n      whether in tort (including negligence), contract, or otherwise,\n      unless required by applicable law (such as deliberate and grossly\n      negligent acts) or agreed to in writing, shall any Contributor be\n      liable to You for damages, including any direct, indirect, special,\n      incidental, or consequential damages of any character arising as a\n      result of this License or out of the use or inability to use the\n      Work (including but not limited to damages for loss of goodwill,\n      work stoppage, computer failure or malfunction, or any and all\n      other commercial damages or losses), even if such Contributor\n      has been advised of the possibility of such damages.\n\n   9. Accepting Warranty or Additional Liability. While redistributing\n      the Work or Derivative Works thereof, You may choose to offer,\n      and charge a fee for, acceptance of support, warranty, indemnity,\n      or other liability obligations and/or rights consistent with this\n      License. However, in accepting such obligations, You may act only\n      on Your own behalf and on Your sole responsibility, not on behalf\n      of any other Contributor, and only if You agree to indemnify,\n      defend, and hold each Contributor harmless for any liability\n      incurred by, or claims asserted against, such Contributor by reason\n      of your accepting any such warranty or additional liability.\n\n   END OF TERMS AND CONDITIONS"
+    },
+    "mit-ac9859ce4e9a": {
+      "spdx": "MIT",
+      "title": "miniz_oxide-0.8.9 :: LICENSE-MIT.md",
+      "sha256": "ac9859ce4e9a80a4846ee0b453981427f4fc2ba9ac7d0e568de61ab80a53d86d",
+      "bytes": 1211,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'miniz_oxide-0.8.9' → notice file 'LICENSE-MIT.md'"
+      ],
+      "text": "MIT License\n\nCopyright 2013-2014 RAD Game Tools and Valve Software\nCopyright 2010-2014 Rich Geldreich and Tenacious Software LLC\nCopyright (c) 2017 Frommi\nCopyright (c) 2017-2024 oyvindln\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+    },
+    "zlib-eac3911cc3d4": {
+      "spdx": "Zlib",
+      "title": "miniz_oxide-0.8.9 :: LICENSE-ZLIB.md",
+      "sha256": "eac3911cc3d41ffb7de705edeec755d3f83189b61839389cc9079acb54d8c5af",
+      "bytes": 983,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'miniz_oxide-0.8.9' → notice file 'LICENSE-ZLIB.md'"
+      ],
+      "text": "Copyright 2013-2014 RAD Game Tools and Valve Software\nCopyright 2010-2014 Rich Geldreich and Tenacious Software LLC\nCopyright (c) 2020 Frommi\nCopyright (c) 2017-2024 oyvindln\n\nThis software is provided 'as-is', without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.\n\nPermission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:\n\n1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.\n\n2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.\n\n3. This notice may not be removed or altered from any source distribution."
+    },
+    "mit-3526044d67fd": {
+      "spdx": "MIT",
+      "title": "object-0.37.3 :: LICENSE-MIT",
+      "sha256": "3526044d67fd6cfbecc3b48b02cef71b8cc7fb80343b71b92cc1ba152f7bdca9",
+      "bytes": 1063,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'object-0.37.3' → notice file 'LICENSE-MIT'"
+      ],
+      "text": "Copyright (c) 2015 The Gimli Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "mit-288ceccbec5d": {
+      "spdx": "MIT",
+      "title": "addr2line-0.25.1 :: LICENSE-MIT",
+      "sha256": "288ceccbec5dbd280bf2c3e04de026101f8834dfd9ac5323c698c14ff4ffeccb",
+      "bytes": 1068,
+      "provenance": [
+        "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'addr2line-0.24.2' → notice file 'LICENSE-MIT'",
+        "matches https://raw.githubusercontent.com/gimli-rs/addr2line/0.25.1/LICENSE-MIT in full, except that this extraction carries no trailing newline — the upstream file ends with one. Verbatim in content, one byte shorter.",
+        "Text extracted from the toolchain notice entry for addr2line-0.24.2, while the linked version is 0.25.1. The toolchain notice file lags the locked version; the licence text is identical between them, which the upstream comparison above confirms against 0.25.1."
+      ],
+      "text": "Copyright (c) 2016-2018 The gimli Developers\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the \"Software\"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE."
+    },
+    "mit-3823dda7cf04": {
+      "spdx": "MIT",
+      "title": "compiler-builtins libm/LICENSE.txt (bundled `math` module) :: MIT, with the musl and CORE-MATH derivation notices",
+      "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+      "bytes": 14088,
+      "provenance": [
+        "rust-src file library/compiler-builtins/libm/LICENSE.txt"
+      ],
+      "text": "rust-lang/libm as a whole is available for use under the MIT license:\n\n------------------------------------------------------------------------------\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n------------------------------------------------------------------------------\n\nAs a contributor, you agree that your code can be used under either the MIT\nlicense or the Apache-2.0 license:\n\n------------------------------------------------------------------------------\n                                 Apache License\n                           Version 2.0, January 2004\n                        http://www.apache.org/licenses/\n\n   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n   1. Definitions.\n\n      \"License\" shall mean the terms and conditions for use, reproduction,\n      and distribution as defined by Sections 1 through 9 of this document.\n\n      \"Licensor\" shall mean the copyright owner or entity authorized by\n      the copyright owner that is granting the License.\n\n      \"Legal Entity\" shall mean the union of the acting entity and all\n      other entities that control, are controlled by, or are under common\n      control with that entity. For the purposes of this definition,\n      \"control\" means (i) the power, direct or indirect, to cause the\n      direction or management of such entity, whether by contract or\n      otherwise, or (ii) ownership of fifty percent (50%) or more of the\n      outstanding shares, or (iii) beneficial ownership of such entity.\n\n      \"You\" (or \"Your\") shall mean an individual or Legal Entity\n      exercising permissions granted by this License.\n\n      \"Source\" form shall mean the preferred form for making modifications,\n      including but not limited to software source code, documentation\n      source, and configuration files.\n\n      \"Object\" form shall mean any form resulting from mechanical\n      transformation or translation of a Source form, including but\n      not limited to compiled object code, generated documentation,\n      and conversions to other media types.\n\n      \"Work\" shall mean the work of authorship, whether in Source or\n      Object form, made available under the License, as indicated by a\n      copyright notice that is included in or attached to the work\n      (an example is provided in the Appendix below).\n\n      \"Derivative Works\" shall mean any work, whether in Source or Object\n      form, that is based on (or derived from) the Work and for which the\n      editorial revisions, annotations, elaborations, or other modifications\n      represent, as a whole, an original work of authorship. For the purposes\n      of this License, Derivative Works shall not include works that remain\n      separable from, or merely link (or bind by name) to the interfaces of,\n      the Work and Derivative Works thereof.\n\n      \"Contribution\" shall mean any work of authorship, including\n      the original version of the Work and any modifications or additions\n      to that Work or Derivative Works thereof, that is intentionally\n      submitted to Licensor for inclusion in the Work by the copyright owner\n      or by an individual or Legal Entity authorized to submit on behalf of\n      the copyright owner. For the purposes of this definition, \"submitted\"\n      means any form of electronic, verbal, or written communication sent\n      to the Licensor or its representatives, including but not limited to\n      communication on electronic mailing lists, source code control systems,\n      and issue tracking systems that are managed by, or on behalf of, the\n      Licensor for the purpose of discussing and improving the Work, but\n      excluding communication that is conspicuously marked or otherwise\n      designated in writing by the copyright owner as \"Not a Contribution.\"\n\n      \"Contributor\" shall mean Licensor and any individual or Legal Entity\n      on behalf of whom a Contribution has been received by Licensor and\n      subsequently incorporated within the Work.\n\n   2. Grant of Copyright License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      copyright license to reproduce, prepare Derivative Works of,\n      publicly display, publicly perform, sublicense, and distribute the\n      Work and such Derivative Works in Source or Object form.\n\n   3. Grant of Patent License. Subject to the terms and conditions of\n      this License, each Contributor hereby grants to You a perpetual,\n      worldwide, non-exclusive, no-charge, royalty-free, irrevocable\n      (except as stated in this section) patent license to make, have made,\n      use, offer to sell, sell, import, and otherwise transfer the Work,\n      where such license applies only to those patent claims licensable\n      by such Contributor that are necessarily infringed by their\n      Contribution(s) alone or by combination of their Contribution(s)\n      with the Work to which such Contribution(s) was submitted. If You\n      institute patent litigation against any entity (including a\n      cross-claim or counterclaim in a lawsuit) alleging that the Work\n      or a Contribution incorporated within the Work constitutes direct\n      or contributory patent infringement, then any patent licenses\n      granted to You under this License for that Work shall terminate\n      as of the date such litigation is filed.\n\n   4. Redistribution. You may reproduce and distribute copies of the\n      Work or Derivative Works thereof in any medium, with or without\n      modifications, and in Source or Object form, provided that You\n      meet the following conditions:\n\n      (a) You must give any other recipients of the Work or\n          Derivative Works a copy of this License; and\n\n      (b) You must cause any modified files to carry prominent notices\n          stating that You changed the files; and\n\n      (c) You must retain, in the Source form of any Derivative Works\n          that You distribute, all copyright, patent, trademark, and\n          attribution notices from the Source form of the Work,\n          excluding those notices that do not pertain to any part of\n          the Derivative Works; and\n\n      (d) If the Work includes a \"NOTICE\" text file as part of its\n          distribution, then any Derivative Works that You distribute must\n          include a readable copy of the attribution notices contained\n          within such NOTICE file, excluding those notices that do not\n          pertain to any part of the Derivative Works, in at least one\n          of the following places: within a NOTICE text file distributed\n          as part of the Derivative Works; within the Source form or\n          documentation, if provided along with the Derivative Works; or,\n          within a display generated by the Derivative Works, if and\n          wherever such third-party notices normally appear. The contents\n          of the NOTICE file are for informational purposes only and\n          do not modify the License. You may add Your own attribution\n          notices within Derivative Works that You distribute, alongside\n          or as an addendum to the NOTICE text from the Work, provided\n          that such additional attribution notices cannot be construed\n          as modifying the License.\n\n      You may add Your own copyright statement to Your modifications and\n      may provide additional or different license terms and conditions\n      for use, reproduction, or distribution of Your modifications, or\n      for any such Derivative Works as a whole, provided Your use,\n      reproduction, and distribution of the Work otherwise complies with\n      the conditions stated in this License.\n\n   5. Submission of Contributions. Unless You explicitly state otherwise,\n      any Contribution intentionally submitted for inclusion in the Work\n      by You to the Licensor shall be under the terms and conditions of\n      this License, without any additional terms or conditions.\n      Notwithstanding the above, nothing herein shall supersede or modify\n      the terms of any separate license agreement you may have executed\n      with Licensor regarding such Contributions.\n\n   6. Trademarks. This License does not grant permission to use the trade\n      names, trademarks, service marks, or product names of the Licensor,\n      except as required for reasonable and customary use in describing the\n      origin of the Work and reproducing the content of the NOTICE file.\n\n   7. Disclaimer of Warranty. Unless required by applicable law or\n      agreed to in writing, Licensor provides the Work (and each\n      Contributor provides its Contributions) on an \"AS IS\" BASIS,\n      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or\n      implied, including, without limitation, any warranties or conditions\n      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A\n      PARTICULAR PURPOSE. You are solely responsible for determining the\n      appropriateness of using or redistributing the Work and assume any\n      risks associated with Your exercise of permissions under this License.\n\n   8. Limitation of Liability. In no event and under no legal theory,\n      whether in tort (including negligence), contract, or otherwise,\n      unless required by applicable law (such as deliberate and grossly\n      negligent acts) or agreed to in writing, shall any Contributor be\n      liable to You for damages, including any direct, indirect, special,\n      incidental, or consequential damages of any character arising as a\n      result of this License or out of the use or inability to use the\n      Work (including but not limited to damages for loss of goodwill,\n      work stoppage, computer failure or malfunction, or any and all\n      other commercial damages or losses), even if such Contributor\n      has been advised of the possibility of such damages.\n\n   9. Accepting Warranty or Additional Liability. While redistributing\n      the Work or Derivative Works thereof, You may choose to offer,\n      and charge a fee for, acceptance of support, warranty, indemnity,\n      or other liability obligations and/or rights consistent with this\n      License. However, in accepting such obligations, You may act only\n      on Your own behalf and on Your sole responsibility, not on behalf\n      of any other Contributor, and only if You agree to indemnify,\n      defend, and hold each Contributor harmless for any liability\n      incurred by, or claims asserted against, such Contributor by reason\n      of your accepting any such warranty or additional liability.\n\n   END OF TERMS AND CONDITIONS\n\n   APPENDIX: How to apply the Apache License to your work.\n\n      To apply the Apache License to your work, attach the following\n      boilerplate notice, with the fields enclosed by brackets \"[]\"\n      replaced with your own identifying information. (Don't include\n      the brackets!)  The text should be enclosed in the appropriate\n      comment syntax for the file format. We also recommend that a\n      file or class name and description of purpose be included on the\n      same \"printed page\" as the copyright notice for easier\n      identification within third-party archives.\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.\n------------------------------------------------------------------------------\n\nThis Rust library contains the following copyrights:\n\n    Copyright (c) 2018 Jorge Aparicio\n\nPortions of this software are derived from third-party works licensed under\nterms compatible with the above MIT license:\n\n* musl libc https://www.musl-libc.org/. This library contains the following\n  copyright:\n\n      Copyright © 2005-2020 Rich Felker, et al.\n\n* The CORE-MATH project https://core-math.gitlabpages.inria.fr/. CORE-MATH\n  routines are available under the MIT license on a per-file basis.\n\nThe musl libc COPYRIGHT file also includes the following notice relevant to\nmath portions of the library:\n\n------------------------------------------------------------------------------\nMuch of the math library code (src/math/* and src/complex/*) is\nCopyright © 1993,2004 Sun Microsystems or\nCopyright © 2003-2011 David Schultz or\nCopyright © 2003-2009 Steven G. Kargl or\nCopyright © 2003-2009 Bruce D. Evans or\nCopyright © 2008 Stephen L. Moshier or\nCopyright © 2017-2018 Arm Limited\nand labelled as such in comments in the individual source files. All\nhave been licensed under extremely permissive terms.\n------------------------------------------------------------------------------\n\nCopyright notices are retained in src/* files where relevant.\n"
+    }
+  },
+  "packages": [
+    {
+      "name": "addr2line",
+      "crateName": "addr2line",
+      "version": "0.25.1",
+      "versionSource": "library/Cargo.lock pins addr2line 0.25.1 (checksum 1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b); library/std/Cargo.toml requests addr2line = \"0.25.0\", consistent with that resolution",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://github.com/gimli-rs/addr2line",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "https://raw.githubusercontent.com/gimli-rs/addr2line/0.25.1/Cargo.toml `license = \"Apache-2.0 OR MIT\"`; identical to the expression the toolchain's COPYRIGHT.html records for addr2line-0.24.2 and addr2line-0.21.0",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) 2016-2018 The gimli Developers"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-288ceccbec5d"
+      ],
+      "resolution": "toolchain-docs+rust-src+upstream",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (ONLY source; docs lack 0.25.1)",
+        "spdx": "upstream Cargo.toml at tag 0.25.1",
+        "licenseText": "toolchain docs (addr2line-0.24.2 bytes), accepted only after byte-equality check against upstream 0.25.1"
+      },
+      "source": "The only crate of the 19 that the shipped toolchain documents cannot cover at the correct version. It is absent from COPYRIGHT-library.html, and COPYRIGHT.html carries only addr2line-0.21.0 and addr2line-0.24.2 - not 0.25.1. Version 0.25.1 comes from library/Cargo.lock. The licence texts stored here are the verbatim bytes the toolchain ships for addr2line-0.24.2, used only after fetching the upstream 0.25.1 files (https://raw.githubusercontent.com/gimli-rs/addr2line/0.25.1/LICENSE-MIT and .../LICENSE-APACHE) and confirming both are byte-identical to them (1068 and 10846 bytes, exact string equality after stripping the trailing newline). Two independent sources agree, so the text is authentic for 0.25.1; no text was written from memory.",
+      "notes": "If this corpus is ever regenerated against a toolchain whose COPYRIGHT.html does carry addr2line at the locked version, prefer that entry and drop the network step.",
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-288ceccbec5d": "alternative"
+      }
+    },
+    {
+      "name": "adler2",
+      "crateName": "adler2",
+      "version": "2.0.1",
+      "versionSource": "library/Cargo.lock pins adler2 2.0.1 (checksum 320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa). This is the authoritative source: adler2 is absent from COPYRIGHT-library.html entirely, and COPYRIGHT.html lists 2 candidate versions (adler2-2.0.0, adler2-2.0.1) with no way to tell which one std was built against. The lock resolves it; the matching COPYRIGHT.html entry then supplies the texts.",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/adler2/2.0.1",
+      "spdx": "0BSD OR MIT OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'adler2-2.0.1' → License",
+      "authors": [
+        "Jonas Schievink <jonasschievink@gmail.com>",
+        "oyvindln <oyvindln@users.noreply.github.com>"
+      ],
+      "copyright": [
+        "Copyright (C) Jonas Schievink <jonasschievink@gmail.com>"
+      ],
+      "licenseTexts": [
+        "0bsd-a21c914647d3",
+        "apache-2-0-3c160092b803",
+        "mit-30fefc3a7d6a"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (ONLY source; docs ambiguous)",
+        "spdx": "toolchain docs (exact-version entry in COPYRIGHT.html)",
+        "licenseText": "toolchain docs (exact-version entry in COPYRIGHT.html)"
+      },
+      "source": "Version established from library/Cargo.lock in the rust-src component of the pinned toolchain (installed for this purpose); verbatim licence texts then taken from the exact-version entry 'adler2-2.0.1' in COPYRIGHT.html, which is shipped by the same toolchain. No text was written from memory and none was taken from a neighbouring version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "0bsd-a21c914647d3": "alternative",
+        "apache-2-0-3c160092b803": "alternative",
+        "mit-30fefc3a7d6a": "alternative"
+      }
+    },
+    {
+      "name": "alloc",
+      "crateName": "alloc",
+      "version": "0.0.0",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.0.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.0.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/alloc of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "cfg_if",
+      "crateName": "cfg-if",
+      "version": "1.0.4",
+      "versionSource": "library/Cargo.lock pins cfg-if 1.0.4 (checksum 9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801); independently confirmed by the exact-version entry 'cfg-if-1.0.4' in COPYRIGHT-library.html",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/cfg-if/1.0.4",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'cfg-if-1.0.4' → License",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "copyright": [
+        "Copyright (c) 2014 Alex Crichton"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-84e1bbfebd74"
+      ],
+      "resolution": "toolchain-docs",
+      "resolutionDetail": {
+        "version": "toolchain docs (corroborated by rust-src library/Cargo.lock)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs"
+      },
+      "source": "Fully resolved from documents shipped by the pinned toolchain: COPYRIGHT-library.html carries an exact-version entry for 'cfg-if-1.0.4' with URL, authors, SPDX expression and full verbatim licence texts; library/Cargo.lock (rust-src) independently corroborates the version.",
+      "notes": "Linked TWICE, but - contrary to the working assumption going into this task - at the SAME version, 1.0.4. The repository Cargo.lock pins cfg-if 1.0.4 and library/Cargo.lock also pins cfg-if 1.0.4. The two copies are separate compilations with different metadata hashes (sysroot 0b754f5caccd910d vs Cargo-resolved fa0d401c0c8126d1 on ios-arm64) because the sysroot build enables the rustc-dep-of-std feature. Recorded here for completeness; there is no version discrepancy to correct for this crate.",
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-84e1bbfebd74": "alternative"
+      }
+    },
+    {
+      "name": "compiler_builtins",
+      "crateName": "compiler_builtins",
+      "version": "0.1.160",
+      "versionSource": "library/Cargo.lock ([[package]] name = \"compiler_builtins\", version = \"0.1.160\", no `source` key => path dependency) confirmed byte-for-byte by library/compiler-builtins/compiler-builtins/Cargo.toml `version = \"0.1.160\"` and the out-of-tree shim manifest library/compiler-builtins/builtins-shim/Cargo.toml",
+      "origin": "rust-in-tree (vendored rust-lang/compiler-builtins)",
+      "repository": "https://github.com/rust-lang/compiler-builtins",
+      "spdx": "MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)",
+      "spdxSource": "library/compiler-builtins/compiler-builtins/Cargo.toml `license = \"MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)\"` (the manifest actually used by the in-tree build), identical in library/compiler-builtins/builtins-shim/Cargo.toml, and corroborated by line 1-11 of library/compiler-builtins/LICENSE.txt",
+      "spdxNote": "This is NOT the MIT/Apache-2.0 dual-licence template the existing notices generator emits, and it is NOT a plain disjunction. LICENSE.txt states: 'The compiler-builtins crate is available for use under both the MIT license and the Apache-2.0 license with the LLVM exception (MIT AND Apache-2.0 WITH LLVM-exception).' The conjunction is deliberate - both sets of terms apply - and the trailing 'AND (MIT OR Apache-2.0)' covers original non-derivative repository content. Reproducing the LLVM exception text is mandatory.",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>",
+        "Amanieu d'Antras <amanieu@gmail.com>",
+        "Jorge Aparicio <japaricious@gmail.com>",
+        "Trevor Gross <tg@trevorgross.com>"
+      ],
+      "copyright": [
+        "Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT (LLVM compiler-rt; see https://github.com/llvm/llvm-project/blob/main/compiler-rt/CREDITS.TXT)",
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)",
+        "Copyright (c) 2018 Jorge Aparicio (libm)",
+        "Copyright © 2005-2020 Rich Felker, et al. (musl libc, via libm)",
+        "Copyright © 1993,2004 Sun Microsystems (musl math routines, via libm)",
+        "Copyright © 2003-2011 David Schultz (musl math routines, via libm)",
+        "Copyright © 2003-2009 Steven G. Kargl (musl math routines, via libm)",
+        "Copyright © 2003-2009 Bruce D. Evans (musl math routines, via libm)",
+        "Copyright © 2008 Stephen L. Moshier (musl math routines, via libm)",
+        "Copyright © 2017-2018 Arm Limited (musl math routines, via libm)"
+      ],
+      "licenseTexts": [
+        "mit-and-apache-2-0-with-llvm-exception-ab6eec6caf0f",
+        "llvm-exception-e34c58338bd8",
+        "mit-3823dda7cf04"
+      ],
+      "derivedFrom": [
+        {
+          "work": "LLVM compiler-rt",
+          "url": "https://llvm.org/",
+          "terms": "work predating 2019-01-19 usable under MIT with copyright 'Copyright (c) 2009-2016 by the contributors listed in CREDITS.TXT'; work after 2019-01-19 usable under Apache-2.0 WITH LLVM-exception"
+        },
+        {
+          "work": "libm (bundled `math` module)",
+          "url": "https://github.com/rust-lang/compiler-builtins",
+          "terms": "MIT. The compiler-builtins LICENSE.txt only POINTS at libm/LICENSE.txt for libm copyrights, so that file is reproduced here as a cited text and its holders are recorded in this stanza — a link is not a reproduction, and MIT requires the copyright notice to be included."
+        }
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock + in-tree Cargo.toml",
+        "spdx": "rust-src in-tree Cargo.toml + LICENSE.txt",
+        "licenseText": "rust-src library/compiler-builtins/LICENSE.txt (+ toolchain share/doc/rust/licenses/LLVM-exception.txt)"
+      },
+      "source": "Version and licence expression established from the rust-src component of the pinned 1.94.0 toolchain, because compiler_builtins appears in NEITHER shipped out-of-tree list - it is absent from COPYRIGHT-library.html and absent from all 1449 packages in COPYRIGHT.html. Licence text is the verbatim, unmodified library/compiler-builtins/LICENSE.txt shipped in that same component (15078 bytes), which is self-contained: MIT text, full Apache-2.0 text, the LLVM exception, and the compiler-rt / libm derivation notices. The standalone SPDX LLVM-exception text from share/doc/rust/licenses/LLVM-exception.txt is referenced additionally.",
+      "notes": "Largest attribution surface in the artifact. Verified by `ar t`: the sysroot libcompiler_builtins-<hash>.rlib contributes 366 of the 449 non-SYMDEF members of every shipped slice (81.5%) - 222 Rust codegen units plus 144 C/asm objects (100 aarch64 LSE outline-atomics, 43 compiler-rt integer/overflow intrinsics such as absvdi2/addvti3/popcountti2, and 1 further object). The 366 member names are exactly the rlib's member names, byte for byte.",
+      "licenseTextRoles": {
+        "mit-and-apache-2-0-with-llvm-exception-ab6eec6caf0f": "additional",
+        "llvm-exception-e34c58338bd8": "exception",
+        "mit-3823dda7cf04": "additional"
+      }
+    },
+    {
+      "name": "core",
+      "crateName": "core",
+      "version": "0.0.0",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.0.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.0.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "(Apache-2.0 OR MIT) AND Unicode-3.0",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers) Aggregate: library/core carries library/core/src/unicode/unicode_data.rs under Unicode-3.0, recorded as an exception in the toolchain COPYRIGHT-library.html. Citing the Unicode text without naming it in the expression understates the licence of the linked crate.",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)",
+        "Copyright 1991-2024 Unicode, Inc"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d",
+        "unicode-3-0-f5062c9a188d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/core of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": "COPYRIGHT-library.html records an in-tree exception for library/core/src/unicode/unicode_data.rs (License: Unicode-3.0; Copyright: 1991-2024 Unicode, Inc). That file is unconditionally compiled into core, so the Unicode-3.0 text is carried here.",
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative",
+        "unicode-3-0-f5062c9a188d": "additional"
+      }
+    },
+    {
+      "name": "gimli",
+      "crateName": "gimli",
+      "version": "0.32.3",
+      "versionSource": "library/Cargo.lock pins gimli 0.32.3 (checksum e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7); independently confirmed by the exact-version entry 'gimli-0.32.3' in COPYRIGHT-library.html",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/gimli/0.32.3",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'gimli-0.32.3' → License",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) 2015 The Rust Project Developers"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-033a9383ff21"
+      ],
+      "resolution": "toolchain-docs",
+      "resolutionDetail": {
+        "version": "toolchain docs (corroborated by rust-src library/Cargo.lock)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs"
+      },
+      "source": "Fully resolved from documents shipped by the pinned toolchain: COPYRIGHT-library.html carries an exact-version entry for 'gimli-0.32.3' with URL, authors, SPDX expression and full verbatim licence texts; library/Cargo.lock (rust-src) independently corroborates the version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-033a9383ff21": "alternative"
+      }
+    },
+    {
+      "name": "hashbrown",
+      "crateName": "hashbrown",
+      "version": "0.16.1",
+      "versionSource": "library/Cargo.lock pins hashbrown 0.16.1 (checksum 841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100); independently confirmed by the exact-version entry 'hashbrown-0.16.1' in COPYRIGHT-library.html",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/hashbrown/0.16.1",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'hashbrown-0.16.1' → License",
+      "authors": [
+        "Amanieu d'Antras <amanieu@gmail.com>"
+      ],
+      "copyright": [
+        "Copyright (c) 2016 Amanieu d'Antras"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-ae9791f02f2b"
+      ],
+      "resolution": "toolchain-docs",
+      "resolutionDetail": {
+        "version": "toolchain docs (corroborated by rust-src library/Cargo.lock)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs"
+      },
+      "source": "Fully resolved from documents shipped by the pinned toolchain: COPYRIGHT-library.html carries an exact-version entry for 'hashbrown-0.16.1' with URL, authors, SPDX expression and full verbatim licence texts; library/Cargo.lock (rust-src) independently corroborates the version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-ae9791f02f2b": "alternative"
+      }
+    },
+    {
+      "name": "libc",
+      "crateName": "libc",
+      "version": "0.2.178",
+      "versionSource": "library/Cargo.lock pins libc 0.2.178 (checksum 37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091); independently confirmed by the exact-version entry 'libc-0.2.178' in COPYRIGHT-library.html",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/libc/0.2.178",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'libc-0.2.178' → License",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "copyright": [
+        "Copyright (c) 2014-2020 The Rust Project Developers"
+      ],
+      "licenseTexts": [
+        "apache-2-0-95bd3988beee",
+        "mit-98ed3581f1f1"
+      ],
+      "resolution": "toolchain-docs",
+      "resolutionDetail": {
+        "version": "toolchain docs (corroborated by rust-src library/Cargo.lock)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs"
+      },
+      "source": "Fully resolved from documents shipped by the pinned toolchain: COPYRIGHT-library.html carries an exact-version entry for 'libc-0.2.178' with URL, authors, SPDX expression and full verbatim licence texts; library/Cargo.lock (rust-src) independently corroborates the version.",
+      "notes": "Linked TWICE. This entry is the SYSROOT copy at 0.2.178 (metadata hashes eff3f88be5387e8d / f63685302b6ed5a6 / b923b314a7e8e4e5, each matching liblibc-<hash>.rlib in the corresponding target sysroot). The Cargo-resolved copy is a DIFFERENT version, 0.2.189, and is the only one the committed 49-package notices inventory cites. Both must be attributed.",
+      "licenseTextRoles": {
+        "apache-2-0-95bd3988beee": "alternative",
+        "mit-98ed3581f1f1": "alternative"
+      }
+    },
+    {
+      "name": "memchr",
+      "crateName": "memchr",
+      "version": "2.7.6",
+      "versionSource": "library/Cargo.lock pins memchr 2.7.6 (checksum f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273). This is the authoritative source: memchr is absent from COPYRIGHT-library.html entirely, and COPYRIGHT.html lists 4 candidate versions (memchr-2.5.0, memchr-2.7.2, memchr-2.7.5, memchr-2.7.6) with no way to tell which one std was built against. The lock resolves it; the matching COPYRIGHT.html entry then supplies the texts.",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/memchr/2.7.6",
+      "spdx": "Unlicense OR MIT",
+      "spdxSource": "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'memchr-2.7.6' → License",
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>",
+        "bluss"
+      ],
+      "copyright": [
+        "Copyright (c) 2015 Andrew Gallant"
+      ],
+      "licenseTexts": [
+        "mit-154c1af2b38e",
+        "unlicense-ca2abdf69588"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (ONLY source; docs ambiguous)",
+        "spdx": "toolchain docs (exact-version entry in COPYRIGHT.html)",
+        "licenseText": "toolchain docs (exact-version entry in COPYRIGHT.html)"
+      },
+      "source": "Version established from library/Cargo.lock in the rust-src component of the pinned toolchain (installed for this purpose); verbatim licence texts then taken from the exact-version entry 'memchr-2.7.6' in COPYRIGHT.html, which is shipped by the same toolchain. No text was written from memory and none was taken from a neighbouring version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "mit-154c1af2b38e": "alternative",
+        "unlicense-ca2abdf69588": "alternative"
+      }
+    },
+    {
+      "name": "miniz_oxide",
+      "crateName": "miniz_oxide",
+      "version": "0.8.9",
+      "versionSource": "library/Cargo.lock pins miniz_oxide 0.8.9 (checksum 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316). This is the authoritative source: miniz_oxide is absent from COPYRIGHT-library.html entirely, and COPYRIGHT.html lists 3 candidate versions (miniz_oxide-0.7.3, miniz_oxide-0.8.3, miniz_oxide-0.8.9) with no way to tell which one std was built against. The lock resolves it; the matching COPYRIGHT.html entry then supplies the texts.",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/miniz_oxide/0.8.9",
+      "spdx": "MIT OR Zlib OR Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'miniz_oxide-0.8.9' → License",
+      "authors": [
+        "Frommi <daniil.liferenko@gmail.com>",
+        "oyvindln <oyvindln@users.noreply.github.com>",
+        "Rich Geldreich richgel99@gmail.com"
+      ],
+      "copyright": [
+        "Copyright 2013-2014 RAD Game Tools and Valve Software",
+        "Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC",
+        "Copyright (c) 2017 Frommi",
+        "Copyright (c) 2017-2024 oyvindln",
+        "Copyright (c) 2020 Frommi"
+      ],
+      "licenseTexts": [
+        "mit-7427abc63036",
+        "apache-2-0-0cec06e0e55f",
+        "mit-ac9859ce4e9a",
+        "zlib-eac3911cc3d4"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (ONLY source; docs ambiguous)",
+        "spdx": "toolchain docs (exact-version entry in COPYRIGHT.html)",
+        "licenseText": "toolchain docs (exact-version entry in COPYRIGHT.html)"
+      },
+      "source": "Version established from library/Cargo.lock in the rust-src component of the pinned toolchain (installed for this purpose); verbatim licence texts then taken from the exact-version entry 'miniz_oxide-0.8.9' in COPYRIGHT.html, which is shipped by the same toolchain. No text was written from memory and none was taken from a neighbouring version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "mit-7427abc63036": "alternative",
+        "apache-2-0-0cec06e0e55f": "alternative",
+        "mit-ac9859ce4e9a": "alternative",
+        "zlib-eac3911cc3d4": "alternative"
+      }
+    },
+    {
+      "name": "object",
+      "crateName": "object",
+      "version": "0.37.3",
+      "versionSource": "library/Cargo.lock pins object 0.37.3 (checksum ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe). This is the authoritative source: object is absent from COPYRIGHT-library.html entirely, and COPYRIGHT.html lists 5 candidate versions (object-0.32.2, object-0.36.1, object-0.36.7, object-0.37.1, object-0.37.3) with no way to tell which one std was built against. The lock resolves it; the matching COPYRIGHT.html entry then supplies the texts.",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/object/0.37.3",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "share/doc/rust/COPYRIGHT.html → Out-of-tree dependencies → package 'object-0.37.3' → License",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) 2015 The Gimli Developers"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-3526044d67fd"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (ONLY source; docs ambiguous)",
+        "spdx": "toolchain docs (exact-version entry in COPYRIGHT.html)",
+        "licenseText": "toolchain docs (exact-version entry in COPYRIGHT.html)"
+      },
+      "source": "Version established from library/Cargo.lock in the rust-src component of the pinned toolchain (installed for this purpose); verbatim licence texts then taken from the exact-version entry 'object-0.37.3' in COPYRIGHT.html, which is shipped by the same toolchain. No text was written from memory and none was taken from a neighbouring version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-3526044d67fd": "alternative"
+      }
+    },
+    {
+      "name": "panic_abort",
+      "crateName": "panic_abort",
+      "version": "0.0.0",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.0.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.0.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/panic_abort of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "rustc_demangle",
+      "crateName": "rustc-demangle",
+      "version": "0.1.26",
+      "versionSource": "library/Cargo.lock pins rustc-demangle 0.1.26 (checksum 56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace); independently confirmed by the exact-version entry 'rustc-demangle-0.1.26' in COPYRIGHT-library.html",
+      "origin": "crates.io dependency of the Rust standard library",
+      "repository": "https://crates.io/crates/rustc-demangle/0.1.26",
+      "spdx": "MIT/Apache-2.0",
+      "spdxSource": "share/doc/rust/COPYRIGHT-library.html → Out-of-tree dependencies → package 'rustc-demangle-0.1.26' → License",
+      "spdxNormalized": "MIT OR Apache-2.0",
+      "spdxNote": "Recorded verbatim as the toolchain document states it. 'MIT/Apache-2.0' is the deprecated slash form still declared in rustc-demangle's manifest; it means the same disjunction.",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "copyright": [
+        "Copyright (c) 2014 Alex Crichton"
+      ],
+      "licenseTexts": [
+        "apache-2-0-769f80b5bcb4",
+        "mit-84e1bbfebd74"
+      ],
+      "resolution": "toolchain-docs",
+      "resolutionDetail": {
+        "version": "toolchain docs (corroborated by rust-src library/Cargo.lock)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs"
+      },
+      "source": "Fully resolved from documents shipped by the pinned toolchain: COPYRIGHT-library.html carries an exact-version entry for 'rustc-demangle-0.1.26' with URL, authors, SPDX expression and full verbatim licence texts; library/Cargo.lock (rust-src) independently corroborates the version.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-769f80b5bcb4": "alternative",
+        "mit-84e1bbfebd74": "alternative"
+      }
+    },
+    {
+      "name": "rustc_std_workspace_alloc",
+      "crateName": "rustc_std_workspace_alloc",
+      "version": "1.99.0",
+      "versionSource": "library/Cargo.lock (path-patched workspace member, version 1.99.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 1.99.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/rustc-std-workspace-alloc of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "rustc_std_workspace_core",
+      "crateName": "rustc_std_workspace_core",
+      "version": "1.99.0",
+      "versionSource": "library/Cargo.lock (path-patched workspace member, version 1.99.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 1.99.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/rustc-std-workspace-core of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": null,
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "std",
+      "crateName": "std",
+      "version": "0.0.0",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.0.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.0.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "Apache-2.0 OR MIT",
+      "spdxSource": "COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)",
+        "Copyright 2014 Alex Crichton",
+        "Copyright 2019 The Crossbeam Project Developers"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "toolchain docs",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/std of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": "COPYRIGHT-library.html records three in-tree exceptions under library/std and library/backtrace. Two apply to this build: library/backtrace (Apache-2.0 OR MIT, +2014 Alex Crichton) and library/std/src/sync/mpmc (Apache-2.0 OR MIT, +2019 The Crossbeam Project Developers). The third, library/std/src/sys/sync/mutex/fuchsia.rs (BSD-2-Clause AND (Apache-2.0 OR MIT), +2016 The Fuchsia Authors), is NOT compiled for these targets: library/std/src/sys/sync/mutex/mod.rs gates `mod fuchsia;` behind target_os = \"fuchsia\", and all three shipped slices are Apple targets. BSD-2-Clause is therefore deliberately omitted.",
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "std_detect",
+      "crateName": "std_detect",
+      "version": "0.1.5",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.1.5) and library/std_detect/Cargo.toml `version = \"0.1.5\"`",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.1.5)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "library/std_detect/Cargo.toml `license = \"MIT OR Apache-2.0\"`; consistent with COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>",
+        "Andrew Gallant <jamslam@gmail.com>",
+        "Gonzalo Brito Gadeschi <gonzalobg88@gmail.com>"
+      ],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "rust-src crate Cargo.toml (agrees with toolchain docs)",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/std_detect of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": "Appears in NEITHER out-of-tree list (not in COPYRIGHT-library.html and not among the 1449 packages in COPYRIGHT.html). Resolved from the rust-src tree: it is an in-tree crate at library/std_detect, upstreamed from rust-lang/stdarch, and is covered by the in-tree '.' entry.",
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    },
+    {
+      "name": "unwind",
+      "crateName": "unwind",
+      "version": "0.0.0",
+      "versionSource": "library/Cargo.lock (workspace member, version 0.0.0)",
+      "displayVersion": "1.94.0 (rust-lang/rust in-tree crate; Cargo manifest version 0.0.0)",
+      "origin": "rust-in-tree (rust-lang/rust)",
+      "repository": "https://github.com/rust-lang/rust",
+      "spdx": "MIT OR Apache-2.0",
+      "spdxSource": "library/unwind/Cargo.toml `license = \"MIT OR Apache-2.0\"`; consistent with COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers)",
+      "authors": [],
+      "copyright": [
+        "Copyright (c) The Rust Project Developers (see https://thanks.rust-lang.org)"
+      ],
+      "licenseTexts": [
+        "apache-2-0-074e6e32c86a",
+        "mit-b85dcd3e453d"
+      ],
+      "resolution": "toolchain-docs+rust-src",
+      "resolutionDetail": {
+        "version": "rust-src library/Cargo.lock (and the crate's Cargo.toml)",
+        "spdx": "rust-src crate Cargo.toml (agrees with toolchain docs)",
+        "licenseText": "toolchain docs (share/doc/rust/licenses/)"
+      },
+      "source": "In-tree crate at library/unwind of the pinned 1.94.0 source tree (rust-src component). Licence basis: COPYRIGHT-library.html → 'In-tree files' → File/Directory '.' (License: Apache-2.0 OR MIT; Copyright: The Rust Project Developers). Licence texts are the SPDX canonical files shipped by this same toolchain at share/doc/rust/licenses/. Note: rust-lang/rust does not ship a filled-in LICENSE-MIT inside the rustc or rust-src components, so the MIT text carried here is the SPDX template and its '<year> <copyright holders>' placeholder is satisfied by the 'copyright' field above.",
+      "notes": "The rust-src tree also carries src/llvm-project/libunwind (Apache-2.0 WITH LLVM-exception). It is NOT compiled into these slices: `ar t` on libunwind-*.rlib in each target sysroot shows exactly one member, unwind-<hash>.unwind.<cgu>.rcgu.o, and no C objects. On Apple targets the unwind crate is FFI declarations against the platform unwinder. LLVM-exception is therefore not claimed for this crate.",
+      "licenseTextRoles": {
+        "apache-2-0-074e6e32c86a": "alternative",
+        "mit-b85dcd3e453d": "alternative"
+      }
+    }
+  ],
+  "unresolved": [],
+  "$copyrightNote": [
+    "Entries are full notice lines, not bare holder names. The distinction matters: the shared",
+    "MIT body these packages cite is the SPDX TEMPLATE, carrying an unfilled",
+    "\"Copyright (c) <year> <copyright holders>\" placeholder, because that is how the toolchain",
+    "ships it. The filled holder therefore has to travel in the package stanza or it travels",
+    "nowhere, and MIT clause 1 requires it to accompany the binary.",
+    "\"Copyright (c) The Rust Project Developers\" is the form rust-lang/rust states in its own",
+    "LICENSE-MIT, and the same line the Cargo path already recovers from libc."
+  ],
+  "$licenseTextRolesNote": [
+    "Per cited text: is it an ALTERNATIVE the licensor offers (a disjunct, e.g. MIT OR Apache-2.0),",
+    "an ADDITIONAL obligation that must be satisfied as well (a conjunct), or an EXCEPTION that",
+    "modifies a grant (the operand of a WITH, e.g. LLVM-exception)?",
+    "The expression alone cannot tell you: a dual-licensed crate legitimately reproduces BOTH",
+    "texts of an OR, so reproducing a text is not evidence of conjunction. Recording the role",
+    "lets the generator check that an additional obligation is actually named in a conjunct",
+    "position rather than merely appearing somewhere in the string, that every part of a",
+    "COMPOUND cited expression holds a conjunct position, and that an exception text is",
+    "accompanied by a conjunct granted WITH it."
+  ]
+}

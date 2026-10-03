@@ -87,7 +87,16 @@ final class LavaSecurityPlusStore: ObservableObject {
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isPurchasing = false
 
-    var entitlementChanged: ((LavaSecurityPlusEntitlement) -> Void)?
+    /// Delivers the new entitlement AND how trustworthy the reading was: a demote (`.inactive`) tagged
+    /// `.unconfirmed` came from a bare `currentEntitlements` pass that may be a cold cache and must not
+    /// downgrade a paying subscriber. See `EntitlementApplicationPolicy`.
+    var entitlementChanged: ((LavaSecurityPlusEntitlement, EntitlementReadingConfidence) -> Void)?
+
+    /// The confidence under which the current `entitlement` value was last delivered. The initial
+    /// `.inactive` is `.unconfirmed` (nothing has been read yet), so a first `.confirmed` reading is never
+    /// swallowed. Lets `setEntitlement` re-deliver a confirmed reading that supersedes a same-valued
+    /// unconfirmed one (a real lapse after a kept transient empty).
+    private var deliveredEntitlementConfidence: EntitlementReadingConfidence = .unconfirmed
 
     private var updatesTask: Task<Void, Never>?
 
@@ -138,8 +147,12 @@ final class LavaSecurityPlusStore: ObservableObject {
         }
     }
 
+    /// - Parameter confidence: how much a NEGATIVE (`.inactive`) outcome should be trusted. The plain
+    ///   startup / Upgrade-screen refresh passes `.unconfirmed` (a bare `currentEntitlements` read with
+    ///   no preceding `AppStore.sync()`); the restore and transaction-update paths pass `.confirmed`.
+    ///   A positive outcome is trustworthy either way. See `EntitlementApplicationPolicy`.
     @discardableResult
-    func refreshEntitlements() async -> LavaSecurityPlusEntitlement {
+    func refreshEntitlements(confidence: EntitlementReadingConfidence) async -> LavaSecurityPlusEntitlement {
         var bestEntitlement: LavaSecurityPlusEntitlement?
 
         for await result in Transaction.currentEntitlements {
@@ -157,7 +170,7 @@ final class LavaSecurityPlusStore: ObservableObject {
         }
 
         let nextEntitlement = bestEntitlement ?? .inactive
-        setEntitlement(nextEntitlement)
+        setEntitlement(nextEntitlement, confidence: confidence)
         return nextEntitlement
     }
 
@@ -204,11 +217,13 @@ final class LavaSecurityPlusStore: ObservableObject {
                 source: .purchase
             ) else {
                 await transaction.finish()
-                let refreshedEntitlement = await refreshEntitlements()
+                // A just-completed purchase is authoritative even when this particular transaction did
+                // not itself yield the entitlement — trust its negative if the re-read is also empty.
+                let refreshedEntitlement = await refreshEntitlements(confidence: .confirmed)
                 return .purchased(refreshedEntitlement)
             }
 
-            setEntitlement(entitlement)
+            setEntitlement(entitlement, confidence: .confirmed)
             await transaction.finish()
             return .purchased(entitlement)
         case .pending:
@@ -223,7 +238,8 @@ final class LavaSecurityPlusStore: ObservableObject {
     @discardableResult
     func restorePurchases() async throws -> LavaSecurityPlusEntitlement {
         try await AppStore.sync()
-        return await refreshEntitlements()
+        // Post-`AppStore.sync()`, so an empty result is a confirmed "no active purchase", not a cold cache.
+        return await refreshEntitlements(confidence: .confirmed)
     }
 
     private func handle(transactionResult: VerificationResult<Transaction>) async {
@@ -236,9 +252,11 @@ final class LavaSecurityPlusStore: ObservableObject {
             signedTransactionJWS: transactionResult.jwsRepresentation,
             source: .transactionUpdate
         ) {
-            setEntitlement(entitlement)
+            setEntitlement(entitlement, confidence: .confirmed)
         } else {
-            _ = await refreshEntitlements()
+            // A `Transaction.updates` push is StoreKit telling us the state changed — authoritative, so a
+            // re-read that comes back empty is a real lapse (a revocation/refund/expiry), not a cold cache.
+            _ = await refreshEntitlements(confidence: .confirmed)
         }
         await transaction.finish()
     }
@@ -392,13 +410,24 @@ final class LavaSecurityPlusStore: ObservableObject {
         )
     }
 
-    private func setEntitlement(_ nextEntitlement: LavaSecurityPlusEntitlement) {
-        guard entitlement != nextEntitlement else {
+    private func setEntitlement(
+        _ nextEntitlement: LavaSecurityPlusEntitlement,
+        confidence: EntitlementReadingConfidence
+    ) {
+        // Not a plain value-only guard: a `.confirmed` reading that equals a value an earlier
+        // `.unconfirmed` one already stored (a real lapse after a kept transient empty) must still be
+        // delivered so the controller can demote — see `EntitlementApplicationPolicy.shouldDeliverReading`.
+        guard EntitlementApplicationPolicy.shouldDeliverReading(
+            valueChanged: entitlement != nextEntitlement,
+            newConfidence: confidence,
+            previousConfidence: deliveredEntitlementConfidence
+        ) else {
             return
         }
 
         entitlement = nextEntitlement
-        entitlementChanged?(nextEntitlement)
+        deliveredEntitlementConfidence = confidence
+        entitlementChanged?(nextEntitlement, confidence)
     }
 
     private static func preferredEntitlement(

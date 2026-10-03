@@ -6,18 +6,18 @@ final class AdminQAHapticsSourceTests: XCTestCase {
         let phoneQABlock = try sourceBlock(
             in: source,
             startingAt: "struct PhoneQAView: View",
-            endingBefore: "private struct AdminQAActionRow"
+            endingBefore: "private struct PhoneQAProtectionMask"
         )
         let previewBlock = try sourceBlock(
             in: source,
             startingAt: "private enum PhoneQAHapticPreview",
-            endingBefore: "private struct PhoneQAHapticPreviewRow"
+            endingBefore: "private extension QAInternetNetworkCondition"
         )
 
-        XCTAssertTrue(phoneQABlock.contains("LavaSectionGroup(\"Haptics\")"))
-        XCTAssertTrue(phoneQABlock.contains("ForEach(Array(PhoneQAHapticPreview.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(phoneQABlock.contains("ProtectionHapticFeedback.play(preview.feedback)"))
-        XCTAssertTrue(phoneQABlock.contains("PhoneQAHapticPreviewRow(preview: preview)"))
+        XCTAssertTrue(phoneQABlock.contains("PhoneQASection(title: \"Haptics\""))
+        XCTAssertTrue(phoneQABlock.contains("PhoneQAHapticPreview.allCases.map"))
+        XCTAssertTrue(phoneQABlock.contains("ProtectionHapticFeedback.play(value.feedback)"))
+        XCTAssertTrue(phoneQABlock.contains("PhoneQAEntry(id: String(describing: value.id)"))
         XCTAssertTrue(previewBlock.contains("case turnOnSuccess"))
         XCTAssertTrue(previewBlock.contains("case turnOnFailure"))
         XCTAssertTrue(previewBlock.contains("case turnOff"))
@@ -27,7 +27,7 @@ final class AdminQAHapticsSourceTests: XCTestCase {
         XCTAssertTrue(previewBlock.contains("\"Turn Off\""))
         XCTAssertTrue(previewBlock.contains("\"Guardian Tap\""))
         XCTAssertTrue(previewBlock.contains("\"Notification error\""))
-        XCTAssertTrue(previewBlock.contains("\"Notification warning\""))
+        XCTAssertFalse(previewBlock.contains("\"Notification warning\""))
         XCTAssertTrue(previewBlock.contains("\"Light impact\""))
         XCTAssertFalse(previewBlock.contains("\"Two light impacts\""))
         XCTAssertFalse(previewBlock.contains("\"Medium impact\""))

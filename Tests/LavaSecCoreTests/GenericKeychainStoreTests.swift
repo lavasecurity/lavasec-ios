@@ -61,6 +61,41 @@ final class GenericKeychainStoreTests: XCTestCase {
         )
     }
 
+    func testTheAccessGroupIsOmittedUnlessTheStoreDeclaresOne() {
+        // The three pre-existing stores pass no group, so their items keep landing in the
+        // process default — which is what makes adding a `keychain-access-groups` entitlement
+        // safe ONLY while the target's own bundle group is that entitlement's FIRST entry.
+        // (`ChainedUpstreamEntitlementSourceTests` pins the ordering; nothing in the compiler
+        // can see it.)
+        let defaulted = makeStore()
+        XCTAssertNil(defaulted.baseQuery(account: "device-secret")[kSecAttrAccessGroup as String])
+        XCTAssertNil(defaulted.addQuery(account: "device-secret", data: Data())[kSecAttrAccessGroup as String])
+
+        let shared = GenericKeychainStore<TestError>(
+            service: "com.lavasec.chained-upstream",
+            accessGroup: "ABCDE12345.com.lavasec.app.chained-upstream",
+            unexpectedItemData: .unexpected,
+            unhandledStatus: { .status($0) }
+        )
+        XCTAssertEqual(
+            shared.baseQuery(account: "upstream-key/1")[kSecAttrAccessGroup as String] as? String,
+            "ABCDE12345.com.lavasec.app.chained-upstream")
+        XCTAssertEqual(
+            shared.baseQuery()[kSecAttrAccessGroup as String] as? String,
+            "ABCDE12345.com.lavasec.app.chained-upstream",
+            "the enumeration query must be scoped to the group too, or a sweep would range "
+                + "over items this store does not own")
+    }
+
+    func testTheServiceWideQueryCarriesNoAccount() {
+        // The enumeration seam: `accounts()` must match every item in the service, so pinning
+        // an account here would make it return at most one.
+        XCTAssertNil(makeStore().baseQuery()[kSecAttrAccount as String])
+        XCTAssertEqual(
+            makeStore().baseQuery()[kSecClass as String] as? String,
+            kSecClassGenericPassword as String)
+    }
+
     func testDistinctAccountsProduceDistinctQueries() {
         let store = makeStore(service: "com.lavasec.zero-knowledge-backup")
         let secret = store.baseQuery(account: "device-secret")

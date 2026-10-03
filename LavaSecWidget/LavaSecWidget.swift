@@ -15,11 +15,11 @@ struct LavaSecWidgetBundle: WidgetBundle {
 struct LavaProtectionLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LavaActivityAttributes.self) { context in
-            LavaLiveActivityLockScreenView(state: context.state)
+            LavaLiveActivityLockScreenView(state: context.state, activityID: context.activityID, isStale: context.isStale)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.center) {
-                    LavaLiveActivityExpandedView(state: context.state)
+                    LavaLiveActivityExpandedView(state: context.state, activityID: context.activityID, isStale: context.isStale)
                 }
             } compactLeading: {
                 LavaLiveActivityCompactGuardianView(state: context.state)
@@ -124,15 +124,19 @@ private struct LavaLiveActivityStatusGlyphView: View {
 
 private struct LavaLiveActivityLockScreenView: View {
     let state: LavaActivityAttributes.ContentState
+    let activityID: String
+    let isStale: Bool
 
     var body: some View {
-        LavaLiveActivityExpandedView(state: state)
+        LavaLiveActivityExpandedView(state: state, activityID: activityID, isStale: isStale)
             .padding(16)
     }
 }
 
 private struct LavaLiveActivityExpandedView: View {
     let state: LavaActivityAttributes.ContentState
+    let activityID: String
+    let isStale: Bool
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { timeline in
@@ -169,31 +173,40 @@ private struct LavaLiveActivityExpandedView: View {
                     // actions (a tap wakes the app to run the intent) even though it
                     // can't keep connectivity status fresh, so it leads with actions,
                     // not status.
-                    switch protectionState {
-                    case .on:
-                        if !state.pauseRequiresAuthentication {
-                            // Pause is the primary action and takes the row; Restart
-                            // recedes to a small secondary icon beside it.
-                            HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
-                                pauseButton(
-                                    title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode),
-                                    accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)
-                                )
-                                restartIconButton(languageCode: languageCode)
+                    Group {
+                        switch protectionState {
+                        case .on:
+                            if !state.pauseRequiresAuthentication {
+                                // Pause is the primary action and takes the row; Restart
+                                // recedes to a small secondary icon beside it.
+                                HStack(spacing: LavaLiveActivityStyle.expandedActionButtonSpacing) {
+                                    if let confirmation = state.pauseConfirmation,
+                                       !isStale,
+                                       confirmation.accepts(token: confirmation.token, now: timeline.date) {
+                                        confirmPauseButton(confirmation: confirmation, languageCode: languageCode)
+                                    } else {
+                                        pauseButton(
+                                            title: pauseButtonTitle(forMinutes: state.pauseMinutes, languageCode: languageCode),
+                                            accessibilityLabel: pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)
+                                        )
+                                    }
+                                    restartIconButton(languageCode: languageCode)
+                                }
+                            } else {
+                                // Pause is locked behind authentication, so Restart stands
+                                // alone — promote it to a full labelled control.
+                                restartLabeledButton(languageCode: languageCode)
                             }
-                        } else {
-                            // Pause is locked behind authentication, so Restart stands
-                            // alone — promote it to a full labelled control.
-                            restartLabeledButton(languageCode: languageCode)
+                        case .paused:
+                            // The only meaningful action is Resume; it fills the row.
+                            resumeButton(languageCode: languageCode)
+                        case .restarting:
+                            // Restart is in progress — the title carries the status and no
+                            // action is offered until it settles.
+                            EmptyView()
                         }
-                    case .paused:
-                        // The only meaningful action is Resume; it fills the row.
-                        resumeButton(languageCode: languageCode)
-                    case .restarting:
-                        // Restart is in progress — the title carries the status and no
-                        // action is offered until it settles.
-                        EmptyView()
                     }
+                    .padding(.trailing, LavaLiveActivityStyle.expandedActionTrailingInset)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -228,7 +241,7 @@ private struct LavaLiveActivityExpandedView: View {
 
     @ViewBuilder
     private func pauseButton(title: String, accessibilityLabel: String) -> some View {
-        Button(intent: PauseLavaProtectionIntent()) {
+        Button(intent: PauseLavaProtectionIntent(activityID: activityID)) {
             pauseActivityActionLabel(title)
         }
         .controlSize(.regular)
@@ -238,6 +251,21 @@ private struct LavaLiveActivityExpandedView: View {
         // primary control names its ACTION — the duration-only visible title alone would announce
         // "15 分, button" with no verb, and the decorative pause glyph is not announced.
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func confirmPauseButton(confirmation: LiveActivityPauseConfirmation, languageCode: String?) -> some View {
+        Button(intent: ConfirmLavaProtectionPauseIntent(token: confirmation.token, activityID: activityID)) {
+            liveActivityActionLabel(LavaCoreStrings.localized("widget.action.confirmPause", languageCode: languageCode))
+                .foregroundStyle(LavaLiveActivityStyle.confirmPauseForeground)
+        }
+        .accessibilityLabel(
+            LavaCoreStrings.localized("widget.action.confirmPause", languageCode: languageCode)
+                + ": " + pauseButtonAccessibilityLabel(forMinutes: state.pauseMinutes, languageCode: languageCode)
+        )
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .tint(LavaLiveActivityStyle.confirmPauseBackground)
+        .buttonBorderShape(.roundedRectangle(radius: LavaLiveActivityStyle.expandedActionButtonCornerRadius))
     }
 
     @ViewBuilder
@@ -369,6 +397,9 @@ private enum LavaLiveActivityStyle {
     // Gap between the primary Pause button and the secondary Restart icon when both
     // are shown in the On state.
     static let expandedActionButtonSpacing: CGFloat = 12
+    // Balance the visible mascot's leading margin and keep every action state's
+    // trailing edge aligned, including the combined Pause/Restart row.
+    static let expandedActionTrailingInset: CGFloat = 12
 
     static let expandedActionFontSize: CGFloat = 16
     static let expandedActionSymbolFontSize: CGFloat = 15
@@ -382,20 +413,20 @@ private enum LavaLiveActivityStyle {
         }
     )
 
+    // The same two native action colors drive the adaptive tint and the reversed
+    // Confirm treatment; do not introduce a separate palette for confirmation.
+    static let actionLightGreen = UIColor(red: 0.45, green: 0.86, blue: 0.63, alpha: 1)
+    static let actionStrongGreen = UIColor(red: 0.12, green: 0.40, blue: 0.28, alpha: 1)
     static let lavaGreen = Color(
         uiColor: UIColor { traits in
-            let components: (red: CGFloat, green: CGFloat, blue: CGFloat) = traits.userInterfaceStyle == .dark
-                ? (0.45, 0.86, 0.63)
-                : (0.12, 0.40, 0.28)
-
-            return UIColor(
-                red: components.red,
-                green: components.green,
-                blue: components.blue,
-                alpha: 1
-            )
+            traits.userInterfaceStyle == .dark ? actionLightGreen : actionStrongGreen
         }
     )
+
+    // Pause uses the native tinted button fill. Confirm promotes that existing tint
+    // to a prominent light fill and uses the strong role for its text in both modes.
+    static let confirmPauseBackground = Color(uiColor: actionLightGreen)
+    static let confirmPauseForeground = Color(uiColor: actionStrongGreen)
 
     // Muted neutral tint for the secondary Restart control so it reads as recovery,
     // not a primary action, against the prominent green Pause/Resume.
@@ -405,26 +436,4 @@ private enum LavaLiveActivityStyle {
             return UIColor(white: white, alpha: 1)
         }
     )
-}
-
-private extension LavaActivityAttributes.ContentState {
-    // Both transient states carry their self-resolve deadline in `resumeDate`, and
-    // the expanded views advance on a 1-second TimelineView, so the Dynamic Island
-    // resolves them on its OWN clock without a fresh push from the app:
-    //  - paused → on at the resume time,
-    //  - restarting → on at the restart deadline (so a restart killed mid-flight,
-    //    before the app could restore state, can't strand the island on
-    //    "Restarting…"; on-demand brings the tunnel back, and the next app wake
-    //    reconciles the true state).
-    func effectiveProtectionState(now: Date) -> LavaActivityAttributes.ProtectionState {
-        switch protectionState {
-        case .paused, .restarting:
-            guard let resumeDate, resumeDate <= now else {
-                return protectionState
-            }
-            return .on
-        case .on:
-            return .on
-        }
-    }
 }

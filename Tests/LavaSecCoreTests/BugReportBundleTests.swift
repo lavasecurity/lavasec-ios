@@ -296,6 +296,150 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertNil(entries[1].details["options"])
     }
 
+    /// A dropped detail key must SAY SO in the report.
+    ///
+    /// This is the structural half of the fix in PR #615, and the half that does not depend on
+    /// anyone maintaining a list. `TunnelDetailKeyExportSourceTests` catches an unexported key
+    /// before it ships, but it reads Swift as text and a text reader can always be evaded by a
+    /// shape it does not parse. This cannot: whatever the emitter looked like, an entry that lost
+    /// keys to the allowlist says how many it lost.
+    ///
+    /// What that buys is the diagnosis, not the data. Three times now a missing reading has been
+    /// read as a missing FEATURE — most recently on 2026-08-28, when a current extension binary
+    /// was diagnosed as stale and a device was reinstalled over it. `_withheld: 1` on
+    /// `data-path-latched` ends that class of investigation in one line: the binary emitted
+    /// something the exporter dropped, so the binary is current and the allowlist is behind.
+    func testDebugLogParserCountsTheDetailKeysItWithheld() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"data-path-latched","timestamp":"2026-08-28T01:02:03Z","dataPath":"chained","brandNewKey":"7","anotherNewKey":"8"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].details["dataPath"], "chained")
+        XCTAssertNil(entries[0].details["brandNewKey"], "the filter must still drop it")
+        XCTAssertEqual(
+            entries[0].details[BugReportDebugLogEntry.withheldKeysField], "2",
+            "the report must say that two readings were dropped, which is what distinguishes a "
+                + "current build with a stale allowlist from a build that never emitted them")
+    }
+
+    /// The chained-connect gate's outcome line must arrive with ALL FIVE of its readings.
+    ///
+    /// This is the regression test for a real, dated failure. On 2026-08-30 the chained connect
+    /// failed three times in a row on device, and every exported gate line looked exactly like
+    /// this, verbatim from the archive:
+    ///
+    ///     {"component":"app","event":"chained-establish-gate",
+    ///      "details":{"_withheld":"3","elapsedMs":"0","phase":"begin"}}
+    ///
+    /// `phase` and `elapsedMs` survived only because tunnel events happen to use the same two key
+    /// names. The three readings PR #598 added expressly to tell a stuck gate from one that never
+    /// started — and both from an extension not answering the IPC — were the three that were
+    /// dropped, so the investigation had to reconstruct the gate's state from tunnel-side
+    /// counters. Written against the real `parseJSONLines`, so it fails if the allowlist narrows
+    /// again by any route.
+    func testTheConnectGateOutcomeLineSurvivesRedactionIntact() throws {
+        let jsonLines = """
+        {"component":"app","event":"chained-establish-gate","timestamp":"2026-08-30T07:01:38Z","phase":"failed","elapsedMs":"15582","polls":"15","unknownReplies":"0","receivedDelta":"0"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].details["phase"], "failed")
+        XCTAssertEqual(entries[0].details["elapsedMs"], "15582")
+        XCTAssertEqual(entries[0].details["polls"], "15", "a stuck gate is told apart by its poll count")
+        XCTAssertEqual(
+            entries[0].details["unknownReplies"], "0",
+            "unknownReplies tracking polls is the signature of an extension not answering the IPC")
+        XCTAssertEqual(
+            entries[0].details["receivedDelta"], "0",
+            "the forwarded-byte delta is the gate's whole decision input — without it the outcome "
+                + "line says a connect failed but not what it saw")
+        XCTAssertNil(
+            entries[0].details[BugReportDebugLogEntry.withheldKeysField],
+            "the gate line must arrive whole; `_withheld: 3` on this event is the exact defect "
+                + "that made the 2026-08-30 device failures unreadable")
+    }
+
+    func testDeviceDNSConfirmationTransitionsSurviveExportWithoutPrivateQueryOrIdentity() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"dns-tier-confirmation","timestamp":"2026-10-02T01:02:03Z","tier":"tierTwo","decision":"checking","reason":"timeout","sequence":"7","transport":"device-dns","domain":"private.example","identity":"private-configuration"}
+        {"component":"tunnel","event":"dns-tier-confirmation","timestamp":"2026-10-02T01:02:06Z","tier":"tierTwo","decision":"completed","reason":"timeout","sequence":"7","outcome":"failure","transport":"device-dns","durationMs":"3000"}
+        """
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+        XCTAssertEqual(entries.count, 2)
+        for entry in entries {
+            XCTAssertEqual(entry.event, "dns-tier-confirmation")
+            XCTAssertEqual(entry.details["tier"], "tierTwo")
+            XCTAssertEqual(entry.details["reason"], "timeout")
+            XCTAssertEqual(entry.details["sequence"], "7")
+            XCTAssertEqual(entry.details["transport"], "device-dns")
+            XCTAssertNil(entry.details["domain"])
+            XCTAssertNil(entry.details["identity"])
+        }
+        XCTAssertEqual(entries[0].details["decision"], "checking")
+        XCTAssertEqual(entries[0].details[BugReportDebugLogEntry.withheldKeysField], "2")
+        XCTAssertEqual(entries[1].details["decision"], "completed")
+        XCTAssertEqual(entries[1].details["outcome"], "failure")
+        XCTAssertEqual(entries[1].details["durationMs"], "3000")
+        XCTAssertNil(entries[1].details[BugReportDebugLogEntry.withheldKeysField])
+    }
+
+    /// The envelope fields are not details and must not be reported as withheld.
+    func testDebugLogParserDoesNotCountStructuralFieldsAsWithheld() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"network-path-changed","timestamp":"2026-08-28T01:02:03Z","kind":"wifi"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertNil(
+            entries[0].details[BugReportDebugLogEntry.withheldKeysField],
+            "component/event/timestamp are the envelope — counting them would put a withheld "
+                + "line on every entry in every report")
+    }
+
+    /// Neither names nor values — otherwise this becomes the leak the allowlist exists to prevent.
+    func testWithheldFieldCarriesNoDomainOrKey() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"chained-aaaa-nodata","timestamp":"2026-08-28T01:02:03Z","domain":"private.example.com"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        let withheld = entries[0].details[BugReportDebugLogEntry.withheldKeysField]
+        XCTAssertEqual(withheld, "1")
+        XCTAssertFalse(
+            withheld?.contains("private.example.com") ?? true,
+            "the withheld field is a count — never the key, and never what the user resolved")
+    }
+
+    /// The withheld field is a COUNT, and carries no key name at all.
+    ///
+    /// Naming the dropped keys reads as obviously more useful and cannot be made safe: a key name
+    /// is only schema while every emitter writes it as a literal, and `details[userValue] = …`
+    /// would put user data in the key position. No character filter fixes that — `AliceSmith` is
+    /// a perfectly ordinary identifier (Codex, PR #615).
+    func testWithheldFieldCarriesACountAndNeverAKeyName() throws {
+        let jsonLines = """
+        {"component":"tunnel","event":"chained-probe","timestamp":"2026-08-28T01:02:03Z","private.example.com":"1","secretToken":"2","dataPath":"chained"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        let withheld = try XCTUnwrap(
+            entries.first?.details[BugReportDebugLogEntry.withheldKeysField])
+        XCTAssertEqual(withheld, "2")
+        XCTAssertFalse(withheld.contains("private.example.com"))
+        XCTAssertFalse(withheld.contains("secretToken"), "an ordinary identifier can still be a name")
+        XCTAssertEqual(
+            entries.first?.details["dataPath"], "chained", "the allowlisted key still exports")
+    }
+
     func testDebugLogParserKeepsSnapshotArtifactMissDetails() throws {
         let jsonLines = """
         {"component":"tunnel","event":"loadSnapshot-store-miss","timestamp":"2026-05-18T01:02:03Z","route":"resolved","compactReason":"reuse:inputs:selectedSourceHashes+catalogVersion","preparedReason":"manifest-missing","generation":"42","ruleCount":"356662","syncCap":"1000000","storeCount":"2","eligibleStoreCount":"1","maxRuleCount":"356662","expected":"full-private-fingerprint","privateDomain":"checkout.example"}
@@ -754,6 +898,89 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertTrue(entries.contains { $0.event == "startTunnel-begin" })
     }
 
+    func testDebugLogParserExcludesChainedTransportFlapChurnButKeepsItsCauseLines() {
+        // Socket flap is the condition a "sites won't load" report is filed DURING, so the
+        // brief-stall transport lines flood exactly the window that has to explain the report —
+        // and their readings (`state`, `previousMs`, `isViable`, `channel`) are not in
+        // `allowedDetailKeys`, so each surviving entry spends a slot and carries no number.
+        //
+        // The cause lines are NOT churn and the distinction is the whole point of the
+        // classification: an identity change is why a rebind happened, and a receive loop that
+        // ended is a socket that will never deliver again. Both are rare and both must survive
+        // a flap that outnumbers them 20:1.
+        var lines = [
+            #"{"component":"tunnel","event":"chained-path-identity-changed","timestamp":"2026-08-24T00:00:00Z"}"#,
+            #"{"component":"tunnel","event":"chained-transport-receive-ended","details":{"error":"posix-54"},"timestamp":"2026-08-24T00:00:01Z"}"#
+        ]
+        for index in 0..<14 {
+            let stamp = String(format: "%02d", index)
+            lines.append(
+                #"{"component":"tunnel","event":"chained-transport-state","details":{"state":"waiting:posix-50","channel":"4"},"timestamp":"2026-08-24T00:00:\#(stamp)Z"}"#
+            )
+            lines.append(
+                #"{"component":"tunnel","event":"chained-transport-viability","details":{"isViable":"false"},"timestamp":"2026-08-24T00:00:\#(stamp)Z"}"#
+            )
+            lines.append(
+                #"{"component":"tunnel","event":"chained-path-observation","details":{"eligible":"en0/wifi"},"timestamp":"2026-08-24T00:00:\#(stamp)Z"}"#
+            )
+        }
+        lines.append(
+            #"{"component":"tunnel","event":"self-reconnect","reason":"receive-failed","timestamp":"2026-08-24T00:00:30Z"}"#
+        )
+
+        // Limit 40, the production default. The old limit of 5 could only be satisfied by
+        // dropping the family outright — no window that small survives a 14-deep flap plus its
+        // cause lines — so it was testing the drop, not the guarantee (Codex P2, PR #581).
+        let entries = BugReportDebugLogEntry.parseJSONLines(
+            Data(lines.joined(separator: "\n").utf8), limit: 40)
+
+        // The transport family is no longer dropped — PR #580 allowlisted its readings, so each
+        // line now carries a stall's state ordering — but it IS capped, so a 14-deep flap cannot
+        // evict the cause lines below (Codex P2, PR #581).
+        XCTAssertFalse(
+            entries.contains { $0.event == "chained-path-observation" },
+            "the unbounded per-callback observation line is still churn — it has no rate bound "
+                + "to cap against")
+        XCTAssertTrue(
+            entries.contains { $0.event == "chained-path-identity-changed" },
+            "the rebind's cause line was evicted by the flap it explains")
+        XCTAssertTrue(
+            entries.contains { $0.event == "chained-transport-receive-ended" },
+            "a dead receive loop is once-per-socket evidence, never churn")
+        XCTAssertTrue(entries.contains { $0.event == "self-reconnect" })
+    }
+
+    func testTransportTransitionsAreCappedRatherThanDropped() {
+        // BOTH FAILURES ARE REAL, which is why this is a cap and not a boolean. Dropping the
+        // family discarded the only per-stall state ordering in a submitted report — the 60 s
+        // liveness counters keep aggregates only. Keeping all of it lets a sustained flap fill
+        // the window and evict the cause lines. The newest few survive; the rest do not.
+        var lines = [
+            #"{"component":"tunnel","event":"chained-path-identity-changed","timestamp":"2026-08-24T00:00:00Z"}"#
+        ]
+        for index in 0..<20 {
+            let stamp = String(format: "%02d", index)
+            lines.append(
+                #"{"component":"tunnel","event":"chained-transport-state","state":"waiting:posix-50","channel":"\#(index)","previousMs":"1200","timestamp":"2026-08-24T00:00:\#(stamp)Z"}"#
+            )
+        }
+        let entries = BugReportDebugLogEntry.parseJSONLines(
+            Data(lines.joined(separator: "\n").utf8), limit: 40)
+
+        let transitions = entries.filter { $0.event == "chained-transport-state" }
+        XCTAssertEqual(
+            transitions.count, BugReportDebugLogEntry.transportTransitionReportCap,
+            "the family must be capped, not dropped and not unbounded")
+        // The NEWEST are the ones kept — a stall is diagnosed from what happened last.
+        XCTAssertEqual(transitions.last?.details["channel"], "19")
+        XCTAssertEqual(transitions.first?.details["channel"], "14")
+        // And the readings survive, which is the whole reason they are worth keeping.
+        XCTAssertEqual(transitions.last?.details["previousMs"], "1200")
+        XCTAssertTrue(
+            entries.contains { $0.event == "chained-path-identity-changed" },
+            "the cause line must survive a flap that outnumbers it 20:1")
+    }
+
     // MARK: - LAV-94 B: redacted incident summary
 
     func testRequestBodyIncludesIncidentSummaryWhenDiagnosticsAreIncluded() throws {
@@ -1061,6 +1288,45 @@ final class BugReportBundleTests: XCTestCase {
         XCTAssertFalse(incident.hasContent)
     }
 
+    /// 🔴 THE BUNDLE FORWARDS THE FAILURE INTO THE SUMMARY IT SERIALIZES.
+    ///
+    /// The bundle stored `lastFocusFailure` while `incident` built `BugReportIncidentSummary`
+    /// without it, so the field defaulted to nil and the record never left the device — the
+    /// diagnostic inert with every other test green (Codex, PR #625). Asserted through
+    /// `bundle.incident`, because a test that constructs the summary DIRECTLY proves rendering
+    /// and not forwarding, and that is exactly the gap that let this through once already.
+    func testTheBundleForwardsTheFocusFailureIntoTheIncidentSummary() throws {
+        let failure = FocusSwitchDiagnosticRecord(
+            outcome: "foreground-reconcile-failed",
+            targetFilterID: "filter-comprehensive",
+            at: Date(),
+            reason: "shared-state-unavailable")
+        let bundle = makeBundle(lastFocusFailure: failure)
+
+        XCTAssertEqual(
+            bundle.incident.lastFocusFailure, failure,
+            "the bundle dropped the failure on its way into the summary the report serializes")
+        let rendered = try XCTUnwrap(
+            bundle.incident.dictionary["focus_last_failure"] as? [String: Any])
+        XCTAssertEqual(rendered["reason"] as? String, "shared-state-unavailable")
+    }
+
+    func testContextEditingRetainsCapturedEnvironmentAndReportIdentity() throws {
+        let original = makeBundle()
+        let context = BugReportContext(issueType: .suggestion, details: "Updated reviewed text", includeDiagnostics: true)
+        let edited = original.updatingContext(context, affectedSiteDecision: nil)
+        XCTAssertEqual(edited.reportID, original.reportID)
+        XCTAssertEqual(edited.context, context)
+        XCTAssertEqual(edited.filters, original.filters)
+        XCTAssertEqual(edited.vpn, original.vpn)
+        XCTAssertEqual(edited.app, original.app)
+        XCTAssertEqual(edited.device, original.device)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        XCTAssertEqual(try encoder.encode(edited.diagnostics), try encoder.encode(original.diagnostics))
+        XCTAssertEqual(edited.makeRequestBody()["user_description"] as? String, context.userDescription)
+    }
+
     private func makeBundle(
         reportID: UUID = UUID(uuidString: "12345678-1234-4234-9234-123456789abc")!,
         context: BugReportContext = BugReportContext(
@@ -1076,7 +1342,8 @@ final class BugReportBundleTests: XCTestCase {
         debugLogEntries: [BugReportDebugLogEntry] = [],
         health: TunnelHealthSnapshot? = nil,
         selfReconnectTimes: [Date] = [],
-        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil
+        lastFocusSwitch: FocusSwitchDiagnosticRecord? = nil,
+        lastFocusFailure: FocusSwitchDiagnosticRecord? = nil
     ) -> BugReportBundle {
         BugReportBundle(
             reportID: reportID,
@@ -1121,12 +1388,636 @@ final class BugReportBundleTests: XCTestCase {
             localHistoryEnabled: false,
             debugLogEntries: debugLogEntries,
             selfReconnectTimes: selfReconnectTimes,
-            lastFocusSwitch: lastFocusSwitch
+            lastFocusSwitch: lastFocusSwitch,
+            lastFocusFailure: lastFocusFailure
         )
+    }
+
+    /// A resolver this session ROAMED AWAY FROM is still folded, because the counter maps still
+    /// name it.
+    ///
+    /// The device-DNS rung's addresses are the tunnel's live capture, so a roam republishes the
+    /// new set over the old one — but `resolverAttemptCounts` and its siblings are session-wide
+    /// and keyed by whichever address was tried, so the retired resolver stays in them. The fold
+    /// is built from the CURRENT lists, so without `chainedFallbackRetiredAddresses` the old
+    /// address walked into the report as a verbatim dictionary key: a LAN or ISP resolver naming
+    /// the user's network, which is the whole disclosure this redaction exists to stop
+    /// (Codex P1, PR #592).
+    ///
+    /// This is the same INDIRECT road PR #575 closed for the current set, re-opened one roam
+    /// later — which is why the test is shaped like its neighbour rather than folded into it.
+    func testTheReportCarriesNoRoamedAwayFallbackAddresses() throws {
+        let roamedAway = "192.168.7.1"
+        let current = "10.0.0.1"
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackEvaluated = true
+        // The CURRENT capture names only the new resolver — this is what a roam leaves behind.
+        health.chainedFallbackLatchedAddresses = [current]
+        health.chainedFallbackEffectiveAddresses = [current]
+        health.chainedFallbackRetiredAddresses = [roamedAway]
+        // ...while the session-wide maps still carry the one it asked before the roam.
+        health.resolverAttemptCounts = [roamedAway: 5, current: 2]
+        health.resolverSuccessCounts = [roamedAway: 3]
+        health.resolverFailureCounts = [roamedAway: 2, current: 1]
+        health.lastResolverAddress = roamedAway
+
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Device DNS", health: health)
+        let encoded = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+
+        XCTAssertFalse(
+            encoded.contains(roamedAway),
+            "a resolver the session roamed away from still keys the counter maps, so it must "
+                + "still fold")
+        XCTAssertFalse(encoded.contains(current), "and the current one is redacted as it always was")
+        XCTAssertEqual(
+            snapshot.health.chainedFallbackRetiredAddresses, [],
+            "the retired list's job is to be READ by the fold, never shipped — it is a list of "
+                + "the very addresses being hidden")
+        // The COUNTS survive under the placeholder: which tier was tried how often is the
+        // diagnostic, and it carries no network detail once the key is folded.
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts[TunnelHealthSnapshot.redactedFallbackAddress], 7,
+            "both resolvers' attempts fold onto the one T1 placeholder")
+    }
+
+    func testTheReportCarriesNoChainedFallbackAddresses() throws {
+        // The chained fallback's custom-resolver field accepts any IPv4, so a QA user can point it
+        // at their own network. The panel may show it — the user's own device, the user's own
+        // setting — but a report they SEND US may not, which is the contract already written
+        // beside `chainedFallbackEvaluated`; these fields broke it three fields later
+        // (Codex, PR #575).
+        let priv = "10.11.12.13"
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackEvaluated = true
+        health.chainedFallbackLatchedAddresses = [priv, "1.1.1.1"]
+        health.chainedFallbackEffectiveAddresses = [priv]
+        health.chainedFallbackOutcomes = [
+            ChainedFallbackAddressOutcome(address: priv, disposition: .admitted),
+            ChainedFallbackAddressOutcome(address: "1.1.1.1", disposition: .alreadyPrimary),
+        ]
+        health.chainedFallbackRescueCount = 4
+        health.chainedFallbackLatchedConfigurationFingerprint = "deadbeef"
+        // THE IDENTITY IS THE NEWEST ROAD OUT. It carries the preset ID, the transport and every
+        // endpoint — and for a Custom entry those endpoints are the user's own resolver, which is
+        // exactly what the address lists above are cleared for (the plan's S4).
+        health.chainedFallbackLatchedIdentity = "custom|plain-dns|\(priv)"
+        health.chainedFallbackAttemptKeys = [priv, "1.1.1.1"]
+        // THE INDIRECT ROAD (Codex, PR #575). Resolver-health evidence keys these by whichever
+        // address served or was tried, and a T1 rung lands in them like any other — so the
+        // first version of this redaction cleared the fallback fields while the same private
+        // address walked out through here.
+        health.lastResolverAddress = priv
+        health.resolverAttemptCounts = [priv: 3, "10.64.0.1": 9]
+        health.resolverSuccessCounts = [priv: 2]
+        health.resolverFailureCounts = [priv: 1, "10.64.0.1": 4]
+
+        // Through the REPORT type, not the helper: the redaction has to belong to the boundary,
+        // so that adding a second construction site cannot quietly bypass it.
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Cloudflare", health: health)
+        let encoded = String(
+            decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+        XCTAssertFalse(
+            encoded.contains(priv), "a hand-entered private resolver must not reach a bug report")
+        XCTAssertFalse(encoded.contains("1.1.1.1"), "no fallback address may reach a bug report")
+        XCTAssertEqual(
+            snapshot.health.chainedFallbackLatchedIdentity, "",
+            "the latched identity embeds a custom resolver's own address; it must be cleared")
+        XCTAssertEqual(
+            snapshot.health.chainedFallbackAttemptKeys, [],
+            "an encrypted attempt key is the endpoint's full cacheIdentifier — URL and all")
+
+        // The DIAGNOSTICS must survive, or the redaction has cost us the reason the field exists:
+        // which gate refused which entry, the counters, and the opaque configuration fingerprint.
+        XCTAssertEqual(
+            snapshot.health.chainedFallbackOutcomes.map(\.disposition),
+            [.admitted, .alreadyPrimary],
+            "the dispositions are the diagnostic and carry no network detail")
+        XCTAssertEqual(snapshot.health.chainedFallbackRescueCount, 4)
+        XCTAssertEqual(
+            snapshot.health.chainedFallbackLatchedConfigurationFingerprint, "deadbeef",
+            "an opaque fingerprint reveals nothing and must be kept")
+        XCTAssertTrue(
+            snapshot.health.chainedFallbackEvaluated,
+            "redaction must not erase whether a session evaluated the selection")
+
+        // The indirect projections, and what must SURVIVE them. Folding onto a placeholder keeps
+        // the totals — T1 was tried three times and served twice — which is the diagnostic;
+        // dropping the entries would make a working fallback and an untried one look identical.
+        XCTAssertEqual(
+            snapshot.health.lastResolverAddress, TunnelHealthSnapshot.redactedFallbackAddress,
+            "that a T1 resolver served last is worth keeping; which one is not")
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts,
+            [TunnelHealthSnapshot.redactedFallbackAddress: 3, "10.64.0.1": 9],
+            "fallback keys fold onto the placeholder; a T0 key is untouched")
+        XCTAssertEqual(
+            snapshot.health.resolverSuccessCounts,
+            [TunnelHealthSnapshot.redactedFallbackAddress: 2])
+        XCTAssertEqual(
+            snapshot.health.resolverFailureCounts,
+            [TunnelHealthSnapshot.redactedFallbackAddress: 1, "10.64.0.1": 4])
+    }
+
+    func testANonFallbackResolverIsLeftAloneByTheRedaction() {
+        // The redaction must not become a blanket scrub: with no fallback in play the snapshot is
+        // a diagnostic and every address in it is one the user chose on the DNS page.
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.lastResolverAddress = "1.1.1.1"
+        health.resolverAttemptCounts = ["1.1.1.1": 5]
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Cloudflare", health: health)
+        XCTAssertEqual(snapshot.health.lastResolverAddress, "1.1.1.1")
+        XCTAssertEqual(snapshot.health.resolverAttemptCounts, ["1.1.1.1": 5])
+    }
+
+    func testADeduplicatedPrimaryIsNotCountedAsAlternativeDNSTraffic() {
+        // Cloudflare selected while the conf already carries `DNS = 1.1.1.1`: that address is
+        // latched and marked `.alreadyPrimary`, but deliberately absent from the effective set —
+        // it is T0. Folding it in with the T1 totals made the report say Alternative DNS
+        // had served queries it never handled, and summed primary counts with real fallback ones
+        // (Codex, PR #575). Still redacted, because a user can hand-enter their own `DNS =`
+        // address here and it names their network either way.
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackLatchedAddresses = ["1.1.1.1", "1.0.0.1"]
+        health.chainedFallbackEffectiveAddresses = ["1.0.0.1"]
+        health.chainedFallbackOutcomes = [
+            ChainedFallbackAddressOutcome(address: "1.1.1.1", disposition: .alreadyPrimary),
+            ChainedFallbackAddressOutcome(address: "1.0.0.1", disposition: .admitted),
+        ]
+        health.lastResolverAddress = "1.1.1.1"
+        health.resolverAttemptCounts = ["1.1.1.1": 40, "1.0.0.1": 2]
+
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Cloudflare", health: health)
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts,
+            [
+                TunnelHealthSnapshot.redactedDeduplicatedPrimaryAddress: 40,
+                TunnelHealthSnapshot.redactedFallbackAddress: 2,
+            ],
+            "40 primary attempts must not be reported as alternative-DNS traffic")
+        XCTAssertEqual(
+            snapshot.health.lastResolverAddress,
+            TunnelHealthSnapshot.redactedDeduplicatedPrimaryAddress,
+            "the deduped address served as T0, and the report must say which tier")
+        // Redacted all the same — the two placeholders differ in MEANING, not in whether they hide.
+        let encoded = String(decoding: try! JSONEncoder().encode(snapshot), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("1.1.1.1"))
+        XCTAssertFalse(encoded.contains("1.0.0.1"))
+    }
+
+    func testARefusedFallbackGetsItsOwnIdentityRatherThanTheTierOneBucket() {
+        // A refused address is never in the resolver route, so it should never key these maps at
+        // all. The mapping is total anyway: folding one into the T1 bucket would invent
+        // alternative-DNS traffic out of an address the tunnel declined to use.
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackLatchedAddresses = ["224.0.0.1"]
+        health.chainedFallbackOutcomes = [
+            ChainedFallbackAddressOutcome(address: "224.0.0.1", disposition: .unusable)
+        ]
+        health.resolverAttemptCounts = ["224.0.0.1": 1]
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Cloudflare", health: health)
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts,
+            [TunnelHealthSnapshot.redactedRefusedFallbackAddress: 1])
+    }
+
+    func testTwoFallbackAddressesFoldWithoutLosingEitherCount() {
+        // A built-in provider contributes TWO servers, so folding must SUM them rather than let
+        // one overwrite the other — otherwise the report understates how hard T1 was working.
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackLatchedAddresses = ["1.1.1.1", "1.0.0.1"]
+        health.resolverAttemptCounts = ["1.1.1.1": 4, "1.0.0.1": 6, "10.64.0.1": 1]
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Cloudflare", health: health)
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts,
+            [TunnelHealthSnapshot.redactedFallbackAddress: 10, "10.64.0.1": 1],
+            "both servers' attempts must survive as one total")
+    }
+
+    func testTheExportKeepsChainedTunnelDiagnosticsAndStillDropsIdentifiers() throws {
+        // THE FIELD FAILURE (PR #580). The allowlist did not keep pace with the chained work, so
+        // `nrg-counters` and `chained-session-liveness` — the two richest lines in the system —
+        // exported as `"details": {}`, along with the `dataPath`/`refusal` pair that says why
+        // chaining did not engage. A log sent from the road, off-tether, could not be diagnosed
+        // because the export had removed everything worth reading.
+        let line = """
+            {"event":"data-path-latched","timestamp":"2026-08-25T00:39:01Z","component":"tunnel",            "dataPath":"dns-only","refusal":"chained-surrendered","outageCount":"4",            "chainedDNSSilentTimeout":"17","chainedDNSResolution":"66","footprintMB":"41",            "sawEgressDemandHost":"probe.example.com","identity":"10.64.0.1"}
+            """
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(line.utf8))
+        let details = try XCTUnwrap(entries.first?.details)
+
+        // The fault is legible: which data path latched, why, and how bad DNS was.
+        XCTAssertEqual(details["dataPath"], "dns-only")
+        XCTAssertEqual(details["refusal"], "chained-surrendered")
+        XCTAssertEqual(details["outageCount"], "4")
+        XCTAssertEqual(details["chainedDNSSilentTimeout"], "17")
+        XCTAssertEqual(details["chainedDNSResolution"], "66")
+        XCTAssertEqual(details["footprintMB"], "41")
+
+        // And the guarantee the allowlist exists for is unchanged: a hostname and an
+        // identity-shaped value are still dropped, so widening it did not widen what leaks.
+        XCTAssertNil(details["sawEgressDemandHost"], "a hostname must never reach a shared bundle")
+        XCTAssertNil(details["identity"], "identity-shaped values stay out by default")
+    }
+
+    /// The reply-SHAPE counters export (PR #588). This is the whole reason they exist: the
+    /// unbacked count against `chainedDNSResolution` is what says "the VPN's resolver completes
+    /// every lookup without resolving anything", and it is only useful in a bundle the founder
+    /// sends from the road. Counts of resolutions — no name, no rcode of any one query.
+    func testTheExportKeepsTheEmptyAnswerShapeCounters() throws {
+        let line = """
+            {"event":"nrg-counters","timestamp":"2026-08-26T04:44:01Z","component":"nrg",            "chainedDNSResolution":"93","chainedDNSEmptyAnswer":"93",            "chainedDNSUnbackedEmptyAnswer":"91","chainedDNSUnbackedEmptyAnswerPerMin":"48.7",            "chainedDNSEmptyAnswerPerMin":"49.8","sawEgressDemandHost":"probe.example.com"}
+            """
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(line.utf8))
+        let details = try XCTUnwrap(entries.first?.details)
+
+        XCTAssertEqual(details["chainedDNSEmptyAnswer"], "93")
+        XCTAssertEqual(details["chainedDNSUnbackedEmptyAnswer"], "91")
+        XCTAssertEqual(details["chainedDNSEmptyAnswerPerMin"], "49.8")
+        XCTAssertEqual(details["chainedDNSUnbackedEmptyAnswerPerMin"], "48.7")
+        XCTAssertNil(details["sawEgressDemandHost"], "a hostname must never reach a shared bundle")
     }
 
     private func jsonString(_ object: [String: Any]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    // MARK: - Observation order (PR #582)
+
+    func testSameBootDelayedAppendIsOrderedByCapturedObservation() {
+        // Production mutation caught: ordering by file position leaves the delayed order-20
+        // append after the order-30 incident and makes stale transport evidence look newest.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"first","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):10"}
+        {"component":"tunnel","event":"incident","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):30"}
+        {"component":"tunnel","event":"delayed","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):20"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["first", "delayed", "incident"])
+        XCTAssertEqual(entries.last?.event, "incident")
+    }
+
+    func testSmallWallClockJumpCannotOverrideCapturedObservationOrder() {
+        // Production mutation caught: retaining the five-second wall-clock heuristic sorts this
+        // same-boot run by display timestamps instead of its monotonic observation sequence.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"first","timestamp":"2026-08-25T12:00:04Z","observationOrder":"v1:\(boot):10"}
+        {"component":"tunnel","event":"newest","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):30"}
+        {"component":"tunnel","event":"middle-delayed","timestamp":"2026-08-25T12:00:05Z","observationOrder":"v1:\(boot):20"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["first", "middle-delayed", "newest"])
+    }
+
+    func testLargeWallClockJumpCannotSplitOneBootRun() {
+        // Production mutation caught: classifying a large timestamp regression as a new epoch
+        // preserves the wrong physical order even though one boot's monotonic key is comparable.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"first","timestamp":"2026-08-25T13:00:00Z","observationOrder":"v1:\(boot):10"}
+        {"component":"tunnel","event":"newest","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):30"}
+        {"component":"tunnel","event":"middle-delayed","timestamp":"2026-08-25T14:00:00Z","observationOrder":"v1:\(boot):20"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["first", "middle-delayed", "newest"])
+    }
+
+    func testBootChangeIsAPhysicalOrderBarrier() {
+        // Production mutation caught: comparing monotonic values across boot IDs moves boot B's
+        // small counters ahead of boot A even though the clock domains are incomparable.
+        let bootA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let bootB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        let jsonLines = """
+        {"component":"tunnel","event":"a-later","timestamp":"2026-08-25T12:00:04Z","observationOrder":"v1:\(bootA):20"}
+        {"component":"tunnel","event":"a-earlier","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(bootA):10"}
+        {"component":"tunnel","event":"b-later","timestamp":"2026-08-25T12:00:02Z","observationOrder":"v1:\(bootB):20"}
+        {"component":"tunnel","event":"b-earlier","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(bootB):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["a-earlier", "a-later", "b-earlier", "b-later"])
+    }
+
+    func testBootTimeFallbackDomainChangeIsAPhysicalOrderBarrier() {
+        // Production mutation caught: globally sorting fallback tokens treats a conservative
+        // manual-wall-time split as permission to compare unrelated monotonic coordinates.
+        let beforeStep = "62747631000000006a78be4b000dfdbe"
+        let afterStep = "62747631000000006a78be4c000dfdbe"
+        let jsonLines = """
+        {"component":"tunnel","event":"before-later","timestamp":"2026-08-25T12:00:04Z","observationOrder":"v1:\(beforeStep):20"}
+        {"component":"tunnel","event":"before-earlier","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(beforeStep):10"}
+        {"component":"tunnel","event":"after","timestamp":"2026-08-25T12:00:02Z","observationOrder":"v1:\(afterStep):1"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["before-earlier", "before-later", "after"])
+    }
+
+    func testABARunsDoNotMergeAcrossTheInterveningBoot() {
+        // Production mutation caught: grouping by boot ID globally merges the two A runs and
+        // moves the final A entry across the intervening reboot evidence.
+        let bootA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let bootB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        let jsonLines = """
+        {"component":"tunnel","event":"a-before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(bootA):20"}
+        {"component":"tunnel","event":"b","timestamp":"2026-08-25T12:00:02Z","observationOrder":"v1:\(bootB):10"}
+        {"component":"tunnel","event":"a-after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(bootA):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["a-before", "b", "a-after"])
+    }
+
+    func testOneBootRunSortsAcrossTheRotationBoundary() {
+        // Production mutation caught: treating the chunk boundary itself as a barrier leaves a
+        // delayed rotated-file append ahead of the earlier current-file observation.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let rotated = Data("""
+        {"component":"tunnel","event":"later-in-rotated","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):20"}
+        """.utf8)
+        let current = Data("""
+        {"component":"tunnel","event":"earlier-in-current","timestamp":"2026-08-25T12:00:00Z","observationOrder":"v1:\(boot):10"}
+        """.utf8)
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(
+            concatenating: [rotated, current], limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["earlier-in-current", "later-in-rotated"])
+    }
+
+    func testLegacyEntryWithoutOrderIsAPhysicalOrderBarrier() {
+        // Production mutation caught: dropping unkeyed legacy entries before ordering lets the
+        // two keyed sides collapse into one run and cross a line from a shipped older build.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"keyed-before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):20"}
+        {"component":"tunnel","event":"legacy","timestamp":"2026-08-25T12:00:02Z"}
+        {"component":"tunnel","event":"keyed-after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["keyed-before", "legacy", "keyed-after"])
+    }
+
+    func testMalformedOrderIsAPhysicalOrderBarrier() {
+        // Production mutation caught: treating a malformed token as absent only after sorting
+        // lets valid keyed entries cross metadata that cannot establish a clock domain.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"keyed-before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):20"}
+        {"component":"tunnel","event":"bad-token","timestamp":"2026-08-25T12:00:02Z","observationOrder":"v1:\(boot):01"}
+        {"component":"tunnel","event":"keyed-after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["keyed-before", "bad-token", "keyed-after"])
+    }
+
+    func testMalformedJSONIsAPhysicalOrderBarrier() {
+        // Production mutation caught: compact-mapping malformed lines before ordering makes
+        // valid keyed entries on opposite sides look contiguous and reorders across lost bytes.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"keyed-before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):20"}
+        {this line was torn by rotation
+        {"component":"tunnel","event":"keyed-after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["keyed-before", "keyed-after"])
+    }
+
+    func testBlankJSONLineIsAPhysicalOrderBarrier() {
+        // Production mutation caught: restoring String.split's default empty-subsequence omission
+        // erases this blank malformed line and sorts the two same-boot sides as one run.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"keyed-before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):20"}
+
+        {"component":"tunnel","event":"keyed-after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):10"}
+        """ + "\n" // An ordinary terminal JSONL delimiter must not surface a phantom entry.
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["keyed-before", "keyed-after"])
+    }
+
+    func testInvalidUTF8JSONLineIsAPhysicalOrderBarrier() {
+        // Production mutation caught: loss-tolerant whole-buffer decoding repairs 0xff into U+FFFD,
+        // turning this damaged keyed line into a public entry and joining both valid sides.
+        let boot = "0123456789abcdef0123456789abcdef"
+        var bytes = Array(
+            ("{\"component\":\"tunnel\",\"event\":\"keyed-before\","
+                + "\"timestamp\":\"2026-08-25T12:00:03Z\","
+                + "\"observationOrder\":\"v1:\(boot):20\"}\n"
+                + "{\"component\":\"tunnel\",\"event\":\"invalid-").utf8
+        )
+        bytes.append(0xff)
+        bytes.append(contentsOf:
+            ("\",\"timestamp\":\"2026-08-25T12:00:02Z\","
+                + "\"observationOrder\":\"v1:\(boot):15\"}\n"
+                + "{\"component\":\"tunnel\",\"event\":\"keyed-after\","
+                + "\"timestamp\":\"2026-08-25T12:00:01Z\","
+                + "\"observationOrder\":\"v1:\(boot):10\"}").utf8
+        )
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(bytes), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["keyed-before", "keyed-after"])
+    }
+
+    func testCRLFDelimitersPreserveOneSameBootRun() {
+        // Production mutation caught: splitting raw bytes on CR and LF independently inserts an
+        // empty barrier between every CRLF record and prevents this valid same-boot reorder.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines =
+            "{\"component\":\"tunnel\",\"event\":\"later\","
+            + "\"timestamp\":\"2026-08-25T12:00:02Z\","
+            + "\"observationOrder\":\"v1:\(boot):20\"}\r\n"
+            + "{\"component\":\"tunnel\",\"event\":\"earlier\","
+            + "\"timestamp\":\"2026-08-25T12:00:01Z\","
+            + "\"observationOrder\":\"v1:\(boot):10\"}\r\n"
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["earlier", "later"])
+    }
+
+    func testEqualMonotonicValuesKeepPhysicalOrder() {
+        // Production mutation caught: omitting the physical-index tie-break delegates equal keys
+        // to Swift's unstable sort and can permute otherwise indistinguishable observations.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"first","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):42"}
+        {"component":"tunnel","event":"second","timestamp":"2026-08-25T12:00:02Z","observationOrder":"v1:\(boot):42"}
+        {"component":"tunnel","event":"third","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):42"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["first", "second", "third"])
+    }
+
+    func testOrderingRunsBeforeChurnFiltering() {
+        // Production mutation caught: filtering the unkeyed churn barrier first merges the keyed
+        // sides and moves `after` ahead of `before`, even though their order is incomparable.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let jsonLines = """
+        {"component":"tunnel","event":"before","timestamp":"2026-08-25T12:00:03Z","observationOrder":"v1:\(boot):20"}
+        {"component":"live-activity-controller","event":"reconcile","timestamp":"2026-08-25T12:00:02Z"}
+        {"component":"tunnel","event":"after","timestamp":"2026-08-25T12:00:01Z","observationOrder":"v1:\(boot):10"}
+        """
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data(jsonLines.utf8), limit: 10)
+
+        XCTAssertEqual(entries.map(\.event), ["before", "after"])
+    }
+
+    func testOrderingRunsBeforeTheTransportTransitionCap() {
+        // Production mutation caught: capping physical file order first keeps monotonic 1...6 and
+        // drops 7; sorting first keeps the six genuinely newest transitions, 2...7.
+        let boot = "0123456789abcdef0123456789abcdef"
+        let lines = stride(from: 7, through: 1, by: -1).map { value in
+            "{\"component\":\"tunnel\",\"event\":\"chained-transport-state\","
+                + "\"timestamp\":\"2026-08-25T12:00:00Z\",\"channel\":\"\(value)\","
+                + "\"observationOrder\":\"v1:\(boot):\(value)\"}"
+        }
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(
+            Data(lines.joined(separator: "\n").utf8), limit: 40)
+
+        XCTAssertEqual(entries.count, BugReportDebugLogEntry.transportTransitionReportCap)
+        XCTAssertEqual(entries.map { $0.details["channel"] }, ["2", "3", "4", "5", "6", "7"])
+    }
+
+    func testFinalSuffixRetainsIncidentAfterMoreThanFortyDelayedWrites() {
+        // Production mutation caught: applying suffix(40) before ordering excludes the incident
+        // that was physically followed by 41 delayed writes but observed after every one of them.
+        let boot = "0123456789abcdef0123456789abcdef"
+        var lines = [
+            "{\"component\":\"tunnel\",\"event\":\"incident\","
+                + "\"timestamp\":\"2026-08-25T12:00:00Z\","
+                + "\"observationOrder\":\"v1:\(boot):100\"}"
+        ]
+        lines += (1...41).map { value in
+            "{\"component\":\"tunnel\",\"event\":\"delayed-\(value)\","
+                + "\"timestamp\":\"2026-08-25T13:00:00Z\","
+                + "\"observationOrder\":\"v1:\(boot):\(value)\"}"
+        }
+
+        let entries = BugReportDebugLogEntry.parseJSONLines(
+            Data(lines.joined(separator: "\n").utf8), limit: 40)
+
+        XCTAssertEqual(entries.count, 40)
+        XCTAssertEqual(entries.first?.event, "delayed-3")
+        XCTAssertEqual(entries.last?.event, "incident")
+    }
+
+    func testObservationOrderNeverLeavesTheRawOrderingPass() throws {
+        // Production mutation caught: forwarding the structural token into details exposes it in
+        // entry dictionaries, request bodies, local-export JSONL, and future `_withheld` counts.
+        let boot = "62747631000000006a78be4b000dfdbe"
+        let entries = BugReportDebugLogEntry.parseJSONLines(Data("""
+        {"component":"tunnel","event":"incident","timestamp":"2026-08-25T12:00:00Z","kind":"wifi","observationOrder":"v1:\(boot):10"}
+        """.utf8), limit: 10)
+        let entry = try XCTUnwrap(entries.first)
+        let entryJSON = try jsonString(entry.dictionary)
+        let bodyJSON = try jsonString(makeBundle(
+            context: BugReportContext(
+                issueType: .vpnOrFilterIssue,
+                details: "Connection stalled.",
+                includeDiagnostics: true
+            ),
+            debugLogEntries: entries
+        ).makeRequestBody())
+
+        XCTAssertNil(entry.details["observationOrder"])
+        XCTAssertNil(entry.details["_withheld"])
+        XCTAssertFalse(entryJSON.contains("observationOrder"))
+        XCTAssertFalse(bodyJSON.contains("observationOrder"))
+    }
+
+    func testTheDeviceLogStillWritesMillisecondDisplayTimestamps() {
+        // Production mutation caught: returning the display formatter to whole seconds loses the
+        // sub-second precision used by people reading raw logs, even though it no longer orders.
+        let stamped = SharedDateFormatting.iso8601WithMilliseconds.string(
+            from: Date(timeIntervalSince1970: 1_787_659_201.234))
+
+        XCTAssertTrue(stamped.contains(".234"), "the stamp must carry milliseconds: \(stamped)")
+    }
+
+    /// A CUSTOM ENCRYPTED endpoint is redacted, and its counters are still folded.
+    ///
+    /// The two halves are one bug. `ResolverOrchestrator.resolveEndpoints` records an encrypted
+    /// attempt under the endpoint's `cacheIdentifier` — the complete `doh:<absolute URL>`, path and
+    /// query included — while the T1 display projection publishes the bare host. The redaction
+    /// folds resolver counters onto placeholders by matching those keys, so a host-only map matched
+    /// nothing: the URL reached the report intact AND the T1 counters it keyed were attributed
+    /// to nobody (Codex P1, PR #591).
+    ///
+    /// Invisible until this PR, because until then the rung could only ever be plain IPv4, where
+    /// the attempt key IS the address.
+    func testACustomEncryptedEndpointIsRedactedAndItsCountersFolded() throws {
+        let privateURL = "doh:https://dns.internal.example/private-path?token=secret"
+        var health = TunnelHealthSnapshot(startedAt: Date(), updatedAt: Date())
+        health.chainedFallbackEvaluated = true
+        // What the PANEL shows: the host alone.
+        health.chainedFallbackLatchedAddresses = ["dns.internal.example"]
+        health.chainedFallbackEffectiveAddresses = ["dns.internal.example"]
+        health.chainedFallbackOutcomes = [
+            ChainedFallbackAddressOutcome(
+                address: "dns.internal.example", disposition: .admitted)
+        ]
+        // What the COUNTERS are keyed by: the whole identifier.
+        health.chainedFallbackAttemptKeys = [privateURL]
+        health.resolverAttemptCounts = [privateURL: 5, "10.64.0.1": 2]
+        health.resolverSuccessCounts = [privateURL: 4]
+        health.lastResolverAddress = privateURL
+
+        let snapshot = BugReportVPNSnapshot(
+            status: "connected", resolverPreset: "Custom", health: health)
+        let encoded = String(
+            decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+
+        XCTAssertFalse(
+            encoded.contains("dns.internal.example"),
+            "a hand-entered DoH host names the user's network as surely as an IPv4 does")
+        XCTAssertFalse(
+            encoded.contains("private-path"),
+            "the URL's PATH is the sharpest half and must not survive")
+        XCTAssertFalse(encoded.contains("secret"), "nor its query")
+
+        // ...and the DIAGNOSTIC survives the redaction, which is the half a bare `contains` check
+        // would not have caught: five attempts and four successes, attributed to T1.
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts[TunnelHealthSnapshot.redactedFallbackAddress], 5)
+        XCTAssertEqual(
+            snapshot.health.resolverSuccessCounts[TunnelHealthSnapshot.redactedFallbackAddress], 4)
+        XCTAssertEqual(
+            snapshot.health.lastResolverAddress, TunnelHealthSnapshot.redactedFallbackAddress,
+            "which tier served the last query is exactly what a triager wants, and it survives")
+        XCTAssertEqual(
+            snapshot.health.resolverAttemptCounts["10.64.0.1"], 2,
+            "the conf's own resolver is untouched — this fold is about the T1 keys")
     }
 }

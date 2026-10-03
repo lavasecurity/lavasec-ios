@@ -23,7 +23,7 @@ final class BlocklistParseResourceBudgetTests: XCTestCase {
 
     func testStreamingCompileCeilingIsBelowTheCompactDeviceBudget() {
         // The streaming compile's transient ceiling (the compact entry arrays + sort/grow
-        // slack) must stay under the 9 B/rule mapped-compact device budget.
+        // slack) must stay under the ~5 B/rule mapped-compact device budget.
         XCTAssertGreaterThan(FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount, 0)
         XCTAssertLessThan(
             FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount,

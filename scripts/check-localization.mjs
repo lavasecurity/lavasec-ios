@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { formatSignature } from "./localization-formats.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkSupportedLocaleLayout, loadSupportedLocales } from "./supported-locales.mjs";
@@ -20,39 +21,23 @@ try {
   process.exit(1);
 }
 const allowedUntranslatedValues = new Set([
-  "Account",
-  "Password",
   "Apple",
   "Cloudflare",
-  "Filter",
   "DNS",
   "DoH",
   "Google",
-  "Guard",
-  "Internet",
   "Lava Security",
+  "Lava",
   "Quad9",
   "TCP",
   "VPN",
+  "WireGuard",
   "LavaSec",
   "Lava Guard",
+  "Lava Plus",
   "Lava Filter",
-  "Feedback",
-  "Provider",
-  "Social media",
-  "Version",
-  "Build",
-  "App",
-  "Passkey",
-  "Tunnel",
-  "Support",
-  "Notifications",
-  "Start",
-  "Name",
-  "Name (optional)",
-  "Email",
-  "Domain",
-  "Details",
+  "Face ID",
+  "Touch ID",
   "LF1-…",
   "%@",
   " %@",
@@ -61,19 +46,9 @@ const allowedUntranslatedValues = new Set([
   "%@. %@",
   "%@: %@",
   "%@: %@ (%@ %d).",
-  "OK",
   "→",
   "iOS",
-  "?",
-  "Protection",
-  "%@ + Fallback",
-  "System",
-  "Original",
-  "Amethyst",
-  "Obsidian",
-  "Kiwi Crème",
-  "Nerd Stats",
-  "Normal"
+  "?"
 ]);
 // The compact Live Activity Pause label is duration-only. These locales correctly share
 // English's SI minute abbreviation, but the exception must stay scoped to this exact core key so
@@ -84,9 +59,80 @@ const allowedUntranslatedCoreEntries = new Set([
   "it:widget.action.pauseForMinutesShort",
   "pt-BR:widget.action.pauseForMinutesShort"
 ]);
+// These interface labels are also the normal local words. Scope the exception
+// to each catalog key and language so it cannot hide untranslated sentences.
+const sharedAppTerms = new Set([
+  "it:Account",
+  "it:Password",
+  "de:Filter",
+  "de:Filter: %@",
+  "de:Internet",
+  "fr:Internet",
+  "es:Internet",
+  "pt-BR:Internet",
+  "it:Internet",
+  "it:Feedback",
+  "pt-BR:Feedback",
+  "it:Provider",
+  "it:Social Media",
+  "de:Version",
+  "de:Build",
+  "fr:Source",
+  "de:App",
+  "es:App",
+  "fr:App",
+  "it:App",
+  "pt-BR:App",
+  "de:Passkey",
+  "it:Passkey",
+  "pt-BR:Passkey",
+  "de:Tunnel",
+  "fr:Tunnel",
+  "it:Tunnel",
+  "de:Support",
+  "fr:Support",
+  "fr:Notifications",
+  "de:Start",
+  "de:Name",
+  "de:Name (optional)",
+  "it:Email",
+  "de:Domain",
+  "de:Details",
+  "de:OK",
+  "fr:OK",
+  "ja:OK",
+  "es:OK",
+  "pt-BR:OK",
+  "it:OK",
+  "fr:Protection",
+  "de:System",
+  "de:Original",
+  "es:Original",
+  "fr:Original",
+  "pt-BR:Original",
+  "de:Amethyst",
+  "de:Obsidian",
+  "fr:Kiwi Crème",
+  "de:Normal",
+  "es:Normal",
+  "fr:Normal",
+  "pt-BR:Normal",
+  "de:Sudoku",
+  "fr:Sudoku",
+  "es:Sudoku",
+  "pt-BR:Sudoku",
+  "it:Sudoku",
+  "de:Emoji",
+  "fr:Emoji",
+  "es:Emoji",
+  "pt-BR:Emoji",
+  "it:Emoji",
+  "fr:Narration"
+]);
 const requiredReleaseKeys = [
   "Guard",
   "Filter",
+  "Filter: %@",
   "Activity",
   "Settings",
   "Close",
@@ -229,7 +275,11 @@ for (const catalogPath of catalogs) {
     const english = value.localizations?.en?.stringUnit?.value;
     for (const locale of requiredLocales.filter((item) => item !== "en")) {
       const translated = value.localizations?.[locale]?.stringUnit?.value;
-      if (translated === english && !allowedUntranslatedValues.has(english)) {
+      if (english !== undefined && translated !== undefined && formatSignature(english) !== formatSignature(translated)) {
+        fail(`${key}: ${locale} format arguments differ from English`);
+      }
+      if (translated === english && !allowedUntranslatedValues.has(english)
+          && !sharedAppTerms.has(`${locale}:${key}`)) {
         fail(`${key}: ${locale} still matches English source`);
       }
     }
@@ -258,7 +308,10 @@ const parseStringsFile = (filePath) => {
   const entries = new Map();
   for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
     const match = line.match(stringsEntryPattern);
+    if (!match && line.trim().startsWith('"')) fail(`${path.relative(iosRoot, filePath)}: malformed strings entry`);
     if (match) {
+      if (entries.has(match[1])) fail(`${path.relative(iosRoot, filePath)}: duplicate key ${match[1]}`);
+      if (!match[2].trim()) fail(`${path.relative(iosRoot, filePath)}: empty value for ${match[1]}`);
       entries.set(match[1], match[2]);
     }
   }
@@ -296,6 +349,9 @@ if (coreBase) {
 
     for (const [key, value] of entries) {
       const english = coreBase.get(key);
+      if (english !== undefined && formatSignature(english) !== formatSignature(value)) {
+        fail(`LavaSecKit ${locale}.lproj: ${key} format arguments differ from English`);
+      }
       const scopedException =
         english === "%d min" && allowedUntranslatedCoreEntries.has(`${locale}:${key}`);
       if (
@@ -331,6 +387,7 @@ if (!fs.existsSync(intentsCatalogPath)) {
     }
 
     for (const [key, value] of Object.entries(intentsCatalog.strings || {})) {
+      if (!value.comment?.trim()) fail(`LavaSecIntents ${key}: missing translator comment`);
       for (const locale of requiredLocales) {
         const unit = value.localizations?.[locale]?.stringUnit;
         if (!unit) {
@@ -351,7 +408,10 @@ if (!fs.existsSync(intentsCatalogPath)) {
         // translated/reviewed. Allowlisted brand/format strings (Lava Security, %@, …) pass.
         if (locale !== "en") {
           const english = value.localizations?.en?.stringUnit?.value;
-          if (english !== undefined && unit.value === english && !allowedUntranslatedValues.has(english)) {
+          if (english !== undefined && formatSignature(english) !== formatSignature(unit.value)) {
+            fail(`LavaSecIntents ${key}: ${locale} format arguments differ from English`);
+          }
+          if (english !== undefined && unit.value === english && !allowedUntranslatedValues.has(english) && !sharedAppTerms.has(`${locale}:${key}`)) {
             fail(`LavaSecIntents ${key}: ${locale} still matches English source`);
           }
         }

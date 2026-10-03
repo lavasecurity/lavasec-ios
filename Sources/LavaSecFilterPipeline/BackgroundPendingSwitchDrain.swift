@@ -90,7 +90,8 @@ public enum BackgroundPendingSwitchDrain {
         // not apply on a later pass either — clear it. (The engine would refuse this switch too;
         // clearing here matches `applyPendingFilterSwitchOnce`'s gate-closed branch so the two
         // drains can't drift on the invariant.)
-        guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults) else {
+        guard !SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults,
+            projectionURL: SecurityProtectedSurfaceStorage.projectionURL(containerURL: env.containerURL)) else {
             PendingFilterSwitchStore.clearIfMatches(request, in: defaults, lockURL: env.pendingMarkerLockURL)
             return .clearedAuthGateClosed
         }
@@ -149,8 +150,9 @@ public enum BackgroundPendingSwitchDrain {
 
 extension HeadlessFocusFilterSwitchEngine.Environment {
     /// A copy of this environment configured for a REPLAY: `now` overridden to the original request
-    /// time (replay identity), the in-lock supersession veto installed, and the expected marker set
-    /// so the engine's records become compare-and-record (see `BackgroundPendingSwitchDrain.drain`).
+    /// time (replay identity), while `diagnosticNow` remains the decision clock. The in-lock
+    /// supersession veto and expected marker make the engine's marker writes compare-and-record
+    /// (see `BackgroundPendingSwitchDrain.drain`).
     /// Lives here, not in the engine file, so the pin-locked engine source gains only the additive
     /// seams; all other fields are carried over verbatim.
     func forReplay(
@@ -168,11 +170,15 @@ extension HeadlessFocusFilterSwitchEngine.Environment {
             focusSwitchLockURL: focusSwitchLockURL,
             configurationWriteLockURL: configurationWriteLockURL,
             pendingMarkerLockURL: pendingMarkerLockURL,
+            focusDiagnosticOrderingLockURL: focusDiagnosticOrderingLockURL,
             snapshotFilename: snapshotFilename,
             compactSnapshotFilename: compactSnapshotFilename,
             defaults: defaults,
             catalogSyncFreshnessInterval: catalogSyncFreshnessInterval,
             now: now,
+            diagnosticNow: diagnosticNow,
+            onHeadlessValidationCompleted: onHeadlessValidationCompleted,
+            onHeadlessCommitCompleted: onHeadlessCommitCompleted,
             postSignal: postSignal,
             log: log,
             notifySwitchOutcome: notifySwitchOutcome,

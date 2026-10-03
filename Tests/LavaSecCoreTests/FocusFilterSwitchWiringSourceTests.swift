@@ -7,231 +7,41 @@ import XCTest
 /// real unit tests (`HeadlessFocusFilterSwitchEngineTests`); these pin its safety-critical wiring as
 /// source text (the app-target reconcile is not reachable from `swift test`).
 final class FocusFilterSwitchWiringSourceTests: XCTestCase {
-    /// The engine's decision body (gate → guards → marker → hybrid defer/commit). Stops before the
-    /// commit helper.
-    private static func runLockedBlock() throws -> String {
-        try sourceBlock(
-            in: try readSource(.headlessFocusFilterSwitchEngine),
-            startingAt: "private static func runLocked(toFilterID id: String, env: Environment) async",
-            endingBefore: "// MARK: - Commit"
+    // Engine gates, marker durability, publication and rollback execute in
+    // HeadlessFocusFilterSwitchEngineTests. Keep only app/process wiring here.
+
+    func testInactiveAutomatedPreparationFailureDoesNotRollBackSharedSelection() throws {
+        let app = try readAppViewModelSource()
+        let block = try sourceBlock(
+            in: app,
+            startingAt: "// Only the current owner may roll back.",
+            endingBefore: "private func switchPublicationMatchesLiveConfiguration("
         )
-    }
-
-    func testHeadlessSwitchGatesFailClosedThenRecordsMarkerThenDefersOrCommits() throws {
-        let block = try Self.runLockedBlock()
-
-        // Fail-closed SECURITY boundary: NOT auth-to-edit. Focus auto-switch is available to ALL tiers, so
-        // the gate must NOT Plus-gate (the paywall was dropped).
-        XCTAssertFalse(block.contains("guard configuration.hasLavaSecurityPlus"),
-                       "The headless switch gate must NOT Plus-gate — Focus auto-switch is free for all tiers.")
-        XCTAssertTrue(block.contains("SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults)"))
-
-        // A reseeded/migrated load (or a failed config load) must refuse — committing would write default
-        // rules/settings over the user's real state (mirrors the bg-refresh bg-premigration bail).
-        XCTAssertTrue(block.contains("guard !loaded.didReseed else { return SwitchDecision(.disallowed, \"disallowed-config-fallback-or-reseed\") }"),
-                      "The headless switch must bail on a reseeded/config-fallback library (no default clobber).")
-
-        // A final catalog re-validation before the flip (mirrors the foreground's catalog-moved guard).
-        XCTAssertTrue(block.contains("WarmFilterSnapshotLoader.stillReusableAgainstCachedCatalog("),
-                      "The headless commit must re-validate the warm snapshot against the current cached catalog before flipping.")
-
-        // Eight foreground-nudge sites (the two foreground-active defer guards were removed — the switch is
-        // state-agnostic now): already-active + plan-unavailable + no-warm + catalog-moved-prevalidation +
-        // the COMMITTED branch (Codex P1: a commit can now land while the app is foreground-active, so it must
-        // wake the resident reconcile too) + the catalog-moved CLEAN-DEFER catch arm + the generation-superseded
-        // CLEAN-DEFER catch arm + the replay-superseded CLEAN-DEFER catch arm (Codex PR #410 P1: its rollback
-        // restores the manual selection and the nudge lets the reconcile promptly drop the superseded marker).
-        // The GENERIC commit-failure catch does NOT nudge.
-        XCTAssertEqual(
-            block.components(separatedBy: "env.postSignal(FocusFilterSwitchSignal.darwinNotificationName)").count - 1,
-            8,
-            "already-active + 3 early defers + committed + catalog-moved + generation-superseded + replay-superseded must post the foreground nudge."
-        )
-        // The superseding-writer clean-defer arm (P4c review P2): a concurrent newer writer — caught at the
-        // flip fence (SupersededError) OR the stale-base write fence (StaleBaseGenerationError) — defers
-        // WITHOUT rolling back, so it can't clobber the newer on-disk state. Distinct from catalog-moved +
-        // the generic wedge.
-        XCTAssertTrue(block.contains("supersedingWriterError is SupersededError")
-                        && block.contains("supersedingWriterError is SharedFilterStatePersistence.StaleBaseGenerationError"),
-                      "One clean-defer arm must handle BOTH the superseded flip and the stale-base write abort.")
-        XCTAssertTrue(block.contains("\"headless-commit-deferred-superseded\""),
-                      "The superseding-writer clean-defer path must log a distinct event.")
-        // The fences live in the commit helper: the in-lock flip fence (commitBeforeFlip) + the generation
-        // CAS on the config write.
-        let fenceBlock = try sourceBlock(
-            in: try readSource(.headlessFocusFilterSwitchEngine),
-            startingAt: "private static func commit(",
-            endingBefore: "private static func writeConfigurationOnly("
-        )
-        XCTAssertTrue(fenceBlock.contains("SharedFilterStatePersistence.onDiskConfigurationGeneration(at: configurationURL) <= writtenGeneration"),
-                      "The in-lock fence must abort the flip if a concurrent writer advanced the generation past ours.")
-        XCTAssertTrue(fenceBlock.contains("throw SupersededError()"),
-                      "The fence must throw SupersededError to abort the flip before it happens.")
-        XCTAssertTrue(fenceBlock.contains("rejectsAdvancedBeyond: configuration.configurationGeneration"),
-                      "The forward config write must fence against the loaded base so a concurrent foreground write isn't clobbered.")
-        // The generation fence must run BEFORE the catalog-basis veto, so a coinciding supersession + catalog
-        // move defers WITHOUT rolling back (SupersededError wins → the newer foreground config is preserved).
-        let fenceOrderIdx = try XCTUnwrap(fenceBlock.range(of: "throw SupersededError()")?.lowerBound)
-        let vetoCallIdx = try XCTUnwrap(fenceBlock.range(of: "try commitBeforeFlip()")?.lowerBound)
-        XCTAssertLessThan(fenceOrderIdx, vetoCallIdx,
-                          "The SupersededError generation fence must be evaluated before the catalog-basis veto call.")
-        let catchBlock = try sourceBlock(in: block, startingAt: "} catch {", endingBefore: "deferred-commit-failed")
-        // Uniqueness guard: the body has THREE catch arms — the specialized
-        // `} catch is CatalogMovedError {` (clean defer), the generic `} catch {`, and the nested
-        // `} catch let rollbackError {`. The `} catch {` anchor must extract the GENERIC arm.
-        XCTAssertTrue(catchBlock.contains("} catch let rollbackError {"),
-                      "The extracted block must be the GENERIC commit-failure catch (it owns the nested rollback do/catch).")
-        XCTAssertFalse(catchBlock.contains("env.postSignal("),
-                       "The generic catch returns .deferred without a nudge (the foreground reconcile picks it up).")
-        // Rollback observability.
-        XCTAssertTrue(catchBlock.contains("env.log(\"headless-commit-failed-rolled-back\""),
-                      "A failed-then-rolled-back commit must be logged.")
-        XCTAssertTrue(catchBlock.contains("env.log(\"headless-commit-rollback-failed\""),
-                      "A commit whose rollback ALSO failed (the wedge) must be logged.")
-
-        // The gate must fail-closed BEFORE anything is recorded. Both record sites funnel through
-        // recordMarker (the compare-and-record seam): unconditional newest-wins for fresh intents,
-        // recordIfMatches for a replay — so a replay can never erase a newer intent's marker
-        // (lavasec-ios public review of the PR #410 promotion).
-        let gateIdx = try XCTUnwrap(block.range(of: "SecurityProtectedSurfaceStorage.isProtected(.filterEditing")?.lowerBound)
-        let recordIdx = try XCTUnwrap(block.range(of: "guard recordMarker(request, env: env)")?.lowerBound)
-        XCTAssertLessThan(gateIdx, recordIdx, "The auth-to-edit gate must precede recording the marker.")
-        // TWO record sites: the main path AND the already-active path (records the newest intent),
-        // BOTH through the funnel (no direct PendingFilterSwitchStore.record in runLocked).
-        XCTAssertEqual(block.components(separatedBy: "recordMarker(").count - 1, 2,
-                       "Both record sites must go through the compare-and-record funnel.")
-        XCTAssertEqual(block.components(separatedBy: "PendingFilterSwitchStore.record(").count - 1, 0,
-                       "runLocked must not bypass the recordMarker funnel with a direct store record.")
-        let alreadyActiveRecordIdx = try XCTUnwrap(block.range(of: "recordMarker(PendingFilterSwitchRequest(targetFilterID: id")?.lowerBound)
-        XCTAssertLessThan(gateIdx, alreadyActiveRecordIdx, "The gate must precede the already-active record site as well.")
-        // The main path FAILS CLOSED if the marker write fails — and a replay's mismatch (a newer
-        // intent won the slot) must surface its own Release-diagnosable reason.
-        XCTAssertTrue(block.contains("guard recordMarker(request, env: env) else {"),
-                      "A failed marker write on the main path must fail closed (return .disallowed).")
-        XCTAssertTrue(block.contains("\"disallowed-replay-marker-changed\""),
-                      "A replay whose marker was superseded mid-flight must record its distinct reason.")
-
-        // The funnel itself: replayExpectedMarker routes to compare-and-record, nil to newest-wins.
-        let engine = try readSource(.headlessFocusFilterSwitchEngine)
-        let funnel = try sourceBlock(
-            in: engine,
-            startingAt: "private static func recordMarker(_ request: PendingFilterSwitchRequest, env: Environment) -> Bool {",
-            endingBefore: "/// Thrown by the in-lock"
-        )
-        XCTAssertTrue(funnel.contains("if let expected = env.replayExpectedMarker {"),
-                      "The funnel must branch on the replay's expected marker.")
-        XCTAssertTrue(funnel.contains("PendingFilterSwitchStore.recordIfMatches("),
-                      "A replay must record via compare-and-record (recordIfMatches).")
-        XCTAssertTrue(funnel.contains("PendingFilterSwitchStore.record(request, in: env.defaults"),
-                      "A fresh intent must keep the unconditional newest-wins record.")
-
-        // STATE-AGNOSTIC: the headless switch must NOT gate on a foreground-active flag (that 5-min defer was
-        // dropped — the cross-process CAS makes a concurrent foreground write safe, so it commits regardless
-        // of app state). The whole AppForegroundActivityState machinery is gone.
-        XCTAssertFalse(block.contains("AppForegroundActivityState"),
-                       "The headless switch must not consult any foreground-active flag (state-agnostic).")
-        XCTAssertFalse(block.contains("isForegroundActive"),
-                       "No foreground-active defer remains — the switch is state-agnostic via the CAS.")
-
-        // WARM-ONLY: the headless path must NEVER cold-compile.
-        XCTAssertFalse(block.contains("prepareFilterSnapshot("),
-                       "The headless switch must be warm-only — no cold compile.")
-        XCTAssertTrue(block.contains("WarmFilterSnapshotLoader.reusableSnapshotForSwitch("),
-                      "The warm artifact must be resolved via the shared loader against the TARGET's mirrored config (plan).")
-        XCTAssertTrue(block.contains("configuration: plan.configuration"),
-                      "Warm validation must use the plan's (target's) configuration, not the active config.")
-
-        // Commit via the SHARED publish path (config-leads-pointer + pointer flip) and post the tunnel reload.
-        XCTAssertTrue(block.contains("FilterSwitchPlan.make(toFilterID: id, configuration: configuration, library: library)"))
-        XCTAssertTrue(block.contains("configuration = plan.configuration"),
-                      "The headless commit must take configuration from the plan.")
-        XCTAssertTrue(block.contains("library = plan.library"),
-                      "The headless commit must take the library from the same plan (not re-mutate a live library).")
-        XCTAssertTrue(block.contains("try await commit("),
-                      "The headless commit must go through the shared commit helper.")
-        // The commit must pass an IN-LOCK catalog-basis veto.
-        XCTAssertTrue(block.contains("commitBeforeFlip: { @Sendable in"),
-                      "The headless commit must pass an in-lock commitBeforeFlip catalog-basis veto.")
-        XCTAssertTrue(block.contains("throw CatalogMovedError()"),
-                      "The in-lock veto must throw CatalogMovedError when the catalog basis moved.")
-        // The REPLAY-only supersession veto (Codex PR #410 P1) runs in the SAME in-lock closure,
-        // BEFORE the catalog-basis guard: a manual switch that completed after a replay's off-lock
-        // pre-check must abort the flip (with rollback) rather than be switched away from.
-        let replayVetoIdx = try XCTUnwrap(block.range(of: "throw ReplaySupersededError()")?.lowerBound,
-                                          "The in-lock closure must carry the replay supersession veto.")
-        let catalogThrowIdx = try XCTUnwrap(block.range(of: "throw CatalogMovedError()")?.lowerBound)
-        XCTAssertLessThan(replayVetoIdx, catalogThrowIdx,
-                          "The replay veto must precede the catalog-basis guard inside the in-lock closure.")
-        XCTAssertTrue(block.contains("} catch is ReplaySupersededError {"),
-                      "A vetoed replay must have its own catch arm (rollback + replay-superseded reason).")
-        XCTAssertTrue(block.contains("\"deferred-replay-superseded-inlock\""),
-                      "The replay-veto defer must record its distinct diagnosable reason.")
-        XCTAssertTrue(block.contains("canReuseForProtectionStartup(configuration: basisConfiguration, cachedCatalog: cachedCatalog)"),
-                      "The in-lock veto must re-validate the warm snapshot's basis against the freshly-loaded cached catalog.")
-        XCTAssertTrue(block.contains("catch is CatalogMovedError {"),
-                      "The catalog-moved veto must be caught as a clean defer, distinct from the generic commit-failure wedge.")
-        XCTAssertTrue(block.contains("\"headless-commit-deferred-catalog-moved\""),
-                      "The clean-defer path must log a distinct catalog-moved event (not a wedge error).")
-        // A committed switch does NOT push to the tunnel — the always-on tunnel adopts it by polling the
-        // config generation (P4d), since an extension→idle-tunnel Darwin is unreliable. So the only Darwin
-        // the engine ever posts is the foreground reconcile nudge.
-        XCTAssertFalse(block.contains("tunnelReloadDarwinName"),
-                       "The engine must NOT post a tunnel-reload Darwin (the tunnel poll adopts the commit).")
-
-        // The commit helper funnels through the single shared writer + the shared artifact publish.
-        let commitBlock = try sourceBlock(
-            in: try readSource(.headlessFocusFilterSwitchEngine),
-            startingAt: "private static func commit(",
-            endingBefore: "private static func writeConfigurationOnly("
-        )
-        XCTAssertTrue(commitBlock.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("),
-                      "The commit must write config+library through the single shared writer (config leads pointer).")
-        XCTAssertTrue(commitBlock.contains("service.persistArtifacts("),
-                      "The commit must publish + flip the artifact pointer through the shared service.")
-        // The headless model never loaded the backup state, so the engine must NEVER schedule a backup.
-        XCTAssertFalse(commitBlock.contains("scheduleAutomaticBackup"),
-                       "The headless engine must not touch automatic-backup scheduling (state not loaded).")
-    }
-
-    func testHeadlessSwitchNeverClearsMarkerAndFencesRollback() throws {
-        let block = try Self.runLockedBlock()
-        // The ENGINE never clears the marker — its record path must stay clear-free so a Focus-off /
-        // replay edge can never drop a different intent's request. (Marker CLEARS live in exactly two
-        // places, both compare-and-clear under the marker flock: the foreground reconcile — the
-        // authoritative site — and BackgroundPendingSwitchDrain's two moot cases.)
-        XCTAssertFalse(block.contains("clearIfMatches"),
-                       "The engine must not clear the pending-switch marker (clears belong to the reconcile + the drain's moot cases).")
-        // A partial commit is rolled back to the previous filter so the on-disk selection stays consistent
-        // with the un-flipped pointer.
-        let catchIdx = try XCTUnwrap(block.range(of: "} catch {")?.lowerBound)
-        let catchBody = String(block[catchIdx...])
-        XCTAssertTrue(catchBody.contains("configuration = previousConfiguration"))
-        XCTAssertTrue(catchBody.contains("library = previousLibrary"))
-        XCTAssertTrue(catchBody.contains("writeConfigurationOnly("),
-                      "A failed headless commit must roll the on-disk selection back to the previous filter.")
-        // The rollback must be FENCED against our own write so it can't clobber a newer foreground write that
-        // landed in the gap between the config write and the rollback (panel P1).
-        XCTAssertTrue(catchBody.contains("let fencedGeneration = configuration.configurationGeneration"),
-                      "The generic rollback must capture the generation we wrote to fence the revert.")
-        XCTAssertTrue(catchBody.contains("expectedBaseGeneration: fencedGeneration"),
-                      "The generic rollback must pass the fenced generation so a newer foreign write isn't clobbered.")
-        XCTAssertTrue(catchBody.contains("catch is SharedFilterStatePersistence.StaleBaseGenerationError"),
-                      "A rollback superseded by a newer write must be a benign skip, not logged as a wedge.")
-        // The catalog-moved clean-defer arm must fence its rollback the same way.
-        let catalogArm = try sourceBlock(in: block, startingAt: "} catch is CatalogMovedError {", endingBefore: "} catch let supersedingWriterError")
-        XCTAssertTrue(catalogArm.contains("expectedBaseGeneration: fencedGeneration"),
-                      "The catalog-moved rollback must also fence against our own write.")
+        let inactivityGate = try XCTUnwrap(block.range(of:
+            "if !publicationStarted, !stampsForegroundSwitch, UIApplication.shared.applicationState != .active {")?.lowerBound)
+        let rollback = try XCTUnwrap(block.range(of:
+            "configuration = applyingFilterPlan(from: previousConfiguration, onto: configuration)")?.lowerBound)
+        XCTAssertLessThan(inactivityGate, rollback,
+                          "A preparation failure after inactivity must leave the durable selection to the headless writer.")
+        let deferred = String(block[inactivityGate..<rollback])
+        XCTAssertTrue(deferred.contains("pendingSwitchFilterID = nil"))
+        XCTAssertTrue(deferred.contains("return"))
+        XCTAssertTrue(deferred.contains("if publicationStarted {"),
+                      "A post-write failure must still restore the local selection and roll back durably.")
+        XCTAssertTrue(deferred.contains("let rollbackGeneration = configuration.configurationGeneration"))
+        XCTAssertTrue(block.contains("persistConfigurationOnly(rejectsAdvancedBeyond: rollbackGeneration)"),
+                      "The app rollback must use the same cross-process generation fence as the headless engine.")
     }
 
     func testForegroundReconcileAppliesThenCompareAndClears() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let block = try sourceBlock(
             in: app,
             startingAt: "func reconcilePendingFilterSwitch() async {",
-            endingBefore: "private func persistSharedState("
+            endingBefore: "func persistSharedState("
         )
-        XCTAssertTrue(block.contains("guard !isHeadless else { return }"),
-                      "Reconcile is foreground-only.")
+        XCTAssertTrue(block.contains("guard !isHeadless, UIApplication.shared.applicationState == .active else { return }"),
+                      "A resident background app must not start the foreground cold-rebuild path.")
         XCTAssertTrue(block.contains("guard !isReconcilingPendingFilterSwitch else {"),
                       "Reconcile must guard against overlapping runs.")
         XCTAssertTrue(block.contains("pendingReconcileRerun = true"),
@@ -252,7 +62,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
 
         XCTAssertFalse(block.contains("guard configuration.hasLavaSecurityPlus"),
                        "Reconcile must NOT Plus-gate the apply — Focus auto-switch is free for all tiers.")
-        XCTAssertTrue(block.contains("SecurityProtectedSurfaceStorage.isProtected(.filterEditing, defaults: defaults)"))
+        XCTAssertTrue(block.contains("projectionURL: LavaSecAppGroup.securityGateProjectionURL"))
         let gateIdx = try XCTUnwrap(block.range(of: "SecurityProtectedSurfaceStorage.isProtected(.filterEditing")?.lowerBound)
         // The supersession decision itself (incl. the `<=` exact-tie rule) lives in the SHARED
         // PendingFilterSwitchStore.isSupersededByForegroundSwitch — one behaviorally-tested
@@ -315,7 +125,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         // be a no-op, else a superseded-then-failed switch leaves the rehydration flag stuck.
         XCTAssertTrue(block.contains("if library.activeFilterID != previousActiveID {"),
                       "The tail must run only when the adopt actually changed the active filter.")
-        XCTAssertTrue(block.contains("await applyCommittedOnDiskActiveFilter(adoptToken: adoptToken, shouldRestoreProtection: shouldRestoreProtection)"),
+        XCTAssertTrue(block.contains("await applyCommittedOnDiskActiveFilter(adoptToken: adoptToken, restoreRequest: restoreRequest)"),
                       "On an actual active-filter change the adopt must run the full warm-switch tail.")
         XCTAssertTrue(block.contains("let adoptToken = configurationReplacementGate.begin()"),
                       "The adopt tail must run under a fresh replacement epoch (begin() — no preparation cover, no recompile).")
@@ -340,7 +150,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(adoptTail.contains("filterEditTargetID = nil"),
                       "The adopt tail must clear the non-active detail target so the now-active filter isn't treated as non-active.")
         XCTAssertTrue(adoptTail.contains("await notifyTunnelSnapshotUpdated()")
-                        && adoptTail.contains("await restoreProtectionIfNeeded(wasEnabled: shouldRestoreProtection)"),
+                        && adoptTail.contains("await restoreProtectionIfNeeded(restoreRequest)"),
                       "The adopt tail must notify the tunnel + restore protection (mirrors switchToFilter's tail).")
         XCTAssertFalse(adoptTail.contains("persistSharedState(") || adoptTail.contains("recordForegroundSwitch("),
                        "The adopt tail must NOT re-persist or stamp lastForegroundSwitch — the extension already committed.")
@@ -351,7 +161,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     }
 
     func testForegroundSwitchStampIsGuardedAndSingleSited() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertTrue(app.contains("func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async"),
                       "switchToFilter must accept a stampsForegroundSwitch flag (default true for genuine user switches).")
         XCTAssertTrue(app.contains("if stampsForegroundSwitch {"),
@@ -361,9 +171,9 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         let switchBlock = try sourceBlock(
             in: app,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
-            endingBefore: "private enum SwitchPublication"
+            endingBefore: "enum SwitchPublication"
         )
-        let persistIdx = try XCTUnwrap(switchBlock.range(of: "try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)")?.lowerBound)
+        let persistIdx = try XCTUnwrap(switchBlock.range(of: "let publishOutcome = try await persistSharedState(")?.lowerBound)
         let postPersistGateIdx = try XCTUnwrap(switchBlock.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {", range: persistIdx..<switchBlock.endIndex)?.lowerBound)
         let stampIdx = try XCTUnwrap(switchBlock.range(of: "PendingFilterSwitchStore.recordForegroundSwitch(")?.lowerBound)
         XCTAssertLessThan(persistIdx, stampIdx, "The stamp must follow the persist (only stamp a switch that durably landed).")
@@ -391,7 +201,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     func testForegroundActiveMachineryIsRemoved() throws {
         // The state-agnostic switch (no 5-min defer) means the whole foreground-active flag machinery is
         // gone — the app no longer tracks/publishes it. Pin its removal so it can't be reintroduced.
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertFalse(app.contains("setForegroundActive("),
                        "The foreground-active flag is gone — the headless switch is state-agnostic now.")
         XCTAssertFalse(app.contains("refreshForegroundActivityPublication"),
@@ -420,13 +230,13 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// must sit outside every `#if` (only its body may be gated) — otherwise a Release build drops the
     /// declaration and fails to compile.
     func testLogFocusSwitchEventDeclaredOutsideAnyConditionalCompilation() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         var depth = 0
         var found = false
         var foundAtDepthZero = false
         for rawLine in app.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("private func logFocusSwitchEvent(") {
+            if line.hasPrefix("func logFocusSwitchEvent(") {
                 found = true
                 foundAtDepthZero = (depth == 0)
             }
@@ -459,7 +269,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         XCTAssertTrue(coord.contains("App Intents EXTENSION as a second"),
                       "The doc must flag that the extension is a second writer process (why the flock is needed).")
         // The app side resolves the SAME lock file the engine/extension uses.
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertTrue(app.contains("lockURL: pendingFilterSwitchMarkerLockURL"),
                       "The foreground reconcile must pass the shared marker lock to clearIfMatches.")
         XCTAssertTrue(app.contains("LavaSecAppGroup.pendingFilterSwitchMarkerLockFilename"),
@@ -480,6 +290,8 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "The environment must wire the dedicated focus-switch lock file.")
         XCTAssertTrue(envFactory.contains("LavaSecAppGroup.configurationWriteLockFilename"),
                       "The environment must wire the cross-process config-write lock (P4c).")
+        XCTAssertTrue(envFactory.contains("LavaSecAppGroup.focusDiagnosticOrderingLockFilename"),
+                      "The environment must wire the terminal diagnostic-ordering lock.")
 
         // The dedicated cross-process flock that serializes concurrent headless switches lives IN the
         // engine, so the extension gets it (no app-target dependency).
@@ -490,7 +302,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "O_CREAT only (never createFile) so the flock binds to a shared inode.")
 
         // The dead app-target LavaWarmSwitchService must be gone (the extension calls the engine directly).
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertFalse(app.contains("enum LavaWarmSwitchService"),
                        "LavaWarmSwitchService must be removed — the App Intents extension drives the engine directly.")
     }
@@ -499,7 +311,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// names, or a rename would silently desync them. The foreground observer stays in the app; the engine
     /// posts the foreground reconcile nudge, while the poll remains the tunnel's adoption mechanism.
     func testDarwinNudgeObserverAndPosterShareTheConstant() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertTrue(app.contains("focusPendingSwitchObserver = DarwinNotificationObserver("),
                       "The foreground reconcile observer must be registered.")
         XCTAssertTrue(app.contains("name: FocusFilterSwitchSignal.darwinNotificationName"),
@@ -517,7 +329,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// poll: a ~60s timer, started on tunnel-up and stopped on tunnel-down, that reloads through the
     /// EXISTING reload entry when the generation advances — and assert NO Darwin observer was reintroduced.
     func testTunnelPollsConfigGenerationAndReusesExistingReload() throws {
-        let tunnel = try readSource(.packetTunnelProvider)
+        let tunnel = try readPacketTunnelProviderSource()
         XCTAssertTrue(tunnel.contains("startFocusConfigurationPoll()"),
                       "The tunnel must start the Focus config poll on tunnel-up.")
         XCTAssertTrue(tunnel.contains("stopFocusConfigurationPoll()"),
@@ -534,12 +346,16 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         // P2 fix: the poll watermark is advanced only on a successful ADOPT (in the snapshot load), never on
         // mere observation — else a poll firing in the extension's config-leads-pointer window would skip
         // the retry. The poll tick must NOT self-assign the watermark.
-        // Start the marker at `func ...` (NOT `private func ...`) so the body's own `private func ` prefix
-        // doesn't make `endingBefore: "private func "` match at offset 0 and return an empty block.
+        // The end marker is the NEXT provider file's header banner, not `private func `. The poll
+        // tick is the last declaration in `Provider/PacketTunnelProvider+FocusConfigPoll.swift`,
+        // and the access-level widenings the file split required mean the next `private func` is
+        // now two files away — that delimiter grew this block from 114 to 494 lines, so the
+        // assertions below could be satisfied by another concern's code. The banner ends the block
+        // at the file boundary, which is what "the poll body" has always meant.
         let pollBlock = try sourceBlock(
             in: tunnel,
             startingAt: "func reloadSnapshotIfConfigurationGenerationAdvanced() {",
-            endingBefore: "private func "
+            endingBefore: "// One concern of `PacketTunnelProvider`"
         )
         let beginBlock = try sourceBlock(
             in: tunnel,
@@ -549,21 +365,21 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         let finishBlock = try sourceBlock(
             in: tunnel,
             startingAt: "private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64)",
-            endingBefore: "private func isCurrentSnapshotReloadGeneration"
+            endingBefore: "func isCurrentSnapshotReloadGeneration"
         )
         let currentBlock = try sourceBlock(
             in: tunnel,
-            startingAt: "private func isCurrentSnapshotReloadGeneration(_ generation: UInt64)",
-            endingBefore: "private func invalidateSnapshotReloadGeneration"
+            startingAt: "func isCurrentSnapshotReloadGeneration(_ generation: UInt64)",
+            endingBefore: "func invalidateSnapshotReloadGeneration"
         )
         let invalidateBlock = try sourceBlock(
             in: tunnel,
-            startingAt: "private func invalidateSnapshotReloadGeneration(reason: String)",
-            endingBefore: "private func loadSnapshotInBackground"
+            startingAt: "func invalidateSnapshotReloadGeneration(reason: String)",
+            endingBefore: "func loadSnapshotInBackground"
         )
         let watermarkBlock = try sourceBlock(
             in: tunnel,
-            startingAt: "private func advanceFocusConfigurationWatermark(",
+            startingAt: "func advanceFocusConfigurationWatermark(",
             endingBefore: "/// One poll tick"
         )
         let watermarkAsyncBlock = try sourceBlock(
@@ -713,10 +529,10 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// dismiss the cover + return early (no foreground-switch stamp, no "Success" toast), letting the
     /// re-dispatched reconcile adopt the genuinely-newer on-disk selection.
     func testForegroundSwitchTreatsAbortedSupersededFlipAsDeferredNotSuccess() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // persistSharedState must SURFACE the publish outcome (not discard it) so the caller can react.
-        XCTAssertTrue(app.contains("@discardableResult\n    private func persistSharedState("),
+        XCTAssertTrue(app.contains("@discardableResult\n    func persistSharedState("),
                       "persistSharedState must be @discardableResult so the 13 non-switch callers stay byte-identical while switchToFilter can read the outcome.")
         XCTAssertTrue(app.contains(") async throws -> FilterSnapshotPreparationService.PublishOutcome {"),
                       "persistSharedState must return the PublishOutcome of the artifact flip.")
@@ -728,7 +544,8 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
             endingBefore: "private func prepareSwitchPublication("
         )
-        XCTAssertTrue(block.contains("let publishOutcome = try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)"),
+        XCTAssertTrue(block.contains("let publishOutcome = try await persistSharedState(")
+                        && block.contains("preparedSnapshot: publication.preparedSnapshot"),
                       "switchToFilter must capture persistSharedState's outcome.")
         XCTAssertTrue(block.contains("if case .abortedSuperseded = publishOutcome {"),
                       "switchToFilter must branch on an aborted (cross-process-superseded) flip.")
@@ -756,11 +573,11 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
     /// that every cover-driving UI mutation in the switch is gated on the stampsForegroundSwitch-derived
     /// flag, so a genuine user switch still shows the cover while the reconcile replay does not.
     func testProgrammaticFocusApplySuppressesPreparationCover() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let block = try sourceBlock(
             in: app,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
-            endingBefore: "private enum SwitchPublication"
+            endingBefore: "enum SwitchPublication"
         )
 
         // The cover-suppression flag is DERIVED from stampsForegroundSwitch (only the reconcile passes
@@ -803,8 +620,8 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "switchToFilter must build the presenter with presentsCover: presentsPreparationCover so a silent apply skips the holds.")
         let presenterBlock = try sourceBlock(
             in: app,
-            startingAt: "private final class FilterPreparationProgressPresenter {",
-            endingBefore: "private func sleep("
+            startingAt: "final class FilterPreparationProgressPresenter {",
+            endingBefore: "func sleep("
         )
         XCTAssertTrue(presenterBlock.contains("guard presentsCover else { return }"),
                       "present() must skip its phase-hold sleep when no cover is presented.")
@@ -814,7 +631,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         let prepareBlock = try sourceBlock(
             in: app,
             startingAt: "private func prepareSwitchPublication(",
-            endingBefore: "private func warmReusableSnapshotForSwitch("
+            endingBefore: "func warmReusableSnapshotForSwitch("
         )
         XCTAssertTrue(prepareBlock.contains("presentsPreparationCover: Bool"),
                       "prepareSwitchPublication must accept the presentsPreparationCover flag.")
@@ -825,7 +642,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         let reconcileBlock = try sourceBlock(
             in: app,
             startingAt: "func reconcilePendingFilterSwitch() async {",
-            endingBefore: "private func persistSharedState("
+            endingBefore: "func persistSharedState("
         )
         XCTAssertTrue(reconcileBlock.contains("await switchToFilter(id: request.targetFilterID, stampsForegroundSwitch: false)"),
                       "The reconcile replay must drive the silent (stampsForegroundSwitch:false) apply.")

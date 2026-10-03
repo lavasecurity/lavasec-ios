@@ -1,0 +1,628 @@
+{
+  "targets": [
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+    "aarch64-apple-darwin"
+  ],
+  "generator": "scripts/generate-wireguard-core-notices.mjs",
+  "crates": [
+    {
+      "name": "addr2line",
+      "version": "0.25.1",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "adler2",
+      "version": "2.0.1",
+      "license": "0BSD OR MIT OR Apache-2.0"
+    },
+    {
+      "name": "aead",
+      "version": "0.5.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "alloc",
+      "version": "0.0.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "base64",
+      "version": "0.22.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "bitflags",
+      "version": "2.13.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "blake2",
+      "version": "0.10.6",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "boringtun",
+      "version": "0.7.1",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "chacha20",
+      "version": "0.9.1",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "chacha20poly1305",
+      "version": "0.10.1",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "cipher",
+      "version": "0.4.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "compiler_builtins",
+      "version": "0.1.160",
+      "license": "MIT AND Apache-2.0 WITH LLVM-exception AND (MIT OR Apache-2.0)"
+    },
+    {
+      "name": "core",
+      "version": "0.0.0",
+      "license": "(Apache-2.0 OR MIT) AND Unicode-3.0"
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "curve25519-dalek",
+      "version": "4.1.3",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7",
+      "license": "MIT"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.2.17",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "gimli",
+      "version": "0.32.3",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.16.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "hex",
+      "version": "0.4.3",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "hmac",
+      "version": "0.12.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "inout",
+      "version": "0.1.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "ip_network",
+      "version": "0.4.1",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "ip_network_table",
+      "version": "0.2.0",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "ip_network_table-deps-treebitmap",
+      "version": "0.5.0",
+      "license": "MIT"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.178",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.189",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "lock_api",
+      "version": "0.4.14",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "memchr",
+      "version": "2.7.6",
+      "license": "Unlicense OR MIT"
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.8.9",
+      "license": "MIT OR Zlib OR Apache-2.0"
+    },
+    {
+      "name": "nix",
+      "version": "0.31.3",
+      "license": "MIT"
+    },
+    {
+      "name": "object",
+      "version": "0.37.3",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "opaque-debug",
+      "version": "0.3.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "panic_abort",
+      "version": "0.0.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "parking_lot",
+      "version": "0.12.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "parking_lot_core",
+      "version": "0.9.12",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "poly1305",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "portable-atomic",
+      "version": "1.14.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.6.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "ring",
+      "version": "0.17.14",
+      "license": "Apache-2.0 AND ISC"
+    },
+    {
+      "name": "rustc_demangle",
+      "version": "0.1.26",
+      "license": "MIT/Apache-2.0"
+    },
+    {
+      "name": "rustc_std_workspace_alloc",
+      "version": "1.99.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "rustc_std_workspace_core",
+      "version": "1.99.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "scopeguard",
+      "version": "1.2.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "smallvec",
+      "version": "1.15.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "std",
+      "version": "0.0.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "std_detect",
+      "version": "0.1.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "subtle",
+      "version": "2.6.1",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44",
+      "license": "MIT"
+    },
+    {
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "license": "MIT"
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "license": "MIT"
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "license": "(MIT OR Apache-2.0) AND Unicode-3.0"
+    },
+    {
+      "name": "universal-hash",
+      "version": "0.5.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "untrusted",
+      "version": "0.9.0",
+      "license": "ISC"
+    },
+    {
+      "name": "unwind",
+      "version": "0.0.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "x25519-dalek",
+      "version": "2.0.1",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "zeroize",
+      "version": "1.9.0",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "name": "zeroize_derive",
+      "version": "1.5.0",
+      "license": "Apache-2.0 OR MIT"
+    }
+  ],
+  "bodies": [
+    {
+      "id": "L01",
+      "sha256": "59013a5c8d3a19c26a457579105915a5d51bb0c09d579f8cdedf12e4203c3018"
+    },
+    {
+      "id": "L02",
+      "sha256": "b38f573d5bc805e32f92fa8772ad44f1330a7de85022d133b2cd3d17424f8c22"
+    },
+    {
+      "id": "L03",
+      "sha256": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb"
+    },
+    {
+      "id": "L04",
+      "sha256": "6a8da4c78c729176907b068222cc6e8e612b09c7345628c98cbceb22c0f06979"
+    },
+    {
+      "id": "L05",
+      "sha256": "14435fbcd271e2783f721b57b7bf4f6502c1379249a4300e0e5bb774686c2d90"
+    },
+    {
+      "id": "L06",
+      "sha256": "fa3da53430eaad051e07cf8176360f1faedd327c9fee168ec1aa332a28d179f0"
+    },
+    {
+      "id": "L07",
+      "sha256": "5ff5253f2cb9347c4b3b1c8ecc5057c4b534ae21fab479f8ac77409bb6d6efa4"
+    },
+    {
+      "id": "L08",
+      "sha256": "50879b2d56af0a49a3c5837ede4f58f8b8adb235a0522f71dab06044a771d441"
+    },
+    {
+      "id": "L09",
+      "sha256": "84e1bbfebd74e4196cfa0ea5cf58e677aa24b47c6661adbb19fb07920d089d1d"
+    },
+    {
+      "id": "L10",
+      "sha256": "282b5e566e851a7cf2ae4b0f226593c9a1e4bd69bec314c451a2624bb752cfac"
+    },
+    {
+      "id": "L11",
+      "sha256": "e90ad0f8f6fea705ccd7ff56392c6379bb51b8602dd197a567140acabda179ce"
+    },
+    {
+      "id": "L12",
+      "sha256": "92f01fc7ca904e16f13e27d4897e507b5446e42516bb7efacc4c5ed189008c31"
+    },
+    {
+      "id": "L13",
+      "sha256": "692b1604961dd580cfcde8cc33d2c587f5f6349b00c449662194fb1586e850c5"
+    },
+    {
+      "id": "L14",
+      "sha256": "82771e440a2341f400e5fd3691e876745a9d0daee5371371d93bdb668ed2e706"
+    },
+    {
+      "id": "L15",
+      "sha256": "9c5127ab88e8f55b26f7846eefbe1f582b9c2c596c65bfbb9a622b0c6f678d13"
+    },
+    {
+      "id": "L16",
+      "sha256": "ad4fcfaf8d5b12b97409c137a03d4a4e4b21024c65c54f976cc3b609c1bd5b0f"
+    },
+    {
+      "id": "L17",
+      "sha256": "2f7ce0f0ada1987bb72bd83c6ea059e4dc4cac627a83ebcf73d5d17af1cf0af5"
+    },
+    {
+      "id": "L18",
+      "sha256": "478d530cbce79fc122b1a7c067ad706b000ef79ae914a4d060195f0f23b4a50d"
+    },
+    {
+      "id": "L19",
+      "sha256": "c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851"
+    },
+    {
+      "id": "L20",
+      "sha256": "9dde4a6ad496606322ae0b61b70dc7123fa231be543caa0896d567e34d20fbf8"
+    },
+    {
+      "id": "L21",
+      "sha256": "71366a4092ad07b6fc29c4aa94ceeac8b892f7a24fcdedf8df7cba8112cdc15b"
+    },
+    {
+      "id": "L22",
+      "sha256": "7e5857a001727f60eba96fdfe035c00a1537631087b327eaf4d0821f52545a6a"
+    },
+    {
+      "id": "L23",
+      "sha256": "bda226275b828f97fc981178c2fbf0ac448bd51011aeba71a13f0b9cff162c90"
+    },
+    {
+      "id": "L24",
+      "sha256": "7faf22fb56b7c71cec4d840514d195999c34bff9374ef79c5f701de2c0fe5dea"
+    },
+    {
+      "id": "L25",
+      "sha256": "95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc"
+    },
+    {
+      "id": "L26",
+      "sha256": "c96302294382bf166f3963bdbce0760aa2b9f0abaa2a7bdb296de7a1c7b51867"
+    },
+    {
+      "id": "L27",
+      "sha256": "8d1f81ea4e87111d557b185d58d996e7bcb974c19c364197fffd4e814fd9b6fa"
+    },
+    {
+      "id": "L28",
+      "sha256": "b9b039b5058cfe9680025ca12f8591df832666baef9f469ea8ba24e73a7fee60"
+    },
+    {
+      "id": "L29",
+      "sha256": "30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652"
+    },
+    {
+      "id": "L30",
+      "sha256": "7873dbb4b8660923e8fdfb93c71ee31ed8bb44bffb5851e6d6a5e62adf65adbd"
+    },
+    {
+      "id": "L31",
+      "sha256": "0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9"
+    },
+    {
+      "id": "L32",
+      "sha256": "e827371937a118a491f2ea16188de92b23f94d7013c271c41d5e2761ba5a0f92"
+    },
+    {
+      "id": "L33",
+      "sha256": "60fd4b5e1281706d68b5163fea25be21e0722ea6eaa5b02e1140ec7104c28026"
+    },
+    {
+      "id": "L34",
+      "sha256": "cc367a7134c2b07d995a2f8dea591094a1d100e49c68513f729fdf3eaf580a21"
+    },
+    {
+      "id": "L35",
+      "sha256": "edb9c6dbff4676b90e729ffdb6c9239076a2e01b3bb8aadf080bdc7a682296da"
+    },
+    {
+      "id": "L36",
+      "sha256": "f3ba8fc296a970c976b1bdcaecc5939bf9757dbaecd3b4421e3e7ed29392e9b8"
+    },
+    {
+      "id": "L37",
+      "sha256": "07414b6c33f30acfd5e0dda512e77ddbeb9f8a37290568fd056a01a0b50244c1"
+    },
+    {
+      "id": "L38",
+      "sha256": "1a6aa2616e74056910aa02ac3a764d45c1b5309eac53768153ad2119637c95cb"
+    },
+    {
+      "id": "L39",
+      "sha256": "7f194ae45c2525a57443f7edabd392e8218109ee81a4bce70d385104c87c1a71"
+    },
+    {
+      "id": "L40",
+      "sha256": "24fa06d8eae3c3ba93e1f863f0640ef57c8996f4bece3e14c3d29c5efb7c0089"
+    },
+    {
+      "id": "L41",
+      "sha256": "c1e08ee9a7288bf649d6a78f6079006333df4212f5fcda85be1a0a451f71852d"
+    },
+    {
+      "id": "L42",
+      "sha256": "db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a"
+    },
+    {
+      "id": "L43",
+      "sha256": "516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406"
+    },
+    {
+      "id": "L44",
+      "sha256": "87ebb37988efc3285a41635c6a9fd38147e1e581b5f0556a284d5ab8fa5cdd4c"
+    },
+    {
+      "id": "L45",
+      "sha256": "361d7912957842f2ce61c774b14afba41ae91df84882982e6f7e749e01c07c91"
+    },
+    {
+      "id": "L46",
+      "sha256": "7cfd98aeed13ac52b89eb0b91cb2900f3723686a85786c317d706f0d94ae657f"
+    },
+    {
+      "id": "L47",
+      "sha256": "a1fff344297822d3e229f6943007694a29e6bede5b83349cb7c39117f4302e3c"
+    },
+    {
+      "id": "L48",
+      "sha256": "f7183775eea50f974ee99591ef2111e7ed5022b68c2ac51bc955268f9de2bfd8"
+    },
+    {
+      "id": "L49",
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+    },
+    {
+      "id": "L50",
+      "sha256": "836ed921bbad486c21fe437f1f565aef73cf20f242f7344eae04b01ed53a2d57"
+    },
+    {
+      "id": "L51",
+      "sha256": "1038b7737a0a04bd9268bbb8d17ee4e13c9bb3cf36f39da46c3a1818c798aa20"
+    },
+    {
+      "id": "L52",
+      "sha256": "288ceccbec5dbd280bf2c3e04de026101f8834dfd9ac5323c698c14ff4ffeccb"
+    },
+    {
+      "id": "L53",
+      "sha256": "a21c914647d33e48cb4d213dfb0749dbb45491514da9d3a8ffc4763cf456217d"
+    },
+    {
+      "id": "L54",
+      "sha256": "3c160092b8035532532ee61cb3f8a4b8d4f3d31438db0992c0ec845bc2dd820f"
+    },
+    {
+      "id": "L55",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "id": "L56",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "id": "L57",
+      "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b"
+    },
+    {
+      "id": "L58",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+    },
+    {
+      "id": "L59",
+      "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+    },
+    {
+      "id": "L60",
+      "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+    },
+    {
+      "id": "L61",
+      "sha256": "033a9383ff21d1e4811d98dd2e0081b0ba0d9c9a31d6c7ba9e63e3488479bf29"
+    },
+    {
+      "id": "L62",
+      "sha256": "ae9791f02f2bbe0ce17b434753af97be6e5284b6f8e9f22db3c1f0f11b2e015a"
+    },
+    {
+      "id": "L63",
+      "sha256": "98ed3581f1f1338414ec61cb65850f41e456b450ce210620d05933d7d0f63bc6"
+    },
+    {
+      "id": "L64",
+      "sha256": "154c1af2b38e25e5c18613dfe352eed29b0863cb39e494007822cdeb39150ac5"
+    },
+    {
+      "id": "L65",
+      "sha256": "ca2abdf695884c77ea4b4a5b64ca7b732d9d9dbade4eebc1c2e76c53e9e3bc83"
+    },
+    {
+      "id": "L66",
+      "sha256": "7427abc630365f6335b3ced8b620b6c8a87b3793edea701d15cdde01ec7a6cde"
+    },
+    {
+      "id": "L67",
+      "sha256": "ac9859ce4e9a80a4846ee0b453981427f4fc2ba9ac7d0e568de61ab80a53d86d"
+    },
+    {
+      "id": "L68",
+      "sha256": "eac3911cc3d41ffb7de705edeec755d3f83189b61839389cc9079acb54d8c5af"
+    },
+    {
+      "id": "L69",
+      "sha256": "3526044d67fd6cfbecc3b48b02cef71b8cc7fb80343b71b92cc1ba152f7bdca9"
+    }
+  ],
+  "sections": {
+    "packages": "82fc6c5d97e8e5f60f9b1193e915e1da9c482791da8f2daf217e9638684a1ec5",
+    "licenseTexts": "8989c8365729d02452c445c7415b5f9737214b0e68a19f11def0ae7fb1e1e929"
+  },
+  "unresolved": []
+}

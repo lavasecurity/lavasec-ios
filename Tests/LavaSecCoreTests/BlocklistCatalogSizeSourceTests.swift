@@ -9,28 +9,6 @@ final class BlocklistCatalogSizeSourceTests: XCTestCase {
         XCTAssertEqual(BlocklistSourceSizeBucket.large.abbreviation, "L")
     }
 
-    func testCatalogRowsUsePlainDomainCountWithLeadingSizeBucketPill() throws {
-        let filtersViewSource = try readSource(.blocklistPickerView)
-        let catalogListBlock = try sourceBlock(
-            in: filtersViewSource,
-            startingAt: "BlocklistPickerList(",
-            endingBefore: ".blocklistJumpAnchor(id: section.id, pinnedHeaderHeight: pinnedHeaderHeight)"
-        )
-        let pickerTextStackBlock = try sourceBlock(
-            in: filtersViewSource,
-            startingAt: "private struct BlocklistPickerTextStack: View",
-            endingBefore: "private struct BlocklistPickerStatusPill"
-        )
-        let prefixRange = try XCTUnwrap(pickerTextStackBlock.range(of: "BlocklistPickerStatusPill(status: metadataPrefixStatus)"))
-        let metadataRange = try XCTUnwrap(pickerTextStackBlock.range(of: "Text(metadata.lavaLocalized)"))
-
-        XCTAssertTrue(catalogListBlock.contains("items: section.items"))
-        XCTAssertTrue(catalogListBlock.contains("catalogMetadata: viewModel.blocklistRuleCountText(for:)"))
-        XCTAssertTrue(catalogListBlock.contains("catalogMetadataPrefixStatus: blocklistSizeStatus(for:)"))
-        XCTAssertFalse(catalogListBlock.contains("status: blocklistSizeStatus(for:)"))
-        XCTAssertLessThan(prefixRange.lowerBound, metadataRange.lowerBound)
-    }
-
     func testCondensedListRendersMetadataPrefixStatusBeforePlainMetadata() throws {
         let listSource = try readSource(.lavaCondensedList)
         let metadataRowBlock = try sourceBlock(

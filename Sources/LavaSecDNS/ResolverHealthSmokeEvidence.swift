@@ -38,6 +38,13 @@ enum ResolverSmokeEvidenceReducer {
                 failure: failure,
                 projectingOnto: snapshot
             )
+
+        case .declinedByPolicy:
+            // A neutral completion: no failure streaks, no recovery ladder. The probe time is
+            // still recorded above, because a probe DID run and the cadence matters; what did
+            // not happen is a resolver being contacted, so there is nothing to score. Counting
+            // it as failure made every chained-mode probe report a synthetic outage.
+            return ResolverHealthTransitionSupport.transition(state: next, effects: [])
         }
     }
 

@@ -3,15 +3,36 @@ import UIKit
 import LavaSecKit
 import LavaSecPresentation
 
+/// Shared by the native Plus page and its React presentation surface.
+struct GuardianThankYouAnimation: View {
+    let size: CGFloat
+    let shieldStyle: GuardianShieldStyle
+    @State private var state: GuardianMascotState = .awake
+    var body: some View {
+        SoftShieldGuardian(size: size, state: state, shieldStyle: shieldStyle)
+            .task {
+                state = .awake
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                guard !Task.isCancelled else { return }
+                state = .grateful
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                guard !Task.isCancelled else { return }
+                state = .awake
+            }
+    }
+}
+
 struct SoftShieldGuardian: View {
     let size: CGFloat
     let state: GuardianMascotState
     let animates: Bool
     let blinkTrigger: Int
+    let finishTrigger: Int
     let minimumFeatureScale: CGFloat
     let maskExpressionWhenPrivacyRedacted: Bool
     let keepsShieldVisibleWhenRedacted: Bool
     let shieldStyle: GuardianShieldStyle
+    let keepsColorWhenSleeping: Bool
 
     @State private var activePlan: GuardianMascotAnimationPlan
     @State private var transitionElapsed: Double
@@ -21,19 +42,23 @@ struct SoftShieldGuardian: View {
         state: GuardianMascotState = .awake,
         animates: Bool = true,
         blinkTrigger: Int = 0,
+        finishTrigger: Int = 0,
         minimumFeatureScale: CGFloat = 1,
         maskExpressionWhenPrivacyRedacted: Bool = false,
         keepsShieldVisibleWhenRedacted: Bool = false,
-        shieldStyle: GuardianShieldStyle = .original
+        shieldStyle: GuardianShieldStyle = .original,
+        keepsColorWhenSleeping: Bool = false
     ) {
         self.size = size
         self.state = state
         self.animates = animates
         self.blinkTrigger = blinkTrigger
+        self.finishTrigger = finishTrigger
         self.minimumFeatureScale = minimumFeatureScale
         self.maskExpressionWhenPrivacyRedacted = maskExpressionWhenPrivacyRedacted
         self.keepsShieldVisibleWhenRedacted = keepsShieldVisibleWhenRedacted
         self.shieldStyle = shieldStyle
+        self.keepsColorWhenSleeping = keepsColorWhenSleeping
 
         let initialStartState: GuardianMascotState = state == .waking ? .sleeping : state
         let initialPlan = GuardianMascotAnimationPlan.animation(from: initialStartState, to: state)
@@ -49,7 +74,8 @@ struct SoftShieldGuardian: View {
             minimumFeatureScale: minimumFeatureScale,
             maskExpressionWhenPrivacyRedacted: maskExpressionWhenPrivacyRedacted,
             keepsShieldVisibleWhenRedacted: keepsShieldVisibleWhenRedacted,
-            shieldStyle: shieldStyle
+            shieldStyle: shieldStyle,
+            keepsColorWhenSleeping: keepsColorWhenSleeping
         )
         .frame(width: size, height: size)
         .accessibilityLabel(LavaCoreStrings.localized("a11y.shieldGuardian"))
@@ -58,16 +84,35 @@ struct SoftShieldGuardian: View {
                 startTransition(from: .sleeping, to: .waking, animated: animates)
             }
         }
-        .onChange(of: state) { _, newState in
-            guard newState != activePlan.endState else {
-                return
+        .onChange(of: expressionInput) { old, new in
+            if new.finish != old.finish {
+                // Settle the previous reaction first. A new target (for example
+                // Open Guard's sleep) still gets its own facial transition.
+                let settled = old.state == .grateful ? GuardianMascotState.awake : old.state
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    runPlan(GuardianMascotAnimationPlan.animation(from: settled, to: settled), animated: false)
+                }
+                if new.state != settled {
+                    startTransition(from: settled, to: new.state, animated: animates)
+                }
+            } else if new.state != activePlan.endState {
+                startTransition(from: activePlan.endState, to: new.state, animated: animates)
             }
+            if new.blink != old.blink {
+                runPlan(GuardianMascotAnimationPlan.blink(on: new.state), animated: animates)
+            }
+        }
+    }
 
-            startTransition(from: activePlan.endState, to: newState, animated: animates)
-        }
-        .onChange(of: blinkTrigger) { _, _ in
-            runPlan(GuardianMascotAnimationPlan.blink(on: activePlan.endState), animated: animates)
-        }
+    private struct ExpressionInput: Equatable {
+        let state: GuardianMascotState
+        let blink: Int
+        let finish: Int
+    }
+    private var expressionInput: ExpressionInput {
+        ExpressionInput(state: state, blink: blinkTrigger, finish: finishTrigger)
     }
 
     private func startTransition(
@@ -112,6 +157,8 @@ extension GuardianShieldStyle {
             LavaGuardianStyle.emeraldGlyph
         case .kiwiCreme:
             LavaGuardianStyle.kiwiCremeGlyph
+        case .aquamarine:
+            LavaGuardianStyle.aquamarineGlyph
         }
     }
 }
@@ -124,6 +171,7 @@ private struct SoftShieldGuardianContent: View, Animatable {
     let maskExpressionWhenPrivacyRedacted: Bool
     let keepsShieldVisibleWhenRedacted: Bool
     let shieldStyle: GuardianShieldStyle
+    let keepsColorWhenSleeping: Bool
 
     @Environment(\.redactionReasons) private var redactionReasons
 
@@ -171,7 +219,7 @@ private struct SoftShieldGuardianContent: View, Animatable {
         switch shieldStyle {
         case .original:
             originalShieldBody(frame)
-        case .fireOpal, .purpleObsidian, .obsidian, .cherryQuartz, .emerald, .kiwiCreme:
+        case .fireOpal, .purpleObsidian, .obsidian, .cherryQuartz, .emerald, .kiwiCreme, .aquamarine:
             obsidianShieldBody(frame)
         }
     }
@@ -180,11 +228,11 @@ private struct SoftShieldGuardianContent: View, Animatable {
         ZStack {
             LavaGuardianShieldShape()
                 .fill(LavaGuardianStyle.guardianSleepGray)
-                .opacity(1 - frame.shieldWakeAmount)
+                .opacity(1 - (keepsColorWhenSleeping ? 1 : frame.shieldWakeAmount))
 
             LavaGuardianShieldShape()
                 .fill(guardianGradient)
-                .opacity(frame.shieldWakeAmount)
+                .opacity(keepsColorWhenSleeping ? 1 : frame.shieldWakeAmount)
                 .shadow(
                     color: LavaGuardianStyle.lavaOrange.opacity(0.18 * frame.glowAmount),
                     radius: 12,
@@ -196,7 +244,7 @@ private struct SoftShieldGuardianContent: View, Animatable {
     }
 
     private func obsidianShieldBody(_ frame: GuardianMascotFrame) -> some View {
-        ObsidianShieldBody(wakeAmount: frame.shieldWakeAmount, style: shieldStyle)
+        ObsidianShieldBody(wakeAmount: keepsColorWhenSleeping ? 1 : frame.shieldWakeAmount, style: shieldStyle)
             .shadow(
                 color: obsidianGlowColor.opacity(0.18 * frame.glowAmount),
                 radius: 12,
@@ -218,6 +266,8 @@ private struct SoftShieldGuardianContent: View, Animatable {
             Color(red: 0.16, green: 0.47, blue: 0.34)
         case .kiwiCreme:
             LavaGuardianStyle.kiwiCremeSupportBrown
+        case .aquamarine:
+            Color(red: 138.0 / 255, green: 221.0 / 255, blue: 229.0 / 255)
         case .original, .fireOpal:
             LavaGuardianStyle.lavaOrange
         }
@@ -447,6 +497,7 @@ private enum ObsidianShieldColorway {
     case cherryQuartz
     case emerald
     case kiwiCreme
+    case aquamarine
 
     init(style: GuardianShieldStyle) {
         switch style {
@@ -460,6 +511,8 @@ private enum ObsidianShieldColorway {
             self = .emerald
         case .kiwiCreme:
             self = .kiwiCreme
+        case .aquamarine:
+            self = .aquamarine
         case .original, .fireOpal:
             self = .ember
         }
@@ -479,6 +532,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.45, green: 0.86, blue: 0.63)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 1.00, green: 0.98, blue: 0.91)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 138.0 / 255, green: 221.0 / 255, blue: 229.0 / 255)
         }
     }
 
@@ -496,6 +551,9 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.24, green: 0.61, blue: 0.41)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.91, green: 0.84, blue: 0.72)
+        case .aquamarine:
+            // Keep the center saturated so the shared cream face reads against the pale cyan crest.
+            LavaGuardianColorStop(red: 75.0 / 255, green: 168.0 / 255, blue: 187.0 / 255)
         }
     }
 
@@ -513,6 +571,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.16, green: 0.47, blue: 0.34)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.68, green: 0.60, blue: 0.51)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 43.0 / 255, green: 129.0 / 255, blue: 150.0 / 255)
         }
     }
 
@@ -530,6 +590,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.55, green: 0.96, blue: 0.72)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.99, green: 0.94, blue: 0.84)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 211.0 / 255, green: 246.0 / 255, blue: 247.0 / 255)
         }
     }
 
@@ -547,6 +609,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.20, green: 0.56, blue: 0.38)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.66, green: 0.58, blue: 0.49)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 138.0 / 255, green: 221.0 / 255, blue: 229.0 / 255)
         }
     }
 
@@ -564,6 +628,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.04, green: 0.18, blue: 0.11)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.25, green: 0.22, blue: 0.19)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 43.0 / 255, green: 129.0 / 255, blue: 150.0 / 255)
         }
     }
 
@@ -581,6 +647,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.02, green: 0.06, blue: 0.04)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.08, green: 0.07, blue: 0.06)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 0.035, green: 0.20, blue: 0.25)
         }
     }
 
@@ -598,6 +666,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.03, green: 0.16, blue: 0.09, opacity: 0.82)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.56, green: 0.50, blue: 0.43, opacity: 0.82)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 0.09, green: 0.37, blue: 0.43, opacity: 0.82)
         }
     }
 
@@ -615,6 +685,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.02, green: 0.06, blue: 0.04, opacity: 0.62)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.22, green: 0.19, blue: 0.16, opacity: 0.62)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 0.035, green: 0.20, blue: 0.25, opacity: 0.62)
         }
     }
 
@@ -632,6 +704,8 @@ private enum ObsidianShieldColorway {
             LavaGuardianColorStop(red: 0.24, green: 0.66, blue: 0.43, opacity: 0.72)
         case .kiwiCreme:
             LavaGuardianColorStop(red: 0.82, green: 0.75, blue: 0.64, opacity: 0.72)
+        case .aquamarine:
+            LavaGuardianColorStop(red: 0.30, green: 0.68, blue: 0.74, opacity: 0.72)
         }
     }
 }
@@ -823,6 +897,10 @@ private enum LavaGuardianStyle {
     static let emeraldGlyph = adaptiveColor(
         light: (0.16, 0.47, 0.34),
         dark: (0.45, 0.86, 0.63)
+    )
+    static let aquamarineGlyph = adaptiveColor(
+        light: (23.0 / 255, 108.0 / 255, 128.0 / 255),
+        dark: (138.0 / 255, 221.0 / 255, 229.0 / 255)
     )
     static let kiwiCremeCanonicalColorRGB: RGB = (0.91, 0.84, 0.72)
     static let kiwiCremeSupportBrownRGB: RGB = (0.46, 0.39, 0.32)

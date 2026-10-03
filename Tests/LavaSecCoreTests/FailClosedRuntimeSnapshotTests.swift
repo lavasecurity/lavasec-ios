@@ -56,4 +56,25 @@ final class FailClosedRuntimeSnapshotTests: XCTestCase {
         // fail-closed; a preset swap here would move the user's DNS traffic silently.
         XCTAssertEqual(snapshot.resolver, .quad9Secure)
     }
+
+    /// THE ZERO COUNTS CANNOT EXPRESS THE POSTURE, which is why `blocksEveryLookup` exists.
+    ///
+    /// A fail-closed snapshot reports 0/0/0 — identical to a permissive pass-through built for an
+    /// empty configuration. Anything deciding whether the user could reach anything must ask the
+    /// property, not the counts: recovery from a block-all resident is always a loosening however
+    /// the numbers move (`FilterLooseningReapplyPolicy`, PR #645).
+    func testDeclaresItBlocksEveryLookupDespiteZeroRuleCounts() {
+        let failClosed = FailClosedRuntimeSnapshot(resolver: .quad9UnfilteredDoH)
+
+        XCTAssertTrue(failClosed.blocksEveryLookup)
+        XCTAssertEqual(failClosed.blockRuleCount, 0)
+        XCTAssertEqual(failClosed.allowRuleCount, 0)
+        XCTAssertEqual(failClosed.guardrailRuleCount, 0, "the counts alone cannot tell this apart "
+            + "from a snapshot that blocks nothing")
+    }
+
+    /// ...and a real rule snapshot does not, so the property is not simply "no rules".
+    func testARealSnapshotDoesNotClaimToBlockEveryLookup() {
+        XCTAssertFalse(FilterSnapshot(blockRules: DomainRuleSet()).blocksEveryLookup)
+    }
 }

@@ -10,11 +10,12 @@ import Foundation
 /// `plans/2026-07-14-reboot-first-unlock-data-reset-incident-plan.md`).
 ///
 /// The deliberate trade (INV-PERSIST-2, registry entry in `docs/invariants.md`): the
-/// CONTROL-PLANE files — the config/library pair, tunnel health, and the compiled filter
-/// artifacts — hold filter selections and custom rules, never browsing history, so they carry
-/// `NSFileProtectionNone` and stay readable pre-unlock. The PRIVACY stores // mobsf-ignore: ios_file_no_special
+/// CONTROL-PLANE files — the config/library pair, tunnel health, protection lifecycle state/locks,
+/// and the compiled filter artifacts — hold filter selections and custom rules, never browsing
+/// history, so they carry `NSFileProtectionNone` and stay readable pre-unlock. The PRIVACY stores // mobsf-ignore: ios_file_no_special
 /// (`dns-events.sqlite`, `diagnostics.json`, `network-activity-log.json`,
-/// `incident-ledger.json`, `vpn-debug-log.jsonl`, the `catalog-cache` downloads) deliberately
+/// `incident-ledger.json`, `vpn-debug-log.jsonl`, `chained-upstream.json`, the `catalog-cache`
+/// downloads) deliberately
 /// stay at the iOS default Class C — they record user activity and nothing at boot needs
 /// them. Every control-plane writer funnels its options/attributes through this ONE type so
 /// the class assignment cannot drift per call site.

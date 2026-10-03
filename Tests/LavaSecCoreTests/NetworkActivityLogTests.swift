@@ -466,6 +466,113 @@ final class NetworkActivityLogTests: XCTestCase {
         XCTAssertEqual(entry.lavaStateLine, "Lava: Connected, Cloudflare, Device fallback idle")
     }
 
+    /// The state line names the fallback toggle the USER was actually offered.
+    ///
+    /// Lava has two mutually exclusive fallback toggles and the DNS page swaps between them by
+    /// primary transport. This line used to render `fallbackToDeviceDNS` unconditionally, so a
+    /// Device-DNS user who had switched "Fallback to alternative DNS" ON read "Device fallback
+    /// off" — true about a setting they were never shown, false about the one they had set. It
+    /// cost a real misdiagnosis of the 2026-08-27 train captures, where the line was taken as
+    /// evidence the user had no fallback configured.
+    ///
+    /// The CONFIGURED transport decides, never the last-used one: a chained session's T0
+    /// resolves over plain DNS through the tunnel whatever the user picked, so keying on
+    /// `resolverTransport` would mislabel the line all over again.
+    func testTheStateLineNamesTheFallbackToggleTheUserWasOffered() {
+        func line(
+            configured: DNSResolverTransport,
+            fallbackToDeviceDNS: Bool,
+            usesEncryptedDeviceDNSFallback: Bool,
+            deviceFallbackActive: Bool = false,
+            encryptedFallbackActive: Bool = false
+        ) -> String {
+            Self.entry(
+                event: .protectionConnected,
+                state: LavaStateSnapshot(
+                    protectionStatus: "Connected",
+                    connectivityStatus: "Connected",
+                    networkKind: .cellular,
+                    networkPathIsSatisfied: true,
+                    resolverDisplayName: "Device DNS",
+                    // Deliberately UNLIKE `configured` where it can be: this is the transport the
+                    // last resolution used, and it must not decide the toggle.
+                    resolverTransport: .plainDNS,
+                    fallbackToDeviceDNS: fallbackToDeviceDNS,
+                    deviceDNSFallbackActive: deviceFallbackActive,
+                    usesEncryptedDeviceDNSFallback: usesEncryptedDeviceDNSFallback,
+                    encryptedFallbackActive: encryptedFallbackActive,
+                    configuredResolverTransport: configured
+                )
+            ).lavaStateLine
+        }
+
+        // A Device-DNS primary is offered "Fallback to alternative DNS" — so that is what the
+        // line reports, and `fallbackToDeviceDNS` (the toggle the page did not show) is ignored
+        // in BOTH its states, which is what stops the old rendering passing vacuously.
+        XCTAssertTrue(
+            line(configured: .deviceDNS, fallbackToDeviceDNS: false,
+                 usesEncryptedDeviceDNSFallback: true).hasSuffix("Alt DNS fallback on"),
+            "alt DNS on must read as on even when the device-fallback flag is off")
+        XCTAssertTrue(
+            line(configured: .deviceDNS, fallbackToDeviceDNS: true,
+                 usesEncryptedDeviceDNSFallback: false).hasSuffix("Alt DNS fallback off"),
+            "and off as off even when the device-fallback flag is on")
+
+        // An encrypted primary is offered "Fallback to Device DNS" — unchanged rendering.
+        XCTAssertTrue(
+            line(configured: .dnsOverHTTPS, fallbackToDeviceDNS: true,
+                 usesEncryptedDeviceDNSFallback: true).hasSuffix("Device fallback idle"),
+            "a non-device primary keeps the device-fallback wording, and ignores the alt flag")
+        XCTAssertTrue(
+            line(configured: .dnsOverHTTPS, fallbackToDeviceDNS: false,
+                 usesEncryptedDeviceDNSFallback: true).hasSuffix("Device fallback off"))
+
+        // A LIVE EPISODE OUTRANKS THE TOGGLE — it is where queries ARE going, not a setting.
+        //
+        // And the episode a DEVICE-DNS primary produces is the ENCRYPTED one. The two carry
+        // different severities (`.usingEncryptedFallback` vs `.usingDeviceDNSFallback`) and both
+        // producers derive `deviceDNSFallbackActive` from the latter alone, so a device primary
+        // can never set it. An earlier cut of this test asserted exactly that impossible
+        // combination and so proved nothing about the path a Device-DNS user actually walks
+        // (Codex P2, PR #597).
+        XCTAssertTrue(
+            line(configured: .deviceDNS, fallbackToDeviceDNS: false,
+                 usesEncryptedDeviceDNSFallback: true, encryptedFallbackActive: true)
+                .hasSuffix("Alt DNS fallback active"),
+            "a Device-DNS primary whose alt DNS is carrying must say so, not report a toggle")
+        // The device-fallback episode still outranks everything for a non-device primary.
+        XCTAssertTrue(
+            line(configured: .dnsOverHTTPS, fallbackToDeviceDNS: true,
+                 usesEncryptedDeviceDNSFallback: false, deviceFallbackActive: true)
+                .hasSuffix("Device fallback active"))
+
+        // THE SPLICED ENTRY, which the comment above wrongly called impossible.
+        //
+        // "A device primary can never set `deviceDNSFallbackActive`" is true of any ONE coherent
+        // snapshot and false of the pair this line is built from. `AppViewModel.setResolver`
+        // writes `configuration.resolverPresetID` and appends the `.changeResolver` entry
+        // immediately, while `tunnelHealth` only catches up after the tunnel reload — so a user
+        // switching to Device DNS while a device-DNS episode is live produces exactly this
+        // combination, from a fresh configuration and a stale health read (Codex P2, PR #597,
+        // retro review). Ungated it rendered "Device fallback active" for the configuration the
+        // user had just chosen, instead of naming its alternative-DNS toggle: the wrong-toggle
+        // misdiagnosis this whole method exists to end.
+        //
+        // The transport is the fresher half, so it wins.
+        XCTAssertTrue(
+            line(configured: .deviceDNS, fallbackToDeviceDNS: true,
+                 usesEncryptedDeviceDNSFallback: true, deviceFallbackActive: true)
+                .hasSuffix("Alt DNS fallback on"),
+            "a stale device episode must not speak for a freshly chosen Device-DNS primary")
+        // And the live ENCRYPTED episode still wins over the toggle in that same spliced state,
+        // because it is the episode that genuinely belongs to this primary.
+        XCTAssertTrue(
+            line(configured: .deviceDNS, fallbackToDeviceDNS: true,
+                 usesEncryptedDeviceDNSFallback: true, deviceFallbackActive: true,
+                 encryptedFallbackActive: true)
+                .hasSuffix("Alt DNS fallback active"))
+    }
+
     func testDNSSmokeProbeDisplayLineAnnotatesDoH3OnlyForNegotiatedHTTP3() {
         let h3Entry = Self.entry(event: .dnsSmokeProbeSucceeded(
             resolver: "Cloudflare",

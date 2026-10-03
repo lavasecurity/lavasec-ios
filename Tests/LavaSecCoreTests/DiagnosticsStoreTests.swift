@@ -3,6 +3,34 @@ import XCTest
 @testable import LavaSecKit
 
 final class DiagnosticsStoreTests: XCTestCase {
+    func testAllHistoryKeepsBothOutcomesWhileApplyingSearchAndLimit() {
+        var store = DiagnosticsStore()
+        store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true)
+        store.record(domain: "other.test", decision: .defaultAllow, keepDomainHistory: true)
+        store.record(domain: "www.example.com", decision: .defaultAllow, keepDomainHistory: true)
+        let rows = store.recentEvents(action: nil, searchText: "example.com", limit: 2)
+        XCTAssertEqual(rows.map(\.domain), ["www.example.com", "ads.example.com"])
+        XCTAssertEqual(rows.map { $0.decision.action }, [.allow, .block])
+        XCTAssertEqual(store.recentEvents(action: nil, searchText: "example.com", limit: 1).count, 1)
+        XCTAssertEqual(store.recentEvents(action: .block, searchText: "example.com").map(\.domain), ["ads.example.com"])
+    }
+
+    func testAllTopDomainsRanksOutcomesTogetherAndKeepsDistinctIdentity() {
+        var store = DiagnosticsStore()
+        let now = Date()
+        for _ in 0..<5 { store.record(domain: "same.example", decision: .defaultAllow, keepDomainHistory: true) }
+        for _ in 0..<3 { store.record(domain: "same.example", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true) }
+        for _ in 0..<4 { store.record(domain: "other.test", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: true) }
+        let ranked = store.topDomainOutcomes(action: nil, from: now, to: now, limit: 2)
+        XCTAssertEqual(ranked.map(\.domain), ["same.example", "other.test"])
+        XCTAssertEqual(ranked.map(\.count), [5, 4])
+        let searched = store.topDomainOutcomes(action: nil, from: now, to: now, searchText: "example", limit: 2)
+        XCTAssertEqual(searched.map(\.count), [5, 3])
+        XCTAssertEqual(Set(searched.map(\.id)).count, 2)
+        XCTAssertEqual(searched.map(\.action), [.allow, .block])
+        XCTAssertTrue(store.topDomainOutcomes(action: nil, from: now, to: now, limit: 0).isEmpty)
+    }
+
     func testSummaryDoesNotRequireDomainHistory() {
         var store = DiagnosticsStore()
         store.record(domain: "ads.example.com", decision: FilterDecision(action: .block, reason: .blocklist), keepDomainHistory: false)

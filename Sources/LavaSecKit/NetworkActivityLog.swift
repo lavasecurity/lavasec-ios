@@ -213,6 +213,28 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
     public let fallbackToDeviceDNS: Bool
     /// Whether Device DNS fallback was actively carrying queries.
     public let deviceDNSFallbackActive: Bool
+    /// Whether the ALTERNATIVE-DNS fallback was enabled — the toggle a Device-DNS primary shows.
+    ///
+    /// Lava has two mutually exclusive fallback toggles and the DNS page swaps between them: an
+    /// encrypted primary offers "Fallback to Device DNS" (``fallbackToDeviceDNS``), while a
+    /// Device-DNS primary offers "Fallback to alternative DNS" — this one. Only one is reachable
+    /// at a time, so a state line that always renders ``fallbackToDeviceDNS`` reports a setting
+    /// the user was never shown for exactly the users whose primary is Device DNS.
+    public let usesEncryptedDeviceDNSFallback: Bool
+    /// Whether the ENCRYPTED fallback was actively carrying queries.
+    ///
+    /// Separate from ``deviceDNSFallbackActive`` because the two episodes carry different
+    /// severities — `.usingEncryptedFallback` and `.usingDeviceDNSFallback` — and a Device-DNS
+    /// primary can only ever produce the former. Folding them would have left the one live state
+    /// a Device-DNS user most needs to see rendering as a mere toggle position.
+    public let encryptedFallbackActive: Bool
+    /// The transport of the resolver the user SELECTED, which decides which toggle above is live.
+    ///
+    /// Deliberately distinct from ``resolverTransport``, which is the transport the last
+    /// resolution actually USED. Those differ routinely — a chained session's T0 resolves
+    /// over plain DNS through the tunnel whatever the user picked — and picking the toggle by
+    /// the used transport would mislabel the state line all over again.
+    public let configuredResolverTransport: DNSResolverTransport
 
     private enum CodingKeys: String, CodingKey {
         case protectionStatus
@@ -223,6 +245,9 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         case resolverTransport
         case fallbackToDeviceDNS
         case deviceDNSFallbackActive
+        case usesEncryptedDeviceDNSFallback
+        case encryptedFallbackActive
+        case configuredResolverTransport
     }
 
     /// Creates a snapshot from captured protection and resolver state.
@@ -234,7 +259,12 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         resolverDisplayName: String,
         resolverTransport: DNSResolverTransport,
         fallbackToDeviceDNS: Bool,
-        deviceDNSFallbackActive: Bool
+        deviceDNSFallbackActive: Bool,
+        // Defaulted so the two call sites are the only places that must decide, and so a caller
+        // that forgets produces the PRE-FIX rendering rather than a wrong new one.
+        usesEncryptedDeviceDNSFallback: Bool = false,
+        encryptedFallbackActive: Bool = false,
+        configuredResolverTransport: DNSResolverTransport = .plainDNS
     ) {
         self.protectionStatus = protectionStatus
         self.connectivityStatus = connectivityStatus
@@ -244,6 +274,9 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         self.resolverTransport = resolverTransport
         self.fallbackToDeviceDNS = fallbackToDeviceDNS
         self.deviceDNSFallbackActive = deviceDNSFallbackActive
+        self.usesEncryptedDeviceDNSFallback = usesEncryptedDeviceDNSFallback
+        self.encryptedFallbackActive = encryptedFallbackActive
+        self.configuredResolverTransport = configuredResolverTransport
     }
 
     /// Decodes a snapshot, defaulting legacy fallback flags to `false`.
@@ -257,11 +290,63 @@ public struct LavaStateSnapshot: Codable, Equatable, Sendable {
         resolverTransport = try container.decode(DNSResolverTransport.self, forKey: .resolverTransport)
         fallbackToDeviceDNS = try container.decodeIfPresent(Bool.self, forKey: .fallbackToDeviceDNS) ?? false
         deviceDNSFallbackActive = try container.decodeIfPresent(Bool.self, forKey: .deviceDNSFallbackActive) ?? false
+        usesEncryptedDeviceDNSFallback =
+            try container.decodeIfPresent(Bool.self, forKey: .usesEncryptedDeviceDNSFallback) ?? false
+        encryptedFallbackActive =
+            try container.decodeIfPresent(Bool.self, forKey: .encryptedFallbackActive) ?? false
+        // A legacy entry names no configured transport. `.plainDNS` reproduces the pre-fix
+        // rendering exactly (it is not `.deviceDNS`, so the device-fallback branch is taken),
+        // which is the honest answer for a line written before the distinction existed.
+        configuredResolverTransport =
+            try container.decodeIfPresent(DNSResolverTransport.self, forKey: .configuredResolverTransport)
+            ?? .plainDNS
     }
 
+    /// The fallback state, naming the toggle the USER was actually offered.
+    ///
+    /// An active device-DNS EPISODE outranks both toggles: it is a live fact about where queries
+    /// are going, not a setting. Below that, the primary's transport decides which of the two
+    /// mutually exclusive toggles is the one the DNS page showed.
+    ///
+    /// This used to render `fallbackToDeviceDNS` unconditionally, so a Device-DNS user who had
+    /// turned "Fallback to alternative DNS" ON saw "Device fallback off" — a true statement about
+    /// a setting they were never shown, and a false impression of the one they had set. It cost a
+    /// real misdiagnosis of the 2026-08-27 train captures.
+    /// THE EPISODE IS GATED BY THE CONFIGURED TRANSPORT, because the two fields come from
+    /// different generations of the same state. `AppViewModel.setResolver` writes
+    /// `configuration.resolverPresetID` and appends the `.changeResolver` entry immediately, while
+    /// `tunnelHealth` only catches up after the tunnel reload — so a user switching from an
+    /// encrypted resolver while a device-DNS episode is live produces
+    /// `configuredResolverTransport == .deviceDNS` beside `deviceDNSFallbackActive == true`.
+    ///
+    /// That combination was called unreachable when this branch was written, on the grounds that
+    /// the producers derive `deviceDNSFallbackActive` from `.usingDeviceDNSFallback` while a
+    /// Device-DNS primary's episode is `.usingEncryptedFallback`. True of any ONE coherent
+    /// snapshot, and false of the pair actually written here — the entry is a splice of a fresh
+    /// configuration and a stale health read. Ungated, it rendered "Device fallback active" for
+    /// the newly chosen Device-DNS configuration instead of naming its alternative-DNS toggle,
+    /// which is the same wrong-toggle misdiagnosis this whole method exists to end (Codex P2,
+    /// PR #597, on a retro review of the merged code).
+    ///
+    /// The transport is the FRESHER of the two, so it decides. A device-DNS episode cannot belong
+    /// to a Device-DNS primary in any coherent state, so refusing to render one there loses no
+    /// truthful line.
+    /// pinned: NetworkActivityLogTests.testTheStateLineNamesTheFallbackToggleTheUserWasOffered
     fileprivate var deviceDNSFallbackDisplayText: String {
-        if deviceDNSFallbackActive {
+        if deviceDNSFallbackActive, configuredResolverTransport != .deviceDNS {
             return "Device fallback active"
+        }
+
+        if configuredResolverTransport == .deviceDNS {
+            // A LIVE EPISODE FIRST, same as the device branch above. This is the one the
+            // `deviceDNSFallbackActive` check cannot cover: a Device-DNS primary's fallback is
+            // the ENCRYPTED one, whose episode carries `.usingEncryptedFallback` and never sets
+            // that flag — so without this the state a Device-DNS user most needs to see rendered
+            // as a toggle position (Codex P2, PR #597).
+            if encryptedFallbackActive {
+                return "Alt DNS fallback active"
+            }
+            return usesEncryptedDeviceDNSFallback ? "Alt DNS fallback on" : "Alt DNS fallback off"
         }
 
         return fallbackToDeviceDNS ? "Device fallback idle" : "Device fallback off"

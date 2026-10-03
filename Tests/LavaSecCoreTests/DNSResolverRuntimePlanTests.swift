@@ -4,6 +4,75 @@ import LavaSecDNS
 @testable import LavaSecKit
 
 final class DNSResolverRuntimePlanTests: XCTestCase {
+    func testSoleActiveSavedTierTwoKeepsItsOriginAcrossPlanTransformations() throws {
+        var configuration = AppConfiguration()
+        try configuration.applyDNSResolutionSelections([
+            .init(id: DNSResolverPreset.quad9UnfilteredDoH.id, isEnabled: false),
+            .init(id: DNSResolverPreset.device.id)
+        ], allowsCustom: false)
+        let plan = DNSResolverRuntimePlan.make(
+            configuration: configuration, deviceDNSAddresses: ["192.168.1.1", "192.168.1.2"],
+            networkKind: .wifi, deviceDNSFallbackModeActive: false)
+        XCTAssertEqual(plan.configuredPrimaryTier, .tierTwo)
+        XCTAssertFalse(plan.usesDeviceDNSFallbackMode)
+        XCTAssertEqual(try XCTUnwrap(plan.restrictingPlainAddresses(to: ["192.168.1.1"])).configuredPrimaryTier, .tierTwo)
+        XCTAssertEqual(plan.restrictingDeviceDNSFallbackAddresses(to: []).configuredPrimaryTier, .tierTwo)
+        XCTAssertEqual(plan.recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: true).configuredPrimaryTier, .tierTwo)
+    }
+
+    func testMovingTheOnlyActiveResolverChangesRuntimeAndLatchIdentity() throws {
+        var configuration = AppConfiguration()
+        try configuration.applyDNSResolutionSelections([
+            .init(id: DNSResolverPreset.quad9UnfilteredDoH.id, isEnabled: false),
+            .init(id: DNSResolverPreset.device.id)
+        ], allowsCustom: false)
+        func makePlan(_ configuration: AppConfiguration) -> DNSResolverRuntimePlan {
+            DNSResolverRuntimePlan.make(
+                configuration: configuration, deviceDNSAddresses: ["192.168.1.1"],
+                networkKind: .wifi, deviceDNSFallbackModeActive: false)
+        }
+        let before = makePlan(configuration)
+        let latchedIdentity = configuration.chainedTierOneRungPolicyIdentity
+        try configuration.applyDNSResolutionSelections(Array(configuration.dnsResolutionSelections.reversed()), allowsCustom: false)
+        let after = makePlan(configuration)
+        XCTAssertEqual(before.transport, after.transport)
+        XCTAssertEqual(before.plainAddresses, after.plainAddresses)
+        XCTAssertEqual(before.configuredPrimaryTier, .tierTwo)
+        XCTAssertEqual(after.configuredPrimaryTier, .tierOne)
+        XCTAssertNotEqual(before.cacheIdentifier, after.cacheIdentifier)
+        XCTAssertNotEqual(latchedIdentity, configuration.chainedTierOneRungPolicyIdentity)
+    }
+
+    func testFallbackPromotionPreservesTheConfiguredPrimaryTier() throws {
+        var configuration = AppConfiguration()
+        try configuration.applyDNSResolutionSelections([
+            .init(id: DNSResolverPreset.quad9UnfilteredDoH.id),
+            .init(id: DNSResolverPreset.device.id)
+        ], allowsCustom: false)
+        let plan = DNSResolverRuntimePlan.make(
+            configuration: configuration, deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi, deviceDNSFallbackModeActive: true)
+        XCTAssertEqual(plan.configuredPrimaryTier, .tierOne)
+        XCTAssertTrue(plan.usesDeviceDNSFallbackMode)
+    }
+
+    func testDeviceDNSAlternativeUsesTheSelectedIPTransportAndNoRecursiveFallback() throws {
+        let plan = DNSResolverRuntimePlan.make(
+            resolver: .device, fallbackToDeviceDNS: true,
+            usesEncryptedDeviceDNSFallback: true, deviceDNSAddresses: ["192.168.1.1"],
+            networkKind: .wifi, deviceDNSFallbackModeActive: false,
+            encryptedFallbackResolver: DNSResolverPreset.quad9Unfiltered.resolverVariant(for: .plainDNS)
+        )
+        let alternative = try XCTUnwrap(plan.encryptedFallback?.plan)
+        XCTAssertEqual(plan.transport, .deviceDNS)
+        XCTAssertEqual(alternative.transport, .plainDNS)
+        XCTAssertEqual(alternative.configuredPrimaryTier, .tierTwo)
+        XCTAssertFalse(alternative.plainAddresses.isEmpty)
+        XCTAssertTrue(alternative.dohEndpoints.isEmpty)
+        XCTAssertFalse(alternative.shouldFallbackToDeviceDNS)
+        XCTAssertFalse(alternative.shouldFallbackToEncrypted)
+    }
+
     func testDeviceDNSPrimaryGetsEncryptedFallbackWhenToggleOn() {
         let plan = DNSResolverRuntimePlan.make(
             resolver: .device,
@@ -15,14 +84,14 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
         )
 
         XCTAssertEqual(plan.transport, .deviceDNS)
-        // Inverse fallback: a Device-DNS primary gets the Mullvad DoH safety net.
+        // Inverse fallback: a Device-DNS primary gets the Quad9 DoH safety net.
         XCTAssertTrue(plan.shouldFallbackToEncrypted)
-        XCTAssertEqual(plan.encryptedFallbackEndpoints, [DNSResolverRuntimePlan.mullvadEncryptedFallbackEndpoint])
+        XCTAssertEqual(plan.encryptedFallbackEndpoints, [DNSResolverRuntimePlan.defaultEncryptedFallbackEndpoint])
         // Mutually exclusive with the device fallback (that needs a non-device primary).
         XCTAssertFalse(plan.shouldFallbackToDeviceDNS)
         XCTAssertEqual(
             plan.cacheIdentifier,
-            "device:192.168.1.1|fallback:encrypted:doh:https://dns.mullvad.net/dns-query"
+            "device:192.168.1.1|fallback:encrypted:doh:https://dns10.quad9.net/dns-query|configured-primary:tierTwo"
         )
     }
 
@@ -423,5 +492,200 @@ final class DNSResolverRuntimePlanTests: XCTestCase {
         )
         XCTAssertNotEqual(before.cacheIdentifier, after.cacheIdentifier)
         XCTAssertEqual(before.primaryCacheIdentifier, after.primaryCacheIdentifier)
+    }
+
+    /// The T1 rung's plan keeps ONLY the addresses the panel calls admitted.
+    ///
+    /// `PacketTunnelProvider.resolvePlainDNS` returns on the first address that yields any packet,
+    /// SERVFAIL included. So a fallback preset partially overlapping the upstream's own `DNS =` —
+    /// Cloudflare against `DNS = 1.1.1.1` — would re-ask the resolver that just declined the name,
+    /// stop on its second refusal, and never reach the address that could have answered
+    /// (Codex, PR #590). Re-asking the failed resolver is the exact thing the rung exists to avoid.
+    func testTheRungPlanKeepsOnlyAdmittedPlainAddresses() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .plainDNS,
+            plainAddresses: ["1.1.1.1", "1.0.0.1"],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung",
+            deviceDNSFallbackAddresses: [],
+            shouldFallbackToDeviceDNS: false,
+            usesDeviceDNSFallbackMode: false)
+
+        // `1.1.1.1` is the conf's own resolver here, so only `1.0.0.1` is a second opinion.
+        let narrowed = try XCTUnwrap(plan.restrictingPlainAddresses(to: ["1.0.0.1"]))
+
+        XCTAssertEqual(
+            narrowed.plainAddresses, ["1.0.0.1"],
+            "the resolver that already failed as T0 must not be asked again as T1")
+        XCTAssertEqual(narrowed.transport, .plainDNS, "nothing else about the plan changes")
+        XCTAssertEqual(narrowed.cacheIdentifier, plan.cacheIdentifier)
+    }
+
+    /// THE RUNG'S DEVICE LEG IS GATED LIKE ITS FIRST ONE, over a SEPARATE list.
+    ///
+    /// `deviceDNSFallbackAddresses` is the tunnel's raw capture — `make` puts it there with no
+    /// chained admission — and the leg only became reachable when PR #596 gave the rung the full
+    /// ladder. Until PR #603 it therefore egressed unadmitted addresses on `.physical`: an IPv6
+    /// resolver into the chained `::/0` blackhole, and a resolver equal to the conf's own `DNS =`
+    /// re-asked the name T0 had just declined, ending the leg on its second refusal because
+    /// `resolveDevice` returns on the first address that yields any packet (Codex P2, PR #596).
+    func testTheRungPlanKeepsOnlyAdmittedDeviceFallbackAddresses() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .dnsOverHTTPS,
+            plainAddresses: [],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung",
+            deviceDNSFallbackAddresses: ["192.168.1.1", "fe80::1", "10.0.0.1"],
+            shouldFallbackToDeviceDNS: true,
+            usesDeviceDNSFallbackMode: false)
+
+        // `fe80::1` is unusable on the chained path and `10.0.0.1` is the conf's own resolver, so
+        // only `192.168.1.1` is a second opinion the leg may ask.
+        let narrowed = plan.restrictingDeviceDNSFallbackAddresses(to: ["192.168.1.1"])
+
+        XCTAssertEqual(narrowed.deviceDNSFallbackAddresses, ["192.168.1.1"])
+        XCTAssertTrue(
+            narrowed.shouldFallbackToDeviceDNS,
+            "a leg with something admitted stays enabled")
+        // EVERYTHING ELSE IS UNTOUCHED — this narrows one list, not the plan's route.
+        XCTAssertEqual(narrowed.transport, .dnsOverHTTPS)
+        XCTAssertEqual(narrowed.cacheIdentifier, plan.cacheIdentifier)
+        XCTAssertEqual(narrowed.shouldFallbackToEncrypted, plan.shouldFallbackToEncrypted)
+    }
+
+    /// A DEVICE LEG WITH NOTHING ADMITTED IS SWITCHED OFF, not left pointing at an empty list.
+    ///
+    /// `resolveDevice` would have nowhere to send the query, so the ladder would spend a step
+    /// discovering that instead of going straight to the encrypted leg. Unlike the plain
+    /// narrowing this does NOT return nil: emptying this list removes a degradation path, not the
+    /// plan's own route.
+    func testADeviceLegWithNothingAdmittedIsDisabledRatherThanEmptied() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .dnsOverHTTPS,
+            plainAddresses: [],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung",
+            deviceDNSFallbackAddresses: ["10.0.0.1"],
+            shouldFallbackToDeviceDNS: true,
+            usesDeviceDNSFallbackMode: false)
+
+        let narrowed = plan.restrictingDeviceDNSFallbackAddresses(to: [])
+
+        XCTAssertTrue(narrowed.deviceDNSFallbackAddresses.isEmpty)
+        XCTAssertFalse(
+            narrowed.shouldFallbackToDeviceDNS,
+            "an empty leg must not be attempted; the ladder moves to the encrypted one")
+    }
+
+    /// ORDER SURVIVES the narrowing, because `make` has already ordered for the network kind.
+    ///
+    /// Re-deriving order from the admitted set would undo the wifi/cellular ordering the plan was
+    /// built with — a silent behaviour change dressed as a filter.
+    func testNarrowingPreservesThePlansOwnAddressOrder() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .plainDNS,
+            plainAddresses: ["9.9.9.9", "1.1.1.1", "8.8.8.8"],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung",
+            deviceDNSFallbackAddresses: [],
+            shouldFallbackToDeviceDNS: false,
+            usesDeviceDNSFallbackMode: false)
+
+        let narrowed = try XCTUnwrap(
+            plan.restrictingPlainAddresses(to: ["8.8.8.8", "9.9.9.9"]))
+
+        XCTAssertEqual(
+            narrowed.plainAddresses, ["9.9.9.9", "8.8.8.8"],
+            "the plan's order wins, not the admitted set's")
+    }
+
+    /// A PLAIN plan with nothing admitted is `nil` — no rung at all.
+    ///
+    /// Every address deduped into T0 or refused by a usability gate means there is no second
+    /// opinion to ask, and a plan with an empty address list would produce an attempt record
+    /// against nothing.
+    func testAPlainPlanWithNothingAdmittedIsNoPlanAtAll() {
+        let plan = DNSResolverRuntimePlan(
+            transport: .plainDNS,
+            plainAddresses: ["1.1.1.1"],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung",
+            deviceDNSFallbackAddresses: [],
+            shouldFallbackToDeviceDNS: false,
+            usesDeviceDNSFallbackMode: false)
+
+        XCTAssertNil(plan.restrictingPlainAddresses(to: []))
+        XCTAssertNil(
+            plan.restrictingPlainAddresses(to: ["8.8.8.8"]),
+            "an admitted set that shares nothing with the plan is the same as none")
+    }
+
+    /// A DEVICE-DNS rung plan with nothing admitted is `nil` too, and that is not a free-standing
+    /// choice — it follows from what `plainAddresses` MEANS for this transport.
+    ///
+    /// `make` puts the captured device resolvers straight into `plainAddresses` for `.deviceDNS`,
+    /// so they ARE the route, exactly as they are for `.plainDNS`. Returning a plan with an empty
+    /// list would hand the orchestrator a rung with nowhere to send the query; it would reach
+    /// `resolveDeviceDNS`, hit the empty guard, and report `deviceDNSUnavailable` — a
+    /// configuration-failure diagnostic for what is really "the network's resolver is the conf's
+    /// own, so there is no second opinion here". Nil says that honestly and T0's answer stands
+    /// (PR #592).
+    func testADeviceDNSRungPlanWithNothingAdmittedIsNoPlanAtAll() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .deviceDNS,
+            plainAddresses: ["192.168.1.1"],
+            dohEndpoints: [],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung-device",
+            deviceDNSFallbackAddresses: [],
+            shouldFallbackToDeviceDNS: false,
+            usesDeviceDNSFallbackMode: false)
+
+        XCTAssertNil(plan.restrictingPlainAddresses(to: []))
+        XCTAssertNil(
+            plan.restrictingPlainAddresses(to: ["10.0.0.1"]),
+            "an admitted set that shares nothing with the capture is the same as none — the "
+                + "ordering `make` applies for the network kind can empty the intersection even "
+                + "where the raw capture was not empty")
+
+        // ...and the narrowing itself still works for the addresses that DO survive.
+        let narrowed = try XCTUnwrap(
+            plan.restrictingPlainAddresses(to: ["192.168.1.1", "10.0.0.1"]))
+        XCTAssertEqual(narrowed.plainAddresses, ["192.168.1.1"])
+        XCTAssertEqual(narrowed.transport, .deviceDNS, "nothing else about the plan changes")
+    }
+
+    /// ...but an ENCRYPTED plan survives, because its plain addresses are only a degradation path.
+    ///
+    /// Emptying them narrows where a degraded query may go; removing the plan would remove the
+    /// endpoints the rung actually resolves through.
+    func testAnEncryptedPlanSurvivesNarrowingToNothing() throws {
+        let plan = DNSResolverRuntimePlan(
+            transport: .dnsOverHTTPS,
+            plainAddresses: ["1.1.1.1"],
+            dohEndpoints: [DNSResolverRuntimePlan.defaultEncryptedFallbackEndpoint],
+            dotEndpoints: [],
+            doqEndpoints: [],
+            cacheIdentifier: "rung-doh",
+            deviceDNSFallbackAddresses: [],
+            shouldFallbackToDeviceDNS: false,
+            usesDeviceDNSFallbackMode: false)
+
+        let narrowed = try XCTUnwrap(plan.restrictingPlainAddresses(to: []))
+
+        XCTAssertTrue(narrowed.plainAddresses.isEmpty, "the degradation path is closed")
+        XCTAssertEqual(
+            narrowed.dohEndpoints.count, 1, "but the endpoints it actually resolves through remain")
     }
 }

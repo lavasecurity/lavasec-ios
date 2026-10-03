@@ -80,6 +80,16 @@ public enum DNSWireMessage {
 
     /// Traverses header-declared resource records, caps non-OPT TTLs in seconds, and returns `nil` if traversal is incomplete.
     public static func cappingCacheableTTLs(in response: Data, to maximumTTL: UInt32) -> Data? {
+        transformingCacheableTTLs(in: response) { min($0, maximumTTL) }
+    }
+
+    static func agingCacheableTTLs(in response: Data, elapsedSeconds: UInt32) -> Data? {
+        transformingCacheableTTLs(in: response) { $0 > elapsedSeconds ? $0 - elapsedSeconds : 0 }
+    }
+
+    private static func transformingCacheableTTLs(
+        in response: Data, transform: (UInt32) -> UInt32
+    ) -> Data? {
         let response = zeroBased(response)
         guard response.count >= 12 else {
             return nil
@@ -102,8 +112,8 @@ public enum DNSWireMessage {
             cursor += 4
         }
 
-        var capped = response
-        var didCapTTL = false
+        var transformed = response
+        var didChangeTTL = false
         for _ in 0..<resourceRecordCount {
             guard skipName(in: response, cursor: &cursor), cursor + 10 <= response.count else {
                 return nil
@@ -119,15 +129,18 @@ public enum DNSWireMessage {
                 return nil
             }
 
-            if recordType != 41, ttl > maximumTTL {
-                writeUInt32(maximumTTL, to: &capped, at: ttlOffset)
-                didCapTTL = true
+            if recordType != 41 {
+                let updatedTTL = transform(ttl)
+                if updatedTTL != ttl {
+                    writeUInt32(updatedTTL, to: &transformed, at: ttlOffset)
+                    didChangeTTL = true
+                }
             }
 
             cursor += dataLength
         }
 
-        return didCapTTL ? capped : response
+        return didChangeTTL ? transformed : response
     }
 
     /// Returns true only when all declared question and resource-record bytes parse and consume the entire message.
@@ -169,79 +182,49 @@ public enum DNSWireMessage {
         return cursor == response.count
     }
 
-    private static func skipName(in data: Data, cursor: inout Int) -> Bool {
-        var localCursor = cursor
-        while localCursor < data.count {
-            let length = data[localCursor]
-            localCursor += 1
-
-            if length == 0 {
-                cursor = localCursor
-                return true
-            }
-
-            if length & 0xC0 == 0xC0 {
-                guard localCursor < data.count else {
-                    return false
-                }
-                let pointer = (Int(length & 0x3F) << 8) | Int(data[localCursor])
-                localCursor += 1
-                guard isValidCompressedNameTarget(pointer, in: data) else {
-                    return false
-                }
-                cursor = localCursor
-                return true
-            }
-
-            guard length & 0xC0 == 0, localCursor + Int(length) <= data.count else {
-                return false
-            }
-
-            localCursor += Int(length)
-        }
-
-        return false
+    static func skipName(in data: Data, cursor: inout Int) -> Bool {
+        guard let name = readName(in: data, at: cursor) else { return false }
+        cursor = name.end
+        return true
     }
 
-    private static func isValidCompressedNameTarget(_ offset: Int, in data: Data) -> Bool {
-        guard offset >= 0, offset < data.count else {
-            return false
-        }
-
+    // One bounded name reader serves structural validation and alias inspection. `limit`
+    // bounds the encoded RDATA; a compression pointer may refer to earlier message bytes.
+    static func readName(
+        in data: Data, at offset: Int, limit: Int? = nil, allowsCompression: Bool = true
+    ) -> (end: Int, name: String?)? {
+        let initialLimit = min(limit ?? data.count, data.count)
+        guard offset >= 0, offset < initialLimit else { return nil }
         var cursor = offset
-        var visitedOffsets: Set<Int> = []
-        while cursor < data.count {
-            guard visitedOffsets.insert(cursor).inserted else {
-                return false
-            }
-
-            let length = data[cursor]
-            cursor += 1
-
+        var encodedEnd: Int?
+        var expandedLength = 1 // Include the terminal root label in the 255-byte wire limit.
+        var spelling: [UInt8] = []
+        spelling.reserveCapacity(64)
+        for _ in 0..<128 {
+            let bound = encodedEnd == nil ? initialLimit : data.count
+            guard cursor < bound else { return nil }
+            let length = Int(data[cursor])
             if length == 0 {
-                return true
+                return (encodedEnd ?? (cursor + 1), String(bytes: spelling, encoding: .utf8))
             }
-
             if length & 0xC0 == 0xC0 {
-                guard cursor < data.count else {
-                    return false
-                }
-                let pointer = (Int(length & 0x3F) << 8) | Int(data[cursor])
-                guard pointer >= 0, pointer < data.count else {
-                    return false
-                }
-                cursor = pointer
+                guard allowsCompression, cursor + 2 <= bound else { return nil }
+                let target = ((length & 0x3F) << 8) | Int(data[cursor + 1])
+                // RFC 1035 compression references a prior occurrence; backward-only pointers
+                // also reject cycles without retaining an attacker-sized visited-offset set.
+                guard target < cursor else { return nil }
+                if encodedEnd == nil { encodedEnd = cursor + 2 }
+                cursor = target
                 continue
             }
-
-            guard length & 0xC0 == 0, cursor + Int(length) <= data.count else {
-                return false
-            }
-
-            cursor += Int(length)
+            guard length & 0xC0 == 0, cursor + 1 + length <= bound else { return nil }
+            expandedLength += 1 + length
+            guard expandedLength <= 255 else { return nil }
+            if !spelling.isEmpty { spelling.append(UInt8(ascii: ".")) }
+            spelling.append(contentsOf: data[(cursor + 1)..<(cursor + 1 + length)])
+            cursor += 1 + length
         }
-
-        return false
+        return nil
     }
 
     // Every parser below indexes by absolute integer offset, which is only valid

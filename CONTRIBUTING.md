@@ -16,9 +16,12 @@ Thanks for your interest in contributing.
 
 ## Development setup
 
+Install the [build prerequisites](README.md#building), including Node/npm,
+Ruby/Bundler, and Python, before running the preparation command.
+
 1. `cp Config/Lava.local.xcconfig.example Config/Lava.local.xcconfig` and fill in your values
    (see the [README](README.md)).
-2. Open `LavaSec.xcodeproj` in Xcode 26+.
+2. Run `bash ReactNative/scripts/prepare-full-app.sh /tmp/lava-rn-build /tmp/lava-rn-evidence`, then open `ReactNative/native-app/LavaSecRN.xcworkspace` in Xcode.
 3. The DNS-filtering core builds without any account configuration.
 
 ### The Xcode project is generated
@@ -33,8 +36,9 @@ shared scheme:
 2. Run `xcodegen generate` (post-generation fixups run automatically).
 3. Commit `project.yml` **and** the regenerated project together.
 
-The generated project stays committed so checkouts build without XcodeGen and
-because the test suite pins target/embed wiring as pbxproj text.
+The generated base project stays committed as the native target manifest; the
+RN workspace is the supported app build. The test suite pins target/embed wiring
+as pbxproj text.
 `scripts/check-xcodegen-drift.sh` verifies the committed project still matches
 `project.yml`; run it if you touched either side.
 

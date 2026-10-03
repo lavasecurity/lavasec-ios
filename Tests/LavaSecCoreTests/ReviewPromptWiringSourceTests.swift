@@ -8,7 +8,11 @@ import XCTest
 final class ReviewPromptWiringSourceTests: XCTestCase {
     /// Source with all whitespace removed, so these pins survive reformatting/line-wrapping.
     private func compactSource(_ file: SourceFile) throws -> String {
-        try readSource(file).filter { !$0.isWhitespace }
+        try compactSource(readSource(file))
+    }
+
+    private func compactSource(_ source: String) -> String {
+        source.filter { !$0.isWhitespace }
     }
 
     /// Source with `/* */` block comments and every `//` line comment removed — including TRAILING `//`
@@ -17,7 +21,11 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
     /// future maintainer documenting a deliberately-excluded predicate in a trailing comment (OCR review
     /// on lavasec-ios#69; the trailing-comment gap in the whole-line-only version was flagged by Codex).
     private func codeOnly(_ file: SourceFile) throws -> String {
-        try readSource(file)
+        try codeOnly(readSource(file))
+    }
+
+    private func codeOnly(_ source: String) -> String {
+        source
             .replacingOccurrences(of: "(?s)/\\*.*?\\*/", with: "", options: .regularExpression)
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { Self.strippingTrailingLineComment(String($0)) }
@@ -55,19 +63,97 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
     // MARK: - AppViewModel
 
     func testProtectionOnAnchorCountsOnlyUserInitiatedTurnOns() throws {
-        let compact = try compactSource(.appViewModel)
+        let source = codeOnly(try readAppViewModelSource())
+        let compact = source.filter { !$0.isWhitespace }
+        let statusUpdate = try sourceBlock(
+            in: source,
+            startingAt: "func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionStartFailedHaptic()"
+        ).filter { !$0.isWhitespace }
+        let captureIndex = try XCTUnwrap(
+            statusUpdate.range(
+                of: "letuserInitiated=isFreshConnected&&awaitsProtectionOnHaptic")?.lowerBound,
+            "The status funnel must capture user intent only on a fresh connected epoch."
+        )
+        let clearIndex = try XCTUnwrap(
+            statusUpdate.range(
+                of: "awaitsProtectionOnHaptic=false",
+                range: captureIndex..<statusUpdate.endIndex)?.lowerBound,
+            "The one-shot haptic intent must be cleared after capture."
+        )
+        let reducerForwardIndex = try XCTUnwrap(
+            statusUpdate.range(
+                of: "userInitiated:userInitiated",
+                range: clearIndex..<statusUpdate.endIndex)?.lowerBound,
+            "The exact captured user-intent value must reach the statusChanged reducer event."
+        )
+        XCTAssertLessThan(captureIndex, clearIndex)
+        XCTAssertLessThan(
+            clearIndex,
+            reducerForwardIndex,
+            "Capture and clear must both happen before the exact value reaches the reducer."
+        )
+
+        let resolution = try sourceBlock(
+            in: source,
+            startingAt: "private func resolveInitialChainedClaim(",
+            endingBefore: "private func isCurrentChainedLifecycleMutation("
+        ).filter { !$0.isWhitespace }
         XCTAssertTrue(
-            compact.contains("letprotectionOnWasUserInitiated=awaitsProtectionOnHaptic"),
-            "The funnel must capture the user-initiated arm BEFORE the haptic call consumes it."
+            resolution.contains(
+                "guardconfirmed||setupReady,userInitiated,"
+                    + "letidentity=chainedLifecycleMutationIdentity,"
+                    + "identity.connection==connection,"
+                    + "letexternalRestartGeneration=identity.externalRestartGeneration"
+                    + "else{"),
+            "Only a user turn-on with verified setup or forwarding, the exact reducer connection "
+                + "and captured Restart generation may reach the publication task."
+        )
+
+        let fencedPublication = try sourceBlock(
+            in: resolution,
+            startingAt: "tryawaitLavaProtectionCommandService"
+                + ".withProtectionLifecycleDescendantMutation(",
+            endingBefore: "}catch{"
         )
         XCTAssertTrue(
-            compact.contains("ifprotectionOnWasUserInitiated{recordUserInitiatedProtectionOnForReview()}"),
-            "The protection-on anchor must fire only on a user-initiated turn-on, never an on-demand reconnect."
+            fencedPublication.contains(
+                "capturedGeneration:externalRestartGeneration,"
+                    + "validateLocalOwnership:{"
+                    + "self.isCurrentChainedLifecycleMutation(identity)"),
+            "The review anchor must enter the descendant fence with strict Restart-generation and "
+                + "exact reducer-identity validation."
         )
+        XCTAssertTrue(
+            fencedPublication.contains(
+                "guardself.isCurrentChainedLifecycleMutation(identity)"
+                    + "else{throwProtectionLifecycleMutationFenceError.ownershipLost}"),
+            "The haptic and review anchor must remain inside the fence, after exact ownership is "
+                + "revalidated."
+        )
+        let errorGuard = try XCTUnwrap(fencedPublication.range(of:
+            "hasError:self.guardPanelMessageIsError")?.lowerBound)
+        let claimGuard = try XCTUnwrap(fencedPublication.range(of:
+            "status:self.protectionStatus")?.lowerBound)
+        let haptic = try XCTUnwrap(fencedPublication.range(of:
+            "ProtectionHapticFeedback.play(.protectionOnSucceeded)")?.lowerBound)
+        let anchor = try XCTUnwrap(fencedPublication.range(of:
+            "self.recordUserInitiatedProtectionOnForReview()")?.lowerBound)
+        XCTAssertLessThan(errorGuard, claimGuard)
+        XCTAssertLessThan(claimGuard, haptic)
+        XCTAssertLessThan(haptic, anchor)
+        XCTAssertEqual(fencedPublication.components(separatedBy:
+            "self.recordUserInitiatedProtectionOnForReview()").count - 1, 1,
+            "Readiness and later forwarding share one success owner and review anchor.")
+        XCTAssertTrue(resolution.contains(
+            ".successFeedbackFinished(connection:connection,retryWhenConfirmed:!delivered)"))
+        XCTAssertFalse(
+            compact.contains("configuration.chainedUpstreamEnabled{recordUserInitiatedProtectionOnForReview"),
+            "saved mode is no longer a lifecycle or review authority")
     }
 
     func testProtectionOnRecordIncrementsCountAndEvaluates() throws {
-        let compact = try compactSource(.appViewModel)
+        let compact = compactSource(try readAppViewModelSource())
         XCTAssertTrue(
             compact.contains("state.successfulProtectionOns+=1"),
             "A user-initiated turn-on must increment the lifetime successful-on count."
@@ -79,7 +165,7 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
     }
 
     func testFilterUpdateAnchorFiresOnlyWhenProtectionWasAdded() throws {
-        let compact = try compactSource(.appViewModel)
+        let compact = compactSource(try readAppViewModelSource())
         // The add-detection reuses FilterConfigurationDiff, which omits custom blocklists (the paid surface).
         XCTAssertTrue(
             compact.contains("!diff.addedBlocklistIDs.isEmpty")
@@ -94,7 +180,7 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
         // on the #402-#407 promo). Search with comments stripped — BOTH `//` line and `/* */` block
         // styles — so a future maintainer who documents this exclusion in a comment naming the predicate
         // can't false-positive this safety-critical negative assertion (OCR review on lavasec-ios#69).
-        let appViewModelCode = try codeOnly(.appViewModel).filter { !$0.isWhitespace }
+        let appViewModelCode = codeOnly(try readAppViewModelSource()).filter { !$0.isWhitespace }
         XCTAssertFalse(
             appViewModelCode.contains("!diff.addedAllowedDomains.isEmpty"),
             "The filter-update anchor must NOT qualify on an added allowed domain — that WEAKENS protection."
@@ -106,11 +192,15 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
     }
 
     func testEvaluationGoesThroughTheSharedPolicyAndAppOnlyDefaults() throws {
-        let compact = try compactSource(.appViewModel)
+        let compact = compactSource(try readAppViewModelSource())
         XCTAssertTrue(
-            compact.contains("@Publishedprivate(set)varpendingReviewRequest=false"),
-            "RootView observes a one-shot published signal; it must be private(set) so only the model arms it."
+            compact.contains("@PublishedvarpendingReviewRequest=false"),
+            "RootView observes a one-shot published signal armed by the model."
         )
+        // `private(set)` cannot survive the class being split across files (the arm/disarm
+        // writers live in AppViewModel+ReviewPrompt.swift), so "only the model arms it" is
+        // pinned as an absence over every source outside the class by
+        // `AppViewModelEncapsulationSourceTests.testNoSourceOutsideTheClassWritesAWidenedProperty`.
         XCTAssertTrue(
             compact.contains("privatevarreviewPromptDefaults:UserDefaults{.standard}"),
             "Review bookkeeping is app-only — UserDefaults.standard, never the app group."
@@ -126,7 +216,7 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
         // file: a regression that moved `state.promptTimestamps.append(Date())` into a sibling (e.g. a
         // future markReviewRequestSkipped) would keep all the substrings yet spend the budget with no
         // arm — a loose file-wide `&&` would pass vacuously (OCR review on lavasec-ios#69).
-        let appViewModelBudgetCode = try codeOnly(.appViewModel).filter { !$0.isWhitespace }
+        let appViewModelBudgetCode = codeOnly(try readAppViewModelSource()).filter { !$0.isWhitespace }
         let markFuncStart = try XCTUnwrap(
             appViewModelBudgetCode.range(of: "funcmarkReviewRequestPresented(){")?.upperBound,
             "markReviewRequestPresented must exist."
@@ -190,39 +280,14 @@ final class ReviewPromptWiringSourceTests: XCTestCase {
     // MARK: - ActivityView (DiagnosticsView)
 
     func testActivityAnchorRequiresDwellAndMagnitude() throws {
-        let compact = try compactSource(.diagnosticsView)
-        // Keyed on the magnitude-qualifies boolean, the selected range, scene phase, AND the date-picker
-        // presentation — NOT the summary itself, whose per-render `localProtectionUptime` tick would
-        // restart the sleep forever (OCR review on lavasec-ios#69). The range keeps a qualifying-range
-        // SWITCH restarting the dwell (Codex P2); a scene transition restarts it too; `datePickerPresented`
-        // restarts it when the range picker opens over the summary so a review can't arm while the picker
-        // hides it (Codex P2 on lavasec-ios#69); the boolean is stable while the page keeps qualifying, so
-        // the dwell can complete.
-        XCTAssertTrue(
-            compact.contains(".task(id:ActivityReviewDwellKey(magnitudeQualifies:selectedSummaryQualifiesForReview,range:selectedRange,scenePhase:scenePhase,datePickerPresented:isShowingDatePicker))"),
-            "The dwell task must key on the magnitude-qualifies boolean, the selected range, scene phase, AND the date-picker presentation (so opening the range picker over the summary cancels the dwell — not the summary itself, whose uptime ticks every render)."
-        )
-        XCTAssertTrue(
-            compact.contains("guardscenePhase==.active"),
-            "The dwell must only progress while the scene is active."
-        )
-        XCTAssertTrue(
-            compact.contains("guard!isShowingDatePickerelse{return}"),
-            "The dwell must not arm while the range-picker sheet obscures the summary (Codex P2 on lavasec-ios#69)."
-        )
-        XCTAssertTrue(
-            compact.contains("try?awaitTask.sleep(nanoseconds:ReviewPromptPolicy.activityMinDwellSeconds*1_000_000_000)"),
-            "The Activity anchor must require a foreground dwell sourced from the shared policy constant (no duplicated magic numbers)."
-        )
-        XCTAssertTrue(
-            compact.contains("summary.totalCount>ReviewPromptPolicy.activityMinTotalQueries")
-                && compact.contains("summary.blockRate>ReviewPromptPolicy.activityMinBlockRate"),
-            "The dwell must gate on the shared query-volume and block-rate thresholds (no duplicated magic numbers)."
-        )
-        XCTAssertTrue(
-            compact.contains("viewModel.noteActivityViewingReviewMoment(totalQueries:summary.totalCount,blockRate:summary.blockRate)"),
-            "After the qualifying dwell, ActivityView must report the moment with the on-screen magnitude."
-        )
+        let source = try readSource(.reactNativeAppQueries)
+        XCTAssertTrue(source.contains("activityDwellTask?.cancel()"))
+        XCTAssertTrue(source.contains("activityDwellToken == token"))
+        XCTAssertTrue(source.contains("UIApplication.shared.applicationState == .active"))
+        XCTAssertTrue(source.contains("Task.sleep(for: .seconds(ReviewPromptPolicy.activityMinDwellSeconds))"))
+        XCTAssertTrue(source.contains("summary.totalCount > ReviewPromptPolicy.activityMinTotalQueries"))
+        XCTAssertTrue(source.contains("summary.blockRate > ReviewPromptPolicy.activityMinBlockRate"))
+        XCTAssertTrue(source.contains("model.noteActivityViewingReviewMoment(totalQueries: current.totalCount, blockRate: current.blockRate)"))
     }
 
     // MARK: - DiagnosticsController (frustration signal)

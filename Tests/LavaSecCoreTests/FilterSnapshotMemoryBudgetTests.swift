@@ -12,7 +12,7 @@ final class FilterSnapshotMemoryBudgetTests: XCTestCase {
         // Must comfortably honor the 1M+ goal while still bounding pathological
         // multi-list configs, and stay above the 2M paid tier ceiling.
         XCTAssertGreaterThan(FilterSnapshotMemoryBudget.maxFilterRuleCount, 3_000_000)
-        XCTAssertLessThan(FilterSnapshotMemoryBudget.maxFilterRuleCount, 5_000_000)
+        XCTAssertLessThan(FilterSnapshotMemoryBudget.maxFilterRuleCount, 7_000_000)
     }
 
     func testExceedsBudgetAtBoundary() {
@@ -23,20 +23,38 @@ final class FilterSnapshotMemoryBudgetTests: XCTestCase {
     }
 
     func testEstimatedResidentTracksTheDeviceMeasurement() {
-        // QA device (2026-06-13): 789,831 rules → ~9.9 MB phys_footprint. The
-        // rounded-up constants should estimate slightly above the measurement.
+        // QA device (2026-06-13): 789,831 rules → ~9.9 MB phys_footprint with the OLD
+        // 8-byte entry. The 4-byte entry halves the structural per-rule cost, so the model
+        // (baseline + 5 B/rule) now estimates well under the old measurement. This is the
+        // conservative re-derivation pending an on-device re-measure (see the W1 plan).
         let mb = FilterSnapshotMemoryBudget.estimatedResidentMegabytes(forRuleCount: 789_831)
-        XCTAssertGreaterThan(mb, 9.0)
-        XCTAssertLessThan(mb, 12.0)
+        XCTAssertGreaterThan(mb, 6.0)
+        XCTAssertLessThan(mb, 9.0)
         // 1M rules should still be well within budget.
         XCTAssertLessThan(FilterSnapshotMemoryBudget.estimatedResidentMegabytes(forRuleCount: 1_000_000), 16.0)
     }
 
     func testTierBudgetsSitUnderTheDeviceGuardrail() {
-        // Free 500K / Plus 2M must both fit under the ~3.26M hard device cap.
+        // Free 500K / Plus 2M must both fit under the ~5.87M hard device cap.
         XCTAssertEqual(FeatureLimits.free.maxFilterRules, 500_000)
         XCTAssertEqual(FeatureLimits.paid.maxFilterRules, 2_000_000)
         XCTAssertLessThan(FeatureLimits.paid.maxFilterRules, FilterSnapshotMemoryBudget.maxFilterRuleCount)
+    }
+
+    /// 🔴 The headline capability of the 4-byte entry change (#538): the in-extension streaming
+    /// compile can now admit a full 2M Plus config, so the ceiling is the POLICY cap (2M), not
+    /// the memory bound. Pins both the 4 B/rule entry constant and the `min(memoryCeiling, 2M)`
+    /// result — reverting `estimatedCompactEntryBytesPerRule` to 8.0 drops the memory ceiling
+    /// below 2M, so the streaming compile would again fail closed on a near-cap config; this
+    /// test catches that silently-reintroduced limitation.
+    func testStreamingCompileCeilingReachesThePlusTierCap() {
+        XCTAssertEqual(FilterSnapshotMemoryBudget.estimatedCompactEntryBytesPerRule, 4.0)
+        // The memory bound (memoryCeiling, ~3.67M with the 4-byte entry) is above the 2M tier
+        // cap, so the streaming ceiling is capped at exactly the Plus limit.
+        XCTAssertEqual(
+            FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount,
+            FeatureLimits.plus.maxFilterRules)
+        XCTAssertEqual(FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount, 2_000_000)
     }
 
     func testDeviceErrorDescriptionNamesTotalsAndLargestSources() throws {
@@ -62,7 +80,7 @@ final class FilterSnapshotMemoryBudgetTests: XCTestCase {
         let freeDescription = try XCTUnwrap(freeError.errorDescription)
         XCTAssertTrue(freeDescription.contains("700,000"))
         XCTAssertTrue(freeDescription.contains("500,000"))
-        XCTAssertTrue(freeDescription.contains("upgrade to Plus"))
+        XCTAssertTrue(freeDescription.contains("upgrade to Lava Plus"))
         XCTAssertTrue(freeDescription.contains("big-list"))
 
         let paidError = FilterSnapshotPreparationError.exceedsTierFilterRuleLimit(
@@ -72,7 +90,7 @@ final class FilterSnapshotMemoryBudgetTests: XCTestCase {
             perSourceRuleCounts: ["big-list": 2_400_000]
         )
         let paidDescription = try XCTUnwrap(paidError.errorDescription)
-        XCTAssertFalse(paidDescription.contains("upgrade to Plus"))
-        XCTAssertTrue(paidDescription.contains("Remove a list"))
+        XCTAssertFalse(paidDescription.contains("upgrade to Lava Plus"))
+        XCTAssertTrue(paidDescription.contains("Remove a blocklist"))
     }
 }

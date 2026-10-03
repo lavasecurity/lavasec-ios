@@ -168,6 +168,38 @@ public struct DomainFrequency: Equatable, Codable, Sendable {
     public let count: Int
 }
 
+/// A domain frequency retaining its allowed/blocked outcome for mixed rankings.
+public struct DomainOutcomeFrequency: Equatable, Sendable, Identifiable {
+    /// The observed domain.
+    public let domain: String
+    /// Number of requests for this outcome.
+    public let count: Int
+    /// The outcome, independent of the currently selected filter.
+    public let action: FilterAction
+    /// A domain can occur in both outcomes; its row identity must distinguish them.
+    public var id: String { "\(action == .block ? "blocked" : "allowed"):\(domain)" }
+}
+
+/// A calendar bucket of numeric filtering counts, independent of retained domain names.
+public struct DiagnosticsTimeBucket: Equatable, Sendable {
+    /// Beginning of this hour or day in the requested calendar.
+    public let start: Date
+    /// Number of allowed lookups retained in this bucket.
+    public let allowed: Int
+    /// Number of blocked lookups retained in this bucket.
+    public let blocked: Int
+    /// False when there is no evidence of collection for this hour or day.
+    public let available: Bool
+    /// Collection began partway through this bucket; values are observations, not estimates.
+    public let partial: Bool
+}
+
+private struct DiagnosticsHourCount: Codable, Sendable {
+    var start: Date
+    var allowed = 0
+    var blocked = 0
+}
+
 private struct DiagnosticsDayCount: Equatable, Codable, Sendable {
     var dayStartedAt: Date
     var allowedCount: Int
@@ -305,6 +337,9 @@ public struct DiagnosticsStore: Codable, Sendable {
     private var blockedCount: Int
     private var localProtectionUptime: TimeInterval
     private var dayCounts: [String: DiagnosticsDayCount]
+    private var hourCounts: [String: DiagnosticsHourCount]
+    private var hourlyCollectionStartedAt: Date?
+    private var hourlyTimeZoneIdentifier: String?
     private var activeLocalProtectionStartedAt: Date?
     /// The start of the current running-count period.
     public private(set) var startedAt: Date
@@ -336,6 +371,9 @@ public struct DiagnosticsStore: Codable, Sendable {
         self.blockedCount = 0
         self.localProtectionUptime = 0
         self.dayCounts = [:]
+        self.hourCounts = [:]
+        self.hourlyCollectionStartedAt = nil
+        self.hourlyTimeZoneIdentifier = nil
         self.activeLocalProtectionStartedAt = nil
         self.startedAt = startedAt
         self.lastAppliedDomainHistoryClearAt = nil
@@ -349,6 +387,9 @@ public struct DiagnosticsStore: Codable, Sendable {
         case blockedCount
         case localProtectionUptime
         case dayCounts
+        case hourCounts
+        case hourlyCollectionStartedAt
+        case hourlyTimeZoneIdentifier
         case activeLocalProtectionStartedAt
         case startedAt
         case lastAppliedDomainHistoryClearAt
@@ -365,6 +406,12 @@ public struct DiagnosticsStore: Codable, Sendable {
         blockedCount = try container.decodeIfPresent(Int.self, forKey: .blockedCount) ?? 0
         localProtectionUptime = try container.decodeIfPresent(TimeInterval.self, forKey: .localProtectionUptime) ?? 0
         dayCounts = try container.decodeIfPresent([String: DiagnosticsDayCount].self, forKey: .dayCounts) ?? [:]
+        hourCounts = try container.decodeIfPresent([String: DiagnosticsHourCount].self, forKey: .hourCounts) ?? [:]
+        hourlyCollectionStartedAt = try container.decodeIfPresent(Date.self, forKey: .hourlyCollectionStartedAt)
+        hourlyTimeZoneIdentifier = try container.decodeIfPresent(String.self, forKey: .hourlyTimeZoneIdentifier)
+        // Earlier candidates stamped creation/clear even with collection off.
+        // An empty hourly store has no observation proving that coverage began.
+        if hourCounts.isEmpty { hourlyCollectionStartedAt = nil }
         activeLocalProtectionStartedAt = try container.decodeIfPresent(Date.self, forKey: .activeLocalProtectionStartedAt)
         startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date()
         lastAppliedDomainHistoryClearAt = try container.decodeIfPresent(Date.self, forKey: .lastAppliedDomainHistoryClearAt)
@@ -383,6 +430,9 @@ public struct DiagnosticsStore: Codable, Sendable {
         try container.encode(blockedCount, forKey: .blockedCount)
         try container.encode(localProtectionUptime, forKey: .localProtectionUptime)
         try container.encode(dayCounts, forKey: .dayCounts)
+        try container.encode(hourCounts, forKey: .hourCounts)
+        try container.encodeIfPresent(hourlyCollectionStartedAt, forKey: .hourlyCollectionStartedAt)
+        try container.encodeIfPresent(hourlyTimeZoneIdentifier, forKey: .hourlyTimeZoneIdentifier)
         try container.encodeIfPresent(activeLocalProtectionStartedAt, forKey: .activeLocalProtectionStartedAt)
         try container.encode(startedAt, forKey: .startedAt)
         try container.encodeIfPresent(lastAppliedDomainHistoryClearAt, forKey: .lastAppliedDomainHistoryClearAt)
@@ -455,6 +505,92 @@ public struct DiagnosticsStore: Codable, Sendable {
         )
     }
 
+    /// Calendar-aligned counts. Hourly history is additive: older installs keep their
+    /// daily totals, and missing hours remain unavailable rather than invented zeros.
+    /// Numeric hours are retained for the current and previous day only; daily trends
+    /// keep their existing retention. Calendar arithmetic preserves 23/25-hour days.
+    public func activityBuckets(
+        from startDate: Date, to endDate: Date, hourly: Bool,
+        calendar: Calendar = .current, asOf: Date = Date()
+    ) -> [DiagnosticsTimeBucket] {
+        let start = calendar.startOfDay(for: min(startDate, endDate))
+        let last = calendar.startOfDay(for: max(startDate, endDate))
+        guard let end = calendar.date(byAdding: .day, value: 1, to: last),
+              let retentionStart = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: asOf))
+        else { return [] }
+        let compatibleHours = !hourly || hasCompatibleHourlyBoundaries(calendar: calendar)
+        var result: [DiagnosticsTimeBucket] = []
+        var cursor = start
+        // The date selector exposes 24 months. Bound untrusted bridge requests too.
+        while cursor < end, result.count < (hourly ? 50 : 732) {
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: cursor)) else { break }
+            let next = hourly ? min(cursor.addingTimeInterval(3600), nextDay) : nextDay
+            guard next > cursor else { break }
+            if hourly {
+                let counts = compatibleHours ? hourCounts[Self.hourKey(cursor)] : nil
+                let began = hourlyCollectionStartedAt
+                let available = compatibleHours && cursor <= asOf && cursor >= retentionStart && began.map { next > $0 } == true
+                result.append(DiagnosticsTimeBucket(start: cursor, allowed: counts?.allowed ?? 0,
+                    blocked: counts?.blocked ?? 0, available: available,
+                    partial: available && began.map { cursor < $0 } == true))
+            } else {
+                let summary = dailySummary(on: cursor, calendar: calendar, asOf: asOf)
+                // A seeded day key (including domain-only history after counts
+                // were cleared) does not prove numeric collection. Retained counts
+                // or measured protection uptime do; zero-traffic uptime is valid.
+                let observed = summary.allowedCount > 0 || summary.blockedCount > 0 || summary.localProtectionUptime > 0
+                let available = cursor <= asOf && observed
+                result.append(DiagnosticsTimeBucket(start: cursor, allowed: summary.allowedCount,
+                    blocked: summary.blockedCount, available: available,
+                    partial: available && summary.localProtectionUptime < next.timeIntervalSince(cursor)))
+            }
+            cursor = next
+        }
+        return result
+    }
+
+    private static func hourKey(_ date: Date) -> String {
+        String(Int64(date.timeIntervalSince1970))
+    }
+
+    // Anchor elapsed-hour bins at each local midnight. This also handles 30-minute
+    // DST jumps: recording and querying share boundaries, including a short final bin.
+    private static func activityHourStart(for date: Date, calendar: Calendar) -> Date {
+        let day = calendar.startOfDay(for: date)
+        return day.addingTimeInterval(floor(date.timeIntervalSince(day) / 3600) * 3600)
+    }
+
+    private func hasCompatibleHourlyBoundaries(calendar: Calendar) -> Bool {
+        if hourCounts.isEmpty || hourlyTimeZoneIdentifier == calendar.timeZone.identifier { return true }
+        guard let identifier = hourlyTimeZoneIdentifier, let zone = TimeZone(identifier: identifier) else { return false }
+        var origin = calendar
+        origin.timeZone = zone
+        return hourCounts.values.allSatisfy {
+            Self.activityHourStart(for: $0.start, calendar: calendar) == $0.start
+                && Self.dayKey(for: $0.start, calendar: origin) == Self.dayKey(for: $0.start, calendar: calendar)
+        }
+    }
+
+    mutating func recordHourCount(_ action: FilterAction, at now: Date, calendar: Calendar) {
+        let hour = Self.activityHourStart(for: now, calendar: calendar)
+        guard let cutoff = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) else { return }
+        if hourlyTimeZoneIdentifier != calendar.timeZone.identifier {
+            // Never redistribute hours across new boundaries or local dates. Daily
+            // totals retain their original date keys; partial hours cannot re-key them.
+            if !hasCompatibleHourlyBoundaries(calendar: calendar) {
+                hourCounts.removeAll()
+                hourlyCollectionStartedAt = nil
+            }
+            hourlyTimeZoneIdentifier = calendar.timeZone.identifier
+        }
+        if hourlyCollectionStartedAt == nil { hourlyCollectionStartedAt = now }
+        let key = Self.hourKey(hour)
+        if hourCounts[key] == nil { hourCounts = hourCounts.filter { $0.value.start >= cutoff } }
+        var bucket = hourCounts[key] ?? DiagnosticsHourCount(start: hour)
+        if action == .allow { bucket.allowed += 1 } else { bucket.blocked += 1 }
+        hourCounts[key] = bucket
+    }
+
     /// Retained DNS query events in reverse chronological order.
     public var recentEvents: [DNSQueryEvent] {
         events.reversed()
@@ -495,12 +631,12 @@ public struct DiagnosticsStore: Codable, Sendable {
     }
 
     /// Returns recent events matching an action and optional domain search.
-    public func recentEvents(action: FilterAction, searchText: String = "", limit: Int = 100) -> [DNSQueryEvent] {
+    public func recentEvents(action: FilterAction?, searchText: String = "", limit: Int = 100) -> [DNSQueryEvent] {
         let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         return recentEvents
             .filter { event in
-                guard event.decision.action == action else {
+                guard action == nil || event.decision.action == action else {
                     return false
                 }
 
@@ -546,6 +682,7 @@ public struct DiagnosticsStore: Codable, Sendable {
 
         if keepFilteringCounts {
             recordDayCount(decision.action, calendar: .current)
+            recordHourCount(decision.action, at: Date(), calendar: .current)
 
             switch decision.action {
             case .allow:
@@ -604,6 +741,11 @@ public struct DiagnosticsStore: Codable, Sendable {
         allowedCount = 0
         blockedCount = 0
         localProtectionUptime = 0
+        hourCounts.removeAll()
+        // Clearing also serves the counts-Off path. No hour after this clear is
+        // observed until a counted query resumes collection; otherwise a disabled
+        // interval would be presented as measured zero traffic after re-enabling.
+        hourlyCollectionStartedAt = nil
         // Clear only the NUMERIC aggregates. Top Domains frequency rides inside `dayCounts` but
         // is identity-level domain history — it is governed by `clearDomainHistory`, not by
         // clearing counts — so keep buckets that still carry domain detail (with their numeric
@@ -734,6 +876,25 @@ public struct DiagnosticsStore: Codable, Sendable {
             }
         }
         return Self.rankedDomains(from: counts, limit: limit)
+    }
+
+    /// Ranks both outcomes together when action is nil, preserving per-row identity.
+    /// Each bounded per-action result contains every possible global top-N candidate.
+    public func topDomainOutcomes(action: FilterAction?, from start: Date, to end: Date,
+                                  searchText: String = "", calendar: Calendar = .current,
+                                  limit: Int = 10) -> [DomainOutcomeFrequency] {
+        guard limit > 0 else { return [] }
+        let actions: [FilterAction] = action.map { [$0] } ?? [.allow, .block]
+        return Array(actions.flatMap { outcome in
+            topDomains(action: outcome, from: start, to: end, searchText: searchText,
+                       calendar: calendar, limit: limit).map {
+                DomainOutcomeFrequency(domain: $0.domain, count: $0.count, action: outcome)
+            }
+        }.sorted {
+            if $0.count != $1.count { return $0.count > $1.count }
+            if $0.domain != $1.domain { return $0.domain < $1.domain }
+            return $0.action == .block && $1.action == .allow
+        }.prefix(limit))
     }
 
     /// Top domains restricted to the inclusive day range `[from, to]`. Used by the

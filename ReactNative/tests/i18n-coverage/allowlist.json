@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy written in production RN source that is looked up but intentionally not in the catalog. Every entry needs a category that explains why. UI copy never belongs here.",
+  "properNames": ["Lava", "Quad9"],
+  "protocolAcronyms": ["DoH", "DoT", "IP"],
+  "exampleDomains": ["example.com", "trusted.example.com"],
+  "reviewHostOnly": [
+    "Lava · UI preview", "UI review build", "Device QA", "Core", "Balanced",
+    "This build previews Lava’s interface. It does not start a VPN, change production filters, authenticate, make purchases, or send reports. Changes in this review session are discarded when you close it.",
+    "Optional diagnostics include anonymized data like VPN status, network logs, and your active filter. They help the Lava team figure out what went wrong."
+  ],
+  "galleryFixtureTitles": ["back", "close", "confirm", "delete", "undo", "heading", "section", "body", "supporting", "caption"]
+}

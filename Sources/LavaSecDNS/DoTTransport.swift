@@ -11,22 +11,75 @@ import Network
 // fresh-connection retry.
 /// Thread-safe DNS-over-TLS client with bounded per-endpoint connection pools and stale-connection recovery.
 public final class DoTTransport: @unchecked Sendable {
-    private static let maxConnectionsPerEndpoint = 4
+    static let maxConnectionsPerEndpoint = 4
     private let timeoutSeconds: Int
     private let debugLogger: DNSTransportDebugLogger?
+    /// See the test-only initialiser. Nil in every shipping construction.
+    private let isolatedLaneObserver: (@Sendable (Int) -> Void)?
     private let connectionLock = NSLock()
     private var connections: [String: [DoTConnection]] = [:]
     private var nextConnectionIndexByKey: [String: Int] = [:]
+    /// One-shot lanes handed out by ``resolveIsolated``, held ONLY so ``cancel`` can reach
+    /// them. Outside `connections` deliberately — an isolated lane must never be handed to a
+    /// second query — but being outside the pool also meant being outside teardown: `cancel`
+    /// walked `connections` alone, so a smoke probe in flight at `stopTunnel` kept a live TLS
+    /// connection and its socket for up to `timeoutSeconds` past the tunnel that started it.
+    ///
+    /// Identical in shape to `DoQTransport`'s registry and fixed for the same reason, with one
+    /// difference in what it costs: no energy counter reads the DoT callback, so this is a
+    /// resource straggler rather than a corrupted measurement. What it shares is the teardown
+    /// bug in ``cancel`` — see ``isQuiesced``.
+    private var isolatedConnections: [ObjectIdentifier: DoTConnection] = [:]
     private var activeQueryCount = 0
     private var shouldResetWhenIdle = false
+    /// Set by ``cancel`` (tunnel teardown), cleared by ``resume`` (tunnel start). While set,
+    /// every entry point refuses rather than opening a connection.
+    ///
+    /// Cancelling alone did not keep the transport down: `cancelLocked` completes each
+    /// in-flight query with `.receiveFailed`, `ResolverOrchestrator.resolveEndpoints` reads a
+    /// nil response as "try the next endpoint", and stop cleanup does not drain in-flight
+    /// resolver work — so that failover, and any query still inside the serving pipeline,
+    /// re-entered `resolve` after teardown, found `connections` empty and built a fresh pool.
+    /// Teardown was creating the connections it had just cancelled.
+    ///
+    /// The pooled case matters more here than it does for DoQ: DoT lanes are REUSED across
+    /// queries rather than opened per query, so a pool rebuilt by a straggler outlives the
+    /// rebuild — `startTunnel`'s own `resetConnections` runs early enough that a straggler can
+    /// re-create the pool after it, leaving the next session serving from connections the
+    /// previous session's dying work opened.
+    private var isQuiesced = false
 
     /// Creates connection pools whose per-query timeout budget is measured in whole seconds.
     public init(timeoutSeconds: Int, debugLogger: DNSTransportDebugLogger? = nil) {
         self.timeoutSeconds = timeoutSeconds
         self.debugLogger = debugLogger
+        self.isolatedLaneObserver = nil
+    }
+
+    /// Test-only overload carrying an observer of isolated-lane registration.
+    ///
+    /// The DoQ sibling's seam, for the same reason: `resolveIsolated` registers a lane and
+    /// then hands the query to that lane's own queue, so any read of ``laneBookkeeping`` from
+    /// outside races the completion that retires what is being counted. A well-formed query
+    /// to an unroutable address only *usually* stays in flight — an environment can report
+    /// the route unreachable immediately (Codex P2, PR #523). Invoked while the registration
+    /// is still current, so a test learns the count at the one unambiguous instant.
+    init(
+        timeoutSeconds: Int,
+        debugLogger: DNSTransportDebugLogger? = nil,
+        isolatedLaneObserver: (@Sendable (Int) -> Void)?
+    ) {
+        self.timeoutSeconds = timeoutSeconds
+        self.debugLogger = debugLogger
+        self.isolatedLaneObserver = isolatedLaneObserver
     }
 
     /// Atomically removes and cancels every pooled TLS connection, including lanes serving active queries.
+    ///
+    /// The MID-session reset (a resolver configuration change), so it deliberately does NOT
+    /// quiesce and does NOT touch isolated lanes: the transport must keep serving, and an
+    /// isolated probe already in flight belongs to the session that is still running. Tunnel
+    /// teardown is ``cancel``.
     public func resetConnections() {
         let connectionsToCancel: [DoTConnection]
         connectionLock.lock()
@@ -42,6 +95,16 @@ public final class DoTTransport: @unchecked Sendable {
     public func resetConnectionsWhenIdle() {
         let connectionsToCancel: [DoTConnection]?
         connectionLock.lock()
+        // Nothing to arm while quiesced, and arming would OUTLIVE the teardown: this is
+        // reached from the failure path of every DoT query, including the stragglers whose
+        // completions `cancel` itself fires. `shouldResetWhenIdle` is transport state, not
+        // per-session state, so a straggler arming it after `cancel` cleared it would carry
+        // the flag into the next tunnel session and tear down THAT session's pool at its
+        // first idle moment — costing it a TLS handshake the previous session caused.
+        guard !isQuiesced else {
+            connectionLock.unlock()
+            return
+        }
         shouldResetWhenIdle = true
         if activeQueryCount == 0 {
             connectionsToCancel = connections.values.flatMap { $0 }
@@ -55,20 +118,68 @@ public final class DoTTransport: @unchecked Sendable {
         connectionsToCancel?.forEach { $0.cancel() }
     }
 
-    /// Cancels all pooled work during tunnel shutdown using the immediate reset semantics.
+    /// Cancels every lane — pooled and isolated — during tunnel shutdown and refuses further
+    /// work until ``resume``.
+    ///
+    /// The pairing with ``resume`` scopes DoT work to a tunnel LIFECYCLE rather than to a
+    /// process: `cancel` is called once from the provider's stop cleanup and `resume` once
+    /// from its per-lifecycle resolver reset.
+    ///
+    /// WHAT THIS DOES NOT YET CLOSE, the same residual as the DoQ sibling and stated for the
+    /// same reason: `isQuiesced` is a WINDOW, not a generation. `cancel` only ENQUEUES each
+    /// lane's cancellation and the stop path does not await those queues, so a stop/start
+    /// completing first leaves `resume` unable to tell the previous lifecycle's late
+    /// completion from the new session's own work — that completion reports `.receiveFailed`,
+    /// `ResolverOrchestrator.resolveEndpoints` advances to the next endpoint, and the stale
+    /// attempt builds a pool in the NEW session (Codex P1, PRs #522/#523). Generation-tagged
+    /// admission threaded from `resolveUpstream` is the fix, and covers DoH too; its own slice.
+    ///
+    /// Distinct from ``resetConnections``, the MID-session reset, which must leave the
+    /// transport serving.
     public func cancel() {
-        resetConnections()
+        let connectionsToCancel: [DoTConnection]
+        connectionLock.lock()
+        isQuiesced = true
+        connectionsToCancel = connections.values.flatMap { $0 } + Array(isolatedConnections.values)
+        connections = [:]
+        nextConnectionIndexByKey = [:]
+        isolatedConnections = [:]
+        shouldResetWhenIdle = false
+        connectionLock.unlock()
+        connectionsToCancel.forEach { $0.cancel() }
+    }
+
+    /// Re-admits work after a ``cancel``, for the tunnel lifecycle now starting.
+    public func resume() {
+        connectionLock.lock()
+        isQuiesced = false
+        connectionLock.unlock()
     }
 
     /// Resolves through a pooled endpoint lane and asynchronously returns one classified transport response.
     public func resolve(
         _ query: Data,
         endpoint: DNSOverTLSEndpoint,
+        isStillAdmitted: @escaping @Sendable () -> Bool = { true },
+        deadline: MonotonicDeadline? = nil,
         completion: @escaping @Sendable (DNSTransportResponse) -> Void
     ) {
-        beginQuery()
-        let connection = connection(for: endpoint)
-        connection.resolve(query) { [weak self] upstreamResponse in
+        // The quiesce check, the active-query accounting and the lane hand-out share ONE
+        // critical section on purpose. Split across sections — as the `beginQuery()` +
+        // `connection(for:)` pair this replaces was — a `cancel` landing in the gap would be
+        // followed by `connectionPoolLocked` rebuilding the pool teardown had just emptied.
+        let connection: DoTConnection
+        connectionLock.lock()
+        guard !isQuiesced else {
+            connectionLock.unlock()
+            completion(Self.refusedResponse)
+            return
+        }
+        activeQueryCount += 1
+        connection = pooledConnectionLocked(for: endpoint)
+        connectionLock.unlock()
+
+        connection.resolve(query, isStillAdmitted: isStillAdmitted, deadline: deadline) { [weak self] upstreamResponse in
             self?.finishQuery()
             completion(upstreamResponse)
         }
@@ -78,29 +189,80 @@ public final class DoTTransport: @unchecked Sendable {
     public func resolveIsolated(
         _ query: Data,
         endpoint: DNSOverTLSEndpoint,
+        isStillAdmitted: @escaping @Sendable () -> Bool = { true },
+        deadline: MonotonicDeadline? = nil,
         completion: @escaping @Sendable (DNSTransportResponse) -> Void
     ) {
-        let connection = DoTConnection(endpoint: endpoint, timeoutSeconds: timeoutSeconds, debugLogger: debugLogger)
-        connection.resolve(query) { [connection] upstreamResponse in
+        let connection: DoTConnection
+        connectionLock.lock()
+        guard !isQuiesced else {
+            connectionLock.unlock()
+            completion(Self.refusedResponse)
+            return
+        }
+        // Built and registered under the same lock the refusal is read under, so a `cancel`
+        // cannot slip between the admission and the registration and leave an untracked
+        // connection behind — the exact lane this registry exists to reach.
+        connection = DoTConnection(endpoint: endpoint, timeoutSeconds: timeoutSeconds, debugLogger: debugLogger)
+        isolatedConnections[ObjectIdentifier(connection)] = connection
+        let registeredLaneCount = isolatedConnections.count
+        connectionLock.unlock()
+        // Reported BEFORE the query is handed to the lane's queue, which is the only instant
+        // the count is unambiguous — see the test-only initialiser.
+        isolatedLaneObserver?(registeredLaneCount)
+
+        connection.resolve(query, isStillAdmitted: isStillAdmitted, deadline: deadline) { [weak self, connection] upstreamResponse in
+            self?.forgetIsolatedConnection(connection)
             connection.cancel()
             completion(upstreamResponse)
         }
     }
 
-    private func connection(for endpoint: DNSOverTLSEndpoint) -> DoTConnection {
+    /// A refusal wears the same outcome an externally cancelled lane completes with, because
+    /// it is the same event one moment earlier: the tunnel is gone. `resolveEndpoints` reads
+    /// the nil response as a failed attempt and walks on, which while quiesced means every
+    /// remaining endpoint is refused too — no partial resolution, and no wire contact.
+    private static let refusedResponse = DNSTransportResponse(response: nil, outcome: .receiveFailed)
+
+    /// The lane bookkeeping ``cancel`` and ``resume`` are responsible for — a read-only
+    /// snapshot under the transport's own lock, `internal` so the storage keeps its private,
+    /// lock-confined contract. See `DoQTransport.LaneBookkeeping` for why the states it
+    /// exposes cannot otherwise be observed without contacting a real resolver.
+    struct LaneBookkeeping: Equatable {
+        var isQuiesced: Bool
+        var isolatedLaneCount: Int
+        var pooledEndpointCount: Int
+        var idleResetIsArmed: Bool
+    }
+
+    var laneBookkeeping: LaneBookkeeping {
         connectionLock.lock()
         defer {
             connectionLock.unlock()
         }
+        return LaneBookkeeping(
+            isQuiesced: isQuiesced,
+            isolatedLaneCount: isolatedConnections.count,
+            pooledEndpointCount: connections.count,
+            idleResetIsArmed: shouldResetWhenIdle
+        )
+    }
 
+    private func forgetIsolatedConnection(_ connection: DoTConnection) {
+        connectionLock.lock()
+        isolatedConnections.removeValue(forKey: ObjectIdentifier(connection))
+        connectionLock.unlock()
+    }
+
+    private func pooledConnectionLocked(for endpoint: DNSOverTLSEndpoint) -> DoTConnection {
         let key = endpoint.cacheIdentifier
-        let pool = connectionPool(for: endpoint)
+        let pool = connectionPoolLocked(for: endpoint)
         let index = nextConnectionIndexByKey[key, default: 0] % pool.count
         nextConnectionIndexByKey[key] = (index + 1) % pool.count
         return pool[index]
     }
 
-    private func connectionPool(for endpoint: DNSOverTLSEndpoint) -> [DoTConnection] {
+    private func connectionPoolLocked(for endpoint: DNSOverTLSEndpoint) -> [DoTConnection] {
         let key = endpoint.cacheIdentifier
         if let pool = connections[key], !pool.isEmpty {
             return pool
@@ -112,12 +274,6 @@ public final class DoTTransport: @unchecked Sendable {
         connections[key] = pool
         nextConnectionIndexByKey[key] = 0
         return pool
-    }
-
-    private func beginQuery() {
-        connectionLock.lock()
-        activeQueryCount += 1
-        connectionLock.unlock()
     }
 
     private func finishQuery() {
@@ -141,6 +297,16 @@ final class DoTConnection: @unchecked Sendable {
     private struct PendingQuery {
         let query: Data
         let completion: @Sendable (DNSTransportResponse) -> Void
+        /// Whether the work that admitted this query is still the live one, asked again at the
+        /// SEND rather than trusted from when it was enqueued.
+        ///
+        /// This lane queues: a query waits behind another query and behind a handshake, so
+        /// seconds separate the caller handing it over from the bytes leaving. Every gate above
+        /// has already passed by then, so this is the last place a data path replaced in that
+        /// window can still stop the query (PR #611). Defaults to always-admitted, which is every
+        /// caller that carries no such token.
+        let isStillAdmitted: @Sendable () -> Bool
+        let deadline: MonotonicDeadline
         var connectionAttemptCount = 0
     }
 
@@ -162,6 +328,19 @@ final class DoTConnection: @unchecked Sendable {
     private var lastConnectionActivityAt = Date.distantPast
     private var currentAttemptReusedConnection = false
     private var connectionStartedAtMonotonicTime: TimeInterval?
+    /// Refuses work that arrives after this lane was cancelled, rather than reconnecting.
+    ///
+    /// The transport's quiesce closes the front door but not this one: `resolve` releases the
+    /// transport lock before calling into the lane, so a `cancel` landing in that gap enqueues
+    /// `cancelLocked` AHEAD of the query's own append — and without this flag the append then
+    /// ran `startNextQueryIfNeeded` and opened a FRESH TLS connection, after teardown, on a
+    /// lane teardown had just cancelled. `DoQConnection` has always had this guard; DoT did
+    /// not, which is the one place the two transports' teardown genuinely differed.
+    ///
+    /// Scoped to `cancelLocked` alone. The idle-staleness refresh and the retry ladder go
+    /// through `resetConnectionLocked`, which does not set this — a lane that reconnects
+    /// because its server closed it idle is not a lane anyone cancelled.
+    private var isCancelled = false
 
     // Cloudflare closes idle DoT connections after ~10s without surfacing a
     // state change on the pooled NWConnection; a query sent on such a zombie
@@ -185,6 +364,8 @@ final class DoTConnection: @unchecked Sendable {
 
     func resolve(
         _ query: Data,
+        isStillAdmitted: @escaping @Sendable () -> Bool = { true },
+        deadline: MonotonicDeadline? = nil,
         completion: @escaping @Sendable (DNSTransportResponse) -> Void
     ) {
         queue.async { [weak self] in
@@ -193,7 +374,15 @@ final class DoTConnection: @unchecked Sendable {
                 return
             }
 
-            pendingQueries.append(PendingQuery(query: query, completion: completion))
+            guard !isCancelled else {
+                completion(DNSTransportResponse(response: nil, outcome: .receiveFailed))
+                return
+            }
+
+            pendingQueries.append(
+                PendingQuery(
+                    query: query, completion: completion, isStillAdmitted: isStillAdmitted,
+                    deadline: deadline ?? MonotonicDeadline(after: TimeInterval(max(0, self.timeoutSeconds)))))
             startNextQueryIfNeeded()
         }
     }
@@ -222,6 +411,22 @@ final class DoTConnection: @unchecked Sendable {
             return
         }
 
+        // AT THE DEQUEUE, and again after the handshake below. This lane serialises, so a query
+        // can sit behind another one for that query's whole timeout before reaching here — and
+        // then wait again for the connection. Both waits are windows in which the data path that
+        // admitted it can be replaced, and they are separate: the first is survivable without a
+        // connection ever existing, which is also what makes it testable (PR #611).
+        guard !currentQuery.deadline.hasExpired() else {
+            finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .expiredBeforeSend), resetsConnection: false)
+            return
+        }
+        guard currentQuery.isStillAdmitted() else {
+            finishCurrentQuery(
+                DNSTransportResponse(response: nil, outcome: .refusedAfterLatchReplaced),
+                resetsConnection: false)
+            return
+        }
+
         guard DNSWireMessage.transactionID(in: currentQuery.query) != nil else {
             finishCurrentQuery(
                 DNSTransportResponse(response: nil, outcome: .receiveFailed),
@@ -245,6 +450,33 @@ final class DoTConnection: @unchecked Sendable {
 
             guard isReady else {
                 failOrRetryCurrentQuery(outcome: .receiveFailed, resetsConnection: true)
+                return
+            }
+
+            // THE SEND SEAM, and the reason the predicate is asked here rather than trusted from
+            // when the query was enqueued: everything above this line can take seconds — the wait
+            // behind another query on this lane, and the TLS handshake itself. A data path
+            // replaced in that window leaves this query addressed to a resolver the user has
+            // stopped choosing, and every earlier gate has already passed (PR #611).
+            //
+            // NOT `resetsConnection`: the connection is fine and other queries on this lane may
+            // be perfectly current. Only this query is stale.
+            //
+            // `self.currentQuery`, QUALIFIED. The enclosing function opens with
+            // `guard let currentQuery else { return }`, so the bare name here is that shadowed
+            // NON-optional local — captured before the handshake. The property is what
+            // `sendCurrentQuery` will actually read, and it can have been finished and cleared
+            // while the handshake ran, so the property is the one to ask. (The DoQ lane writes
+            // the same check unqualified because `handleConnectionState` shadows nothing; the two
+            // differ for that reason, not by accident.)
+            if self.currentQuery?.deadline.hasExpired() == true {
+                finishCurrentQuery(DNSTransportResponse(response: nil, outcome: .expiredBeforeSend), resetsConnection: false)
+                return
+            }
+            guard self.currentQuery?.isStillAdmitted() ?? true else {
+                finishCurrentQuery(
+                    DNSTransportResponse(response: nil, outcome: .refusedAfterLatchReplaced),
+                    resetsConnection: false)
                 return
             }
 
@@ -445,7 +677,8 @@ final class DoTConnection: @unchecked Sendable {
             self.failOrRetryCurrentQuery(outcome: .timeout, resetsConnection: false)
         }
         currentTimeout = timeout
-        queue.asyncAfter(deadline: .now() + .seconds(timeoutSeconds), execute: timeout)
+        let remaining = min(TimeInterval(timeoutSeconds), currentQuery?.deadline.remainingSeconds() ?? TimeInterval(timeoutSeconds))
+        queue.asyncAfter(deadline: .now() + remaining, execute: timeout)
     }
 
     private func failOrRetryCurrentQuery(outcome: DNSTransportOutcome, resetsConnection: Bool) {
@@ -532,6 +765,7 @@ final class DoTConnection: @unchecked Sendable {
     }
 
     private func cancelLocked() {
+        isCancelled = true
         currentTimeout?.cancel()
         currentTimeout = nil
         let activeCompletion = currentQuery?.completion

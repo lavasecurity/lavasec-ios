@@ -1,3 +1,4 @@
+import CommonCrypto
 import XCTest
 @testable import LavaSecCore
 @testable import LavaSecAppServices
@@ -335,6 +336,122 @@ final class ZeroKnowledgeBackupEnvelopeTests: XCTestCase {
         )
 
         XCTAssertThrowsError(try envelope.decryptWithPassword("wrong2026!"))
+    }
+
+    func testRejectsExcessiveStoredPBKDFWorkBeforeUnlock() throws {
+        let envelope = try ZeroKnowledgeBackupEnvelope.makeForTesting(
+            payload: BackupConfigurationPayload(configuration: AppConfiguration()),
+            password: "test-password",
+            recoveryPhrase: "test-recovery"
+        )
+        let slot = try XCTUnwrap(envelope.keySlots.first { $0.kind == .password })
+        let changed = replacingIterations(1_000_001, in: slot, envelope: envelope)
+
+        XCTAssertThrowsError(try changed.decryptWithPassword("test-password")) { error in
+            XCTAssertEqual(error as? ZeroKnowledgeBackupEnvelopeError,
+                           .keyDerivationFailed(Int32(kCCParamError)))
+        }
+    }
+
+    func testRejectsExcessivePBKDFWorkWhenCreatingEnvelope() throws {
+        XCTAssertThrowsError(try ZeroKnowledgeBackupEnvelope.make(
+            payload: BackupConfigurationPayload(configuration: AppConfiguration()),
+            password: "test-password", recoveryPhrase: "test-recovery",
+            passwordIterations: 1_000_001
+        )) { error in
+            XCTAssertEqual(error as? ZeroKnowledgeBackupEnvelopeError,
+                           .keyDerivationFailed(Int32(kCCParamError)))
+        }
+    }
+
+    func testAllPBKDFUnlockPathsRejectUnsupportedWork() throws {
+        let envelope = try ZeroKnowledgeBackupEnvelope.makeForTesting(
+            payload: BackupConfigurationPayload(configuration: AppConfiguration()),
+            password: "test-password", recoveryPhrase: "test-recovery"
+        )
+        let original = try XCTUnwrap(envelope.keySlots.first)
+        for kind in [ZeroKnowledgeBackupKeySlotKind.password, .recoveryPhrase,
+                     .keychain, .assistedRecovery, .passkey] {
+            for iterations in [Int.min, -1, 0, 1_000_001, Int(UInt32.max), Int.max] {
+                let slot = ZeroKnowledgeBackupKeySlot(
+                    kind: kind, kdf: original.kdf, salt: original.salt,
+                    iterations: iterations, wrappedKey: original.wrappedKey
+                )
+                let changed = ZeroKnowledgeBackupEnvelope(
+                    payloadCiphertext: envelope.payloadCiphertext, keySlots: [slot],
+                    serverRecoveryShare: "test-share", ciphertextByteSize: envelope.ciphertextByteSize
+                )
+                let unlock: () throws -> BackupConfigurationPayload = {
+                    switch kind {
+                    case .password: try changed.decryptWithPassword("test-password")
+                    case .recoveryPhrase: try changed.decryptWithRecoveryPhrase("test-recovery")
+                    case .keychain: try changed.decryptWithKeychainSecret("test-device")
+                    case .assistedRecovery: try changed.decryptWithAssistedRecoveryPhrase("test-recovery")
+                    case .passkey: try changed.decryptWithPasskeySecret("test-passkey")
+                    }
+                }
+                XCTAssertThrowsError(try unlock(), "\(kind), \(iterations)") { error in
+                    XCTAssertEqual(error as? ZeroKnowledgeBackupEnvelopeError,
+                                   .keyDerivationFailed(Int32(kCCParamError)))
+                }
+            }
+        }
+    }
+
+    func testSupportedPBKDFBoundaryCountsRoundTripWithoutClamping() throws {
+        let payload = BackupConfigurationPayload(configuration: AppConfiguration(blockedDomains: ["blocked.example"]))
+        for iterations in [1, 8, 210_000, 1_000_000] {
+            let envelope = try ZeroKnowledgeBackupEnvelope.make(
+                payload: payload, password: "test-password", recoveryPhrase: "test-recovery",
+                passwordIterations: iterations
+            )
+            XCTAssertTrue(envelope.keySlots.allSatisfy { $0.iterations == iterations })
+            XCTAssertEqual(try envelope.decryptWithPassword("test-password"), payload)
+        }
+    }
+
+    func testPRFRestoreCannotCopyExcessiveDeviceSlotWorkIntoRekey() throws {
+        let payload = BackupConfigurationPayload(configuration: AppConfiguration())
+        let prfOutput = Data(repeating: 0x2A, count: 32)
+        let envelope = try ZeroKnowledgeBackupEnvelope.makeWithPRFForTesting(
+            payload: payload, deviceSecret: "test-device", recoveryPhrase: "test-recovery",
+            passkeyPRFOutput: prfOutput, passkeyPRFSalt: Data(repeating: 0x07, count: 32),
+            passkeyCredentialID: "test-credential"
+        )
+        let deviceSlot = try XCTUnwrap(envelope.keySlots.first { $0.kind == .keychain })
+        let changed = replacingIterations(1_000_001, in: deviceSlot, envelope: envelope)
+        // HKDF does not use PBKDF rounds, but the subsequent device rekey does.
+        XCTAssertEqual(try changed.decryptWithPasskeyPRFOutput(prfOutput), payload)
+        XCTAssertThrowsError(try changed.rekeyingDeviceSlot(
+            newDeviceSecret: "new-test-device", unlockingPasskeyPRFOutput: prfOutput
+        )) { error in
+            XCTAssertEqual(error as? ZeroKnowledgeBackupEnvelopeError,
+                           .keyDerivationFailed(Int32(kCCParamError)))
+        }
+        XCTAssertThrowsError(try changed.resealingPayload(payload, deviceSecret: "test-device")) { error in
+            XCTAssertEqual(error as? ZeroKnowledgeBackupEnvelopeError,
+                           .keyDerivationFailed(Int32(kCCParamError)))
+        }
+    }
+
+    private func replacingIterations(
+        _ iterations: Int, in slot: ZeroKnowledgeBackupKeySlot,
+        envelope: ZeroKnowledgeBackupEnvelope
+    ) -> ZeroKnowledgeBackupEnvelope {
+        ZeroKnowledgeBackupEnvelope(
+            payloadCiphertext: envelope.payloadCiphertext,
+            keySlots: envelope.keySlots.map { candidate in
+                guard candidate.kind == slot.kind else { return candidate }
+                return ZeroKnowledgeBackupKeySlot(
+                    kind: candidate.kind, kdf: candidate.kdf, salt: candidate.salt,
+                    iterations: iterations, wrappedKey: candidate.wrappedKey,
+                    credentialID: candidate.credentialID
+                )
+            },
+            serverRecoveryShare: envelope.serverRecoveryShare,
+            ciphertextByteSize: envelope.ciphertextByteSize,
+            createdAt: envelope.createdAt
+        )
     }
 
     func testRejectsUnsupportedKeyDerivationFunction() throws {

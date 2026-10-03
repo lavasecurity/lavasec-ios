@@ -74,6 +74,29 @@ def target(
     }
 
 
+def binary_target(name: str, path: str) -> dict[str, object]:
+    """The approved shape of a prebuilt-artifact target.
+
+    A binary target compiles no reviewed source, so it is the one place a foreign
+    object file can enter the package graph. It is whitelisted by exact shape —
+    including `packageAccess: False` and the artifact path — so a second binary
+    target, a relocated artifact, or a remote `url:`/`checksum:` variant (which
+    would fetch bytes CI never rebuilt) all fail the boundary instead of shipping.
+    The one approved artifact is the WireGuard engine, whose bytes CI proves equal
+    a from-source rebuild (scripts/check-wireguard-core-drift.sh).
+    """
+    return {
+        "dependencies": [],
+        "exclude": [],
+        "name": name,
+        "packageAccess": False,
+        "path": path,
+        "resources": [],
+        "settings": [],
+        "type": "binary",
+    }
+
+
 EXPECTED_TARGETS = [
     target(
         "LavaSecKit",
@@ -99,7 +122,18 @@ EXPECTED_TARGETS = [
         ["LavaSecKit", "LavaSecFilterPipeline"],
     ),
     target("LavaSecCore", "regular", LAYER_TARGETS),
-    target("LavaSecCoreTests", "test", ["LavaSecCore", *LAYER_TARGETS]),
+    binary_target(
+        "LavaSecWGCore",
+        "ThirdParty/wireguard-core/build/LavaSecWGCore.xcframework",
+    ),
+    # Sits beside the layers but deliberately outside LAYER_TARGETS: the façade must not
+    # re-export it, and no layer may depend on it (docs/architecture/module-boundaries.md).
+    target("LavaSecChainedUpstream", "regular", ["LavaSecKit", "LavaSecWGCore"]),
+    target(
+        "LavaSecCoreTests",
+        "test",
+        ["LavaSecCore", *LAYER_TARGETS, "LavaSecChainedUpstream"],
+    ),
     target("LavaSecCoreFacadeCompileTests", "test", ["LavaSecCore"]),
 ]
 
@@ -116,6 +150,7 @@ def library_product(name: str, targets: list[str]) -> dict[str, object]:
 EXPECTED_PRODUCTS = [
     library_product("LavaSecCore", ["LavaSecCore", *LAYER_TARGETS]),
     *[library_product(name, [name]) for name in LAYER_TARGETS],
+    library_product("LavaSecChainedUpstream", ["LavaSecChainedUpstream"]),
 ]
 
 

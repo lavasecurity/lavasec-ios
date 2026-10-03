@@ -1,319 +1,403 @@
 import SwiftUI
+import UserNotifications
 import LavaSecKit
 import LavaSecAppServices
+import LavaSecPresentation
 
 struct LavaOnboardingView: View {
     @Binding var hasSeenOnboarding: Bool
-    /// Invoked when the user finishes setup via "Go to Settings" so the host can
-    /// land them on the Settings tab instead of Guard.
-    var onRequestOpenSettings: () -> Void = {}
+    /// Installs the optional DNS configuration; selection remains an explicit Settings action.
+    var installDNSProfile: () async throws -> Void = {}
+    var supportsDNSProfile = false
+    /// QA rehearsal: all setup actions and choices stay in this view's transient state.
+    var isMock = false
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: AppViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
+    @ObservedObject private var handoff = LavaOnboardingHandoff.shared
+    @State private var sourceFrame = CGRect.zero
+    @State private var footerHeight: CGFloat = 0
+    @State private var travelOrigin = CGRect.zero
+    @State private var travelStarted: Date?
+    @State private var opening = false
+    @State private var surroundingsOpacity = 1.0
+    @State private var sessionID: String?
+    @State private var arrivalAttempt = 0
+    @State private var arrivalFailed = false
     @State private var page: OnboardingPage = .lava
     @State private var pageHistory: [OnboardingPage] = []
     @State private var visitedPages: Set<OnboardingPage> = [.lava]
-    @State private var featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
-    @State private var guardHeroBlinkTrigger = 0
+    @State private var didInstallVPN = false
+    @State private var notificationsEnabled = false
     @State private var isInstallingVPN = false
     @State private var isRequestingNotifications = false
-    @State private var isShowingAdditionalSetup = false
+    @State private var isInstallingDNSProfile = false
+    @State private var didInstallDNSProfile = false
+    @State private var dnsProfileError: String?
     @State private var protectionLevel: OnboardingProtectionLevel = .recommended
     @State private var useEncryptedFallback = true
-    @State private var fallbackResolverPresetID = DNSResolverPreset.mullvadDoH.id
+    @State private var useDNSProfile = true
+    @State private var hasLoadedConnectionChoice = false
+    @State private var expressionTask: Task<Void, Never>?
+    @State private var blinkTrigger = 0
+    @State private var finishTrigger = 0
+    @State private var isSmiling = false
+    private let panelFadeDelay = 0.1
+    private let panelFadeDuration = 0.55
+
+    private var vpnInstalled: Bool {
+        if isMock { return didInstallVPN }
+        #if targetEnvironment(simulator)
+        return didInstallVPN || viewModel.isVPNConfigurationInstalled
+        #else
+        return viewModel.isVPNConfigurationInstalled
+        #endif
+    }
+    // Trigger the panel with the return from grateful to awake; its brief delay
+    // lets the face lead while the last part of the travel settles.
+    private var panelReveal: Double { page == .done && travelStarted != nil && !isSmiling ? 1 : 0 }
+    private var isBusy: Bool { isInstallingVPN || isRequestingNotifications || isInstallingDNSProfile || opening }
+    private var mascotState: GuardianMascotState {
+        if opening { return .sleeping }
+        if page == .vpn && (!vpnInstalled || isInstallingVPN) { return .sleeping }
+        return isSmiling ? .grateful : .awake
+    }
 
     var body: some View {
+        ZStack {
+            if isMock {
+                // Same root placement as RootView, outside the overlay's safe-area geometry.
+                LavaAppHost(onboardingPreview: true).ignoresSafeArea(.all, edges: .bottom)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+            }
+            GeometryReader { proxy in
+                ZStack {
+                    NavigationStack {
+                        onboardingContent.lavaFullSheetHeader("", leading: {
+                            if !pageHistory.isEmpty {
+                                LavaToolbarIconButton(systemName: "chevron.left", accessibilityLabel: "Back", action: goBack)
+                                    .disabled(isBusy).opacity(opening ? 0 : 1)
+                            }
+                        }, trailing: {
+                            if isMock {
+                                LavaToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close") { dismiss() }
+                                    .opacity(opening ? 0 : 1)
+                            }
+                        })
+                        .toolbarBackground(page == .lava || page == .done ? .hidden : .automatic, for: .navigationBar)
+                    }
+                    .mask { coverMask }
+                    .opacity(surroundingsOpacity)
+                    TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: travelStarted == nil || handoff.phase != "arriving")) { timeline in
+                        mascotAndAction(in: proxy, at: timeline.date)
+                    }
+                }
+            }
+        }
+        .onAppear { sessionID = handoff.begin(mock: isMock) }
+        .onDisappear { expressionTask?.cancel(); handoff.end(session: sessionID) }
+    }
+
+    private var coverMask: some View {
+        GeometryReader { mask in
+            Rectangle().overlay {
+                if let panel = handoff.frames["panel"] {
+                    Rectangle()
+                        .frame(width: panel.width, height: panel.height)
+                        .position(x: panel.midX - mask.frame(in: .global).minX,
+                                  y: panel.midY - mask.frame(in: .global).minY)
+                        .opacity(panelReveal)
+                        .animation(.easeInOut(duration: panelFadeDuration)
+                            .delay(panelReveal == 1 ? panelFadeDelay : 0), value: panelReveal)
+                        .blendMode(.destinationOut)
+                }
+            }.compositingGroup()
+        }.ignoresSafeArea()
+    }
+
+    private func mascotAndAction(in proxy: GeometryProxy, at date: Date) -> some View {
+        let destination = handoff.frames["mascot"] ?? sourceFrame
+        let progress = opening ? 1 : travelStarted.map { OnboardingGuardTravel.progress(at: date.timeIntervalSince($0)) } ?? 0
+        let origin = travelStarted == nil ? sourceFrame : travelOrigin
+        let center = CGPoint(x: origin.midX + (destination.midX - origin.midX) * progress,
+                             y: origin.midY + (destination.midY - origin.midY) * progress)
+        return ZStack {
+            ZStack {
+                SoftShieldGuardian(size: LavaGuardMetrics.mascotSize, state: mascotState,
+                    animates: true, blinkTrigger: blinkTrigger, finishTrigger: finishTrigger, shieldStyle: viewModel.customization.lavaGuardLook,
+                    keepsColorWhenSleeping: !opening)
+                    .accessibilityHidden(true)
+                // Expose the canonical drawing slot, not the changing outline's tight bounds.
+                Color.clear.accessibilityElement().accessibilityLabel("Lava")
+                    .accessibilityValue(mascotState.rawValue)
+                    .accessibilityIdentifier("onboarding.mascot")
+            }
+            .frame(width: LavaGuardMetrics.mascotSize, height: LavaGuardMetrics.mascotSize)
+            .position(x: center.x - proxy.frame(in: .global).minX,
+                      y: center.y - proxy.frame(in: .global).minY)
+            .opacity(page == .lava || handoff.phase == "released" ? 0 : 1)
+            .animation(guardRevealAnimation, value: page == .lava)
+            .allowsHitTesting(false)
+            if page == .done, panelReveal == 1, let panel = handoff.frames["panel"] {
+                Color.clear.frame(width: panel.width, height: panel.height)
+                    .accessibilityElement().accessibilityLabel("Ready")
+                    .accessibilityValue("Your next step to a safer internet.")
+                    .accessibilityIdentifier("onboarding.ready")
+                    .position(x: panel.midX - proxy.frame(in: .global).minX,
+                              y: panel.midY - proxy.frame(in: .global).minY)
+                    .allowsHitTesting(false)
+            }
+            if page == .done, panelReveal == 1, let action = handoff.frames["action"] {
+                Button(action: openGuard) { Color.clear.contentShape(Rectangle()) }
+                    .frame(width: action.width, height: action.height)
+                    .position(x: action.midX - proxy.frame(in: .global).minX,
+                              y: action.midY - proxy.frame(in: .global).minY)
+                    .accessibilityLabel("Open Guard").accessibilityIdentifier("onboarding.primary")
+                    .disabled(isBusy)
+            }
+        }
+    }
+
+    private var onboardingContent: some View {
         GeometryReader { proxy in
             ZStack {
-                LavaStyle.groupedBackground
-                    .ignoresSafeArea()
+                LavaStyle.groupedBackground.ignoresSafeArea()
 
-                OnboardingLavaFloor(cornerRadius: 0, intensity: 1.35)
+                OnboardingLavaBackdrop()
                     .ignoresSafeArea()
                     .opacity(page == .lava ? 1 : 0)
+                    .animation(reduceMotion ? .easeInOut(duration: 0.25) : .easeOut(duration: 0.7), value: page == .lava)
+                    .allowsHitTesting(false)
+
+                OnboardingLavaFloor(cornerRadius: 0, intensity: 1.35, isActive: page == .lava)
+                    .ignoresSafeArea()
+                    .offset(y: page == .lava || reduceMotion ? 0 : proxy.size.height * 1.1)
+                    .opacity(reduceMotion && page != .lava ? 0 : 1)
+                    .allowsHitTesting(false)
 
                 VStack(spacing: 0) {
-                    topBar
+                    // The slot remains in layout; one persistent drawing lives above the cover.
+                    Color.clear
+                        .frame(height: 128)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { sourceFrame = $0 }
 
-                    ScrollView {
-                        currentPage
-                            .padding(.horizontal, page == .lava ? 0 : 24)
-                            .padding(.top, page == .lava ? 0 : 12)
-                            .padding(.bottom, page == .lava ? 0 : 24)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: max(520, proxy.size.height - 154), alignment: .top)
+                    ZStack {
+                        if page == .lava {
+                            ScrollView {
+                                internetIsLavaPage
+                                    .padding(.horizontal, 24)
+                                    .padding(.top, 72)
+                                    .padding(.bottom, 24)
+                                    .frame(maxWidth: 600)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .scrollIndicators(.hidden)
+                            // The outgoing copy rides the same distance and timing as the waves.
+                            .transition(reduceMotion ? .opacity.animation(revealAnimation) :
+                                .offset(y: proxy.size.height * 1.1).animation(revealAnimation))
+                        } else {
+                            ScrollView {
+                                currentPage
+                                    .padding(.horizontal, 24)
+                                    .padding(.top, 8)
+                                    .padding(.bottom, 24)
+                                    .frame(maxWidth: 600)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .scrollIndicators(.hidden)
+                            .id(page)
+                            .transition(.asymmetric(
+                                insertion: .opacity.animation(page == .features ? guardRevealAnimation : pageChangeAnimation),
+                                removal: .opacity.animation(pageChangeAnimation)))
+                        }
                     }
-                    .scrollIndicators(.hidden)
+                    .clipped()
 
-                    footer
+                    if page == .done {
+                        // Preserve the measured layout without retaining invisible controls.
+                        Color.clear.frame(height: footerHeight).accessibilityHidden(true)
+                    } else {
+                        footer
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                            .transition(.opacity)
+                    }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
         .interactiveDismissDisabled()
-        .sheet(isPresented: $isShowingAdditionalSetup) {
-            OnboardingAdditionalSetupSheet(
-                onGoToSettings: {
-                    onRequestOpenSettings()
-                    hasSeenOnboarding = true
-                },
-                onFinish: {
-                    hasSeenOnboarding = true
-                }
-            )
-            .environmentObject(viewModel)
-        }
         .onAppear {
-            prepareAnimations(for: page)
+            if !isMock && !hasLoadedConnectionChoice {
+                useEncryptedFallback = viewModel.configuration.usesEncryptedDeviceDNSFallback
+                hasLoadedConnectionChoice = true
+            }
         }
-        .onChange(of: page) { _, newPage in
-            prepareAnimations(for: newPage)
+        .task(id: scenePhase) {
+            guard !isMock, scenePhase == .active else { return }
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationsEnabled = [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus)
+            await viewModel.refreshProtectionStatus(force: true)
+        }
+        .task(id: "\(page.rawValue)-\(arrivalAttempt)") {
+            guard page == .done else { return }
+            // Wait for the real destination to report a valid layout; no guessed fallback.
+            do {
+                arrivalFailed = false
+                let deadline = ContinuousClock.now + .seconds(8)
+                while handoff.frames["mascot"] == nil || handoff.frames["panel"] == nil || handoff.frames["action"] == nil {
+                    if ContinuousClock.now >= deadline { arrivalFailed = true; return }
+                    try await Task.sleep(for: .milliseconds(80))
+                }
+                travelOrigin = sourceFrame
+                let started = Date()
+                travelStarted = started
+                while isSmiling { try await Task.sleep(for: .milliseconds(40)) }
+                // The return to awake has triggered the slightly delayed panel fade.
+                // Keep the clock running until both visuals settle.
+                let remainingTravel = OnboardingGuardTravel.duration - Date().timeIntervalSince(started)
+                try await Task.sleep(for: .seconds(max(remainingTravel, panelFadeDelay + panelFadeDuration)))
+                if !opening { handoff.setPhase("ready") }
+            } catch { }
+        }
+        .task(id: opening) {
+            guard opening else { return }
+            do {
+                handoff.setPhase("opening")
+                withAnimation(.easeInOut(duration: 0.7)) { surroundingsOpacity = 0 }
+                let duration = GuardianMascotAnimationPlan.animation(from: .awake, to: .sleeping).duration
+                try await Task.sleep(for: .seconds(duration))
+                // The drawing is now identical to the actual off mascot beneath it.
+                handoff.setPhase("released")
+                try await Task.sleep(for: .milliseconds(isMock ? 2080 : 80))
+                if isMock { dismiss() } else { hasSeenOnboarding = true }
+            } catch { }
         }
     }
 
-    private var topBar: some View {
-        HStack {
-            if !pageHistory.isEmpty {
-                Button(action: goBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: LavaIconSize.control, weight: .semibold))
-                        .foregroundStyle(LavaStyle.ink)
-                        .frame(width: 38, height: 38)
-                        .background(.regularMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(LavaStyle.secondaryText.opacity(0.18), lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back")
-            } else {
-                Color.clear
-                    .frame(width: 38, height: 38)
-            }
-
-            Spacer()
-
-            // "Import a filter" action (the old .done "Additional setup" on-ramp), shown
-            // ONLY on the final page: its sheet can finish onboarding (Skip/import/settings
-            // set hasSeenOnboarding), so reaching it earlier would let setup complete before
-            // the VPN/notification/protection/connection steps run (Codex P2).
-            if page == .done {
-                Button {
-                    isShowingAdditionalSetup = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.down")
-                        Text("Import a filter")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(LavaStyle.ink)
-                    .padding(.horizontal, 14)
-                    .frame(height: 38)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(LavaStyle.secondaryText.opacity(0.18), lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Import a filter")
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
+    private func openGuard() {
+        guard !isBusy, page == .done else { return }
+        finishExpression()
+        ProtectionHapticFeedback.play(.actionSucceeded)
+        opening = true
     }
 
     @ViewBuilder
     private var currentPage: some View {
         switch page {
-        case .lava:
-            internetIsLavaPage
-        case .guardIntro, .features:
-            guardScenePage
-        case .protectionLevel:
-            protectionLevelPage
-        case .connectionQuality:
-            connectionQualityPage
-        case .vpn:
-            vpnPage
-        case .notifications:
-            notificationsPage
-        case .done:
-            donePage
+        case .lava: internetIsLavaPage
+        case .features: guardScenePage
+        case .vpn: vpnPage
+        case .protectionLevel: protectionLevelPage
+        case .connectionQuality: connectionQualityPage
+        case .done: donePage
         }
     }
 
     private var internetIsLavaPage: some View {
         VStack(spacing: 24) {
-            Spacer(minLength: 24)
-
             Text("The internet is lava")
-                .font(.largeTitle.bold())
+                .font(.title.bold())
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
-                .padding(.horizontal, 28)
-                .padding(.top, 86)
 
-            Text("Malicious domains are the hot spots. Your phone can step around them before apps and websites connect.")
-                .font(.title3)
+            Text("Malicious domains are the hot spots. Your device can step around them before apps and websites connect.")
+                .font(.title3.bold())
                 .foregroundStyle(.white.opacity(0.78))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 34)
-
-            Spacer(minLength: 160)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 4)
     }
 
     private var guardScenePage: some View {
-        let transition = page == .features
-            ? OnboardingFeatureTransitionPlan.state(at: featureTransitionElapsed)
-            : OnboardingFeatureTransitionPlan.state(at: 0)
-
-        return ZStack(alignment: .top) {
-            VStack(spacing: 22) {
-                OnboardingGuardHero(blinkTrigger: guardHeroBlinkTrigger)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: CGFloat(transition.heroHeight))
-                    .offset(y: CGFloat(transition.heroPanelOffsetY))
-
-                Text("Lava checks domain names on this phone before apps and websites connect.")
-                    .font(.title3)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .opacity(transition.descriptionOpacity)
-                    .clipped()
-            }
-            .padding(.top, CGFloat(transition.heroTopSpacer))
-
-            if transition.featureRowsOccupyLayout {
-                VStack(spacing: 12) {
-                    OnboardingFeatureRow(
-                        systemImage: "hand.raised.fill",
-                        title: "Lava blocks your phone's access to malicious domains"
-                    )
-                    OnboardingFeatureRow(
-                        systemImage: "lock.shield.fill",
-                        title: "Local filter makes it safe, private and free"
-                    )
-                    OnboardingFeatureRow(
-                        systemImage: "slider.horizontal.3",
-                        title: "You're in full control of what gets logged locally"
-                    )
-                }
-                .opacity(transition.featureRowsOpacity)
-                .offset(y: CGFloat(transition.featureRowsOffsetY))
-                .padding(.top, CGFloat(transition.featureRowsTopOffset))
-            }
+        LavaSetupStepLayout(title: "Lava stands guard here") {
+            OnboardingFeatureRow(systemImage: "shield",
+                                 title: "Lava blocks your device's access to malicious domains")
+            OnboardingFeatureRow(systemImage: "lock",
+                                 title: "Local filter makes it safe, private and free")
+            OnboardingFeatureRow(systemImage: "slider.horizontal.3",
+                                 title: "You're in full control of what gets logged locally")
         }
     }
 
     private var protectionLevelPage: some View {
-        OnboardingStepLayout(
-            step: "Step 3",
-            title: "Pick how much Lava blocks",
-            description: "Choose your protection level. You can change this anytime in Filters.",
-            contentPlacement: .centered
-        ) {
+        LavaSetupStepLayout(title: "Pick how much Lava blocks") {
             OnboardingProtectionLevelPanel(selection: $protectionLevel)
         }
     }
 
     private var connectionQualityPage: some View {
-        OnboardingStepLayout(
-            step: "Step 4",
-            title: "Improve connection quality",
-            description: "Stay covered if your device's DNS can't be reached after a network change.",
-            contentPlacement: .centered
-        ) {
-            OnboardingConnectionPanel(
-                useEncryptedFallback: $useEncryptedFallback,
-                fallbackResolverPresetID: $fallbackResolverPresetID
-            )
-        }
-    }
-
-    private var vpnPage: some View {
-        OnboardingStepLayout(
-            step: "Step 1",
-            title: "Install Lava's local VPN",
-            description: "This enforces the filter and does not route traffic to a server at all",
-            contentPlacement: .centered
-        ) {
-            // Decorative preview of the upcoming iOS system prompt — its fake "Allow"/"Don't
-            // Allow" buttons are not real controls, so hide it from assistive tech. The page
-            // heading + description already convey what the real prompt will ask.
-            OnboardingVPNPermissionDialogIllustration()
-                .accessibilityHidden(true)
-
-            if viewModel.vpnMessageIsError, let message = viewModel.vpnMessage {
-                Text(message)
-                    .lavaQuietNoteText()
-                    .foregroundStyle(LavaStyle.errorText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        LavaSetupStepLayout(title: "Lastly, let’s keep your connection running smoothly.",
+                            description: "Change these anytime in Settings.") {
+            OnboardingConnectionPanel(useEncryptedFallback: $useEncryptedFallback,
+                                      useDNSProfile: $useDNSProfile, supportsDNSProfile: supportsDNSProfile)
+                .disabled(isInstallingDNSProfile)
+            if let dnsProfileError {
+                Text(dnsProfileError).lavaQuietNoteText().foregroundStyle(LavaStyle.errorText)
+                Button("Set up later") { goForward() }
+                    .buttonStyle(LavaSecondaryActionButtonStyle())
             }
         }
     }
 
-    private var notificationsPage: some View {
-        OnboardingStepLayout(
-            step: "Step 2",
-            title: "Let Lava ask for help",
-            description: "Turn on notifications in case Lava needs your help to unblock network issues",
-            contentPlacement: .centered
-        ) {
-            // Decorative preview of the iOS notification prompt (fake buttons); hide from
-            // assistive tech — the heading + description carry the meaning.
-            OnboardingNotificationPromptCard()
-                .accessibilityHidden(true)
+    private var vpnPage: some View {
+        LavaSetupStepLayout(title: "First, let’s get Lava ready to help.") {
+            OnboardingPermissionButton(title: vpnInstalled ? "VPN installed" : "Install local VPN",
+                systemImage: "shield",
+                isComplete: vpnInstalled, isLoading: isInstallingVPN, action: installVPN)
+                .disabled((!isMock && viewModel.isConfiguringVPN) || isBusy || vpnInstalled)
+                .accessibilityIdentifier("onboarding.install-vpn")
+            OnboardingPermissionButton(title: notificationsEnabled ? "Notifications enabled (optional)" : "Enable notifications (optional)",
+                systemImage: "bell",
+                isComplete: notificationsEnabled, isLoading: isRequestingNotifications, action: requestNotifications)
+                .disabled(isBusy || notificationsEnabled)
+                .accessibilityIdentifier("onboarding.notifications")
+            if !isMock, viewModel.vpnMessageIsError, let message = viewModel.vpnMessage {
+                Text(message).lavaQuietNoteText().foregroundStyle(LavaStyle.errorText)
+            }
         }
     }
 
     private var donePage: some View {
-        VStack(spacing: 22) {
-            Spacer(minLength: 54)
-
-            OnboardingReadyMascot()
-
-            Text("Lava is ready")
-                .font(.largeTitle.bold())
-                .foregroundStyle(LavaStyle.ink)
-                .multilineTextAlignment(.center)
-                .accessibilityAddTraits(.isHeader)
-
-            Text("We are happy to serve you!\nThe setup is complete. You can change everything later in Settings.")
-                .font(.title3)
-                .foregroundStyle(LavaStyle.secondaryText)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 0)
+        // The actual RN Guard panel is revealed through the cover at its canonical frame.
+        VStack(spacing: 16) {
+            if arrivalFailed {
+                Text("Guard is still loading. Please try again.").lavaQuietNoteText()
+                Button("Try again") {
+                    handoff.setPhase("arriving", restart: true)
+                    arrivalAttempt += 1
+                }.buttonStyle(LavaSecondaryActionButtonStyle())
+            }
         }
     }
 
     private var footer: some View {
-        VStack(spacing: 16) {
-            pageDots
-            footerButtons
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 18)
-        .background(page == .lava ? Color.clear : LavaStyle.groupedBackground)
+        VStack(spacing: 16) { pageDots; footerButtons }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 18)
     }
 
     private var pageDots: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             ForEach(OnboardingPage.allCases) { dotPage in
                 Button {
-                    guard visitedPages.contains(dotPage) else {
-                        return
-                    }
-                    go(to: dotPage)
+                    guard visitedPages.contains(dotPage) else { return }
+                    navigate(to: dotPage)
                 } label: {
-                    Capsule()
-                        .fill(dotPage == page ? activeDotColor : inactiveDotColor)
+                    Capsule().fill(dotPage == page ? activeDotColor : inactiveDotColor)
                         .frame(width: dotPage == page ? 24 : 8, height: 8)
+                        .frame(width: dotPage == page ? 32 : 20, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!visitedPages.contains(dotPage))
-                .accessibilityLabel("Step \(dotPage.rawValue + 1) of \(OnboardingPage.allCases.count)")
+                .disabled(!visitedPages.contains(dotPage) || isBusy || (dotPage.rawValue > OnboardingPage.vpn.rawValue && !vpnInstalled))
+                .accessibilityLabel("Step %lld of %lld".lavaLocalizedFormat(dotPage.rawValue + 1, OnboardingPage.allCases.count))
                 .accessibilityAddTraits(dotPage == page ? [.isSelected] : [])
             }
         }
@@ -322,352 +406,161 @@ struct LavaOnboardingView: View {
     @ViewBuilder
     private var footerButtons: some View {
         switch page {
-        case .lava:
-            OnboardingPrimaryButton(title: "Meet Lava") {
-                goForward()
-            }
-        case .guardIntro:
-            OnboardingPrimaryButton(title: "Continue") {
-                goForward()
-            }
-        case .features:
-            OnboardingPrimaryButton(title: "Set Up Protection") {
-                goForward()
-            }
-        case .protectionLevel, .connectionQuality:
-            // The choice is applied on departure (applyCurrentStepChoiceIfNeeded in go(to:)),
-            // so Continue and a forward page-dot jump both persist it.
-            OnboardingPrimaryButton(title: "Continue") {
-                goForward()
-            }
+        case .lava, .features:
+            OnboardingPrimaryButton(title: page == .lava ? "Meet Lava" : "Set Up Protection",
+                                    usesWhiteOutline: page == .lava) { goForward() }
         case .vpn:
-            OnboardingPrimaryButton(
-                title: "Install Local VPN",
-                isLoading: isInstallingVPN,
-                isDisabled: viewModel.isConfiguringVPN
-            ) {
-                installVPNThenContinue()
-            }
-        case .notifications:
-            HStack(spacing: 12) {
-                OnboardingSecondaryButton(title: "Not Now") {
-                    goForward()
-                }
-                OnboardingPrimaryButton(
-                    title: "Enable",
-                    isLoading: isRequestingNotifications
-                ) {
-                    requestNotificationsThenContinue()
-                }
-            }
+            OnboardingPrimaryButton(title: vpnInstalled ? "Next step" : "Install VPN first",
+                                    isDisabled: !vpnInstalled || isBusy) { goForward() }
+        case .protectionLevel:
+            OnboardingPrimaryButton(title: "Next step", isDisabled: isBusy) { goForward() }
+        case .connectionQuality:
+            OnboardingPrimaryButton(title: "Next step", isLoading: isInstallingDNSProfile) { navigate(to: .done) }
         case .done:
-            OnboardingPrimaryButton(title: "Open Guard") {
-                hasSeenOnboarding = true
-            }
+            Color.clear.frame(height: 44)
         }
     }
 
-    private var activeDotColor: Color {
-        page == .lava ? .white : LavaStyle.safeGreen
-    }
-
-    private var inactiveDotColor: Color {
-        page == .lava ? .white.opacity(0.28) : LavaStyle.secondaryText.opacity(0.22)
-    }
+    private var activeDotColor: Color { page == .lava ? .white : LavaStyle.safeGreen }
+    private var inactiveDotColor: Color { page == .lava ? .white.opacity(0.28) : LavaStyle.secondaryText.opacity(0.22) }
 
     private func goForward() {
-        guard let next = page.next else {
-            return
-        }
+        guard let next = page.next else { return }
         go(to: next)
     }
 
+    private func navigate(to next: OnboardingPage) {
+        guard next != page, !isBusy else { return }
+        finishExpression()
+        if next == .done && supportsDNSProfile && useDNSProfile && !didInstallDNSProfile {
+            isInstallingDNSProfile = true
+            dnsProfileError = nil
+            Task { @MainActor in
+                defer { isInstallingDNSProfile = false }
+                do {
+                    if isMock { try await Task.sleep(for: .milliseconds(500)) }
+                    else { try await installDNSProfile() }
+                    guard !Task.isCancelled else { return }
+                    didInstallDNSProfile = true
+                    isInstallingDNSProfile = false
+                    go(to: next)
+                } catch {
+                    isInstallingDNSProfile = false
+                    go(to: .connectionQuality)
+                    dnsProfileError = "Couldn't save your changes. Please try again.".lavaLocalized
+                }
+            }
+        } else { go(to: next) }
+    }
+
     private func go(to nextPage: OnboardingPage) {
-        guard nextPage != page else {
-            return
-        }
-
-        // Persist the leaving step's surfaced choice so jumping away via the page dots
-        // (which call go(to:) directly) applies it too, not just the Continue button (Codex P2).
-        // When this transition ALSO seeds the recommended defaults (→ .done, below), fold the
-        // leaving choice into that single marker-clearing reseed persist instead of firing a
-        // second racing persist: a generic persist that lands the seeded pair while the durable
-        // reseed marker is still present would, on a kill before the deferred clear, relaunch the
-        // onboarded defaults as a suppressed reseed (Codex P2 on #386).
+        guard nextPage != page, !isBusy else { return }
+        guard nextPage.rawValue <= OnboardingPage.vpn.rawValue || vpnInstalled else { return }
         applyCurrentStepChoiceIfNeeded(persistImmediately: nextPage != .done)
-
-        // Reduce Motion: never leave the settled features layout — skipping the reset
-        // here (not just in prepareAnimations) avoids even a one-frame unsettled pass
-        // between the page change and the onChange-driven prepareAnimations call.
-        if nextPage == .features, !reduceMotion {
-            featureTransitionElapsed = 0
-        }
-
-        // The standalone "Decide how Lava works" step is gone, so its recommended
-        // defaults are applied silently as setup wraps up on the final page.
-        if nextPage == .done {
+        if !isMock && nextPage == .done {
             viewModel.applyOnboardingRecommendedDefaults(protectionLevel: protectionLevel)
         }
-
+        let shouldBlink = page == .protectionLevel && nextPage == .connectionQuality
+        finishExpression()
         pageHistory.append(page)
         visitedPages.insert(nextPage)
-        guard page != .guardIntro || nextPage != .features else {
-            page = nextPage
-            return
-        }
-
-        withAnimation(pageChangeAnimation) {
-            page = nextPage
-        }
+        withAnimation(page == .lava || nextPage == .lava ? revealAnimation : pageChangeAnimation) { page = nextPage }
+        if nextPage == .done { handoff.setPhase("arriving"); playGratitude() }
+        else if shouldBlink { blinkTrigger += 1 }
     }
 
     private func goBack() {
-        guard let previousPage = pageHistory.popLast() else {
-            return
-        }
-
+        guard !isBusy, let previousPage = pageHistory.popLast() else { return }
         applyCurrentStepChoiceIfNeeded()
-        visitedPages.insert(previousPage)
-        withAnimation(pageChangeAnimation) {
-            page = previousPage
+        if page == .done {
+            handoff.setPhase("setup")
+            withAnimation(.easeInOut(duration: 0.4)) { travelStarted = nil }
         }
+        finishExpression()
+        withAnimation(previousPage == .lava ? revealAnimation : pageChangeAnimation) { page = previousPage }
     }
 
-    /// Reduce Motion: swap pages INSTANTLY (nil transaction). The design system's
-    /// reduced-motion fade (`LavaFlowTransition.animation`) is designed to pair with its
-    /// `lavaFlowTransition` modifier on the swapped content; this view has no transition
-    /// modifier, so a non-nil animation would hard-swap the page content while still
-    /// ANIMATING page-dependent layout (lava opacity, footer background, page-dot
-    /// widths) — residual motion, the opposite of the setting's intent.
+    private var revealAnimation: Animation? { reduceMotion ? .easeInOut(duration: 0.25) : .easeInOut(duration: 1.1) }
+    private var guardRevealAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.25) : .easeInOut(duration: 1.25).delay(0.15)
+    }
     private var pageChangeAnimation: Animation? {
-        reduceMotion ? nil : LavaFlowTransition.animation(reduceMotion: false)
+        reduceMotion ? .easeInOut(duration: 0.2) : LavaFlowTransition.animation(reduceMotion: false)
     }
 
-    /// Persist the choice made on the step we're leaving. Called from every navigation
-    /// path (Continue, page dots, back) so a surfaced choice is applied no matter how the
-    /// user moves on — idempotent for the blocklist (no-op when unchanged).
-    /// - Parameter persistImmediately: `false` when this same transition also seeds the
-    ///   onboarding recommended defaults (a `.done` transition), so the leaving choice is
-    ///   MUTATED into `configuration` now but its write is folded into
-    ///   `applyOnboardingRecommendedDefaults`'s single marker-clearing persist rather than a
-    ///   second fire-and-forget persist that could land the seeded pair while the durable reseed
-    ///   marker is still present (Codex P2 on #386).
     private func applyCurrentStepChoiceIfNeeded(persistImmediately: Bool = true) {
+        guard !isMock else { return }
         switch page {
         case .protectionLevel:
             viewModel.selectOnboardingBlocklists(protectionLevel.enabledBlocklistIDs(), persistImmediately: persistImmediately)
         case .connectionQuality:
             viewModel.applyOnboardingConnectionPreferences(
                 useEncryptedFallback: useEncryptedFallback,
-                fallbackResolverPresetID: fallbackResolverPresetID,
                 persistImmediately: persistImmediately
             )
-        default:
-            break
+        default: break
         }
     }
 
-    private func installVPNThenContinue() {
-        guard !isInstallingVPN else {
-            return
-        }
+    private func finishExpression() {
+        expressionTask?.cancel()
+        expressionTask = nil
+        isSmiling = false
+        finishTrigger += 1
+    }
 
+    private func playGratitude() {
+        expressionTask?.cancel()
+        isSmiling = true
+        expressionTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(GuardianMascotAnimationPlan.stateChangeDuration + 0.65))
+                isSmiling = false
+                try await Task.sleep(for: .seconds(GuardianMascotAnimationPlan.stateChangeDuration))
+            } catch { } // The newer action owns the expression after cancellation.
+        }
+    }
+
+    private func installVPN() {
+        guard !isBusy, isMock || !viewModel.isConfiguringVPN else { return }
+        finishExpression()
+        isInstallingVPN = true
         Task { @MainActor in
-            isInstallingVPN = true
-            let didInstall = await viewModel.installLocalVPNProfileForOnboarding()
+            if isMock {
+                try? await Task.sleep(for: .milliseconds(500))
+                didInstallVPN = true
+            } else {
+                didInstallVPN = await viewModel.installLocalVPNProfileForOnboarding()
+            }
             isInstallingVPN = false
-            if didInstall {
-                goForward()
-            }
         }
     }
 
-    private func requestNotificationsThenContinue() {
-        guard !isRequestingNotifications else {
-            return
-        }
-
+    private func requestNotifications() {
+        guard !isBusy else { return }
+        finishExpression()
+        isRequestingNotifications = true
         Task { @MainActor in
-            isRequestingNotifications = true
-            _ = await viewModel.requestProtectionNotificationAuthorizationForOnboarding()
+            if isMock {
+                try? await Task.sleep(for: .milliseconds(500))
+                notificationsEnabled = true
+            } else {
+                notificationsEnabled = await viewModel.requestProtectionNotificationAuthorizationForOnboarding()
+            }
+            if notificationsEnabled && vpnInstalled && page == .vpn { playGratitude() }
             isRequestingNotifications = false
-            goForward()
-        }
-    }
-
-    private func prepareAnimations(for nextPage: OnboardingPage) {
-        switch nextPage {
-        case .features:
-            // Reduce Motion: skip the hero-uplift choreography (and its blink)
-            // and present the settled features layout directly.
-            guard !reduceMotion else {
-                featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
-                return
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                guard page == .features else {
-                    return
-                }
-                withAnimation(.easeInOut(duration: OnboardingFeatureTransitionPlan.heroMoveDuration)) {
-                    featureTransitionElapsed = OnboardingFeatureTransitionPlan.heroMoveDuration
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08 + OnboardingFeatureTransitionPlan.heroMoveDuration) {
-                guard page == .features else {
-                    return
-                }
-                guardHeroBlinkTrigger += 1
-                withAnimation(.easeOut(duration: OnboardingFeatureTransitionPlan.featureFadeDuration)) {
-                    featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
-                }
-            }
-        default:
-            featureTransitionElapsed = OnboardingFeatureTransitionPlan.totalDuration
         }
     }
 }
 
 private enum OnboardingPage: Int, CaseIterable, Identifiable {
-    case lava
-    case guardIntro
-    case features
-    case vpn
-    case notifications
-    case protectionLevel
-    case connectionQuality
-    case done
-
+    case lava, features, vpn, protectionLevel, connectionQuality, done
     var id: Int { rawValue }
-
-    var next: OnboardingPage? {
-        OnboardingPage(rawValue: rawValue + 1)
-    }
-}
-
-private struct OnboardingGuardHero: View {
-    let blinkTrigger: Int
-
-    var body: some View {
-        VStack(spacing: 14) {
-            SoftShieldGuardian(size: 132, state: .awake, animates: true, blinkTrigger: blinkTrigger)
-
-            Text("Lava stands guard here")
-                .font(.largeTitle.bold())
-                .foregroundStyle(LavaStyle.ink)
-                .multilineTextAlignment(.center)
-        }
-    }
-}
-
-private struct OnboardingReadyMascot: View {
-    @State private var mascotState: GuardianMascotState = .awake
-
-    var body: some View {
-        SoftShieldGuardian(size: 124, state: mascotState)
-            .task {
-                mascotState = .awake
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard !Task.isCancelled else {
-                    return
-                }
-                mascotState = .grateful
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled else {
-                    return
-                }
-                mascotState = .awake
-            }
-    }
-}
-
-private enum OnboardingStepContentPlacement {
-    case top
-    case centered
-}
-
-private struct OnboardingStepLayout<Content: View>: View {
-    let step: String
-    let title: String
-    let description: String
-    let contentPlacement: OnboardingStepContentPlacement
-    let content: Content
-
-    init(
-        step: String,
-        title: String,
-        description: String,
-        contentPlacement: OnboardingStepContentPlacement = .top,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.step = step
-        self.title = title
-        self.description = description
-        self.contentPlacement = contentPlacement
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            OnboardingStepHeading(
-                step: step,
-                title: title,
-                description: description
-            )
-
-            switch contentPlacement {
-            case .top:
-                content
-                Spacer(minLength: 0)
-            case .centered:
-                Spacer(minLength: 0)
-                content.frame(maxWidth: .infinity, alignment: .center)
-                Spacer(minLength: 0)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.top, 18)
-    }
-}
-
-private struct OnboardingStepHeading: View {
-    let step: String
-    let title: String
-    let description: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(step.lavaLocalized)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(LavaStyle.safeGreen)
-                .textCase(.uppercase)
-
-            Text(title.lavaLocalized)
-                .font(.largeTitle.bold())
-                .foregroundStyle(LavaStyle.ink)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-
-            Text(description.lavaLocalized)
-                .font(.title3)
-                .foregroundStyle(LavaStyle.secondaryText)
-                .lineLimit(3)
-                .minimumScaleFactor(0.86)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    var next: OnboardingPage? { OnboardingPage(rawValue: rawValue + 1) }
 }
 
 private extension OnboardingProtectionLevel {
-    // Short labels so the segmented control reads at full size (no shrink-to-fit). Sourced from
-    // the canonical `displayName` (Core / Balanced / Extra) so the lever and the seeded filters
-    // in "Your filters" always match.
-    var leverTitle: LocalizedStringKey {
-        LocalizedStringKey(displayName)
-    }
-
-    // Kept short (≤2 lines) so the description slot can reserve a fixed height and the
-    // panel never changes size when the selection changes.
+    // Concise descriptions share the same wrapping row anatomy for every choice.
     var leverSummary: LocalizedStringKey {
         switch self {
         case .essential:
@@ -680,208 +573,148 @@ private extension OnboardingProtectionLevel {
     }
 }
 
-/// The whole Step-3 protection control as ONE coherent panel, matching the Step-2
-/// permission-dialog style: a `.panel` surface (clean black/white background) with a
-/// green border, a segmented selector on top whose selected pill is filled Lava control
-/// green with a bold white label, the selected level's description, then the
-/// constant-height "what this turns on" checklist. The panel keeps a fixed size across
-/// selections — only the green pill slides, the description swaps within its reserved
-/// slot, and each checklist row lights up / dims.
+/// Setup choices share one trailing accessory and filled selection treatment.
+private func updateOnboardingSelection(_ update: () -> Void) {
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) { update() }
+}
+
 private struct OnboardingProtectionLevelPanel: View {
     @Binding var selection: OnboardingProtectionLevel
-    @Namespace private var segmentNamespace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    // The full superset of category rows (from the broadest level) so the checklist
-    // keeps a constant height — only each row's enabled state changes.
-    private var allGroups: [(category: BlocklistCategory, sources: [BlocklistSource])] {
-        let widestIDs = OnboardingProtectionLevel.comprehensive.enabledBlocklistIDs()
-        return DefaultCatalog.curatedSourcesByCategory.compactMap { entry in
-            let included = entry.sources.filter { widestIDs.contains($0.id) }
-            return included.isEmpty ? nil : (entry.category, included)
-        }
-    }
 
     var body: some View {
-        let enabledCategories = Set(selection.enabledCategories())
-        return VStack(alignment: .leading, spacing: 20) {
-            segments
-
-            Text(selection.leverSummary)
-                .font(.title3)
-                .foregroundStyle(LavaStyle.secondaryText)
-                .lineLimit(2, reservesSpace: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(allGroups, id: \.category) { group in
-                    let isOn = enabledCategories.contains(group.category)
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
-                            .foregroundStyle(isOn ? LavaStyle.safeGreen : LavaStyle.secondaryText.opacity(0.35))
-                            .accessibilityHidden(true)
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(group.category.displayLabel.lavaLocalized)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(isOn ? LavaStyle.ink : LavaStyle.secondaryText)
-
-                            Text(group.sources.map(\.name).joined(separator: ", "))
-                                .font(.subheadline)
-                                .foregroundStyle(LavaStyle.secondaryText.opacity(isOn ? 1 : 0.55))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-                    .opacity(isOn ? 1 : 0.5)
-                    // The included/excluded state was conveyed only by the glyph + dimming; give
-                    // VoiceOver an explicit On/Off value (icon hidden as decorative) so grayscale
-                    // and non-visual users get the same meaning.
-                    .accessibilityElement(children: .combine)
-                    .accessibilityValue(Text(isOn ? "On" : "Off"))
-                }
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
-        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: selection)
-    }
-
-    private var segments: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: LavaSpacing.lg) {
             ForEach(OnboardingProtectionLevel.allCases, id: \.self) { level in
-                let isSelected = selection == level
-                Button {
-                    withAnimation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion)) {
-                        selection = level
-                    }
-                } label: {
-                    Text(level.leverTitle)
-                        .font(.body.weight(.bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .foregroundStyle(isSelected ? Color.white : LavaStyle.secondaryText)
-                        .background {
-                            if isSelected {
-                                Capsule()
-                                    .fill(LavaStyle.safeControlGreen)
-                                    .overlay(
-                                        Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 1)
-                                    )
-                                    .matchedGeometryEffect(id: "selectedSegment", in: segmentNamespace)
-                            }
-                        }
-                        .contentShape(Capsule())
+                Button { updateOnboardingSelection { selection = level } } label: {
+                    OnboardingSelectionLabel(title: level.displayName, emoji: level.emoji,
+                                             summary: level.leverSummary, isSelected: selection == level)
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                .accessibilityValue(Text(selection == level ? "On" : "Off"))
+                .accessibilityAddTraits(selection == level ? .isSelected : [])
+                .accessibilityIdentifier("onboarding.filter.\(level.rawValue)")
             }
         }
     }
 }
 
-/// Step 4 — the encrypted-fallback control, matching the Step-3 panel style: a toggle
-/// (default on), a DoH provider picker (transport pinned, not surfaced), and an inline
-/// privacy disclosure naming the chosen third-party resolver and that it's used only
-/// transiently during recovery.
 private struct OnboardingConnectionPanel: View {
     @Binding var useEncryptedFallback: Bool
-    @Binding var fallbackResolverPresetID: String
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private let providers: [DNSResolverPreset] = [
-        .mullvadDoH, .cloudflareDoH, .quad9SecureDoH, .hageziDoH, .googleDoH
-    ]
-
-    private func providerName(_ preset: DNSResolverPreset) -> String {
-        if preset.id == DNSResolverPreset.mullvadDoH.id { return "Mullvad" }
-        if preset.id == DNSResolverPreset.cloudflareDoH.id { return "Cloudflare" }
-        if preset.id == DNSResolverPreset.quad9SecureDoH.id { return "Quad9" }
-        if preset.id == DNSResolverPreset.hageziDoH.id { return "HaGeZi" }
-        if preset.id == DNSResolverPreset.googleDoH.id { return "Google" }
-        return preset.displayName
-    }
-
-    private var selectedProviderName: String {
-        providerName(providers.first { $0.id == fallbackResolverPresetID } ?? .mullvadDoH)
-    }
+    @Binding var useDNSProfile: Bool
+    let supportsDNSProfile: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Toggle(isOn: $useEncryptedFallback.animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion))) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Encrypted fallback")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(LavaStyle.ink)
-                    Text("Recommended")
-                        .font(.footnote)
-                        .foregroundStyle(LavaStyle.secondaryText)
-                }
-            }
-            .tint(LavaStyle.safeControlGreen)
-
-            if useEncryptedFallback {
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Provider")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(LavaStyle.secondaryText)
-                        .textCase(.uppercase)
-
-                    VStack(spacing: 0) {
-                        ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
-                            if index > 0 {
-                                Divider()
-                            }
-                            providerRow(provider)
-                        }
-                    }
-                }
-
-                Text("If your device's DNS can't be reached, allowed requests briefly use %1$@ over an encrypted connection, then switch back automatically. %2$@ is an outside provider, used only for recovery.".lavaLocalizedFormat(selectedProviderName, selectedProviderName))
-                    .font(.footnote)
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: LavaSpacing.lg) {
+            connectionChoice("Keep connections working", systemImage: "network",
+                summary: "Try a backup DNS service when websites won't load. The default is Quad9",
+                isOn: $useEncryptedFallback)
+                .accessibilityIdentifier("onboarding.dns-fallback")
+            if supportsDNSProfile {
+                connectionChoice("Set up DNS profile", systemImage: "doc.text",
+                    summary: "This helps Lava work well in iOS 27 with Connectivity Assist. Follow the orange dots for complete setups",
+                    isOn: $useDNSProfile)
+                    .accessibilityIdentifier("onboarding.dns-profile")
             }
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.panel, cornerRadius: 26, borderTint: LavaStyle.safeGreen)
-        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: useEncryptedFallback)
-        .animation(LavaFlowTransition.incidental(.easeInOut(duration: 0.2), reduceMotion: reduceMotion), value: fallbackResolverPresetID)
     }
 
-    private func providerRow(_ provider: DNSResolverPreset) -> some View {
-        let isSelected = provider.id == fallbackResolverPresetID
-        return Button {
-            fallbackResolverPresetID = provider.id
-        } label: {
-            HStack(spacing: 12) {
-                Text(providerName(provider))
-                    .font(.body)
-                    .foregroundStyle(LavaStyle.ink)
-
-                Spacer(minLength: 0)
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(LavaStyle.safeControlGreen)
-                }
-            }
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
+    private func connectionChoice(_ title: String, systemImage: String, summary: LocalizedStringKey,
+                                  isOn: Binding<Bool>) -> some View {
+        Button { updateOnboardingSelection { isOn.wrappedValue.toggle() } } label: {
+            OnboardingSelectionLabel(title: title, summary: summary, isSelected: isOn.wrappedValue,
+                                     systemImage: systemImage)
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityValue(Text(isOn.wrappedValue ? "On" : "Off"))
+        .accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])
+    }
+}
+
+private struct OnboardingPermissionButton: View {
+    let title: String
+    let systemImage: String
+    let isComplete: Bool
+    let isLoading: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    var body: some View {
+        if isComplete {
+            // A completed action is a status surface, so it retains full contrast.
+            label.accessibilityElement(children: .combine)
+        } else {
+            Button(action: action) { label }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var label: some View {
+        OnboardingSelectionLabel(title: title, isSelected: isComplete,
+                                 systemImage: systemImage, isLoading: isLoading)
+    }
+}
+
+/// Matches the filter scaffold's content insets and reserved trailing glyph column.
+private struct OnboardingSelectionLabel: View {
+    let title: String
+    var emoji: String? = nil
+    var summary: LocalizedStringKey? = nil
+    let isSelected: Bool
+    var systemImage: String? = nil
+    var isLoading = false
+
+    var body: some View {
+        HStack(spacing: LavaSpacing.md) {
+            VStack(alignment: .leading, spacing: LavaSpacing.xs) {
+                HStack(spacing: LavaSpacing.sm) {
+                    if let emoji { Text(emoji).accessibilityHidden(true) }
+                    Text(title.lavaLocalized)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .lavaRowTitleText()
+                if let summary {
+                    Text(summary).lavaSupportingText(color: isSelected ? .white.opacity(0.85) : LavaStyle.secondaryText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
+            Group {
+                if isLoading {
+                    ProgressView()
+                } else if isSelected {
+                    OnboardingRowGlyph(systemImage: "checkmark.circle.fill")
+                } else if let systemImage {
+                    OnboardingRowGlyph(systemImage: systemImage)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: LavaSelectionAccessory.columnWidth, height: LavaToolbarMetrics.iconFrameSize)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, LavaRowHeight.horizontalInset)
+        .padding(.vertical, LavaRowHeight.verticalInset)
+        .frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)
+        .foregroundStyle(isSelected ? Color.white : LavaStyle.ink)
+        .background(isSelected ? LavaStyle.safeControlGreen : LavaStyle.cardBackground,
+                    in: RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Unadorned outline symbols match Settings rows; completed actions use its success glyph.
+private struct OnboardingRowGlyph: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: LavaNavigationRowMetrics.glyphPointSize, weight: .regular))
+            .frame(width: 24, height: 24)
+            .accessibilityHidden(true)
     }
 }
 
@@ -890,299 +723,18 @@ private struct OnboardingFeatureRow: View {
     let title: String
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.headline.weight(.bold))
-                .foregroundStyle(LavaStyle.safeGreen)
-                .frame(width: 38, height: 38)
-                .background(LavaStyle.softGreen, in: Circle())
-
+        HStack(spacing: LavaSpacing.md) {
+            OnboardingRowGlyph(systemImage: systemImage)
             Text(title.lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
+                .lavaRowTitleText()
                 .fixedSize(horizontal: false, vertical: true)
-
             Spacer(minLength: 0)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.panel, cornerRadius: LavaSurface.compactCornerRadius)
-    }
-}
-
-private struct OnboardingVPNPermissionDialogIllustration: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("\"Lava Security\" Would Like to Add VPN Configurations")
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.bold))
-
-                    Text("Allow")
-                        .font(.subheadline.weight(.bold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(LavaStyle.safeControlGreen, in: Capsule())
-
-                Text("Don't Allow")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(LavaStyle.secondaryText)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(LavaStyle.secondaryText.opacity(0.14), in: Capsule())
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.panel, cornerRadius: 26)
-    }
-}
-
-private struct OnboardingNotificationPromptCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("\"Lava Security\" Would Like to Send You Notifications")
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(spacing: 10) {
-                promptAction(
-                    title: "Allow",
-                    systemImage: "checkmark.circle.fill",
-                    tint: LavaStyle.safeControlGreen,
-                    isPrimary: true
-                )
-
-                promptAction(
-                    title: "Allow in Scheduled Summary",
-                    systemImage: nil,
-                    tint: LavaStyle.secondaryText,
-                    isPrimary: false
-                )
-
-                promptAction(
-                    title: "Don't Allow",
-                    systemImage: nil,
-                    tint: Color.blue,
-                    isPrimary: false
-                )
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .lavaSurface(.panel, cornerRadius: 26)
-    }
-
-    private func promptAction(title: String, systemImage: String?, tint: Color, isPrimary: Bool) -> some View {
-        HStack(spacing: 8) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.subheadline.weight(.bold))
-            }
-
-            Text(title.lavaLocalized)
-                .font(.headline)
-        }
-        .foregroundStyle(isPrimary ? .white : LavaStyle.ink)
-        .frame(maxWidth: .infinity)
-        .frame(height: 48)
-        .background(isPrimary ? tint : LavaStyle.secondaryText.opacity(0.14), in: Capsule())
-        .overlay {
-            if isPrimary {
-                Capsule()
-                    .stroke(.white.opacity(0.28), lineWidth: 1)
-            }
-        }
-        .shadow(color: isPrimary ? tint.opacity(0.28) : .clear, radius: 14, y: 6)
-    }
-}
-
-private struct OnboardingAccountSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var account: AccountController
-    @State private var isConfirmingAccountDeletion = false
-
-    var body: some View {
-        let accountConnections = account.accountConnections
-
-        LavaSheetScaffold(spacing: 14, scrolls: false) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Account & Backup")
-                    .font(.title3.bold())
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                LavaPlainCard {
-                    if account.isAccountSignedIn {
-                        VStack(spacing: 12) {
-                            ForEach(Array(accountConnections.enumerated()), id: \.element.provider) { index, connection in
-                                OnboardingSignedInAccountRow(connection: connection)
-
-                                if index < accountConnections.count - 1 {
-                                    Divider()
-                                }
-                            }
-
-                            Divider()
-
-                            Button {
-                                account.signOutAccount()
-                                dismiss()
-                            } label: {
-                                OnboardingAccountActionRow(
-                                    title: "Sign out of all accounts",
-                                    systemImage: "rectangle.portrait.and.arrow.right",
-                                    tint: LavaStyle.ink
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                isConfirmingAccountDeletion = true
-                            } label: {
-                                OnboardingAccountActionRow(
-                                    title: account.isAccountDeletionInProgress ? "Deleting account" : "Delete my Lava account",
-                                    systemImage: "trash",
-                                    tint: .red,
-                                    titleTint: .red,
-                                    isLoading: account.isAccountDeletionInProgress
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(account.isAccountDeletionInProgress)
-                        }
-                    } else {
-                        VStack(spacing: 12) {
-                            Button {
-                                account.beginSignInWithApple()
-                            } label: {
-                                OnboardingAccountActionRow(
-                                    title: account.appleSignInActionTitle,
-                                    systemImage: "apple.logo",
-                                    tint: LavaStyle.ink,
-                                    isLoading: account.isAppleSignInInProgress
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(account.isAccountSignInInProgress)
-
-                            Divider()
-
-                            Button {
-                                account.beginSignInWithGoogle()
-                            } label: {
-                                OnboardingAccountActionRow(
-                                    title: account.googleSignInActionTitle,
-                                    systemImage: "g.circle.fill",
-                                    tint: LavaStyle.safeGreen,
-                                    isLoading: account.isGoogleSignInInProgress
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(account.isAccountSignInInProgress)
-                        }
-                    }
-                }
-            }
-        }
-        .presentationDetents([.height(account.isAccountSignedIn && accountConnections.count > 1 ? 354 : account.isAccountSignedIn ? 310 : 248)])
-        .presentationDragIndicator(.visible)
-        .lavaConfirmationAlert { host in
-            host.alert(
-                "Delete your Lava account?",
-                isPresented: $isConfirmingAccountDeletion
-            ) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    Task {
-                        if await account.deleteAccount() {
-                            dismiss()
-                        }
-                    }
-                }
-            } message: {
-                Text("This deletes the signed-in Lava account and its encrypted backup from Lava's servers. Local protection settings stay on this device.")
-            }
-        }
-    }
-}
-
-private struct OnboardingSignedInAccountRow: View {
-    let connection: AccountAuthConnection
-
-    var body: some View {
-        HStack(spacing: 12) {
-            icon
-                .frame(width: 28, height: 28)
-
-            Text(connection.email ?? "%@ account".lavaLocalizedFormat(connection.provider.displayName))
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var icon: some View {
-        switch connection.provider {
-        case .apple:
-            Image(systemName: "apple.logo")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(LavaStyle.ink)
-        case .google:
-            Image("GoogleSignInG")
-                .resizable()
-                .renderingMode(.original)
-                .scaledToFit()
-                .frame(width: 23, height: 23)
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-private struct OnboardingAccountActionRow: View {
-    let title: String
-    let systemImage: String
-    let tint: Color
-    var titleTint: Color = .primary
-    var isLoading = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 28, height: 28)
-            } else {
-                Image(systemName: systemImage)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 28, height: 28)
-            }
-
-            Text(title.lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(titleTint)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .foregroundStyle(LavaStyle.ink)
+        .padding(.horizontal, LavaRowHeight.horizontalInset)
+        .padding(.vertical, LavaRowHeight.verticalInset)
+        .frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)
+        .lavaSurface(.card, cornerRadius: LavaSurface.controlCornerRadius)
     }
 }
 
@@ -1190,182 +742,69 @@ private struct OnboardingPrimaryButton: View {
     let title: String
     var isLoading = false
     var isDisabled = false
+    var usesWhiteOutline = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(.white)
-                }
-
+            HStack(spacing: LavaSpacing.sm) {
+                if isLoading { ProgressView().controlSize(.small).tint(LavaStyle.actionForeground) }
                 Text(title.lavaLocalized)
-                    .font(.headline)
+                    // Replace the label once; only the surrounding button material morphs.
+                    .contentTransition(.identity)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 52)
-            .background(LavaStyle.safeControlGreen, in: RoundedRectangle(cornerRadius: 14))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LavaStandaloneActionButtonStyle())
+        .environment(\.lavaActionWhiteOutline, usesWhiteOutline)
         .disabled(isDisabled || isLoading)
-        .opacity(isDisabled || isLoading ? 0.7 : 1)
+        .accessibilityIdentifier("onboarding.primary")
     }
 }
 
-private struct OnboardingSecondaryButton: View {
-    let title: String
-    let action: () -> Void
+/// The rectangular top layer stays stationary while the curved curtain drains.
+private struct OnboardingLavaBackdrop: View {
+    static let colors: [Color] = [LavaStyle.lavaOrange.opacity(0.86), Color(red: 0.83, green: 0.08, blue: 0.02), Color(red: 0.48, green: 0.02, blue: 0.01)]
 
     var body: some View {
-        Button(action: action) {
-            Text(title.lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(LavaStyle.panelActionGreen)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 52)
-                .background(LavaStyle.panelActionFill, in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// The branch off the final "Lava is ready" screen: bring in a shared setup by
-/// code or QR, or jump straight to Settings. "Skip" anywhere finishes setup and
-/// opens Guard as usual.
-private struct OnboardingAdditionalSetupSheet: View {
-    let onGoToSettings: () -> Void
-    let onFinish: () -> Void
-
-    @EnvironmentObject private var viewModel: AppViewModel
-    @State private var route: Route?
-
-    private enum Route {
-        case enterCode
-        case scanCode
-    }
-
-    var body: some View {
-        switch route {
-        case .none:
-            chooser
-        case .enterCode:
-            ImportFiltersFlow(
-                startMode: .enterCode,
-                showsSkip: true,
-                // Onboarding seeds the three default filters (the free cap), so "add as new" can't
-                // apply here — the import becomes the active filter instead.
-                allowsAddingNewFilter: false,
-                onRootBack: { route = nil },
-                onSkip: onFinish,
-                onImported: onFinish
-            )
-            .environmentObject(viewModel)
-        case .scanCode:
-            ImportFiltersFlow(
-                startMode: .scanCode,
-                showsSkip: true,
-                allowsAddingNewFilter: false,
-                onRootBack: { route = nil },
-                onSkip: onFinish,
-                onImported: onFinish
-            )
-            .environmentObject(viewModel)
-        }
-    }
-
-    private var chooser: some View {
-        NavigationStack {
-            LavaSheetScaffold(spacing: 18) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Have a setup to use? Bring it in, or open Settings to fine-tune everything yourself.")
-                        .lavaSupportingText()
-
-                    ImportOptionRow(
-                        systemImage: "qrcode.viewfinder",
-                        title: "Scan a QR code",
-                        subtitle: "Use a setup someone shared with you"
-                    ) {
-                        route = .scanCode
-                    }
-
-                    ImportOptionRow(
-                        systemImage: "character.cursor.ibeam",
-                        title: "Enter a code",
-                        subtitle: "Paste or type a config code"
-                    ) {
-                        route = .enterCode
-                    }
-
-                    ImportOptionRow(
-                        systemImage: "gearshape",
-                        title: "Go to Settings",
-                        subtitle: "Open Lava's settings instead of Guard"
-                    ) {
-                        onGoToSettings()
-                    }
-                }
-            }
-            .navigationTitle("Additional setup".lavaLocalized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Skip", action: onFinish)
-                        .font(.headline)
-                        .foregroundStyle(LavaStyle.panelActionGreen)
-                }
-            }
-        }
+        LinearGradient(colors: Self.colors, startPoint: .top, endPoint: .bottom)
     }
 }
 
 private struct OnboardingLavaFloor: View {
     var cornerRadius: CGFloat = 28
     var intensity: CGFloat = 1
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var isActive = true
     @State private var startDate = Date.now
 
     var body: some View {
-        Group {
-            if reduceMotion {
-                // Reduce Motion: hold the lava at the wave loop's first frame
-                // instead of advancing the 60fps timeline.
-                waves(phase: OnboardingLavaWaveTimeline.phase(at: 0))
-            } else {
-                TimelineView(.periodic(from: startDate, by: 1.0 / 60.0)) { timeline in
-                    waves(phase: OnboardingLavaWaveTimeline.phase(
-                        at: timeline.date.timeIntervalSince(startDate)
-                    ))
+        // Keep the welcome waves alive in both motion modes; page movement still respects Reduce Motion.
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isActive)) { timeline in
+            let phase = OnboardingLavaWaveTimeline.phase(at: timeline.date.timeIntervalSince(startDate))
+            Canvas { context, size in
+                let rect = CGRect(origin: .zero, size: size)
+                // Keep the curtain opaque below its wave edge without translating a rectangle.
+                let leadingEdge = LavaWaveShape(phase: phase, amplitude: 18 * intensity, baseline: 0.18).path(in: rect)
+                context.clip(to: leadingEdge)
+                context.fill(Path(rect), with: .color(LavaStyle.groupedBackground))
+                context.fill(Path(rect), with: .linearGradient(
+                    Gradient(colors: OnboardingLavaBackdrop.colors),
+                    startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
+                let waves: [(Double, CGFloat, CGFloat, Color)] = [
+                    (phase, 18, 0.18, Color(red: 1, green: 0.50, blue: 0.13).opacity(0.74)),
+                    (-phase + .pi * 0.35, 22, 0.34, Color(red: 0.92, green: 0.20, blue: 0.04).opacity(0.78)),
+                    (phase * 2 + .pi, 14, 0.48, Color(red: 0.55, green: 0.03, blue: 0.01).opacity(0.70))
+                ]
+                for (phase, amplitude, baseline, color) in waves {
+                    context.fill(LavaWaveShape(phase: phase, amplitude: amplitude * intensity, baseline: baseline).path(in: rect), with: .color(color))
                 }
             }
         }
-        .accessibilityHidden(true)
-    }
-
-    private func waves(phase: Double) -> some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
-                colors: [
-                    LavaStyle.lavaOrange.opacity(0.86),
-                    Color(red: 0.83, green: 0.08, blue: 0.02),
-                    Color(red: 0.48, green: 0.02, blue: 0.01)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            LavaWaveShape(phase: phase, amplitude: 18 * intensity, baseline: 0.18)
-                .fill(Color(red: 1.0, green: 0.50, blue: 0.13).opacity(0.74))
-
-            LavaWaveShape(phase: -phase + .pi * 0.35, amplitude: 22 * intensity, baseline: 0.34)
-                .fill(Color(red: 0.92, green: 0.20, blue: 0.04).opacity(0.78))
-
-            LavaWaveShape(phase: phase * 2 + .pi, amplitude: 14 * intensity, baseline: 0.48)
-                .fill(Color(red: 0.55, green: 0.03, blue: 0.01).opacity(0.70))
-        }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .accessibilityHidden(true)
     }
 }
 
@@ -1406,6 +845,68 @@ private struct LavaWaveShape: Shape {
 }
 
 #Preview("Onboarding") {
-    LavaOnboardingView(hasSeenOnboarding: .constant(false))
+    LavaOnboardingView(hasSeenOnboarding: .constant(false), supportsDNSProfile: true, isMock: true)
         .environmentObject(AppViewModel(loadVPNState: false))
+}
+
+/// Transient presentation only. Geometry comes from the mounted Guard panel;
+/// no VPN, notification, DNS, filter or onboarding preference is written here.
+@MainActor
+final class LavaOnboardingHandoff: ObservableObject {
+    static let shared = LavaOnboardingHandoff()
+    @Published private(set) var frames: [String: CGRect] = [:]
+    @Published private(set) var phase = "setup"
+    private var session: String?
+    private var mock = false
+    private var layoutRevision = 0
+
+    // The measured finale belongs to Guard until the overlay has fully released it.
+    // Mock previews must not constrain navigation in the real app beneath QA.
+    var keepsGuardVisible: Bool { session != nil && !mock && phase != "setup" }
+
+    var snapshot: Any {
+        guard let session else { return NSNull() }
+        return ["session": session, "mock": mock, "phase": phase, "layoutRevision": layoutRevision] as [String: Any]
+    }
+    func begin(mock: Bool) -> String {
+        let id = UUID().uuidString
+        session = id
+        self.mock = mock
+        frames = [:]
+        phase = "setup"
+        LavaAppBridge.shared.publish()
+        return id
+    }
+    func setPhase(_ value: String, restart: Bool = false) {
+        guard session != nil, phase != value || restart else { return }
+        phase = value
+        if value == "arriving" {
+            layoutRevision += 1
+            frames = [:]
+            if !mock { LavaAppBridge.shared.requestNavigation(tab: "GuardTab", screen: "Guard") }
+        }
+        LavaAppBridge.shared.publish()
+    }
+    func end(session id: String?) {
+        guard let id, session == id else { return }
+        session = nil
+        frames = [:]
+        phase = "setup"
+        LavaAppBridge.shared.publish()
+    }
+    func receive(_ input: [String: Any]) -> Bool {
+        guard let session, input["session"] as? String == session, input["phase"] as? String == phase, input["layoutRevision"] as? Int == layoutRevision,
+              let values = input["frames"] as? [String: [String: Double]] else { return false }
+        var next: [String: CGRect] = [:]
+        for name in ["panel", "mascot", "action"] {
+            guard let value = values[name], let x = value["x"], let y = value["y"],
+                  let width = value["width"], let height = value["height"],
+                  [x, y, width, height].allSatisfy(\.isFinite), width > 0, height > 0 else { return false }
+            next[name] = CGRect(x: x, y: y, width: width, height: height)
+        }
+        guard let panel = next["panel"], let mascot = next["mascot"], let action = next["action"],
+              panel.insetBy(dx: -1, dy: -1).contains(mascot), panel.insetBy(dx: -1, dy: -1).contains(action) else { return false }
+        if next != frames { frames = next }
+        return true
+    }
 }

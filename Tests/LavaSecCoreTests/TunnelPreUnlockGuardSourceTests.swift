@@ -14,16 +14,16 @@ import XCTest
 /// the provider wiring the compiler can't see.
 final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     func testUnreadableConfigBootstrapsFailClosedNeverPassThrough() throws {
-        let source = try readSource(.packetTunnelProvider)
-        XCTAssertTrue(source.contains("private func loadConfigurationClassified()"),
+        let source = try readPacketTunnelProviderSource()
+        XCTAssertTrue(source.contains("func loadConfigurationClassified()"),
                       "The tunnel's config read must classify unreadable distinctly (INV-PERSIST-1).")
         XCTAssertTrue(source.contains("SharedStateFileReader.read(AppConfiguration.self"),
                       "Classification must go through the shared INV-PERSIST-1 reader.")
 
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState() -> Bool",
-            endingBefore: "private func refreshConfigurationIfNeeded"
+            startingAt: "func loadInitialSharedState() -> Bool",
+            endingBefore: "func refreshConfigurationIfNeeded"
         )
         let unreadableIdx = try XCTUnwrap(
             initialStateBlock.range(of: "if configurationIsUnreadable {")?.lowerBound,
@@ -45,11 +45,11 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testUnreadableConfigLeavesRefreshMarkerNilSoRetriesContinue() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let initialStateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadInitialSharedState() -> Bool",
-            endingBefore: "private func refreshConfigurationIfNeeded"
+            startingAt: "func loadInitialSharedState() -> Bool",
+            endingBefore: "func refreshConfigurationIfNeeded"
         )
         XCTAssertTrue(
             initialStateBlock.contains(
@@ -63,19 +63,19 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         )
         let refreshBlock = try sourceBlock(
             in: source,
-            startingAt: "private func refreshConfigurationIfNeeded",
-            endingBefore: "private static func resolverNetworkIdentity"
+            startingAt: "func refreshConfigurationIfNeeded",
+            endingBefore: "static func resolverNetworkIdentity"
         )
         XCTAssertTrue(refreshBlock.contains("modifiedAt != lastConfigurationModifiedAt"),
                       "The unchanged-mtime gate the nil marker defeats must remain the refresh throttle.")
     }
 
     func testBackgroundReloadAbortsInsteadOfAdoptingPlaceholderOnUnreadableConfig() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let loadSnapshotBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadSnapshotInBackground(reason: String, operationID: LatencyOperationID? = nil)",
-            endingBefore: "private func scheduleProtectionPauseResumeIfNeeded"
+            startingAt: "func loadSnapshotInBackground(reason: String, operationID: LatencyOperationID? = nil, resetsDNSRuntimeOnChange: Bool = false)",
+            endingBefore: "func scheduleProtectionPauseResumeIfNeeded"
         )
         let abortIdx = try XCTUnwrap(
             loadSnapshotBlock.range(of: "loadSnapshot-aborted-config-unreadable")?.lowerBound,
@@ -89,11 +89,11 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testBootSuiteWritesAreDeferredUntilProtectedContentIsReadable() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let beginBlock = try sourceBlock(
             in: source,
-            startingAt: "private func beginFreshProtectionVPNSession(reason: String)",
-            endingBefore: "private func endProtectionVPNSession(reason: String)"
+            startingAt: "func beginFreshProtectionVPNSession(reason: String)",
+            endingBefore: "func endProtectionVPNSession(reason: String)"
         )
         let guardIdx = try XCTUnwrap(
             beginBlock.range(of: "guard sharedProtectedContentIsReadable() else")?.lowerBound,
@@ -118,8 +118,8 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
 
         let refreshBlock = try sourceBlock(
             in: source,
-            startingAt: "private func refreshConfigurationIfNeeded",
-            endingBefore: "private static func resolverNetworkIdentity"
+            startingAt: "func refreshConfigurationIfNeeded",
+            endingBefore: "static func resolverNetworkIdentity"
         )
         // BOTH readable-content outcomes must flush: .loaded AND .absentOrCorrupt each prove
         // first unlock happened, and a config that turns out corrupt behind a locked boot
@@ -164,8 +164,8 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
 
         let flushBlock = try sourceBlock(
             in: source,
-            startingAt: "private func flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: Bool)",
-            endingBefore: "private func beginFreshProtectionVPNSession(reason: String)"
+            startingAt: "func flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: Bool)",
+            endingBefore: "func beginFreshProtectionVPNSession(reason: String)"
         )
         XCTAssertTrue(flushBlock.contains("Self.closeDanglingSelfReconnectGapIfNeeded()"),
                       "The flush must also close the gap marker the pre-unlock start skipped (locked reads bailed without writing).")
@@ -195,7 +195,7 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         let clearBlock = try sourceBlock(
             in: source,
             startingAt: "private func clearSnapshotReloadInFlight(ifCurrentGeneration generation: UInt64)",
-            endingBefore: "private func isCurrentSnapshotReloadGeneration("
+            endingBefore: "func isCurrentSnapshotReloadGeneration("
         )
         XCTAssertTrue(clearBlock.contains("requestSnapshotReload(reason: \"config-recovered-after-unlock-deferred\", force: true)"),
                       "The deferred recovery force must fire once the in-flight reload's clear runs.")
@@ -230,8 +230,8 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         // fire a forced reload into a stopped lifecycle (Codex P2 round 9).
         let invalidateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func invalidateSnapshotReloadGeneration(reason: String)",
-            endingBefore: "private func loadSnapshotInBackground("
+            startingAt: "func invalidateSnapshotReloadGeneration(reason: String)",
+            endingBefore: "func loadSnapshotInBackground("
         )
         XCTAssertTrue(invalidateBlock.contains("deferredRecoveryReloadPending = false"),
                       "Reload invalidation (tunnel stop) must clear the deferred recovery handoff.")
@@ -250,11 +250,11 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testStalePauseIsMaskedWhileSessionBeginIsDeferred() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let pauseReadBlock = try sourceBlock(
             in: source,
             startingAt: "private func currentTemporaryProtectionPauseUntil(",
-            endingBefore: "private func refreshTemporaryProtectionPauseState("
+            endingBefore: "func refreshTemporaryProtectionPauseState("
         )
         // A pre-reboot pause whose clearing begin is still deferred must read as NO pause —
         // honoring it would forward DNS unfiltered on a freshly rebooted device (INV-DNS-1,
@@ -309,7 +309,7 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testObservabilityWritersAreCanaryGated() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         // Serve-path observability writes read locked app-group files as empty and then
         // atomically save — the same INV-PERSIST-1 clobber class as the suite writes
         // (Codex P2 round 5 on #377). The Class-C funnels gate on the canary: the
@@ -350,11 +350,11 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testStopCleanupSuiteWritesAreCanaryGated() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let endBlock = try sourceBlock(
             in: source,
-            startingAt: "private func endProtectionVPNSession(reason: String)",
-            endingBefore: "private var protectionPauseDefaults"
+            startingAt: "func endProtectionVPNSession(reason: String)",
+            endingBefore: "var protectionPauseDefaults"
         )
         // A pre-unlock stop/cleanup must not write the locked suite either — same cfprefsd
         // re-materialization hazard as the boot-time begin (Codex P2 round 2 on #377).
@@ -379,7 +379,7 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         let cleanupBlock = try sourceBlock(
             in: source,
             startingAt: "private func cleanUpTunnelRuntimeAfterStop(reason: String",
-            endingBefore: "private static func errorDebugDetails("
+            endingBefore: "static func errorDebugDetails("
         )
         XCTAssertTrue(cleanupBlock.contains("if self.diagnosticsStoresReflectLockedBoot {"),
                       "The abandon must be scoped to locked-boot stores — a readable-boot stop persists normally.")
@@ -392,11 +392,11 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     // MARK: - Locked-boot filtering evidence lands in Class-None health (QA gate "Path A")
 
     func testLockedBootServesAreBucketedIntoClassNoneHealthEvidence() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         let recordBlock = try sourceBlock(
             in: source,
-            startingAt: "private func recordDiagnostic(",
-            endingBefore: "private func markLocalProtectionUptimeStarted()"
+            startingAt: "func recordDiagnostic(",
+            endingBefore: "func markLocalProtectionUptimeStarted()"
         )
         // Membership is two-branch (Codex review, #381): a fresh canary probe observing
         // locked NOW admits exactly (the flag alone over-admits — it clears only at the
@@ -445,7 +445,7 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testLockedBootWindowEndStampIsForcePersistedAtTheReadableReload() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         // The transition stamp lives at the deferred-begin FLUSH — the only mid-session
         // (dnsStateQueue-confined) readable reload. It must never return to the loader:
         // the loader's other caller (loadInitialSharedState / startTunnel) runs
@@ -454,8 +454,8 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         // startTunnel's resetHealth clobbers it there regardless (Codex review, #381).
         let flushBlock = try sourceBlock(
             in: source,
-            startingAt: "private func flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: Bool)",
-            endingBefore: "private func beginFreshProtectionVPNSession(reason: String)"
+            startingAt: "func flushDeferredFreshProtectionVPNSessionIfNeeded(hasDecodableConfiguration: Bool)",
+            endingBefore: "func beginFreshProtectionVPNSession(reason: String)"
         )
         let gateIdx = try XCTUnwrap(
             flushBlock.range(of: "if diagnosticsStoresReflectLockedBoot {")?.lowerBound,
@@ -491,8 +491,8 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
         // fresh locked observation — but stays stamp-free.
         let loadBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadDiagnosticsAndEventLogStores() {",
-            endingBefore: "private func drainAndPruneDNSEventLog("
+            startingAt: "func loadDiagnosticsAndEventLogStores() {",
+            endingBefore: "func drainAndPruneDNSEventLog("
         )
         XCTAssertTrue(loadBlock.contains("diagnosticsStoresReflectLockedBoot = !sharedProtectedContentIsReadable()"),
                       "The loader must derive the flag from a fresh canary probe.")
@@ -522,7 +522,7 @@ final class TunnelPreUnlockGuardSourceTests: XCTestCase {
     }
 
     func testHealthFlushMessageStampsAnUnstampedEndedLockedWindow() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
         // A Feedback capture seconds after first unlock can precede the deferred-begin
         // flush's next tick: without this handler-side stamp, the sampled payload would
         // carry populated lockedBoot* counters with a "none" window-end — a completed

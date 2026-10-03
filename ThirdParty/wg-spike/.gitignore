@@ -1,0 +1,5 @@
+# Throwaway spike build outputs — never commit the compiled artifacts.
+# Cargo.lock IS committed (pins the reproducible build); target/ and the assembled
+# xcframework are not.
+/target/
+/build/

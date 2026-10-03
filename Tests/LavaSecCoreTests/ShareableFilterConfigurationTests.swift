@@ -11,9 +11,84 @@ final class ShareableFilterConfigurationTests: XCTestCase {
         )
     }
 
+    func testReplacementReviewSeparatesRemovedRulesAndPreservesExceptions() throws {
+        let oldSource = try makeCustomSource()
+        let newSource = try CustomBlocklistSource(id: oldSource.id, displayName: "New list", rawURL: "https://lists.example.com/new.txt")
+        let target = Filter(name: "Existing", enabledBlocklistIDs: ["old", "same", oldSource.id],
+                            customBlocklists: [oldSource], blockedDomains: ["old.example", "same.example"],
+                            allowedDomains: ["personal.example"])
+        let imported = ShareableFilterConfiguration(schemaVersion: 1, enabledBlocklistIDs: ["new", "same", newSource.id],
+                            blockedDomains: ["new.example", "same.example"], customBlocklists: [newSource])
+        let review = imported.replacementSummary(for: target)
+        XCTAssertEqual(review.selectionDiff.removedBlocklistIDs, ["old"])
+        XCTAssertEqual(review.selectionDiff.addedBlocklistIDs, ["new"])
+        XCTAssertEqual(review.selectionDiff.removedBlockedDomains, ["old.example"])
+        XCTAssertEqual(review.selectionDiff.addedBlockedDomains, ["new.example"])
+        XCTAssertEqual(review.removedCustomBlocklists, [oldSource])
+        XCTAssertEqual(review.addedCustomBlocklists, [newSource])
+        XCTAssertEqual(review.after?.allowedDomains, target.allowedDomains)
+        XCTAssertTrue(review.selectionDiff.removedAllowedDomains.isEmpty)
+        XCTAssertTrue(review.selectionDiff.addedAllowedDomains.isEmpty)
+        XCTAssertEqual(review.after?.id, target.id)
+    }
+
+    func testReplacementReviewIgnoresMetadataOmittedByTheShareCode() throws {
+        let source = try CustomBlocklistSource(id: "custom-existing", displayName: "Existing list",
+            rawURL: "https://example.com/list", createdAt: Date(timeIntervalSince1970: 1),
+            lastAcceptedHash: String(repeating: "a", count: 64))
+        let target = Filter(name: "Existing", enabledBlocklistIDs: [source.id], customBlocklists: [source])
+        let decoded = try ShareableFilterConfiguration.decode(
+            configurationCode: ShareableFilterConfiguration(filter: target).encodedConfigurationCode())
+        XCTAssertNotEqual(decoded.customBlocklists.first?.createdAt, source.createdAt)
+        XCTAssertNil(decoded.customBlocklists.first?.lastAcceptedHash)
+        let review = decoded.replacementSummary(for: target)
+        XCTAssertTrue(review.removedCustomBlocklists.isEmpty)
+        XCTAssertTrue(review.addedCustomBlocklists.isEmpty)
+        XCTAssertFalse(review.hasChanges)
+        XCTAssertEqual(target.customBlocklists.first?.lastAcceptedHash, source.lastAcceptedHash)
+    }
+
+    func testReplacementReviewCountsCustomDefinitionsOnceButRetainsEnablementChanges() throws {
+        let source = try makeCustomSource()
+        let target = Filter(name: "Existing", enabledBlocklistIDs: ["curated", source.id], customBlocklists: [source])
+        let removed = ShareableFilterConfiguration(enabledBlocklistIDs: [], blockedDomains: []).replacementSummary(for: target)
+        XCTAssertEqual(removed.removedBlocklistIDs, ["curated"])
+        XCTAssertEqual(removed.removedCustomBlocklists, [source])
+        let added = ShareableFilterConfiguration(filter: target).replacementSummary(for: Filter(name: "Empty"))
+        XCTAssertEqual(added.addedBlocklistIDs, ["curated"])
+        XCTAssertEqual(added.addedCustomBlocklists, [source])
+        var disabled = target
+        disabled.enabledBlocklistIDs = ["curated"]
+        let toggled = FilterReplacementSummary(before: target, after: disabled)
+        XCTAssertEqual(toggled.removedBlocklistIDs, [source.id])
+        XCTAssertTrue(toggled.removedCustomBlocklists.isEmpty)
+    }
+
+    func testReplacementReviewKeepsEnablementChangesWhenRetainedSourceMetadataChanges() throws {
+        let source = try makeCustomSource()
+        let changed = try CustomBlocklistSource(id: source.id, displayName: source.displayName,
+            rawURL: source.sourceURL.absoluteString, createdAt: source.createdAt,
+            lastAcceptedHash: String(repeating: "b", count: 64))
+        let enabled = Filter(name: "Existing", enabledBlocklistIDs: [source.id], customBlocklists: [source])
+        let disabled = Filter(name: "Existing", enabledBlocklistIDs: [], customBlocklists: [changed])
+        let removed = FilterReplacementSummary(before: enabled, after: disabled)
+        XCTAssertEqual(removed.removedBlocklistIDs, [source.id])
+        XCTAssertEqual(removed.removedCustomBlocklists, [source])
+        let added = FilterReplacementSummary(before: disabled, after: enabled)
+        XCTAssertEqual(added.addedBlocklistIDs, [source.id])
+        XCTAssertEqual(added.addedCustomBlocklists, [source])
+    }
+
+    func testReplacementReviewDoesNotMistakeRetainedRulesForRemovals() {
+        let target = Filter(name: "Existing", enabledBlocklistIDs: ["same"], blockedDomains: ["same.example"], allowedDomains: ["personal.example"])
+        let review = ShareableFilterConfiguration(filter: target).replacementSummary(for: target)
+        XCTAssertFalse(review.hasChanges)
+        XCTAssertTrue(review.selectionDiff.isEmpty)
+    }
+
     // MARK: Shareable slice excludes security-sensitive fields
 
-    func testInitFromConfigurationKeepsOnlyBlockSideFields() throws {
+    func testInitFromConfigurationKeepsFullFilterContent() throws {
         let custom = try makeCustomSource()
         let configuration = AppConfiguration(
             protectionEnabled: true,
@@ -37,17 +112,17 @@ final class ShareableFilterConfigurationTests: XCTestCase {
         XCTAssertEqual(shared.enabledBlocklistIDs, ["blocklistproject-basic", custom.id])
         XCTAssertEqual(shared.blockedDomains, ["casino.example"])
         XCTAssertEqual(shared.customBlocklists, [custom])
-        // Allowlist exceptions and resolver details must never travel.
+        // Filter exceptions travel; resolver/device fields are absent from the wire schema.
         let code = shared.encodedConfigurationCode()
-        XCTAssertFalse(code.contains("school"))
-        XCTAssertFalse(code.contains("bypass"))
+        XCTAssertEqual(shared.allowedDomains, ["school.example", "bypass.example"])
         let decodedBack = try ShareableFilterConfiguration.decode(configurationCode: code)
         XCTAssertEqual(decodedBack.enabledBlocklistIDs, shared.enabledBlocklistIDs)
         XCTAssertEqual(decodedBack.blockedDomains, shared.blockedDomains)
         Self.assertSameSharedCustoms(decodedBack.customBlocklists, shared.customBlocklists)
+        XCTAssertEqual(decodedBack.allowedDomains, shared.allowedDomains)
     }
 
-    func testInitFromConfigurationExcludesDisabledCustomBlocklists() throws {
+    func testInitFromConfigurationKeepsDisabledCustomDefinitions() throws {
         let enabledCustom = try CustomBlocklistSource(
             id: "custom-on",
             displayName: "On",
@@ -65,11 +140,11 @@ final class ShareableFilterConfigurationTests: XCTestCase {
 
         let shared = ShareableFilterConfiguration(configuration: configuration)
 
-        // Only the enabled custom list travels; the disabled one's URL/name stays.
-        XCTAssertEqual(shared.customBlocklists, [enabledCustom])
+        XCTAssertEqual(shared.customBlocklists, [enabledCustom, disabledCustom])
+        XCTAssertEqual(shared.enabledBlocklistIDs, [enabledCustom.id])
     }
 
-    func testInitFromFilterKeepsBlockSideAndDropsDisabledCustom() throws {
+    func testInitFromSelectedFilterKeepsFullContentAndDisabledDefinitions() throws {
         let enabledCustom = try CustomBlocklistSource(
             id: "c-on",
             displayName: "On",
@@ -92,9 +167,8 @@ final class ShareableFilterConfigurationTests: XCTestCase {
 
         XCTAssertEqual(shared.enabledBlocklistIDs, ["list-a", "c-on"])
         XCTAssertEqual(shared.blockedDomains, ["bad.example"])
-        // Only the enabled custom list travels; the disabled one is dropped. Allowlist
-        // exceptions never leave the device (the share has no allowed field).
-        XCTAssertEqual(shared.customBlocklists, [enabledCustom])
+        XCTAssertEqual(shared.customBlocklists, [enabledCustom, disabledCustom])
+        XCTAssertEqual(shared.allowedDomains, ["allow.example"])
     }
 
     func testFitsShareableCodeCapacityGatesOversizedSetups() throws {
@@ -273,6 +347,7 @@ final class ShareableFilterConfigurationTests: XCTestCase {
             customBlocklists: []
         )
         let applied = ShareableFilterConfiguration(
+            schemaVersion: 1,
             enabledBlocklistIDs: ["new-list", importedCustom.id],
             blockedDomains: ["new.example"],
             customBlocklists: [importedCustom]
@@ -350,6 +425,142 @@ final class ShareableFilterConfigurationTests: XCTestCase {
         XCTAssertEqual(plan.droppedCount(of: .unavailableBlocklist), 0)
     }
 
+    func testSharedCatalogTakedownCannotBeBypassedWithKnownCustomURLs() throws {
+        let catalogID = "hagezi-social"
+        let canonical = try XCTUnwrap(DefaultCatalog.curatedSources.first { $0.id == catalogID }).sourceURL
+        let legacy = try XCTUnwrap(URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt"))
+        for url in [canonical, legacy] {
+            for allowsCustom in [false, true] {
+                let custom = try CustomBlocklistSource(id: "custom-shared-social", displayName: "Shared social", rawURL: url.absoluteString)
+                let knownID = try XCTUnwrap(KnownBlocklistURLMatcher.catalogSourceID(for: url))
+                let shared = ShareableFilterConfiguration(enabledBlocklistIDs: [catalogID, custom.id],
+                    blockedDomains: ["keep.example"], customBlocklists: [custom])
+                let unavailable = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [],
+                    reservedBlocklistIDs: [catalogID], catalogSourceIDsByCustomURL: [url: knownID],
+                    allowsCustomBlocklists: allowsCustom, maxBlockedDomains: 500)
+                let plan = shared.importPlan(capabilities: unavailable)
+                XCTAssertTrue(plan.applied.enabledBlocklistIDs.isEmpty)
+                XCTAssertTrue(plan.applied.customBlocklists.isEmpty)
+                XCTAssertEqual(plan.applied.blockedDomains, ["keep.example"])
+                XCTAssertEqual(plan.droppedCount(of: .unavailableBlocklist), 2)
+                XCTAssertEqual(plan.droppedCount(of: .requiresUpgrade), 0)
+
+                let available = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [catalogID],
+                    reservedBlocklistIDs: [catalogID], catalogSourceIDsByCustomURL: [url: knownID],
+                    allowsCustomBlocklists: allowsCustom, maxBlockedDomains: 500)
+                let restored = shared.importPlan(capabilities: available)
+                XCTAssertEqual(restored.droppedCount(of: .requiresUpgrade), 0)
+                XCTAssertEqual(restored.applied.enabledBlocklistIDs, [catalogID])
+                XCTAssertTrue(restored.applied.customBlocklists.isEmpty)
+                XCTAssertEqual(restored.applied.importPlan(capabilities: available).applied, restored.applied)
+            }
+        }
+    }
+
+    func testInactiveKnownCatalogSourcesRetainOnlyAvailableReferences() throws {
+        let id = "hagezi-social"
+        let url = try XCTUnwrap(DefaultCatalog.curatedSources.first { $0.id == id }).sourceURL
+        let custom = try CustomBlocklistSource(id: "custom-inactive", displayName: "Saved social", rawURL: url.absoluteString)
+        let shared = ShareableFilterConfiguration(customBlocklists: [custom])
+        let available = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [id],
+            reservedBlocklistIDs: [id], catalogSourceIDsByCustomURL: [url: id],
+            allowsCustomBlocklists: true, maxBlockedDomains: 500)
+        let kept = shared.importPlan(capabilities: available)
+        XCTAssertTrue(kept.applied.enabledBlocklistIDs.isEmpty)
+        XCTAssertEqual(kept.applied.customBlocklists.map(\.id), [custom.id])
+        XCTAssertFalse(kept.applied.isEmpty)
+        XCTAssertFalse(kept.hasUnsupportedEntries)
+        XCTAssertEqual(kept.applied.importPlan(capabilities: available).applied, kept.applied)
+        let removed = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [],
+            reservedBlocklistIDs: [id], catalogSourceIDsByCustomURL: [url: id],
+            allowsCustomBlocklists: true, maxBlockedDomains: 500)
+        let dropped = shared.importPlan(capabilities: removed)
+        XCTAssertTrue(dropped.applied.isEmpty)
+        XCTAssertEqual(dropped.droppedCount(of: .unavailableBlocklist), 1)
+    }
+
+    func testShadowedCatalogIDStillReportsTakedown() throws {
+        let id = "hagezi-social"
+        let shadow = try CustomBlocklistSource(id: id, displayName: "Shadow", rawURL: "https://example.com/list.txt")
+        let shared = ShareableFilterConfiguration(enabledBlocklistIDs: [id], customBlocklists: [shadow])
+        for available in [Set<String>(), [id]] {
+            let capabilities = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: available,
+                reservedBlocklistIDs: [id], allowsCustomBlocklists: true, maxBlockedDomains: 500)
+            let plan = shared.importPlan(capabilities: capabilities)
+            XCTAssertTrue(plan.applied.customBlocklists.isEmpty)
+            XCTAssertEqual(plan.applied.enabledBlocklistIDs, available)
+            XCTAssertEqual(plan.droppedCount(of: .unsafeSource), 1)
+            XCTAssertEqual(plan.droppedCount(of: .unavailableBlocklist), available.isEmpty ? 1 : 0)
+        }
+    }
+
+    func testSyncedCatalogURLCannotBypassTakedownAsCustomSource() throws {
+        let url = try XCTUnwrap(URL(string: "https://lists.example.com/server-only"))
+        let sharedURL = try XCTUnwrap(URL(string: "https://LISTS.EXAMPLE.COM:443/server-only/"))
+        let id = try XCTUnwrap(KnownBlocklistURLMatcher.catalogSourceID(for: sharedURL,
+            additionalSourceIDsByURL: [url: "server-only"]))
+        let custom = try CustomBlocklistSource(id: "custom-server", displayName: "Server list", rawURL: sharedURL.absoluteString)
+        let shared = ShareableFilterConfiguration(enabledBlocklistIDs: [custom.id], customBlocklists: [custom])
+        for available in [Set<String>(), [id]] {
+            let capabilities = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: available,
+                reservedBlocklistIDs: [id], catalogSourceIDsByCustomURL: [sharedURL: id],
+                allowsCustomBlocklists: true, maxBlockedDomains: 500)
+            let plan = shared.importPlan(capabilities: capabilities)
+            XCTAssertTrue(plan.applied.customBlocklists.isEmpty)
+            XCTAssertEqual(plan.applied.enabledBlocklistIDs, available)
+            XCTAssertEqual(plan.droppedCount(of: .unavailableBlocklist), available.isEmpty ? 1 : 0)
+        }
+    }
+
+    func testFragmentCannotBypassImportedCatalogTakedown() throws {
+        let source = try XCTUnwrap(DefaultCatalog.curatedSources.first { $0.id == "hagezi-social" })
+        let fragmentURL = try XCTUnwrap(URL(string: source.sourceURL.absoluteString + "#shared"))
+        XCTAssertNil(KnownBlocklistURLMatcher.catalogSourceID(for: fragmentURL),
+            "Installed-list migration matching must remain unchanged")
+        let id = try XCTUnwrap(KnownBlocklistURLMatcher.catalogSourceIDForImport(for: fragmentURL))
+        XCTAssertEqual(id, source.id)
+        let custom = try CustomBlocklistSource(id: "custom-fragment", displayName: "Social", rawURL: fragmentURL.absoluteString)
+        let shared = ShareableFilterConfiguration(enabledBlocklistIDs: [custom.id], customBlocklists: [custom])
+        let capabilities = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [],
+            reservedBlocklistIDs: [id], catalogSourceIDsByCustomURL: [fragmentURL: id],
+            allowsCustomBlocklists: true, maxBlockedDomains: 500)
+        let plan = shared.importPlan(capabilities: capabilities)
+        XCTAssertTrue(plan.applied.isEmpty)
+        XCTAssertEqual(plan.droppedCount(of: .unavailableBlocklist), 1)
+        let queried = try XCTUnwrap(URL(string: "https://lists.example.com/source?variant=one#ignored"))
+        let known = try XCTUnwrap(URL(string: "https://lists.example.com/source?variant=one"))
+        let other = try XCTUnwrap(URL(string: "https://lists.example.com/source?variant=two#ignored"))
+        XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceIDForImport(for: queried,
+            additionalSourceIDsByURL: [known: "server-list"]), "server-list")
+        XCTAssertNil(KnownBlocklistURLMatcher.catalogSourceIDForImport(for: other,
+            additionalSourceIDsByURL: [known: "server-list"]))
+    }
+
+    func testCurrentCatalogURLMappingWinsOverBundledAndLegacyIdentities() throws {
+        let source = try XCTUnwrap(DefaultCatalog.curatedSources.first { $0.id == "hagezi-social" })
+        let legacy = try XCTUnwrap(URL(string: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt"))
+        for url in [source.sourceURL, legacy] {
+            XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceID(for: url,
+                additionalSourceIDsByURL: [url: "replacement-social"]), "replacement-social")
+            var variant = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+            variant.host = variant.host?.uppercased()
+            variant.port = 443
+            variant.path += "/"
+            XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceID(for: try XCTUnwrap(variant.url),
+                additionalSourceIDsByURL: [url: "replacement-social"]), "replacement-social")
+            XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceID(for: url), source.id)
+        }
+    }
+
+    func testSyncedCatalogURLQueriesRequireExactMatch() throws {
+        let known = try XCTUnwrap(URL(string: "https://lists.example.com/list?variant=one"))
+        let other = try XCTUnwrap(URL(string: "https://lists.example.com/list?variant=two"))
+        XCTAssertEqual(KnownBlocklistURLMatcher.catalogSourceID(for: known,
+            additionalSourceIDsByURL: [known: "server-list"]), "server-list")
+        XCTAssertNil(KnownBlocklistURLMatcher.catalogSourceID(for: other,
+            additionalSourceIDsByURL: [known: "server-list"]))
+    }
+
     func testImportPlanCapsBlockedDomainsAtPlanLimit() {
         let shared = ShareableFilterConfiguration(
             blockedDomains: ["a.example", "b.example", "c.example"]
@@ -390,7 +601,7 @@ final class ShareableFilterConfigurationTests: XCTestCase {
     }
 
     func testImportPlanCountsPreservedAllowlistTowardBudget() {
-        let shared = ShareableFilterConfiguration(enabledBlocklistIDs: ["list"])
+        let shared = ShareableFilterConfiguration(schemaVersion: 1, enabledBlocklistIDs: ["list"])
         // The list alone (60) fits a 100 budget, but with 50 preserved allowlist
         // rules the total (110) exceeds it — matching what snapshot prep enforces.
         let capabilities = ShareableFilterImportCapabilities(
@@ -455,7 +666,7 @@ final class ShareableFilterConfigurationTests: XCTestCase {
         XCTAssertEqual(Set(plan.applied.customBlocklists.map(\.id)).count, 1)
     }
 
-    func testImportPlanIgnoresInactiveCustomSources() throws {
+    func testImportPlanPreservesInactiveCustomSourcesWithoutEnablingThem() throws {
         // A crafted code can carry a custom source whose ID isn't enabled; it
         // would compile to nothing, so it must not count toward the import.
         let inactive = try CustomBlocklistSource(
@@ -475,8 +686,9 @@ final class ShareableFilterConfigurationTests: XCTestCase {
 
         let plan = shared.importPlan(capabilities: capabilities)
 
-        XCTAssertTrue(plan.applied.customBlocklists.isEmpty)
-        XCTAssertTrue(plan.applied.isEmpty)
+        XCTAssertEqual(plan.applied.customBlocklists, [inactive])
+        XCTAssertFalse(plan.applied.isEmpty)
+        XCTAssertTrue(plan.applied.enabledBlocklistIDs.isEmpty)
         XCTAssertEqual(plan.droppedCount(of: .requiresUpgrade), 0)
     }
 

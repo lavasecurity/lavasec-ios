@@ -18,6 +18,18 @@ import XCTest
 /// locale by design (guard-tab/brand rule), so only the surrounding sentence localizes. Values assert against
 /// the committed catalogs in `Sources/LavaSecKit/Resources/*.lproj/Localizable.strings`.
 final class SwitchFilterDialogLocalizationTests: XCTestCase {
+    func testEmojiIdentitySurvivesEveryLocalizedSwitchDialog() {
+        let label = FilterIdentityPolicy.displayName(name: "Balanced", emoji: "🪴")
+        for language in ["en", "de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"] {
+            for key in ["dialog.filterSwitchedTo", "dialog.filterAlreadyActive",
+                        "dialog.filterWillApplyAutomatically", "dialog.filterSwitchDisallowed"] {
+                let message = LavaCoreStrings.localizedFormat(key, languageCode: language, label)
+                XCTAssertTrue(message.contains("🪴 Balanced"), "\(key)/\(language)")
+                XCTAssertFalse(message.contains("%@"))
+            }
+        }
+    }
+
     /// The exact user-reported scenario: an automation runs Switch Filter, the built-in "Extra" filter is
     /// already active, and a zh-Hant app must show the Chinese sentence — not English. Before the fix this
     /// dialog resolved in the (English) system locale; this pins that it now resolves in the app's language.
@@ -28,7 +40,7 @@ final class SwitchFilterDialogLocalizationTests: XCTestCase {
         )
         XCTAssertEqual(
             LavaCoreStrings.localizedFormat("dialog.filterAlreadyActive", languageCode: "ja", "Extra"),
-            "Extra はすでに有効なフィルターです。"
+            "Extraはすでに使用中のフィルターです。"
         )
         // en (the source language) reads naturally, with the built-in level name staying English.
         XCTAssertEqual(
@@ -64,7 +76,7 @@ final class SwitchFilterDialogLocalizationTests: XCTestCase {
         )
         XCTAssertEqual(
             LavaCoreStrings.localizedFormat("dialog.filterSwitchDisallowed", languageCode: "en", "Extra"),
-            "Couldn't switch to Extra. Open Lava to check your filter settings."
+            "Couldn’t switch to Extra. Open Lava to check your filter settings."
         )
     }
 

@@ -3,12 +3,79 @@ import XCTest
 @testable import LavaSecKit
 
 final class OnboardingDefaultsTests: XCTestCase {
-    func testRecommendedOnboardingDefaultsUseDeviceDNSWithMullvadDoHFallback() {
+    func testRecommendedOnboardingDefaultsUseDeviceDNSWithQuad9DoHFallback() {
         let defaults = AppConfiguration.lavaRecommendedDefaults
 
         XCTAssertEqual(defaults.resolverPresetID, DNSResolverPreset.device.id)
         XCTAssertTrue(defaults.usesEncryptedDeviceDNSFallback)
-        XCTAssertEqual(defaults.fallbackResolverPreset.id, DNSResolverPreset.mullvadDoH.id)
+        XCTAssertEqual(defaults.fallbackResolverPreset.id, DNSResolverPreset.quad9UnfilteredDoH.id)
+    }
+
+    func testAppBootstrapUsesEffectiveOnboardingDNSWithoutChangingOtherDefaults() {
+        var expected = AppConfiguration()
+        expected.resolverPresetID = DNSResolverPreset.device.id
+        expected.usesEncryptedDeviceDNSFallback = true
+        expected.fallbackResolverPresetID = DNSResolverPreset.quad9UnfilteredDoH.id
+        XCTAssertEqual(AppConfiguration.lavaAppInitialDefaults, expected)
+        XCTAssertEqual(AppConfiguration().resolverPresetID, DNSResolverPreset.quad9UnfilteredDoH.id,
+                       "Other processes and decoder compatibility keep the original model defaults.")
+    }
+
+    func testInterruptedFreshOnboardingKeepsDNSDefaultsAndLaterToggleChoice() throws {
+        var firstLaunch = AppConfiguration.lavaAppInitialDefaults
+        // Initial bootstrap / VPN-profile persistence occurs before the DNS step.
+        var resumed = try JSONDecoder().decode(AppConfiguration.self, from: JSONEncoder().encode(firstLaunch))
+        XCTAssertEqual(resumed.resolverPresetID, DNSResolverPreset.device.id)
+        XCTAssertTrue(resumed.usesEncryptedDeviceDNSFallback)
+        resumed.applyOnboardingEncryptedFallback(false)
+        firstLaunch = try JSONDecoder().decode(AppConfiguration.self, from: JSONEncoder().encode(resumed))
+        XCTAssertEqual(firstLaunch.resolverPresetID, DNSResolverPreset.device.id)
+        XCTAssertFalse(firstLaunch.usesEncryptedDeviceDNSFallback)
+        XCTAssertEqual(firstLaunch.fallbackResolverPresetID, DNSResolverPreset.quad9UnfilteredDoH.id)
+    }
+
+    func testAppBootstrapLoadsSavedDNSOverInitialDefaultsWithoutMigration() throws {
+        let app = try readAppViewModelSource()
+        XCTAssertTrue(app.contains("@Published var configuration = AppConfiguration.lavaAppInitialDefaults"))
+        let load = try sourceBlock(in: app, startingAt: "func loadPersistedConfiguration()", endingBefore: "func reloadSharedStateIfBlockedByDataProtection()")
+        XCTAssertTrue(load.contains("case .loaded(let persistedConfiguration):\n                configuration = persistedConfiguration"))
+        XCTAssertFalse(load.contains("lavaAppInitialDefaults"), "A reload must accept saved settings, not reapply setup defaults.")
+        XCTAssertTrue(load.contains("sharedStateUnavailableAtLoad = true"), "Unreadable state remains protected by the existing writer fence.")
+    }
+
+    func testFallbackTogglePreservesEveryOtherSavedSetting() {
+        for provider in [DNSResolverPreset.quad9UnfilteredDoH.id, DNSResolverPreset.quad9SecureDoH.id, DNSResolverPreset.customID] {
+            for enabled in [false, true] {
+                var saved = AppConfiguration.lavaRecommendedDefaults
+                saved.resolverPresetID = DNSResolverPreset.customID
+                saved.customResolverAddress = "https://primary.example/dns-query"
+                saved.customResolverName = "My primary"
+                saved.fallbackResolverPresetID = provider
+                saved.fallbackCustomResolverAddress = "https://backup.example/dns-query"
+                saved.fallbackCustomResolverSecondaryAddress = "https://secondary.example/dns-query"
+                saved.fallbackCustomResolverName = "My backup"
+                saved.fallbackToDeviceDNS = false
+                saved.usesEncryptedDeviceDNSFallback = !enabled
+                var expected = saved
+                expected.usesEncryptedDeviceDNSFallback = enabled
+                saved.applyOnboardingEncryptedFallback(enabled)
+                XCTAssertEqual(saved, expected, "Setup must change only its visible fallback toggle, including for a saved custom provider.")
+            }
+        }
+    }
+
+    func testOnboardingFallbackViewSeedsSavedStateAndUsesNarrowPersistBoundary() throws {
+        let flow = try readSource(.onboardingFlowView)
+        XCTAssertTrue(flow.contains("useEncryptedFallback = viewModel.configuration.usesEncryptedDeviceDNSFallback"))
+        XCTAssertTrue(flow.contains("if !isMock && !hasLoadedConnectionChoice {"))
+        XCTAssertFalse(flow.contains("@State private var fallbackResolverPresetID"))
+        let app = try readAppViewModelSource()
+        let apply = try sourceBlock(in: app, startingAt: "func applyOnboardingConnectionPreferences(", endingBefore: "func selectOnboardingBlocklists(")
+        XCTAssertTrue(apply.contains("configuration.applyOnboardingEncryptedFallback(useEncryptedFallback)"))
+        XCTAssertTrue(apply.contains("if persistImmediately {"))
+        XCTAssertTrue(apply.contains("persistFilterChanges()"))
+        XCTAssertFalse(apply.contains("configuration.resolverPresetID ="))
+        XCTAssertFalse(apply.contains("configuration.fallbackResolverPresetID ="))
     }
 
     func testSummaryUsesRecommendedOnboardingDefaults() {
@@ -16,7 +83,7 @@ final class OnboardingDefaultsTests: XCTestCase {
 
         XCTAssertEqual(summary.blocklistText, "Block List Basic + 1 more")
         XCTAssertEqual(summary.resolverText, "Device DNS")
-        XCTAssertEqual(summary.deviceDNSFallbackText, "Mullvad (DoH)")
+        XCTAssertEqual(summary.deviceDNSFallbackText, "Quad9 (DoH)")
         XCTAssertEqual(summary.localLoggingText, "Domain counts, domain history, and network activity")
         XCTAssertEqual(summary.accountText, "Continue without account")
     }
@@ -25,7 +92,7 @@ final class OnboardingDefaultsTests: XCTestCase {
         let summary = OnboardingDefaultsSummary(
             configuration: AppConfiguration(
                 enabledBlocklistIDs: [DefaultCatalog.blockListProjectBasic.id, DefaultCatalog.blockListProjectPhishing.id],
-                resolverPresetID: DNSResolverPreset.quad9SecureDoH.id,
+                resolverPresetID: DNSResolverPreset.quad9UnfilteredDoH.id,
                 fallbackToDeviceDNS: false,
                 keepFilteringCounts: false,
                 keepDomainDiagnostics: true,
@@ -34,7 +101,7 @@ final class OnboardingDefaultsTests: XCTestCase {
         )
 
         XCTAssertEqual(summary.blocklistText, "Block List Basic + 1 more")
-        XCTAssertEqual(summary.resolverText, "Quad9 Secure (DoH)")
+        XCTAssertEqual(summary.resolverText, "Quad9 (DoH)")
         XCTAssertEqual(summary.deviceDNSFallbackText, "Off")
         XCTAssertEqual(summary.localLoggingText, "Domain history")
     }

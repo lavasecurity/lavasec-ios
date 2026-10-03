@@ -26,7 +26,15 @@ let package = Package(
         .library(name: "LavaSecDNS", targets: ["LavaSecDNS"]),
         .library(name: "LavaSecFilterPipeline", targets: ["LavaSecFilterPipeline"]),
         .library(name: "LavaSecPresentation", targets: ["LavaSecPresentation"]),
-        .library(name: "LavaSecAppServices", targets: ["LavaSecAppServices"])
+        .library(name: "LavaSecAppServices", targets: ["LavaSecAppServices"]),
+        // Chained WireGuard upstream engine wrapper. Deliberately NOT a member of the
+        // LavaSecCore façade product: nothing engine-ward depends on it, and the façade
+        // is linked by non-production callers we do not want pulling a crypto archive.
+        // The packet tunnel is its ONE approved consumer (plan D4, least privilege); see
+        // docs/architecture/module-boundaries.md for the matrix. No other production target
+        // may take it without the same review — a crypto archive in a process that has no
+        // use for it is audit surface for nothing.
+        .library(name: "LavaSecChainedUpstream", targets: ["LavaSecChainedUpstream"])
     ],
     targets: [
         // Foundation layer: models, pure policies, persistence plumbing, localized
@@ -78,16 +86,34 @@ let package = Package(
             dependencies: ["LavaSecKit", "LavaSecFilterPipeline"]
         ),
         // Compatibility façade for callers outside the production process targets. The
-        // tunnel links only its four narrow products, so re-exporting Presentation here
+        // tunnel links only its approved narrow products, so re-exporting Presentation here
         // cannot introduce UI policy into the Network Extension. See lavasec-infra
         // plans/2026-07-07-ios-modularization-scaffolding-plan.md Phase B.
         .target(
             name: "LavaSecCore",
             dependencies: ["LavaSecKit", "LavaSecNetworking", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecPresentation", "LavaSecAppServices"]
         ),
+        // The WireGuard engine as a prebuilt, provenance-gated artifact. The Xcode/SwiftPM
+        // build cannot run Rust (shell phases, build rules, and plugins are all rejected by
+        // the committed xcodegen guards), so the engine ships as a committed xcframework
+        // whose bytes CI proves equal a from-source rebuild — see
+        // scripts/check-wireguard-core-drift.sh and ThirdParty/wireguard-core/README.md.
+        // This is the package's only binary target; the boundary guard whitelists it by
+        // exact shape so a second one cannot appear unreviewed.
+        .binaryTarget(
+            name: "LavaSecWGCore",
+            path: "ThirdParty/wireguard-core/build/LavaSecWGCore.xcframework"
+        ),
+        // Swift surface over the engine's C ABI. Depends on Kit for nothing but layer
+        // placement discipline is preserved: it sits beside the other engine layers and
+        // nothing below it may import it (docs/architecture/module-boundaries.md).
+        .target(
+            name: "LavaSecChainedUpstream",
+            dependencies: ["LavaSecKit", "LavaSecWGCore"]
+        ),
         .testTarget(
             name: "LavaSecCoreTests",
-            dependencies: ["LavaSecCore", "LavaSecKit", "LavaSecNetworking", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecPresentation", "LavaSecAppServices"]
+            dependencies: ["LavaSecCore", "LavaSecKit", "LavaSecNetworking", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecPresentation", "LavaSecAppServices", "LavaSecChainedUpstream"]
         ),
         // Compiler proof that the compatibility façade alone exposes every real layer.
         .testTarget(

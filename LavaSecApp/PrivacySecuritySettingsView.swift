@@ -2,7 +2,7 @@ import SwiftUI
 import LavaSecKit
 import UniformTypeIdentifiers
 
-private struct LocalLogExportDocument: FileDocument {
+struct LocalLogExportDocument: FileDocument {
     static var readableContentTypes: [UTType] {
         [.zip]
     }
@@ -19,454 +19,6 @@ private struct LocalLogExportDocument: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: data)
-    }
-}
-
-struct PrivacyDataSettingsView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-    // The diagnostics scope (Phase D4 peel): the store-coupled keep-flags + clears live here.
-    @EnvironmentObject private var reports: DiagnosticsController
-    @EnvironmentObject private var security: SecurityController
-    @State private var disableTarget: LocalLogSetting?
-    @State private var clearTarget: LocalLogClearTarget?
-    @State private var showsClearOptions = false
-    @State private var localLogExportDocument: LocalLogExportDocument?
-    @State private var localLogExportFilename = "lava-local-logs.zip"
-    @State private var isPresentingLocalLogExporter = false
-    @State private var localLogExportErrorMessage: String?
-    // True while an export is draining off the main actor. Concurrent CLEARS can no longer
-    // truncate the archive — the export reads a pinned SQLite snapshot (see
-    // DiagnosticsController.domainHistoryExportSource) — so this flag exists only to stop a second
-    // overlapping export from racing the shared `localLogExportDocument`/exporter state below.
-    // pinned: DNSEventLogWiringSourceTests.testLocalLogExportGuardsOverlappingExports
-    @State private var isExportingLocalLogs = false
-
-    var body: some View {
-        SettingsSubpageContent(
-            title: "Privacy & Data",
-            tier: .calm,
-            intro: LavaInfoPanel(
-                title: "All local logs stay on this iPhone",
-                description: "Domain history and network activity are kept for 7 days; counts and Lava Guard progress last longer. Keep or clear each below.",
-                systemImage: "eyeglasses"
-            )
-        ) {
-            LavaSectionGroup("Local Logs", footer: "Detailed activity is kept for 7 days — export to keep a copy.") {
-                VStack(spacing: 10) {
-                    LavaCondensedList {
-                        localLogToggle("Filtering Counts", isOn: keepFilteringCountsBinding)
-
-                        LavaCondensedDivider()
-
-                        localLogToggle("Domain Logs", isOn: keepDomainHistoryBinding)
-
-                        LavaCondensedDivider()
-
-                        localLogToggle("Network Activity", isOn: keepNetworkActivityBinding)
-
-                        LavaCondensedDivider()
-
-                        localLogToggle("Lava Guard Progress", isOn: keepLavaGuardProgressBinding)
-                    }
-                    .font(.headline)
-                    .tint(LavaStyle.safeGreen)
-
-                    Button {
-                        exportLocalLogs()
-                    } label: {
-                        ExportLocalLogsRow()
-                            .lavaControlRowCard()
-                    }
-                    .buttonStyle(.plain)
-                    // Prevent a second overlapping export from clobbering the in-flight one's
-                    // exporter state; concurrent clears are handled by the snapshot, not here.
-                    .disabled(isExportingLocalLogs)
-
-                    if let localLogExportErrorMessage {
-                        Text(localLogExportErrorMessage)
-                            .lavaQuietNoteText()
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-
-            LavaSectionGroup("Delete Local Logs") {
-                VStack(spacing: 10) {
-                    Toggle("Show Delete Options", isOn: $showsClearOptions)
-                        .font(.headline)
-                        .tint(LavaStyle.safeGreen)
-                        .lavaControlRowCard()
-
-                    if showsClearOptions {
-                        VStack(spacing: 10) {
-                            LavaCondensedList {
-                                localLogClearButton(.filteringCounts)
-                                LavaCondensedDivider()
-                                localLogClearButton(.domainHistory)
-                                LavaCondensedDivider()
-                                localLogClearButton(.networkActivity)
-                                LavaCondensedDivider()
-                                localLogClearButton(.lavaGuardProgress)
-                            }
-
-                            LavaCondensedList {
-                                localLogClearButton(.all)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .fileExporter(
-            isPresented: $isPresentingLocalLogExporter,
-            document: localLogExportDocument,
-            contentType: .zip,
-            defaultFilename: localLogExportFilename
-        ) { result in
-            handleLocalLogExportCompletion(result)
-        }
-        .lavaConfirmationAlert { host in
-            host.alert(
-                disableTarget?.disableTitle.lavaLocalized ?? "",
-                isPresented: disableConfirmationBinding,
-                presenting: disableTarget
-            ) { target in
-                Button("Cancel", role: .cancel) {}
-                Button(target.disableActionTitle.lavaLocalized, role: .destructive) {
-                    disable(target)
-                }
-            } message: { target in
-                Text(target.disableMessage.lavaLocalized)
-            }
-        }
-        .lavaConfirmationAlert { host in
-            host.alert(
-                clearTarget?.clearTitle.lavaLocalized ?? "",
-                isPresented: clearConfirmationBinding,
-                presenting: clearTarget
-            ) { target in
-                Button("Cancel", role: .cancel) {}
-                Button(target.clearActionTitle.lavaLocalized, role: .destructive) {
-                    clear(target)
-                }
-            } message: { target in
-                Text(target.clearMessage.lavaLocalized)
-            }
-        }
-    }
-
-    private var keepFilteringCountsBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepFilteringCounts
-        } set: { newValue in
-            if newValue {
-                performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    reports.setKeepFilteringCounts(true)
-                }
-            } else {
-                disableTarget = .filteringCounts
-            }
-        }
-    }
-
-    private var keepDomainHistoryBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepDomainDiagnostics
-        } set: { newValue in
-            if newValue {
-                performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    reports.setKeepDomainDiagnostics(true)
-                }
-            } else {
-                disableTarget = .domainHistory
-            }
-        }
-    }
-
-    private var keepNetworkActivityBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepNetworkActivity
-        } set: { newValue in
-            if newValue {
-                performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    viewModel.setKeepNetworkActivity(true)
-                }
-            } else {
-                disableTarget = .networkActivity
-            }
-        }
-    }
-
-    private var keepLavaGuardProgressBinding: Binding<Bool> {
-        Binding {
-            viewModel.configuration.keepLavaGuardProgress
-        } set: { newValue in
-            if newValue {
-                performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-                    viewModel.setKeepLavaGuardProgress(true)
-                }
-            } else {
-                disableTarget = .lavaGuardProgress
-            }
-        }
-    }
-
-    private var disableConfirmationBinding: Binding<Bool> {
-        Binding {
-            disableTarget != nil
-        } set: { isPresented in
-            if !isPresented {
-                disableTarget = nil
-            }
-        }
-    }
-
-    private var clearConfirmationBinding: Binding<Bool> {
-        Binding {
-            clearTarget != nil
-        } set: { isPresented in
-            if !isPresented {
-                clearTarget = nil
-            }
-        }
-    }
-
-    private func disable(_ target: LocalLogSetting) {
-        performAppSettingsMutation(reason: "Edit Privacy & Data settings") {
-            switch target {
-            case .filteringCounts:
-                reports.setKeepFilteringCounts(false)
-            case .domainHistory:
-                reports.setKeepDomainDiagnostics(false)
-            case .networkActivity:
-                viewModel.setKeepNetworkActivity(false)
-            case .lavaGuardProgress:
-                viewModel.setKeepLavaGuardProgress(false)
-            }
-        }
-    }
-
-    private func localLogToggle(_ title: String, isOn: Binding<Bool>) -> some View {
-        Toggle(title.lavaLocalized, isOn: isOn)
-            .lavaRow()
-    }
-
-    private func localLogClearButton(_ target: LocalLogClearTarget) -> some View {
-        Button(role: .destructive) {
-            clearTarget = target
-        } label: {
-            SettingsActionRow(
-                title: target.buttonTitle,
-                iconTint: .red,
-                titleTint: .red
-            ) {
-                Image(systemName: target.systemImage)
-                    .font(.title3.weight(.semibold))
-            }
-            .lavaRow()
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func clear(_ target: LocalLogClearTarget) {
-        performAppSettingsMutation(reason: "Delete Local Logs") {
-            let didClear: Bool
-            switch target {
-            case .filteringCounts:
-                didClear = reports.clearLocalFilteringCounts()
-            case .domainHistory:
-                didClear = reports.clearDomainHistory()
-            case .networkActivity:
-                didClear = viewModel.clearNetworkActivityLog()
-            case .lavaGuardProgress:
-                didClear = viewModel.clearLavaGuardProgress()
-            case .all:
-                didClear = reports.clearAllLocalLogs()
-            }
-            // Rows clear in place with no on-screen confirmation, so announce completion for
-            // VoiceOver — but ONLY when the clear durably persisted. The VM catches write failures
-            // internally (surfacing an error banner + failure haptic) rather than throwing, so an
-            // unconditional announcement would say "… cleared" even on a failed write. On failure
-            // the error banner + haptic already convey the outcome.
-            if didClear {
-                LavaAccessibilityAnnouncer.announce(target.clearedConfirmation.lavaLocalized)
-            }
-        }
-    }
-
-    private func exportLocalLogs() {
-        // Raise the flag SYNCHRONOUSLY (before authentication) so the export button disables
-        // immediately and a second tap during the auth prompt can't queue an overlapping export
-        // (Codex review, PR #341). The guard is belt-and-suspenders; the defer always clears the
-        // flag, including when authentication is cancelled. Auth is inlined here (rather than via
-        // performAppSettingsMutation) so the flag spans the whole auth+build, not just the build.
-        guard !isExportingLocalLogs else { return }
-        isExportingLocalLogs = true
-        Task { @MainActor in
-            defer { isExportingLocalLogs = false }
-            guard await security.requireAuthentication(for: .appSettings, reason: "Export local logs") else {
-                return
-            }
-            do {
-                let archive = try await viewModel.makeLocalLogExportArchive()
-                localLogExportFilename = archive.filename
-                localLogExportDocument = LocalLogExportDocument(data: archive.data)
-                localLogExportErrorMessage = nil
-                isPresentingLocalLogExporter = true
-            } catch {
-                localLogExportErrorMessage = "Could not export local logs: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func handleLocalLogExportCompletion(_ result: Result<URL, Error>) {
-        localLogExportDocument = nil
-
-        if case .failure(let error) = result {
-            let nsError = error as NSError
-            guard !(nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError) else {
-                return
-            }
-
-            localLogExportErrorMessage = "Could not save local logs: \(error.localizedDescription)"
-        }
-    }
-
-    private func performAppSettingsMutation(reason: String, action: @escaping @MainActor () -> Void) {
-        Task {
-            guard await security.requireAuthentication(for: .appSettings, reason: reason) else {
-                return
-            }
-
-            action()
-        }
-    }
-}
-
-struct SecuritySettingsView: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-    @EnvironmentObject private var security: SecurityController
-    @State private var isShowingPasscodeSetup = false
-
-    var body: some View {
-        SettingsSubpageContent(
-            title: "Security",
-            tier: .calm,
-            intro: LavaInfoPanel(
-                title: "Lock Lava with a passcode",
-                description: "Add a passcode or Face ID so only you can change Lava. Pick which screens ask for it below.",
-                systemImage: "lock.fill"
-            )
-        ) {
-            LavaSectionGroup("Authentication method") {
-                LavaCondensedList {
-                    Toggle("Passcode", isOn: passcodeBinding)
-                        .lavaRow()
-
-                    if security.shouldShowBiometricToggle {
-                        LavaCondensedDivider()
-
-                        Toggle(security.biometricToggleTitle.lavaLocalized, isOn: biometricBinding)
-                            .lavaRow()
-                            .disabled(!security.canEnableBiometrics)
-                    }
-                }
-                .font(.headline)
-                .tint(LavaStyle.safeGreen)
-            }
-
-            LavaSectionGroup(
-                "Use authentication for",
-                footer: "These switches turn on after you set a passcode or Face ID above. Each one decides which screen asks before it lets you in."
-            ) {
-                LavaCondensedList {
-                    ForEach(Array(authenticationSurfaces.enumerated()), id: \.offset) { index, item in
-                        securitySurfaceToggle(item.title, surface: item.surface)
-
-                        if index < authenticationSurfaces.count - 1 {
-                            LavaCondensedDivider()
-                        }
-                    }
-                }
-                .disabled(!security.hasAuthenticationMethod)
-                .opacity(security.hasAuthenticationMethod ? 1 : 0.45)
-            }
-
-            if let statusMessage = security.statusMessage {
-                Text(statusMessage.lavaLocalized)
-                    .lavaQuietNoteText()
-            }
-        }
-        .fullScreenCover(isPresented: $isShowingPasscodeSetup) {
-            SecurityPasscodeSetupView()
-                .environmentObject(security)
-        }
-    }
-
-    private var passcodeBinding: Binding<Bool> {
-        Binding {
-            security.isPasscodeEnabled
-        } set: { isEnabled in
-            if isEnabled {
-                isShowingPasscodeSetup = true
-            } else {
-                Task {
-                    guard await security.requirePasscodeAuthentication(reason: "Turn off Security passcode") else {
-                        return
-                    }
-
-                    security.disablePasscode()
-                }
-            }
-        }
-    }
-
-    private var biometricBinding: Binding<Bool> {
-        Binding {
-            security.isBiometricEnabled
-        } set: { isEnabled in
-            Task {
-                if isEnabled {
-                    await security.setBiometricEnabled(true)
-                    return
-                }
-
-                guard await security.requireBiometricAuthentication(reason: "Turn off %@".lavaLocalizedFormat(security.biometricToggleTitle)) else {
-                    return
-                }
-
-                await security.setBiometricEnabled(false)
-            }
-        }
-    }
-
-    private var authenticationSurfaces: [(title: String, surface: SecurityProtectedSurface)] {
-        [
-            ("App Unlock", .appUnlock),
-            ("Turn on/off Lava", .protectionControl),
-            ("Pause Lava", .protectionPause),
-            ("Update domains and lists", .filterEditing),
-            ("View Activities", .activityViewing),
-            ("Update App Settings", .appSettings),
-        ]
-    }
-
-    private func securitySurfaceToggle(_ title: String, surface: SecurityProtectedSurface) -> some View {
-        Toggle(title.lavaLocalized, isOn: Binding {
-            security.hasAuthenticationMethod && security.isProtected(surface)
-        } set: { isEnabled in
-            guard security.hasAuthenticationMethod else {
-                return
-            }
-
-            security.setProtection(isEnabled, for: surface)
-            if surface == .protectionPause {
-                viewModel.reconcileLiveActivity()
-            }
-        })
-        .font(.headline)
-        .tint(LavaStyle.safeGreen)
-        .lavaRow()
     }
 }
 
@@ -493,7 +45,7 @@ private enum SecurityPasscodeSetupPhase {
     }
 }
 
-private struct SecurityPasscodeSetupView: View {
+struct SecurityPasscodeSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var security: SecurityController
     @State private var phase: SecurityPasscodeSetupPhase = .enter
@@ -545,6 +97,7 @@ private struct SecurityPasscodeSetupView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
                 }
+                .lavaToolbarChrome()
             }
             .task {
                 await focusPasscodeField()
@@ -601,25 +154,7 @@ private struct SecurityPasscodeSetupView: View {
     }
 }
 
-private struct ExportLocalLogsRow: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("Export Local Logs".lavaLocalized)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 0)
-
-            Image(systemName: "square.and.arrow.up")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
-}
-
-private enum LocalLogSetting: Identifiable {
+enum LocalLogSetting: Identifiable {
     case filteringCounts
     case domainHistory
     case networkActivity
@@ -678,7 +213,7 @@ private enum LocalLogSetting: Identifiable {
     }
 }
 
-private enum LocalLogClearTarget: Identifiable {
+enum LocalLogClearTarget: Identifiable {
     case filteringCounts
     case domainHistory
     case networkActivity
@@ -752,15 +287,15 @@ private enum LocalLogClearTarget: Identifiable {
     var clearMessage: String {
         switch self {
         case .filteringCounts:
-            return "This removes saved allowed, blocked, and local protection uptime counts from this phone."
+            return "This removes saved allowed, blocked, and local protection uptime counts from this device."
         case .domainHistory:
-            return "This removes saved domain rows from this phone. Filtering counts and network activity are unchanged."
+            return "This removes saved domain rows from this device. Filtering counts and network activity are unchanged."
         case .networkActivity:
-            return "This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged."
+            return "This removes saved network activity entries from this device. Filtering counts and domain history are unchanged."
         case .lavaGuardProgress:
-            return "This removes unearned Lava Guard progress from this phone. Earned Lava Guards stay unlocked."
+            return "This removes unearned Lava Guard progress from this device. Earned Lava Guards stay unlocked."
         case .all:
-            return "This removes saved filtering counts, domain history, network activity, and unearned Lava Guard progress from this phone."
+            return "This removes saved filtering counts, domain history, network activity, and unearned Lava Guard progress from this device."
         }
     }
 

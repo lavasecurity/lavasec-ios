@@ -66,7 +66,7 @@ test("literal sites and every labeled ternary branch are checked", () => {
     sources: {
       "LavaSecApp/Fixture.swift": 'LavaInfoPanel(title: condition ? "First" : "Second")\n'
     }
-  }), /"Second".*needs: app catalog or LavaSecCore/);
+  }), /"Second".*needs: app catalog/);
 });
 
 test("interpolated localized keys fail while localized formats pass", () => {
@@ -146,6 +146,23 @@ test("escaped quotes in legacy strings keys are decoded before matching", () => 
       "LavaSecWidget/WidgetView.swift": String.raw`Text("Tap \"Guard\"")`
     }
   }));
+});
+
+test("native bridge display errors and package lookups cannot bypass catalog coverage", () => {
+  assertFailed(runFixture({sources:{
+    "ReactNative/native-app/LavaAppBridge.swift": 'throw CommandError("Unrendered native error")\n'
+  }}), /Unrendered native error/);
+  assertFailed(runFixture({sources:{
+    "Sources/LavaSecKit/Fixture.swift": 'LavaCoreStrings.localized("core.unregistered")\n'
+  }}), /core.unregistered/);
+});
+
+test("ordinary app labels cannot resolve keys from package or InfoPlist tables", () => {
+  const result=runFixture({infoKeys:["Info only"],coreStrings:'"Package only" = "Package only";\n',sources:{
+    "LavaSecApp/Fixture.swift": 'Text("Package only")\nText("Info only")\n'
+  }});
+  assertFailed(result,/Package only/);
+  assert.match(result.stderr,/Info only/);
 });
 
 test("registered render-bound assignments reject raw literals and accept localized formats", () => {

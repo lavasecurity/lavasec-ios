@@ -71,7 +71,7 @@ def fix_icon_composer_types(text: str) -> str:
     right = "lastKnownFileType = folder.iconcomposer.icon;"
     if wrong not in text:
         if right not in text:
-            sys.exit("xcodegen-fixups: no .icon file references found — expected 8 Icon Composer bundles.")
+            sys.exit("xcodegen-fixups: no .icon file references found — expected Icon Composer bundles.")
         return text
     return text.replace(wrong, right)
 

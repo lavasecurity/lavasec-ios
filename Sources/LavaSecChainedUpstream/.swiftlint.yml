@@ -1,0 +1,7 @@
+# Nested config: missing_docs applies ONLY in the post-split SPM targets (see root
+# .swiftlint.yml + CLAUDE.md comment conventions).
+opt_in_rules:
+  - missing_docs
+missing_docs:
+  excludes_extensions: true
+  excludes_inherited_types: true

@@ -41,11 +41,11 @@ final class ControlPlaneProtectionSourceTests: XCTestCase {
     }
 
     func testTunnelHealthWriteStampsControlPlaneWritingOptions() throws {
-        let provider = try readSource(.packetTunnelProvider)
+        let provider = try readPacketTunnelProviderSource()
         let healthWriteBlock = try sourceBlock(
             in: provider,
-            startingAt: "private lazy var healthPersistence = DebouncedPersistenceController(",
-            endingBefore: "private lazy var diagnosticsPersistence = DebouncedPersistenceController("
+            startingAt: "lazy var healthPersistence = DebouncedPersistenceController(",
+            endingBefore: "lazy var diagnosticsPersistence = DebouncedPersistenceController("
         )
         XCTAssertTrue(healthWriteBlock.contains("LavaSecAppGroup.tunnelHealthFilename"),
                       "The pinned block must still be the tunnel-health write closure.")
@@ -57,6 +57,24 @@ final class ControlPlaneProtectionSourceTests: XCTestCase {
         XCTAssertTrue(
             healthWriteBlock.contains("data.write(to: url, \(optionsMarker))"),
             "The boot tunnel writes health pre-unlock; the options marker must sit at the real Data.write call — a Class-C write fails silently under this closure's try? (INV-PERSIST-2).")
+    }
+
+    func testLifecycleCoordinationWritesAndLocksStayReadableBeforeFirstUnlock() throws {
+        let storage = try readSource(.protectionStoreSupport)
+        let service = try readSource(.lavaProtectionCommandService)
+        let mutationFence = try readSource(.protectionLifecycleMutationFence)
+
+        let persist = try sourceBlock(
+            in: storage,
+            startingAt: "public func persistIfNeeded() throws",
+            endingBefore: "public protocol ProtectionCriticalSectionLock"
+        )
+        XCTAssertTrue(persist.contains("SharedStateFileProtection.atomicControlPlaneWritingOptions"))
+        XCTAssertFalse(persist.contains("options: .atomic"))
+        XCTAssertTrue(service.contains("ProtectionLifecycleMutationFence.acquire("))
+        XCTAssertTrue(
+            mutationFence.contains("SharedStateFileProtection.applyControlPlaneProtection(at: lockFileURL)")
+        )
     }
 
     func testStreamingCompilerStampsScratchAtCreationAndReappliesAfterPromotion() throws {
@@ -91,7 +109,7 @@ final class ControlPlaneProtectionSourceTests: XCTestCase {
     }
 
     func testForegroundHookRunsTheOneShotMigrationGatedOnProtectedData() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let foreground = try sourceBlock(
             in: app,
             startingAt: "func setAppForegroundActive(_ active: Bool) {",
@@ -136,6 +154,19 @@ final class ControlPlaneProtectionSourceTests: XCTestCase {
         XCTAssertTrue(
             apply.contains("applied == FileProtectionType.none"),
             "The apply must require the re-read class to be Class-None before returning success."
+        )
+    }
+
+    func testInvariantRegistryDistinguishesRequiredLifecycleCoordinationFromAdvisoryLocks() throws {
+        let invariants = try readSource(.invariants)
+        XCTAssertTrue(invariants.contains("`protection-lifecycle-state.json`"))
+        XCTAssertTrue(invariants.contains("`protection-command.lock`"))
+        XCTAssertTrue(invariants.contains("`protection-lifecycle-mutation.lock`"))
+        XCTAssertTrue(invariants.contains("required locks fail CLOSED rather than degrading open"))
+        XCTAssertTrue(invariants.contains("Other, best-effort/privacy advisory lock files"))
+        XCTAssertFalse(
+            invariants.contains("The advisory lock files are also\ndeliberately EXCLUDED"),
+            "The registry must not classify the two required lifecycle locks as best-effort exclusions."
         )
     }
 }

@@ -191,10 +191,15 @@ public enum DefaultCatalog {
     /// Curated sources grouped into their display sections, ordered by category and
     /// dropping any empty category. Backs the sectioned blocklist picker.
     public static var curatedSourcesByCategory: [(category: BlocklistCategory, sources: [BlocklistSource])] {
+        groupedByCategory(curatedSources)
+    }
+
+    /// Groups an already-resolved selection without reintroducing unavailable sources.
+    public static func groupedByCategory(_ sources: [BlocklistSource]) -> [(category: BlocklistCategory, sources: [BlocklistSource])] {
         BlocklistCategory.allCases
             .sorted { $0.sortOrder < $1.sortOrder }
             .compactMap { category in
-                let sources = curatedSources.filter { $0.category == category }
+                let sources = sources.filter { $0.category == category }
                 return sources.isEmpty ? nil : (category, sources)
             }
     }
@@ -203,9 +208,10 @@ public enum DefaultCatalog {
 
     public static func selectableCuratedSources(
         availableSourceIDs: Set<String>,
-        enabledSourceIDs: Set<String>
+        enabledSourceIDs: Set<String>,
+        catalogLoaded: Bool = false
     ) -> [BlocklistSource] {
-        guard !availableSourceIDs.isEmpty else {
+        guard catalogLoaded || !availableSourceIDs.isEmpty else {
             return curatedSources
         }
 

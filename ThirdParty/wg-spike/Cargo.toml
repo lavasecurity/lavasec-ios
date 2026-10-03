@@ -1,0 +1,32 @@
+# THROWAWAY SPIKE — Phase 0 de-risking for chained VPN upstream.
+# Plan: lavasec-infra plans/2026-07-22-vpn-upstream-chaining-implementation-plan.md (Phase 0).
+# This crate is NOT the MVP engine packaging (that is Phase 1: vendored boringtun +
+# committed xcframework + CI rebuild-drift gate). It exists only to answer the memory
+# go/no-go on device and is expected to be deleted or superseded.
+[package]
+name = "lavasec-wg-spike"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "BSD-3-Clause"
+
+[lib]
+name = "lavasec_wg_spike"
+# staticlib = the artifact the iOS build links; rlib = so the in-crate integration
+# test can link and exercise the same C-ABI symbols.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Pinned exactly so the measured binary is reproducible across spike runs.
+boringtun = "=0.7.1"
+
+[dev-dependencies]
+# The round-trip test derives x25519 keypairs through boringtun's own primitives
+# rather than hand-rolling curve math.
+boringtun = "=0.7.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+strip = "debuginfo"

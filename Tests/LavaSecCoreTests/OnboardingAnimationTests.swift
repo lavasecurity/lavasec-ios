@@ -4,6 +4,17 @@ import XCTest
 @testable import LavaSecKit
 
 final class OnboardingAnimationTests: XCTestCase {
+    func testGuardTravelMovesOnFirstFrameAndSlowsAtArrival() {
+        XCTAssertEqual(OnboardingGuardTravel.progress(at: 0), 0)
+        XCTAssertEqual(OnboardingGuardTravel.progress(at: OnboardingGuardTravel.duration), 1)
+        XCTAssertEqual(OnboardingGuardTravel.progress(at: 3), 1)
+        let early = OnboardingGuardTravel.progress(at: OnboardingGuardTravel.duration * 0.25)
+        let late = 1 - OnboardingGuardTravel.progress(at: OnboardingGuardTravel.duration * 0.75)
+        XCTAssertGreaterThan(early, 0)
+        XCTAssertLessThan(early, 1)
+        XCTAssertGreaterThan(early, late)
+    }
+
     func testFeatureTransitionStartsFromGuardIntroGeometryWithRowsHidden() {
         let state = OnboardingFeatureTransitionPlan.state(at: 0)
 
@@ -106,7 +117,7 @@ final class OnboardingAnimationTests: XCTestCase {
     }
 
     func testApplyingOnboardingDefaultsStartsBlocklistSyncWhenRulesAreMissing() throws {
-        let appViewModelSource = try readSource(.appViewModel)
+        let appViewModelSource = try readAppViewModelSource()
         let defaultsBlock = try sourceBlock(
             in: appViewModelSource,
             startingAt: "func applyOnboardingRecommendedDefaults(",
@@ -118,185 +129,98 @@ final class OnboardingAnimationTests: XCTestCase {
                       "Finishing onboarding seeds the three default filters with the chosen level active.")
     }
 
-    func testFeaturePageDoesNotMountRowsUntilTransitionAllowsLayout() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let guardScenePage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var guardScenePage: some View",
-            endingBefore: "private var vpnPage"
-        )
-
-        XCTAssertTrue(guardScenePage.contains("OnboardingFeatureTransitionPlan.state(at: featureTransitionElapsed)"))
-        XCTAssertTrue(guardScenePage.contains("ZStack(alignment: .top)"))
-        XCTAssertTrue(guardScenePage.contains(".offset(y: CGFloat(transition.heroPanelOffsetY))"))
-        XCTAssertTrue(guardScenePage.contains("if transition.featureRowsOccupyLayout"))
-        XCTAssertTrue(guardScenePage.contains(".padding(.top, CGFloat(transition.featureRowsTopOffset))"))
+    func testSharedMascotStaysOutsideScrollingPagesAndKeepsSleepColor() throws {
+        let source = try readSource(.onboardingFlowView)
+        let mascot = try XCTUnwrap(source.range(of: "SoftShieldGuardian(size: LavaGuardMetrics.mascotSize"))
+        let scroll = try XCTUnwrap(source.range(of: "ScrollView {"))
+        XCTAssertLessThan(mascot.lowerBound, scroll.lowerBound)
+        XCTAssertEqual(source.components(separatedBy: "SoftShieldGuardian(").count - 1, 1)
+        XCTAssertTrue(source.contains(".frame(height: 128)"))
+        XCTAssertTrue(source.contains("keepsColorWhenSleeping: !opening"))
+        XCTAssertTrue(source.contains("if page == .vpn && (!vpnInstalled || isInstallingVPN) { return .sleeping }"))
+        XCTAssertTrue(source.contains("animates: true"))
     }
 
-    func testGuardIntroAndFeaturesShareOneSceneViewIdentity() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let currentPage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var currentPage: some View",
-            endingBefore: "private var internetIsLavaPage"
-        )
-
-        XCTAssertTrue(currentPage.contains("case .guardIntro, .features:"))
-        XCTAssertTrue(currentPage.contains("guardScenePage"))
+    func testLavaUsesClockDrivenCanvasAndDrainsDuringReveal() throws {
+        let source = try readSource(.onboardingFlowView)
+        XCTAssertTrue(source.contains("TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !isActive))"))
+        XCTAssertTrue(source.contains("Canvas { context, size in"))
+        XCTAssertTrue(source.contains("page == .lava || reduceMotion ? 0 : proxy.size.height * 1.1"))
+        XCTAssertTrue(source.contains("reduceMotion ? .easeInOut(duration: 0.25) : .easeInOut(duration: 1.1)"))
+        XCTAssertTrue(source.contains(".opacity(reduceMotion && page != .lava ? 0 : 1)"),
+                      "Only the reduced-motion curtain fades; normal motion stays opaque.")
+        XCTAssertTrue(source.contains("context.clip(to: leadingEdge)"),
+                      "The draining layer must have a wave edge instead of a rectangular top.")
+        XCTAssertTrue(source.contains(".offset(y: proxy.size.height * 1.1).animation(revealAnimation)"),
+                      "Welcome text travels with the curtain.")
     }
 
-    func testOnboardingTopBarDoesNotRenderCenterTitleAfterFirstPage() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let topBar = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var topBar: some View",
-            endingBefore: "@ViewBuilder"
-        )
-
-        XCTAssertFalse(topBar.contains("Text(\"Lava\")"))
+    func testSixPagesCombineBenefitsAndPermissions() throws {
+        let source = try readSource(.onboardingFlowView)
+        XCTAssertTrue(source.contains("case lava, features, vpn, protectionLevel, connectionQuality, done"))
+        XCTAssertFalse(source.contains("case guardIntro"))
+        XCTAssertFalse(source.contains("case notifications"))
+        XCTAssertTrue(source.contains("title: \"You're in full control of what gets logged locally\""))
     }
 
-    func testIntroCopyKeepsInternetFocusAndLocalLoggingRowIsDirect() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let lavaPage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var internetIsLavaPage: some View",
-            endingBefore: "private var guardScenePage"
-        )
-        let guardScenePage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var guardScenePage: some View",
-            endingBefore: "private var vpnPage"
-        )
-
-        XCTAssertTrue(lavaPage.contains("Text(\"The internet is lava\")"))
-        XCTAssertTrue(lavaPage.contains("Malicious domains are the hot spots. Your phone can step around them before apps and websites connect."))
-        XCTAssertFalse(lavaPage.contains("Lava helps your phone step around them"))
-        XCTAssertTrue(guardScenePage.contains("title: \"You're in full control of what gets logged locally\""))
-        XCTAssertFalse(guardScenePage.contains("No silent logging."))
+    func testBlinkFollowsFilterAndGratitudeFollowsCompletionWithoutGatingControls() throws {
+        let source = try readSource(.onboardingFlowView)
+        XCTAssertTrue(source.contains("let shouldBlink = page == .protectionLevel && nextPage == .connectionQuality"))
+        XCTAssertTrue(source.contains("else if shouldBlink { blinkTrigger += 1 }"))
+        XCTAssertTrue(source.contains("handoff.setPhase(\"arriving\"); playGratitude()"))
+        let busy = try sourceBlock(in: source, startingAt: "private var isBusy:", endingBefore: "private var mascotState:")
+        XCTAssertFalse(busy.contains("expressionBusy"))
+        XCTAssertTrue(source.contains("page == .done && travelStarted != nil && !isSmiling ? 1 : 0"),
+                      "Panel fade begins with the grateful-to-awake return, not its completion.")
+        XCTAssertTrue(source.contains("let progress = opening ? 1 :"),
+                      "Open Guard completes any remaining travel before the sleep transition.")
+        XCTAssertTrue(source.contains("ProtectionHapticFeedback.play(.actionSucceeded)"))
+        XCTAssertTrue(source.contains("isMock ? 2080 : 80"))
+        XCTAssertTrue(source.contains("GuardianMascotAnimationPlan.stateChangeDuration + 0.65"))
+        XCTAssertTrue(source.contains("return isSmiling ? .grateful : .awake"))
     }
 
-    func testGuardHeroBlinksAfterFeatureUpliftCompletes() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let viewStateBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "struct LavaOnboardingView: View",
-            endingBefore: "var body: some View"
-        )
-        let guardScenePage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var guardScenePage: some View",
-            endingBefore: "private var vpnPage"
-        )
-        let animationBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private func prepareAnimations(for nextPage: OnboardingPage)",
-            endingBefore: "private enum OnboardingPage"
-        )
-        let heroBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingGuardHero: View",
-            endingBefore: "private struct OnboardingStepLayout"
-        )
-        let guardianSource = try readSource(.softShieldGuardian)
-        let guardianBlock = try sourceBlock(
-            in: guardianSource,
-            startingAt: "struct SoftShieldGuardian: View",
-            endingBefore: "private struct SoftShieldGuardianContent"
-        )
-
-        XCTAssertTrue(viewStateBlock.contains("@State private var guardHeroBlinkTrigger = 0"))
-        XCTAssertTrue(guardScenePage.contains("OnboardingGuardHero(blinkTrigger: guardHeroBlinkTrigger)"))
-        XCTAssertTrue(animationBlock.contains("guardHeroBlinkTrigger += 1"))
-        XCTAssertTrue(animationBlock.contains("0.08 + OnboardingFeatureTransitionPlan.heroMoveDuration"))
-        XCTAssertTrue(heroBlock.contains("SoftShieldGuardian(size: 132, state: .awake, animates: true, blinkTrigger: blinkTrigger)"))
-        XCTAssertTrue(guardianBlock.contains("let blinkTrigger: Int"))
-        XCTAssertTrue(guardianBlock.contains(".onChange(of: blinkTrigger)"))
-        XCTAssertTrue(guardianBlock.contains("GuardianMascotAnimationPlan.blink(on: activePlan.endState)"))
+    func testVPNInstallRemainsInstallOnlyAndDoesNotAdvance() throws {
+        let source = try readSource(.onboardingFlowView)
+        let install = try sourceBlock(in: source, startingAt: "private func installVPN()", endingBefore: "private func requestNotifications()")
+        XCTAssertTrue(install.contains("await viewModel.installLocalVPNProfileForOnboarding()"))
+        XCTAssertFalse(install.contains("goForward()"))
+        XCTAssertFalse(install.contains("wakeDuration"))
+        XCTAssertTrue(source.contains("isDisabled: !vpnInstalled || isBusy"))
+        XCTAssertTrue(source.contains("nextPage.rawValue <= OnboardingPage.vpn.rawValue || vpnInstalled"))
+        let model = try readAppViewModelSource()
+        let action = try sourceBlock(in: model, startingAt: "func installLocalVPNProfileForOnboarding()", endingBefore: "func requestProtectionNotificationAuthorizationForOnboarding()")
+        XCTAssertFalse(action.contains("enableProtection"))
+        XCTAssertFalse(action.contains("startVPNTunnel"))
     }
 
-    func testPermissionPromptIllustrationsAreCenteredInStepBody() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let vpnPage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var vpnPage: some View",
-            endingBefore: "private var notificationsPage"
-        )
-        let notificationsPage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var notificationsPage: some View",
-            endingBefore: "private var donePage"
-        )
-        let stepLayout = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingStepLayout<Content: View>: View",
-            endingBefore: "private struct OnboardingStepHeading"
-        )
-
-        XCTAssertTrue(vpnPage.contains("contentPlacement: .centered"))
-        XCTAssertTrue(notificationsPage.contains("contentPlacement: .centered"))
-        XCTAssertTrue(stepLayout.contains("let contentPlacement: OnboardingStepContentPlacement"))
-        XCTAssertTrue(stepLayout.contains("case .centered"))
-        XCTAssertTrue(stepLayout.contains("content.frame(maxWidth: .infinity, alignment: .center)"))
+    func testDNSSetupDefaultsOnUsesAuthoritativeServiceAndDoesNotResetDiscoveries() throws {
+        let source = try readSource(.onboardingFlowView)
+        let root = try readSource(.rootView)
+        XCTAssertTrue(source.contains("@State private var useEncryptedFallback = true"))
+        XCTAssertTrue(source.contains("@State private var useDNSProfile = true"))
+        XCTAssertTrue(source.contains("try await installDNSProfile()"))
+        XCTAssertTrue(source.contains("Button(\"Set up later\") { goForward() }"))
+        XCTAssertFalse(source.contains("configuration.dnsPatchEnabled ="))
+        XCTAssertTrue(root.contains("LavaAppBridge.shared.updateManagedDNSPatch(create: true)"))
+        XCTAssertFalse(source.contains("LavaDiscovery."))
+        XCTAssertFalse(source.contains("Additional setup"))
     }
 
-    func testReadyPageAnimatesMascotFromAwakeToGratefulAndBackToAwake() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let donePage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var donePage: some View",
-            endingBefore: "private var footer"
-        )
-        let readyMascot = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private struct OnboardingReadyMascot: View",
-            endingBefore: "private struct OnboardingStepLayout"
-        )
-
-        XCTAssertTrue(donePage.contains("OnboardingReadyMascot()"))
-        XCTAssertFalse(donePage.contains("SoftShieldGuardian(size: 124, state: .grateful, animates: false)"))
-        XCTAssertTrue(donePage.contains("Text(\"Lava is ready\")"))
-        XCTAssertFalse(donePage.contains("Text(\"Lava is ready.\")"))
-        XCTAssertTrue(donePage.contains("Text(\"We are happy to serve you!\\nThe setup is complete. You can change everything later in Settings.\")"))
-        XCTAssertTrue(readyMascot.contains("@State private var mascotState: GuardianMascotState = .awake"))
-        XCTAssertTrue(readyMascot.contains("SoftShieldGuardian(size: 124, state: mascotState)"))
-        XCTAssertTrue(readyMascot.contains("Task.sleep(nanoseconds: 500_000_000)"))
-        XCTAssertTrue(readyMascot.contains("mascotState = .grateful"))
-        XCTAssertTrue(readyMascot.contains("Task.sleep(nanoseconds: 700_000_000)"))
-        XCTAssertTrue(readyMascot.contains("guard !Task.isCancelled else {\n                    return\n                }\n                mascotState = .awake"))
-    }
-
-    func testOnboardingVPNInstallDoesNotShowIOSPermissionHintMessage() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let vpnPage = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private var vpnPage: some View",
-            endingBefore: "private var notificationsPage"
-        )
-        let viewModelSource = try readSource(.appViewModel)
-        let onboardingInstallBlock = try sourceBlock(
-            in: viewModelSource,
-            startingAt: "func installLocalVPNProfileForOnboarding() async -> Bool",
-            endingBefore: "func requestProtectionNotificationAuthorizationForOnboarding() async -> Bool"
-        )
-
-        XCTAssertTrue(vpnPage.contains("if viewModel.vpnMessageIsError, let message = viewModel.vpnMessage"))
-        XCTAssertFalse(vpnPage.contains("if let message = viewModel.vpnMessage"))
-        XCTAssertFalse(onboardingInstallBlock.contains("vpnMessage = Self.vpnPermissionPromptMessage"))
-    }
-
-    func testFeatureNavigationResetsTransitionBeforeShowingFeaturePage() throws {
-        let onboardingSource = try readSource(.onboardingFlowView)
-        let navigationBlock = try sourceBlock(
-            in: onboardingSource,
-            startingAt: "private func go(to nextPage: OnboardingPage)",
-            endingBefore: "private func goBack"
-        )
-
-        let resetRange = try XCTUnwrap(navigationBlock.range(of: "featureTransitionElapsed = 0"))
-        let showPageRange = try XCTUnwrap(navigationBlock.range(of: "page = nextPage"))
-
-        XCTAssertLessThan(resetRange.lowerBound, showPageRange.lowerBound)
-        XCTAssertTrue(navigationBlock.contains("guard page != .guardIntro || nextPage != .features else"))
+    func testMockOnboardingGuardsEveryProductionBoundary() throws {
+        let source = try readSource(.onboardingFlowView)
+        XCTAssertTrue(source.contains("if isMock { return didInstallVPN }"))
+        XCTAssertTrue(source.contains("if !isMock && !hasLoadedConnectionChoice"))
+        XCTAssertTrue(source.contains("guard !isMock, scenePhase == .active else { return }"))
+        XCTAssertTrue(source.contains("if !isMock, viewModel.vpnMessageIsError"))
+        XCTAssertTrue(source.contains("if !isMock && nextPage == .done"))
+        let persist = try sourceBlock(in: source, startingAt: "private func applyCurrentStepChoiceIfNeeded", endingBefore: "private func installVPN()")
+        XCTAssertTrue(persist.contains("guard !isMock else { return }"))
+        for productionCall in ["didInstallVPN = await viewModel.installLocalVPNProfileForOnboarding()",
+                               "notificationsEnabled = await viewModel.requestProtectionNotificationAuthorizationForOnboarding()"] {
+            XCTAssertTrue(source.contains("} else {\n                \(productionCall)"))
+        }
+        XCTAssertTrue(source.contains("else { try await installDNSProfile() }"))
+        XCTAssertTrue(source.contains("if isMock { dismiss() } else { hasSeenOnboarding = true }"))
     }
 }

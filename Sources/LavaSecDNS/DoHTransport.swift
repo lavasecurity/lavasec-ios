@@ -60,12 +60,34 @@ public final class DoHTransport: @unchecked Sendable {
     public func resolve(
         _ query: Data,
         endpoint: URL,
+        isStillAdmitted: @escaping @Sendable () -> Bool = { true },
+        deadline: MonotonicDeadline? = nil,
         completion: @escaping @Sendable (DNSTransportResponse) -> Void
     ) {
+        // BEFORE THE TASK EXISTS. The first cut created the task, then cancelled it on a stale
+        // latch and called `completion` itself — but cancelling a task completes it too, with a
+        // cancellation error, so the same resolution finished TWICE: once refused and once as
+        // `.receiveFailed`. The orchestrator would then process one DNS request twice and score
+        // the resolver failed for a refusal the device chose (Codex P2, PR #611).
+        //
+        // There is no queue here — URLSession owns scheduling once `resume()` is called — so this
+        // is the only point that is both after the caller's own gates and before anything exists
+        // to double-complete. A relatch landing after `resume()` is honestly not stopped; closing
+        // that would mean cancelling from the relatch, which reaches into every DNS-only query
+        // sharing this session.
+        guard !(deadline?.hasExpired() ?? false) else {
+            completion(DNSTransportResponse(response: nil, outcome: .expiredBeforeSend))
+            return
+        }
+        guard isStillAdmitted() else {
+            completion(DNSTransportResponse(response: nil, outcome: .refusedAfterLatchReplaced))
+            return
+        }
+
         let request = DNSOverHTTPSRequest.makePOSTRequest(
             endpoint: endpoint,
             query: query,
-            timeoutSeconds: TimeInterval(timeoutSeconds)
+            timeoutSeconds: min(TimeInterval(timeoutSeconds), deadline?.remainingSeconds() ?? TimeInterval(timeoutSeconds))
         )
 
         let metricsRecorder = DoHTaskMetricsRecorder(debugLogger: debugLogger)

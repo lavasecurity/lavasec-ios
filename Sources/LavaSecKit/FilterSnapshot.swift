@@ -123,11 +123,35 @@ public protocol FilterRuntimeSnapshot: Sendable {
     var allowRuleCount: Int { get }
     var guardrailRuleCount: Int { get }
 
+    /// Allow entries whose full scope is not overridden by a threat guardrail.
+    /// Separate from raw table counts: one suffix allow can contain many threat children.
+    var effectiveAllowRuleCount: Int { get }
+
+    /// Nonredundant threat scopes within each partly reachable suffix allow. Comparing
+    /// retained allow keys detects released children without retaining the threat rules.
+    var allowedSuffixGuardrailCoverage: [String: GuardrailScopeCoverage] { get }
+
+    /// Whether this snapshot blocks EVERY lookup — the fail-closed posture, in which the rule
+    /// counts are all zero and say nothing about what the user could reach.
+    ///
+    /// A requirement with NO default extension, deliberately. Recovery from a block-all resident is
+    /// always a loosening whatever the counts show (`FilterLooseningReapplyPolicy`), and the
+    /// question was previously answered by proxies that each missed a case: first the several
+    /// markers recording WHY a block-all resident was installed, then a concrete-type test, which a
+    /// resolver-adjusted WRAPPER around a fail-closed snapshot silently failed (review, PR #645). A
+    /// defaulted `false` would let the next wrapper miss it the same way; requiring it forces every
+    /// conformer — wrappers most of all — to state the answer.
+    var blocksEveryLookup: Bool { get }
+
     func decision(for rawDomain: String) -> FilterDecision
     func decision(forNormalizedDomain normalizedDomain: String) -> FilterDecision
 }
 
 extension FilterSnapshot: FilterRuntimeSnapshot {
+    /// A real rule snapshot serves its rules; a permissive pass-through built for an empty
+    /// configuration blocks nothing either. Neither is the fail-closed posture.
+    public var blocksEveryLookup: Bool { false }
+
     public var blockRuleCount: Int {
         blockRules.count
     }
@@ -138,6 +162,15 @@ extension FilterSnapshot: FilterRuntimeSnapshot {
 
     public var guardrailRuleCount: Int {
         nonAllowableThreatRules.count
+    }
+
+    /// Allow entries not wholly covered by threat rules, independent of raw threat count.
+    public var effectiveAllowRuleCount: Int {
+        allowRules.effectiveAllowRuleCount(nonAllowableThreatRules: nonAllowableThreatRules)
+    }
+
+    public var allowedSuffixGuardrailCoverage: [String: GuardrailScopeCoverage] {
+        allowRules.allowedSuffixGuardrailCoverage(nonAllowableThreatRules: nonAllowableThreatRules)
     }
 }
 
@@ -177,11 +210,22 @@ public extension AppConfiguration {
     }
 
     func nonAllowableRulesForAllowedDomains(from threatRules: DomainRuleSet) -> DomainRuleSet {
-        var effectiveRules = DomainRuleSet()
-        for domain in allowedDomains where threatRules.contains(domain) {
-            try? effectiveRules.insert(domain: domain, matchesSubdomains: true)
-        }
-        return effectiveRules
+        threatRules.threatOverlap(withAllowedSuffixes: allowRuleSet)
     }
 }
 
+
+public extension FilterRuntimeSnapshot {
+    /// Evaluates a question and its validated reachable alias targets against one snapshot.
+    /// Each name keeps its existing allowlist and threat-guardrail precedence; allowing the
+    /// question does not implicitly allow a different destination named by the resolver.
+    func decision(forNormalizedDomain domain: String, reachableAliasDomains: [String]) -> FilterDecision {
+        let original = decision(forNormalizedDomain: domain)
+        guard original.action == .allow else { return original }
+        for target in reachableAliasDomains {
+            let targetDecision = decision(forNormalizedDomain: target)
+            if targetDecision.action == .block { return targetDecision }
+        }
+        return original
+    }
+}

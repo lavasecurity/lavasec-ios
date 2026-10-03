@@ -22,16 +22,20 @@ import SwiftUI
 /// - `accountDidSignIn()`: after a confirmed Apple/Google sign-in — the hub uploads
 ///   any pending encrypted backup, THEN syncs the current StoreKit entitlement to the
 ///   server (pre-peel order preserved; both no-op quietly when there is nothing to do).
-/// - `accountWillCompleteDeletion()`: between the server-side account delete and this
-///   controller's state mirror — the hub tears down the device-local backup unlock
-///   material whose server row just died with the account.
+/// - `accountWillBeginDeletion(accountID:)`: settles pending backup deletion while its
+///   original account can authorize it, then holds backup maintenance through deletion.
+/// - `accountWillCompleteDeletion(accountID:)`: retires only the confirmed deleted
+///   account’s device-local unlock material.
+/// - `accountDidFinishDeletion()`: releases the maintenance lease on every exit.
 /// - `reloadEncryptedBackupStateAfterAccountChange()`: after sign-out and after a
 ///   completed deletion — the hub re-derives the backup presentation state (its
 ///   signed-in/signed-out copy branches on the session).
 @MainActor
 protocol AccountHubBridging: AnyObject {
     func accountDidSignIn() async
-    func accountWillCompleteDeletion()
+    func accountWillBeginDeletion(accountID: String) async throws
+    func accountDidFinishDeletion() async
+    func accountWillCompleteDeletion(accountID: String)
     func reloadEncryptedBackupStateAfterAccountChange()
 }
 
@@ -78,9 +82,9 @@ final class AccountController: ObservableObject {
             }
             return "Signing in"
         case .notConfigured:
-            return "Account setup pending"
+            return "Not signed in"
         case .signedOut:
-            return "Continue without account"
+            return "Not signed in"
         }
     }
 
@@ -92,17 +96,13 @@ final class AccountController: ObservableObject {
         return switch accountAuthState {
         case .signedIn,
              .signingIn where isAccountSignedIn:
-            if let signedInProviderName {
-                "Signed in with \(signedInProviderName). Encrypted backup can upload to your account."
-            } else {
-                "Encrypted backup can upload to your account."
-            }
+            ""
         case .signingIn:
             "Opening sign-in."
         case .notConfigured:
-            "Account login needs the Supabase URL and publishable key in the app configuration."
+            ""
         case .signedOut:
-            "Sign in only when you want encrypted backup upload or account services."
+            ""
         }
     }
 
@@ -114,7 +114,7 @@ final class AccountController: ObservableObject {
         case 1:
             return providers[0]
         default:
-            return providers.dropLast().joined(separator: ", ") + " and " + providers.last!
+            return "%1$@ and %2$@".lavaLocalizedFormat(providers.dropLast().joined(separator: ", "), providers.last!)
         }
     }
 
@@ -168,78 +168,91 @@ final class AccountController: ObservableObject {
 
     // MARK: - Account & sign-in
 
-    func beginSignInWithApple() {
-        Task {
+    // SwiftUI can fire and forget; the RN bridge awaits this same task so its
+    // pending provider gate spans authorization, networking and completion.
+    @discardableResult
+    func beginSignInWithApple() -> Task<Void, Never> {
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("account.signin")
+        return Task {
             accountSignInProviderInProgress = .apple
             defer { accountSignInProviderInProgress = nil }
             accountAuthState = .signingIn(connections: accountAuthState.connections, provider: .apple)
-            accountAuthMessage = "Opening Apple's sign-in sheet."
+            accountAuthMessage = "Opening Apple sign-in"
             accountAuthMessageIsError = false
 
             do {
                 accountAuthState = try await accountAuthService.signInWithApple()
                 accountSignInProviderInProgress = nil
-                accountAuthMessage = "Signed in with Apple."
+                // The confirmed provider status already communicates success.
+                accountAuthMessage = nil
                 accountAuthMessageIsError = false
-                ProtectionHapticFeedback.play(.actionSucceeded)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .succeeded)
                 await hub.accountDidSignIn()
             } catch AccountAuthError.cancelled {
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed, cancelled: true)
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Sign in was cancelled."
                 accountAuthMessageIsError = false
             } catch AccountAuthError.notConfigured {
                 accountAuthState = accountAuthService.state
-                accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
+                accountAuthMessage = "Sign-in unavailable"
                 accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed)
             } catch {
                 accountAuthState = accountAuthService.state
-                accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
+                accountAuthMessage = "Could not sign in: %@".lavaLocalizedFormat(error.localizedDescription)
                 accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed)
             }
         }
     }
 
-    func beginSignInWithGoogle() {
-        Task {
+    @discardableResult
+    func beginSignInWithGoogle() -> Task<Void, Never> {
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("account.signin")
+        return Task {
             accountSignInProviderInProgress = .google
             defer { accountSignInProviderInProgress = nil }
             accountAuthState = .signingIn(connections: accountAuthState.connections, provider: .google)
-            accountAuthMessage = "Opening Google sign-in."
+            accountAuthMessage = "Opening Google sign-in"
             accountAuthMessageIsError = false
 
             do {
                 accountAuthState = try await accountAuthService.signInWithGoogle()
                 accountSignInProviderInProgress = nil
-                accountAuthMessage = "Signed in with Google."
+                // The confirmed provider status already communicates success.
+                accountAuthMessage = nil
                 accountAuthMessageIsError = false
-                ProtectionHapticFeedback.play(.actionSucceeded)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .succeeded)
                 await hub.accountDidSignIn()
             } catch AccountAuthError.cancelled {
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed, cancelled: true)
                 accountAuthState = accountAuthService.state
                 accountAuthMessage = "Sign in was cancelled."
                 accountAuthMessageIsError = false
             } catch AccountAuthError.notConfigured {
                 accountAuthState = accountAuthService.state
-                accountAuthMessage = "Account login needs LavaSupabaseURL and LavaSupabaseAnonKey in the app configuration before backup upload can be enabled."
+                accountAuthMessage = "Sign-in unavailable"
                 accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed)
             } catch AccountAuthError.googleClientIDNotConfigured {
                 accountAuthState = accountAuthService.state
-                accountAuthMessage = "Google sign-in needs the Google iOS and Web client IDs in the app configuration."
+                accountAuthMessage = "Google sign-in is unavailable. Try signing in with Apple."
                 accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed)
             } catch {
                 accountAuthState = accountAuthService.state
-                accountAuthMessage = "Could not sign in: \(error.localizedDescription)"
+                accountAuthMessage = "Could not sign in: %@".lavaLocalizedFormat(error.localizedDescription)
                 accountAuthMessageIsError = true
-                ProtectionHapticFeedback.play(.actionFailed)
+                LavaFeedbackCoordinator.shared.finish("account.signin", feedbackID, .failed)
             }
         }
     }
 
     func signOutAccount() {
+        // Invalidate any sign-in operation whose networking tail returns after sign-out.
+        let stale = LavaFeedbackCoordinator.shared.begin("account.signin")
+        LavaFeedbackCoordinator.shared.finish("account.signin", stale, .acknowledged, cancelled: true)
         accountAuthService.signOut()
         accountAuthState = accountAuthService.state
         accountAuthMessage = "Signed out."
@@ -253,28 +266,39 @@ final class AccountController: ObservableObject {
         }
 
         isAccountDeletionInProgress = true
+        let feedbackID = LavaFeedbackCoordinator.shared.begin("account.delete")
         accountAuthMessage = "Deleting your Lava account."
         accountAuthMessageIsError = false
-        defer { isAccountDeletionInProgress = false }
-
+        defer {
+            isAccountDeletionInProgress = false
+        }
+        let succeeded: Bool
         do {
-            try await accountAuthService.deleteAccount()
-            // Between the confirmed server delete and the state mirror below, exactly
-            // where the pre-peel hub tore down the local backup unlock material.
-            hub.accountWillCompleteDeletion()
-            accountAuthState = accountAuthService.state
-            accountAuthMessage = "Deleted your Lava account."
-            accountAuthMessageIsError = false
-            hub.reloadEncryptedBackupStateAfterAccountChange()
-            ProtectionHapticFeedback.play(.actionSucceeded)
-            return true
+            if let deletedAccountID = try await accountAuthService.deleteAccount(preparing: { [hub] accountID in
+                try await hub.accountWillBeginDeletion(accountID: accountID)
+            }) {
+                hub.accountWillCompleteDeletion(accountID: deletedAccountID)
+                accountAuthState = accountAuthService.state
+                accountAuthMessage = "Deleted your Lava account."
+                accountAuthMessageIsError = false
+                hub.reloadEncryptedBackupStateAfterAccountChange()
+                LavaFeedbackCoordinator.shared.finish("account.delete", feedbackID, .succeeded)
+                succeeded = true
+            } else {
+                accountAuthState = accountAuthService.state
+                accountAuthMessage = "Signed out."
+                hub.reloadEncryptedBackupStateAfterAccountChange()
+                succeeded = false
+            }
         } catch {
             accountAuthState = accountAuthService.state
-            accountAuthMessage = "Could not delete account: \(error.localizedDescription)"
+            accountAuthMessage = "Could not delete account: %@".lavaLocalizedFormat(error.localizedDescription)
             accountAuthMessageIsError = true
-            ProtectionHapticFeedback.play(.actionFailed)
-            return false
+            LavaFeedbackCoordinator.shared.finish("account.delete", feedbackID, .failed)
+            succeeded = false
         }
+        await hub.accountDidFinishDeletion()
+        return succeeded
     }
 
     // MARK: - Hub-bridge backing (session pass-throughs + backup identity)

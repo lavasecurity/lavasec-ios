@@ -13,7 +13,7 @@ final class FilterPreparationProgressBarSourceTests: XCTestCase {
     // MARK: Saving fills its quarter before Success (no frozen tail → jump)
 
     func testApplyLandsSavingOnItsQuarterTopBeforeSuccess() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // The presenter maps phases to equal quarters (Success owns the 4th).
         XCTAssertTrue(

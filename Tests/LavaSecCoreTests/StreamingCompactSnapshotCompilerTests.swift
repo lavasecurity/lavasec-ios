@@ -10,7 +10,149 @@ import XCTest
 /// union reference, and scratch cleanup.
 final class StreamingCompactSnapshotCompilerTests: XCTestCase {
 
+    func testAllowedSuffixIndexMatchesAncestorAndDescendantOverlap() {
+        let allowed = ["example.com", "child.example.com", "deep.child.example.com",
+                       "other.com", "notexample.com", "child.example.com"]
+        let index = AllowedSuffixIntersectionIndex(normalizedDomains: allowed)
+        for threat in ["example.com", "evil.example.com", "child.example.com",
+                       "com", "other.com", "notexample.com", "ample.com"] {
+            let expectedAncestor = allowed.contains { threat == $0 || threat.hasSuffix("." + $0) }
+            XCTAssertEqual(index.containsAncestor(of: threat), expectedAncestor, threat)
+            var descendants: Set<String> = []
+            index.forEachDescendant(of: threat) { descendants.insert($0) }
+            let expectedDescendants = Set(allowed.filter { $0.hasSuffix("." + threat) })
+            XCTAssertEqual(descendants, expectedDescendants, threat)
+        }
+    }
+
     // MARK: writeStreaming — byte-format single source of truth
+
+    func testBroadAllowedSuffixCannotPublishAnOverBudgetHeapGuardrailSet() async throws {
+        try await withTemporaryDirectory { cacheURL in
+            let configuration = AppConfiguration(enabledBlocklistIDs: [], allowedDomains: ["example.com"])
+            let retained = cacheURL.appendingPathComponent("retained.lscfsnp")
+            let compiler = CachedFilterSnapshotCompiler(cacheDirectoryURL: cacheURL)
+            try writeGuardrailCatalog("before.example.com\n", to: cacheURL)
+            _ = try await compiler.compile(baseSnapshot: configuration.filterSnapshot(), configuration: configuration,
+                                           retainedArtifactURL: retained)
+            let previousArtifact = try Data(contentsOf: retained)
+
+            // Each valid descendant is distinct: one broad allowance must not admit
+            // an unbounded heap-backed threat set before compact encoding begins.
+            let text = (0..<4_097).map { "threat\($0).example.com\n" }.joined()
+            try writeGuardrailCatalog(text, to: cacheURL)
+            do {
+                _ = try await compiler.compile(baseSnapshot: configuration.filterSnapshot(), configuration: configuration,
+                                               retainedArtifactURL: retained)
+                XCTFail("Expected the streamed descendant guardrail heap budget to fail closed")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.lowercased().contains("guardrail"))
+            }
+            XCTAssertEqual(try Data(contentsOf: retained), previousArtifact,
+                           "A failed compile must not replace the last complete retained artifact")
+            let scratch = StreamingCompactSnapshotCompiler.scratchRootURL(cacheDirectoryURL: cacheURL)
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: scratch.path).isEmpty)
+        }
+    }
+
+    private func writeGuardrailCatalog(_ text: String, to cacheURL: URL) throws {
+        let source = makeSource(id: "guardrail-budget-source", sourceHash: hash(text))
+        let catalog = BlocklistCatalog(schemaVersion: 2, catalogVersion: "20260101T000000Z",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000), sources: [], guardrails: [source])
+        try writeCatalog(catalog, to: cacheURL)
+        try writeLatestBlocklist(text, sourceID: source.id, to: cacheURL)
+    }
+
+    func testGuardrailBudgetAcceptsItsBoundaryAndChargesOverlappingScopesOnce() async throws {
+        try await withTemporaryDirectory { cacheURL in
+            let limit = FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount
+            let configuration = AppConfiguration(enabledBlocklistIDs: [],
+                allowedDomains: ["example.com", "nested.example.com"])
+            let lines = (0..<limit).map { "threat\($0).nested.example.com\n" }.joined()
+            try writeGuardrailCatalog(lines + lines, to: cacheURL)
+            let base = configuration.filterSnapshot(nonAllowableThreatRules:
+                DomainRuleSet(suffixDomains: ["threat0.nested.example.com"]))
+            let compiled = try await CachedFilterSnapshotCompiler(cacheDirectoryURL: cacheURL)
+                .compile(baseSnapshot: base, configuration: configuration)
+            XCTAssertEqual(compiled.guardrailRuleCount, limit,
+                           "Duplicate lines, overlapping allowances and the base duplicate each retain one scope")
+            let cold = try CompactFilterSnapshot.decode(from: compiled.encodedData())
+            XCTAssertEqual(cold.guardrailRuleCount, limit)
+            XCTAssertEqual(cold.decision(for: "threat0.nested.example.com").reason, .threatGuardrail)
+            XCTAssertEqual(cold.decision(for: "sub.threat\(limit - 1).nested.example.com").reason, .threatGuardrail)
+            XCTAssertEqual(cold.decision(for: "safe.nested.example.com").reason, .localAllowlist)
+            XCTAssertEqual(cold.effectiveAllowRuleCount, 2)
+            XCTAssertEqual(cold.allowedSuffixGuardrailCoverage, compiled.allowedSuffixGuardrailCoverage)
+        }
+    }
+
+    func testBaseThreatMergeCannotBypassTheHeapBoundOrCollapseExactAndSuffixKinds() async throws {
+        try await withTemporaryDirectory { cacheURL in
+            let limit = FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount
+            let configuration = AppConfiguration(enabledBlocklistIDs: [], allowedDomains: ["example.com"])
+            try writeGuardrailCatalog((0..<limit).map { "threat\($0).example.com\n" }.joined(), to: cacheURL)
+            // A byte-equal exact entry is still a separate resident entry from its suffix.
+            let base = configuration.filterSnapshot(nonAllowableThreatRules:
+                DomainRuleSet(exactDomains: ["threat0.example.com"]))
+            do {
+                _ = try await CachedFilterSnapshotCompiler(cacheDirectoryURL: cacheURL)
+                    .compile(baseSnapshot: base, configuration: configuration)
+                XCTFail("Expected the base contribution to use the same heap bound")
+            } catch let error as StreamingCompileGuardrailBudgetExceeded {
+                XCTAssertEqual(error.ruleCount, limit + 1)
+            }
+            let scratch = StreamingCompactSnapshotCompiler.scratchRootURL(cacheDirectoryURL: cacheURL)
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: scratch.path).isEmpty)
+        }
+    }
+
+    func testOversizedBaseThreatSetIsRejectedBeforeScratchAllocation() async throws {
+        try await withTemporaryDirectory { cacheURL in
+            let limit = FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount
+            let configuration = AppConfiguration(enabledBlocklistIDs: [])
+            let base = FilterSnapshot(blockRules: DomainRuleSet(), nonAllowableThreatRules: DomainRuleSet(
+                suffixDomains: Set((0...limit).map { "threat\($0).example.com" })))
+            do {
+                _ = try await CachedFilterSnapshotCompiler(cacheDirectoryURL: cacheURL)
+                    .compile(baseSnapshot: base, configuration: configuration)
+                XCTFail("Expected the oversized base to fail before loading or allocating scratch")
+            } catch let error as StreamingCompileGuardrailBudgetExceeded {
+                XCTAssertEqual(error.ruleCount, limit + 1)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath:
+                StreamingCompactSnapshotCompiler.scratchRootURL(cacheDirectoryURL: cacheURL).path))
+        }
+    }
+
+    func testRetainedGuardrailsAlsoConsumeTheStreamingAggregateBudget() async throws {
+        try await withTemporaryDirectory { cacheURL in
+            let limit = FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount
+            // Repeated block emissions still occupy compact entries before deduplication.
+            // This exercises the actual production ceiling without millions of heap strings.
+            let blocks = String(repeating: "b.test\n", count: limit)
+            let blockSource = makeSource(id: "aggregate-block-source", sourceHash: hash(blocks))
+            let threats = "evil.example.com\n"
+            let threatSource = makeSource(id: "aggregate-threat-source", sourceHash: hash(threats))
+            let catalog = BlocklistCatalog(schemaVersion: 2, catalogVersion: "20260101T000000Z",
+                generatedAt: Date(timeIntervalSince1970: 1_700_000_000), sources: [blockSource], guardrails: [threatSource])
+            try writeCatalog(catalog, to: cacheURL)
+            try writeLatestBlocklist(blocks, sourceID: blockSource.id, to: cacheURL)
+            try writeLatestBlocklist(threats, sourceID: threatSource.id, to: cacheURL)
+            let configuration = AppConfiguration(enabledBlocklistIDs: [blockSource.id], allowedDomains: ["example.com"])
+            let retained = cacheURL.appendingPathComponent("must-not-publish.lscfsnp")
+            do {
+                _ = try await CachedFilterSnapshotCompiler(cacheDirectoryURL: cacheURL)
+                    .compile(baseSnapshot: configuration.filterSnapshot(), configuration: configuration,
+                             retainedArtifactURL: retained)
+                XCTFail("Expected the first unique guardrail beyond the aggregate ceiling to fail")
+            } catch let error as StreamingCompileBudgetExceeded {
+                XCTAssertEqual(error.ruleCount, limit + 1)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: retained.path))
+            let scratch = StreamingCompactSnapshotCompiler.scratchRootURL(cacheDirectoryURL: cacheURL)
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: scratch.path).isEmpty)
+        }
+    }
 
     /// `writeStreaming` must emit bytes identical to the in-heap `encodedData()` when given
     /// the same (sorted) tables, and the result must pass the strict `decode` and the cheap
@@ -22,18 +164,22 @@ final class StreamingCompactSnapshotCompilerTests: XCTestCase {
             let suffixDomains = ["x.example.com", "z.example.com"] // x.example.com in both tables
 
             // Build the blob + entries exactly as `CompactDomainRuleTableBuilder` does (exact
-            // sorted, then suffix sorted, into one contiguous blob with monotonic offsets).
+            // sorted, then suffix sorted, into one contiguous blob with monotonic offsets):
+            // each domain is stored as a 1-byte length prefix followed by its bytes, and the
+            // entry is the byte offset of that prefix.
             var blob = Data()
             var exactEntries: [CompactDomainRuleSet.Entry] = []
             for domain in exactDomains {
                 let bytes = Data(domain.utf8)
-                exactEntries.append(.init(offset: UInt32(blob.count), length: UInt16(bytes.count)))
+                exactEntries.append(UInt32(blob.count))
+                blob.append(UInt8(bytes.count))
                 blob.append(bytes)
             }
             var suffixEntries: [CompactDomainRuleSet.Entry] = []
             for domain in suffixDomains {
                 let bytes = Data(domain.utf8)
-                suffixEntries.append(.init(offset: UInt32(blob.count), length: UInt16(bytes.count)))
+                suffixEntries.append(UInt32(blob.count))
+                blob.append(UInt8(bytes.count))
                 blob.append(bytes)
             }
 
@@ -268,7 +414,7 @@ final class StreamingCompactSnapshotCompilerTests: XCTestCase {
             XCTAssertEqual(compiled.decision(for: "d0.example.com").reason, .blocklist)
             XCTAssertEqual(compiled.decision(for: "d699999.example.com").reason, .blocklist)
             XCTAssertEqual(compiled.decision(for: "d700000.example.com").reason, .defaultAllow)
-            // The served, mapped-compact snapshot (~9 B/rule) stays within the device budget.
+            // The served, mapped-compact snapshot (~5 B/rule) stays within the device budget.
             XCTAssertFalse(FilterSnapshotMemoryBudget.exceedsBudget(ruleCount: compiled.blockRuleCount))
         }
     }
@@ -278,7 +424,7 @@ final class StreamingCompactSnapshotCompilerTests: XCTestCase {
     func testGuardrailIntersectionWithAllowlist() async throws {
         try await withTemporaryDirectory { cacheURL in
             let blockText = "ads.example.com\n"
-            let guardrailText = "evil.example.com\n" // suffix rule for evil.example.com
+            let guardrailText = "evil.example.com\nbad.example.com\n" // descendant suffix rules
             let blockSource = makeSource(id: "block-src", sourceHash: hash(blockText))
             let guardrailSource = makeSource(id: "guard-src", sourceHash: hash(guardrailText))
             let catalog = BlocklistCatalog(
@@ -296,7 +442,7 @@ final class StreamingCompactSnapshotCompilerTests: XCTestCase {
             // so it must stay blocked as a threatGuardrail (the allow can't override the guardrail).
             let configuration = AppConfiguration(
                 enabledBlocklistIDs: [blockSource.id],
-                allowedDomains: ["sub.evil.example.com", "safe.example.com"]
+                allowedDomains: ["example.com"]
             )
             let compiled = try await CachedFilterSnapshotCompiler(
                 cacheDirectoryURL: cacheURL,
@@ -305,7 +451,35 @@ final class StreamingCompactSnapshotCompilerTests: XCTestCase {
 
             XCTAssertEqual(compiled.decision(for: "sub.evil.example.com").reason, .threatGuardrail)
             XCTAssertEqual(compiled.decision(for: "safe.example.com").reason, .localAllowlist)
-            XCTAssertEqual(compiled.decision(for: "ads.example.com").reason, .blocklist)
+            XCTAssertEqual(compiled.decision(for: "evil.example.com").reason, .threatGuardrail)
+            XCTAssertEqual(compiled.decision(for: "ads.example.com").reason, .localAllowlist)
+            let adopted = FilterLooseningReapplyPolicy.RuleCounts(snapshot: compiled)
+            XCTAssertEqual(compiled.guardrailRuleCount, 2)
+            let regular = configuration.filterSnapshot(nonAllowableThreatRules:
+                DomainRuleSet(suffixDomains: ["evil.example.com", "bad.example.com"]))
+            XCTAssertEqual(adopted.effectiveAllowRuleCount, regular.effectiveAllowRuleCount)
+            let decoded = try CompactFilterSnapshot.decode(from: compiled.encodedData())
+            XCTAssertEqual(decoded.effectiveAllowRuleCount, regular.effectiveAllowRuleCount)
+            XCTAssertEqual(adopted.effectiveAllowRuleCount, 1,
+                           "A descendant threat cannot erase the broader parent allowance")
+            XCTAssertTrue(FilterLooseningReapplyPolicy.isLoosening(
+                previous: .init(blockRuleCount: compiled.blockRuleCount, allowRuleCount: 0, guardrailRuleCount: 0),
+                adopted: adopted))
+
+            // The next streamed catalog releases the descendant threats while keeping
+            // the same allow and ordinary block tables. Cold decoding preserves the signal.
+            try writeCatalog(makeCatalog(sources: [blockSource]), to: cacheURL)
+            let released = try await CachedFilterSnapshotCompiler(
+                cacheDirectoryURL: cacheURL, includesGuardrails: true
+            ).compile(baseSnapshot: configuration.filterSnapshot(), configuration: configuration)
+            let coldReleased = try CompactFilterSnapshot.decode(from: released.encodedData())
+            XCTAssertEqual(released.decision(for: "sub.evil.example.com").reason, .localAllowlist)
+            XCTAssertEqual(released.blockRuleCount, compiled.blockRuleCount)
+            XCTAssertEqual(released.effectiveAllowRuleCount, compiled.effectiveAllowRuleCount)
+            XCTAssertNotEqual(adopted.allowedSuffixGuardrailCoverage["example.com"], GuardrailScopeCoverage())
+            XCTAssertEqual(coldReleased.allowedSuffixGuardrailCoverage, ["example.com": GuardrailScopeCoverage()])
+            XCTAssertTrue(FilterLooseningReapplyPolicy.isLoosening(
+                previous: adopted, adopted: .init(snapshot: coldReleased)))
         }
     }
 

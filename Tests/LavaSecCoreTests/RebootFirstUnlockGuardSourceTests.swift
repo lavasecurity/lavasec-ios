@@ -12,11 +12,11 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - Launch load classifies reads and gates the reseed persist
 
     func testLaunchLoadClassifiesReadsAndNeverPersistsAnUnreadableReseed() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         let loadBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadPersistedConfiguration() {",
+            startingAt: "func loadPersistedConfiguration() {",
             endingBefore: "private func loadOrMigrateFilterLibrary()"
         )
         XCTAssertTrue(loadBlock.contains("SharedStateFileReader.read(AppConfiguration.self"),
@@ -27,7 +27,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            endingBefore: "private func persistPreparedSnapshotArtifacts("
+            endingBefore: "// MARK: - Sudoku easter egg persistence"
         )
         XCTAssertTrue(migrateBlock.contains("SharedStateFileReader.read(FilterLibrary.self"),
                       "The library launch read must go through the INV-PERSIST-1 classifier.")
@@ -75,7 +75,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - Persist funnels refuse placeholder state (the post-unlock clobber half)
 
     func testPersistFunnelsRefuseWhileLaunchLoadWasBlocked() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         // Assert the guard PRECEDES the pair write in each funnel, not merely that both tokens
         // appear: a reorder that ran the write before the guard — or a duplicate write outside
@@ -85,8 +85,8 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // pins elsewhere in this file.
         let sharedFunnel = try sourceBlock(
             in: source,
-            startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly("
+            startingAt: "func persistSharedState(",
+            endingBefore: "func persistConfigurationOnly("
         )
         let sharedGuardIdx = try XCTUnwrap(
             sharedFunnel.range(of: "guard !sharedStateUnavailableAtLoad else")?.lowerBound,
@@ -101,7 +101,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
 
         let configFunnel = try sourceBlock(
             in: source,
-            startingAt: "private func persistConfigurationOnly(",
+            startingAt: "func persistConfigurationOnly(",
             endingBefore: "private func refreshFilterSwitchShortcutAfterPersist()"
         )
         let configGuardIdx = try XCTUnwrap(
@@ -119,14 +119,14 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - First-unlock recovery wiring
 
     func testBlockedLoadRecoversAtFirstUnlockAndOnForeground() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         XCTAssertTrue(source.contains("UIApplication.protectedDataDidBecomeAvailableNotification"),
                       "The app must re-run a blocked launch load when protected data becomes available.")
 
         let recovery = try sourceBlock(
             in: source,
-            startingAt: "private func reloadSharedStateIfBlockedByDataProtection() {",
+            startingAt: "func reloadSharedStateIfBlockedByDataProtection() {",
             endingBefore: "private func loadOrMigrateFilterLibrary()"
         )
         XCTAssertTrue(recovery.contains("guard sharedStateUnavailableAtLoad else { return }"),
@@ -159,7 +159,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - The Class-None library accept honors the durable file marker (scoped upgrade freeze)
 
     func testAcceptedLibraryHonorsDurableFileMarker() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // INV-PERSIST-2 made filter-library.json Class-None, so the accept branch runs
         // pre-first-unlock. A 1.2.5-native device's suppression lives in the Class-None
@@ -199,8 +199,8 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // migrated forward to the durable file.
         let helper = try sourceBlock(
             in: app,
-            startingAt: "private func reseedSuppressionMarkerState() -> ReseedSuppressionMarkerState {",
-            endingBefore: "private var reseedSuppressionAwaitingUnlockConfirmation"
+            startingAt: "func reseedSuppressionMarkerState() -> ReseedSuppressionMarkerState {",
+            endingBefore: "var reseedSuppressionAwaitingUnlockConfirmation"
         )
         XCTAssertTrue(
             helper.contains("ReseedSuppressionMarkerStore.isMarked(containerURL: containerURL)"),
@@ -259,7 +259,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
                        "The unlock re-derivation must be called from the unlock notification and the foreground re-check (plus its own definition).")
         let confirm = try sourceBlock(
             in: app,
-            startingAt: "private func confirmReseedSuppressionAfterUnlock() {",
+            startingAt: "func confirmReseedSuppressionAfterUnlock() {",
             endingBefore: "// Re-runs the blocked launch load at first unlock"
         )
         XCTAssertTrue(confirm.contains("guard reseedSuppressionAwaitingUnlockConfirmation else { return }"),
@@ -287,10 +287,10 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         let schedule = try sourceBlock(
             in: backup,
             startingAt: "func scheduleAutomaticBackupAfterConfigurationChange() {",
-            endingBefore: "private func runScheduledAutomaticBackup()"
+            endingBefore: "private func runScheduledAutomaticBackup("
         )
         let guardIdx = try XCTUnwrap(
-            schedule.range(of: "guard !hub.libraryOriginatesFromLaunchReseed else")?.lowerBound,
+            schedule.range(of: "!hub.libraryOriginatesFromLaunchReseed else")?.lowerBound,
             "The automatic-backup scheduler must refuse while the library originated from a launch reseed."
         )
         let resealIdx = try XCTUnwrap(schedule.range(of: "refreshLocalEncryptedBackupEnvelope()")?.lowerBound)
@@ -305,7 +305,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // + post-pair-landed catch) so a failed reseed persist keeps the marker until the pair
         // lands (Codex P1 round 4). All go through the single clearing helper; the 6th match is
         // that helper's definition.
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertEqual(sourceOccurrenceCount(of: "clearLibraryOriginatesFromLaunchReseed()", in: app), 6,
                        "The suppression must clear at exactly the five deferred drop sites (deliberate-migration + restore ×2 + explicit-reseed helper ×2), via the marker-dropping helper (plus its definition).")
         // Persisted recovery reseeds (absent/corrupt store) mark the suppression DURABLY —
@@ -325,15 +325,15 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
                        "The no-op UserDefaults flush must be gone — durability is the atomic Class-None marker file.")
         let markHelper = try sourceBlock(
             in: app,
-            startingAt: "private func markLibraryOriginatesFromPersistedRecoveryReseed() -> Bool {",
-            endingBefore: "private func clearLibraryOriginatesFromLaunchReseed() {"
+            startingAt: "func markLibraryOriginatesFromPersistedRecoveryReseed() -> Bool {",
+            endingBefore: "func clearLibraryOriginatesFromLaunchReseed() {"
         )
         XCTAssertTrue(markHelper.contains("ReseedSuppressionMarkerStore.mark(containerURL: containerURL)"),
                       "The stamp helper must write the durable Class-None marker file.")
         let clearHelper = try sourceBlock(
             in: app,
-            startingAt: "private func clearLibraryOriginatesFromLaunchReseed() {",
-            endingBefore: "private enum ReseedSuppressionMarkerState {"
+            startingAt: "func clearLibraryOriginatesFromLaunchReseed() {",
+            endingBefore: "enum ReseedSuppressionMarkerState {"
         )
         // Clear removes the flaky legacy Class-C key BEFORE the durable Class-None file marker so an
         // interruption in between leaves the durable file marker present, and the next readable
@@ -385,11 +385,11 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // suppression lifted on the next launch (Codex P1 round 4).
         let restoreBlock = try sourceBlock(
             in: app,
-            startingAt: "func applyRestoredBackupPayload(",
+            startingAt: "func applyReviewedBackup(",
             endingBefore: "// MARK: - LavaSecurity+ hub bridge"
         )
         let restorePersistIdx = try XCTUnwrap(
-            restoreBlock.range(of: "persistSharedState(prioritizesConfigurationDurability: true)")?.lowerBound
+            restoreBlock.range(of: "try await persistSharedState(")?.lowerBound
         )
         let restoreClearIdx = try XCTUnwrap(
             restoreBlock.range(of: "clearLibraryOriginatesFromLaunchReseed()")?.lowerBound,
@@ -420,7 +420,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - Explicit reseeds defer the durable-marker drop until the persist lands
 
     func testExplicitReseedDefersDurableMarkerDropUntilPersistLands() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // Both explicit-reseed entry points (restore-to-default, onboarding recommended-defaults)
         // must LIFT the in-memory suppression before the persist — so the reseed's backup hook runs
@@ -461,8 +461,8 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // never on a throw where nothing landed.
         let helper = try sourceBlock(
             in: app,
-            startingAt: "private func persistFilterReseedDroppingDurableMarkerWhenLanded() {",
-            endingBefore: "private func loadPersistedConfiguration"
+            startingAt: "func persistFilterReseedDroppingDurableMarkerWhenLanded() {",
+            endingBefore: "func loadPersistedConfiguration"
         )
         let basisIdx = try XCTUnwrap(
             helper.range(of: "let generationBeforePersist = configuration.configurationGeneration")?.lowerBound,
@@ -503,15 +503,15 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         )
         XCTAssertTrue(goBlock.contains("applyCurrentStepChoiceIfNeeded(persistImmediately: nextPage != .done)"),
                       "go(to: .done) must fold the leaving choice into the reseed persist, not fire its own.")
-        XCTAssertTrue(goBlock.contains("if nextPage == .done {"),
+        XCTAssertTrue(goBlock.contains("if !isMock && nextPage == .done {"),
                       "The .done transition must still seed the recommended defaults (the reseed persist the fold targets).")
 
         // Both surfaced-choice appliers MUTATE config unconditionally but gate their OWN persist on
         // the flag, so the .done fold suppresses the sibling persist while keeping the mutation.
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let appliers = [
             ("func applyOnboardingConnectionPreferences(", "func selectOnboardingBlocklists("),
-            ("func selectOnboardingBlocklists(", "private func startOnboardingDefaultBlocklistSyncIfNeeded()"),
+            ("func selectOnboardingBlocklists(", "func startOnboardingDefaultBlocklistSyncIfNeeded()"),
         ]
         for (anchor, endBefore) in appliers {
             let block = try sourceBlock(in: app, startingAt: anchor, endingBefore: endBefore)
@@ -533,7 +533,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - The onboarding neutralize never fires on a locked defaults read
 
     func testOnboardingNeutralizeIsGatedOnProtectedDataAvailability() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let initTask = try sourceBlock(
             in: source,
             startingAt: "if !hasCompletedOnboarding {",
@@ -570,7 +570,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - Field breadcrumbs: classifications and fence trips are diagnosable (plan Phase 4)
 
     func testUnreadableClassificationsAndFenceTripsLeaveFieldBreadcrumbs() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // Each launch-load classification site logs a breadcrumb naming ITS file: the pair
         // carries NSFileProtectionNone post-INV-PERSIST-2, so which file classified
@@ -578,7 +578,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // locked boot and a live anomaly. Anchor each event inside its `.unreadable` case.
         let loadBlock = try sourceBlock(
             in: app,
-            startingAt: "private func loadPersistedConfiguration() {",
+            startingAt: "func loadPersistedConfiguration() {",
             endingBefore: "private func loadOrMigrateFilterLibrary()"
         )
         let configCaseIdx = try XCTUnwrap(loadBlock.range(of: "case .unreadable")?.lowerBound)
@@ -597,7 +597,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         let migrateBlock = try sourceBlock(
             in: app,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            endingBefore: "private func persistPreparedSnapshotArtifacts("
+            endingBefore: "// MARK: - Sudoku easter egg persistence"
         )
         let libraryCaseIdx = try XCTUnwrap(migrateBlock.range(of: "case .unreadable")?.lowerBound)
         let libraryEventIdx = try XCTUnwrap(
@@ -639,14 +639,14 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
         // only two delegates, so together every app-side pair write logs fence trips).
         let sharedFunnel = try sourceBlock(
             in: app,
-            startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly("
+            startingAt: "func persistSharedState(",
+            endingBefore: "func persistConfigurationOnly("
         )
         XCTAssertTrue(sharedFunnel.contains("try writeSharedStateLoggingFenceTrip {"),
                       "persistSharedState must route its pair write through the fence-logging wrapper.")
         let configFunnel = try sourceBlock(
             in: app,
-            startingAt: "private func persistConfigurationOnly(",
+            startingAt: "func persistConfigurationOnly(",
             endingBefore: "private func refreshFilterSwitchShortcutAfterPersist()"
         )
         XCTAssertTrue(configFunnel.contains("try writeSharedStateLoggingFenceTrip {"),
@@ -656,7 +656,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     }
 
     func testLanguagePinPublishIsGuardedOnProtectedData() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let foreground = try sourceBlock(
             in: app,
             startingAt: "func setAppForegroundActive(_ active: Bool) {",
@@ -683,7 +683,7 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     }
 
     func testForegroundActivePublishIsGuardedOnProtectedData() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let foreground = try sourceBlock(
             in: app,
             startingAt: "func setAppForegroundActive(_ active: Bool) {",

@@ -12,6 +12,9 @@ public final class DNSResolverFallbackPlan: Equatable, @unchecked Sendable {
 
 /// An immutable resolver-routing snapshot captured for one query and safe to pass into tunnel orchestration.
 public struct DNSResolverRuntimePlan: Equatable, Sendable {
+    /// The saved canonical tier supplying this plan's configured primary resolver.
+    /// Runtime Device DNS fallback promotion keeps this origin unchanged.
+    public let configuredPrimaryTier: DNSResolverTier
     /// The effective primary transport after applying device-DNS mode and endpoint availability.
     public let transport: DNSResolverTransport
     package let plainAddresses: [String]
@@ -27,16 +30,11 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     public let deviceDNSFallbackAddresses: [String]
     package let shouldFallbackToDeviceDNS: Bool
     package let usesDeviceDNSFallbackMode: Bool
-    // Inverse of shouldFallbackToDeviceDNS: when the *primary* is Device DNS and it
-    // is wedged, fall back per-query to an encrypted resolver (Mullvad DoH) so a
-    // single bad/stale local resolver doesn't strand the user. Mutually exclusive
-    // with shouldFallbackToDeviceDNS (that requires a non-device primary).
-    /// Whether a failed Device-DNS primary may activate `encryptedFallback`, whose route can try multiple endpoints.
+    // The historical names remain for compatibility. An explicitly selected alternative
+    // can follow any primary; legacy preferences activate it only beneath Device DNS.
+    /// Whether a failed primary may activate the user-selected alternative fallback.
     public let shouldFallbackToEncrypted: Bool
-    // The per-query encrypted fallback for a Device-DNS primary, as a fully-formed
-    // nested plan resolved through the user-selected fallback resolver and its
-    // transport (plain / DoH / DoT). Nil when no encrypted fallback applies.
-    /// Fully resolved encrypted fallback route, or `nil` when the query must remain on its primary route.
+    /// Fully resolved alternative fallback route, or `nil` when no alternative is selected.
     public let encryptedFallback: DNSResolverFallbackPlan?
 
     /// Back-compat accessor for readers that only need the DoH endpoints of the
@@ -55,7 +53,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     /// or its hostname lookup recurses through the (wedged) Device DNS the fallback
     /// exists to escape. Empty for non-DoT fallbacks.
     public var encryptedFallbackDoTEndpoints: [DNSOverTLSEndpoint] { encryptedFallback?.plan.dotEndpoints ?? [] }
-    // Whether a server-side refusal (SERVFAIL/REFUSED) from the Device-DNS primary
+    // Whether a server-side error from the Device-DNS primary
     // should trigger the encrypted fallback. Only set when the resolver is already
     // health-confirmed as broadly wedged: a one-off refusal on an otherwise-healthy
     // resolver is an authoritative verdict (a managed-network block or a DNSSEC
@@ -63,18 +61,107 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     // No-response failures fall back regardless of this flag.
     package let treatsResolverRejectionAsFallbackTrigger: Bool
 
-    /// Fixed encrypted fallback resolver for Device-DNS primary: Mullvad's
+    /// Fixed encrypted fallback resolver for Device-DNS primary: Quad9's
     /// non-filtering DoH endpoint (Lava filters locally, so the upstream must not
     /// also filter). DoH/443 is chosen for firewall-friendliness on the degraded
     /// networks where the local resolver just failed. It works precisely when the
     /// tunnel's *captured* device resolver is stale/refusing: the DoH client resolves
-    /// `dns.mullvad.net` by hostname (URLSession), and that lookup loops back through
+    /// `dns10.quad9.net` by hostname (URLSession), and that lookup loops back through
     /// the tunnel where `dohBootstrapResponse` answers it from the bootstrap IPs
-    /// below — so the fallback reaches Mullvad without depending on the wedged
+    /// below — so the fallback reaches Quad9 without depending on the wedged
     /// device resolver. (DoT/DoQ consume their bootstrap IPs directly via NWConnection.)
-    // Aliased to the Mullvad DoH preset's endpoint so the default encrypted
+    // Aliased to the Quad9 DoH preset's endpoint so the default encrypted
     // fallback (when no resolver is selected) and this constant can't drift.
-    package static var mullvadEncryptedFallbackEndpoint: DNSOverHTTPSEndpoint { DNSResolverPreset.mullvadDoH.dohEndpoint! }
+    package static var defaultEncryptedFallbackEndpoint: DNSOverHTTPSEndpoint { DNSResolverPreset.quad9UnfilteredDoH.dohEndpoint! }
+
+    /// This plan with its plain-DNS addresses narrowed to `admitted`, or `nil` when a plain-DNS
+    /// plan has nothing admitted left to ask.
+    ///
+    /// THE T1 RUNG'S PLAN MUST BE THE ADMITTED SET, and the restriction is not cosmetic.
+    /// `PacketTunnelProvider.resolvePlainDNS` returns on the FIRST address that produces any
+    /// packet — SERVFAIL included, because a reply is a reply. So a preset that partially overlaps
+    /// the upstream's own `DNS =` (Cloudflare against `DNS = 1.1.1.1`) would re-ask the very
+    /// resolver that just declined the name, stop on its second refusal, and never reach the
+    /// address the panel calls admitted (Codex, PR #590). Addresses reported `.alreadyPrimary` or
+    /// `.unusable` must not reach the wire at all.
+    ///
+    /// ORDER IS PRESERVED, not re-derived: `make` has already ordered these for the current
+    /// network kind, and re-sorting by the admitted set's order would undo that.
+    ///
+    /// NIL ONLY FOR AN ADDRESS-ROUTED PLAN — `.plainDNS` and, since PR #592, `.deviceDNS`. For
+    /// both, `plainAddresses` IS the route: emptied, the plan has nowhere to send the query, and
+    /// nil is the honest answer ("no second opinion to ask") rather than a plan that fails at the
+    /// socket. An encrypted plan's addresses are its degradation path, not its primary route, so
+    /// emptying them narrows where a degraded query may go without removing the endpoints the
+    /// rung actually resolves through.
+    ///
+    /// A `.deviceDNS` plan can lose its last address here even when the caller saw a non-empty
+    /// admitted set: `make` orders and filters the live capture for the current network kind, so
+    /// the intersection can be empty where the raw capture's was not.
+    /// pinned: DNSResolverRuntimePlanTests.testTheRungPlanKeepsOnlyAdmittedPlainAddresses
+    /// pinned: DNSResolverRuntimePlanTests.testADeviceDNSRungPlanWithNothingAdmittedIsNoPlanAtAll
+    public func restrictingPlainAddresses(to admitted: [String]) -> DNSResolverRuntimePlan? {
+        let allowed = Set(admitted)
+        let kept = plainAddresses.filter { allowed.contains($0) }
+        if transport == .plainDNS || transport == .deviceDNS, kept.isEmpty { return nil }
+        return DNSResolverRuntimePlan(
+            transport: transport,
+            plainAddresses: kept,
+            dohEndpoints: dohEndpoints,
+            dotEndpoints: dotEndpoints,
+            doqEndpoints: doqEndpoints,
+            cacheIdentifier: cacheIdentifier,
+            deviceDNSFallbackAddresses: deviceDNSFallbackAddresses,
+            shouldFallbackToDeviceDNS: shouldFallbackToDeviceDNS,
+            usesDeviceDNSFallbackMode: usesDeviceDNSFallbackMode,
+            shouldFallbackToEncrypted: shouldFallbackToEncrypted,
+            encryptedFallback: encryptedFallback,
+            treatsResolverRejectionAsFallbackTrigger: treatsResolverRejectionAsFallbackTrigger,
+            configuredPrimaryTier: configuredPrimaryTier)
+    }
+
+    /// This plan with its DEVICE-DNS FALLBACK addresses narrowed to `admitted`.
+    ///
+    /// THE RUNG'S SECOND LEG NEEDS THE SAME GATE ITS FIRST ONE HAS, and until PR #603 it had none.
+    /// ``restrictingPlainAddresses(to:)`` narrows the SELECTED resolver's list, which is the only
+    /// list a T1 rung had before PR #596 let it run the full ladder. `deviceDNSFallbackAddresses`
+    /// is the tunnel's raw capture, put there by ``make(configuration:deviceDNSAddresses:…)`` without
+    /// any chained admission at all — so the newly reachable device leg egressed unadmitted
+    /// addresses on `.physical`:
+    ///
+    /// - an IPv6 device resolver is swallowed by the chained `::/0` blackhole, spending the leg on
+    ///   an address that cannot answer, and
+    /// - a device resolver that IS the conf's own `DNS =` gets asked the name T0 just declined,
+    ///   and `resolveDevice` returns on the first address that yields any packet — SERVFAIL
+    ///   included — so its second refusal ends the leg before a usable resolver is tried.
+    ///
+    /// Both are the failures ``restrictingPlainAddresses(to:)`` exists to prevent, one leg over
+    /// (Codex P2, PR #596, on a retro review of the merged code).
+    ///
+    /// THE FLAG FALLS WITH THE LIST. An empty list is not "ask nothing and continue" — `resolveDevice`
+    /// would have nowhere to send the query and the ladder would spend a step discovering it — so a
+    /// leg with nothing admitted is switched off here and the ladder moves straight to the
+    /// encrypted one. NOT nil like the plain narrowing: emptying THIS list removes a degradation
+    /// path, not the plan's route.
+    /// pinned: DNSResolverRuntimePlanTests.testTheRungPlanKeepsOnlyAdmittedDeviceFallbackAddresses
+    public func restrictingDeviceDNSFallbackAddresses(to admitted: [String]) -> DNSResolverRuntimePlan {
+        let allowed = Set(admitted)
+        let kept = deviceDNSFallbackAddresses.filter { allowed.contains($0) }
+        return DNSResolverRuntimePlan(
+            transport: transport,
+            plainAddresses: plainAddresses,
+            dohEndpoints: dohEndpoints,
+            dotEndpoints: dotEndpoints,
+            doqEndpoints: doqEndpoints,
+            cacheIdentifier: cacheIdentifier,
+            deviceDNSFallbackAddresses: kept,
+            shouldFallbackToDeviceDNS: shouldFallbackToDeviceDNS && !kept.isEmpty,
+            usesDeviceDNSFallbackMode: usesDeviceDNSFallbackMode,
+            shouldFallbackToEncrypted: shouldFallbackToEncrypted,
+            encryptedFallback: encryptedFallback,
+            treatsResolverRejectionAsFallbackTrigger: treatsResolverRejectionAsFallbackTrigger,
+            configuredPrimaryTier: configuredPrimaryTier)
+    }
 
     package init(
         transport: DNSResolverTransport,
@@ -91,8 +178,10 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         // Convenience for tests/callers that still pass raw DoH endpoints; wrapped
         // into a DoH fallback plan when `encryptedFallback` isn't supplied directly.
         encryptedFallbackEndpoints: [DNSOverHTTPSEndpoint] = [],
-        treatsResolverRejectionAsFallbackTrigger: Bool = false
+        treatsResolverRejectionAsFallbackTrigger: Bool = false,
+        configuredPrimaryTier: DNSResolverTier = .tierOne
     ) {
+        self.configuredPrimaryTier = configuredPrimaryTier
         self.transport = transport
         self.plainAddresses = plainAddresses
         self.dohEndpoints = dohEndpoints
@@ -115,7 +204,8 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
                 cacheIdentifier: "doh-fallback",
                 deviceDNSFallbackAddresses: [],
                 shouldFallbackToDeviceDNS: false,
-                usesDeviceDNSFallbackMode: false
+                usesDeviceDNSFallbackMode: false,
+                configuredPrimaryTier: .tierTwo
             ))
         } else {
             self.encryptedFallback = nil
@@ -132,7 +222,7 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
     /// actually resolves; if the wedge marker flips in between, the captured trigger is stale.
     /// Recomputing just this bit from a fresh read lets a query straddling a Device-DNS wedge
     /// transition be carried by the encrypted fallback rather than returning the wedged resolver's
-    /// SERVFAIL/REFUSED authoritatively — without re-deriving (and re-reading the state behind) the
+    /// error response authoritatively — without re-deriving (and re-reading the state behind) the
     /// whole plan. `shouldFallbackToEncrypted` is unchanged, so a plan with no encrypted fallback
     /// keeps a `false` trigger regardless of `deviceResolverWedged`.
     public func recomputingResolverRejectionFallbackTrigger(deviceResolverWedged: Bool) -> DNSResolverRuntimePlan {
@@ -148,7 +238,8 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
             usesDeviceDNSFallbackMode: usesDeviceDNSFallbackMode,
             shouldFallbackToEncrypted: shouldFallbackToEncrypted,
             encryptedFallback: encryptedFallback,
-            treatsResolverRejectionAsFallbackTrigger: shouldFallbackToEncrypted && deviceResolverWedged
+            treatsResolverRejectionAsFallbackTrigger: shouldFallbackToEncrypted && deviceResolverWedged,
+            configuredPrimaryTier: configuredPrimaryTier
         )
     }
 
@@ -162,17 +253,29 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         allowsQueryFallback: Bool = true,
         deviceResolverWedged: Bool = false
     ) -> DNSResolverRuntimePlan {
-        make(
-            resolver: configuration.resolverPreset,
-            fallbackToDeviceDNS: configuration.fallbackToDeviceDNS,
-            usesEncryptedDeviceDNSFallback: configuration.usesEncryptedDeviceDNSFallback,
+        // THROUGH THE PROJECTION, NOT FIELD BY FIELD. `AppConfiguration.resolverLadderInputs` is
+        // the one list of configuration inputs that steer a ladder, and
+        // `chainedTierOneRungPolicyIdentity` fingerprints that same list to decide whether a
+        // running chained session must relatch its T1 rung. Reading fields directly here is
+        // what let the two drift: the relatch named the resolver only, so `fallbackToDeviceDNS`,
+        // `usesEncryptedDeviceDNSFallback` and `fallbackResolverPreset` moved without it and a
+        // running session kept sending failed T1 lookups to the old fallback until restart
+        // (Codex P1, PR #599). New inputs, including a saved tier's origin when another row
+        // is disabled, join `ResolverLadderInputs` so the runtime and relatch see them together.
+        let ladder = configuration.resolverLadderInputs
+        return make(
+            resolver: ladder.resolver,
+            fallbackToDeviceDNS: ladder.fallbackToDeviceDNS,
+            usesEncryptedDeviceDNSFallback: ladder.usesEncryptedDeviceDNSFallback,
+            usesExplicitDNSTiers: ladder.usesExplicitDNSTiers,
             deviceDNSAddresses: deviceDNSAddresses,
             networkKind: networkKind,
             deviceDNSFallbackModeActive: deviceDNSFallbackModeActive,
             ignoresDeviceDNSFallbackMode: ignoresDeviceDNSFallbackMode,
             allowsQueryFallback: allowsQueryFallback,
             deviceResolverWedged: deviceResolverWedged,
-            encryptedFallbackResolver: configuration.fallbackResolverPreset
+            encryptedFallbackResolver: ladder.encryptedFallbackResolver,
+            configuredPrimaryTier: ladder.configuredPrimaryTier
         )
     }
 
@@ -180,13 +283,15 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
         resolver: DNSResolverPreset,
         fallbackToDeviceDNS: Bool,
         usesEncryptedDeviceDNSFallback: Bool = false,
+        usesExplicitDNSTiers: Bool = false,
         deviceDNSAddresses: [String],
         networkKind: TunnelNetworkKind,
         deviceDNSFallbackModeActive: Bool,
         ignoresDeviceDNSFallbackMode: Bool = false,
         allowsQueryFallback: Bool = true,
         deviceResolverWedged: Bool = false,
-        encryptedFallbackResolver: DNSResolverPreset? = nil
+        encryptedFallbackResolver: DNSResolverPreset? = nil,
+        configuredPrimaryTier: DNSResolverTier = .tierOne
     ) -> DNSResolverRuntimePlan {
         let orderedDeviceDNSAddresses = orderedResolverAddresses(deviceDNSAddresses, networkKind: networkKind)
         let resolverPlainAddresses = orderedResolverAddresses(
@@ -253,40 +358,54 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
             dotEndpoints: dotEndpoints,
             doqEndpoints: doqEndpoints
         )
-        let shouldFallbackToDeviceDNS = fallbackToDeviceDNS
-            && allowsQueryFallback
-            && effectiveTransport != .deviceDNS
-            && !orderedDeviceDNSAddresses.isEmpty
-        // Inverse direction: a Device-DNS *primary* (the configured preset, not the
-        // device-DNS-fallback mode) gets a per-query encrypted fallback so a wedged
-        // local resolver doesn't strand the user. Gated by its own opt-in flag
-        // (default off — enabling a third-party encrypted resolver is explicit), and
-        // off for the smoke probe (allowsQueryFallback == false) so the probe still
-        // measures the *primary* device resolver's health.
-        let shouldFallbackToEncrypted = usesEncryptedDeviceDNSFallback
-            && allowsQueryFallback
-            && resolver.transport == .deviceDNS
-        // Build the encrypted fallback as a fully-formed nested plan resolved through
-        // the user-selected fallback resolver and its transport. Defaulting to Mullvad
-        // DoH (when none is passed) keeps resolver-based callers producing the prior
-        // behavior. The nested plan disables its own encrypted/device fallbacks so
-        // there's no infinite recursion.
-        let resolvedFallbackResolver = encryptedFallbackResolver ?? .mullvadDoH
-        let encryptedFallback: DNSResolverFallbackPlan?
-        if shouldFallbackToEncrypted, resolvedFallbackResolver.transport != .deviceDNS {
-            encryptedFallback = DNSResolverFallbackPlan(DNSResolverRuntimePlan.make(
-                resolver: resolvedFallbackResolver,
-                fallbackToDeviceDNS: false,
-                usesEncryptedDeviceDNSFallback: false,
-                deviceDNSAddresses: [],
-                networkKind: networkKind,
-                deviceDNSFallbackModeActive: false,
-                allowsQueryFallback: false
-            ))
-        } else {
-            encryptedFallback = nil
-        }
-        // Only let a SERVFAIL/REFUSED device reply engage the fallback once the
+        // T2, DECIDED ONCE. These two legs are the same tier — "what answers the names T1 could
+        // not" — and the settings page has always offered them as one control whose label follows
+        // the primary. They used to be computed here as two independent booleans from opposite
+        // sides of `resolver.transport == .deviceDNS`: mutually exclusive by construction, but
+        // nothing said so and nothing named the tier. `ResolverTierTwo` is that name, and
+        // deriving both legs from its one answer is what keeps them in step
+        // (`docs/architecture/dns-tiers.md`).
+        //
+        // Defaulting to Quad9 DoH (when no fallback resolver is passed) keeps resolver-based
+        // callers producing the prior behaviour.
+        // pinned: ResolverTierTwoTests.testTheTwoLegsAreTheSameTierAndNeverArmTogether
+        let resolvedFallbackResolver = encryptedFallbackResolver ?? .quad9UnfilteredDoH
+        let tierTwo = ResolverTierTwo.resolve(
+            primaryTransport: resolver.transport,
+            effectiveTransport: effectiveTransport,
+            fallbackToDeviceDNS: fallbackToDeviceDNS,
+            usesEncryptedDeviceDNSFallback: usesEncryptedDeviceDNSFallback,
+            usesExplicitDNSTiers: usesExplicitDNSTiers,
+            encryptedFallbackResolver: resolvedFallbackResolver,
+            allowsQueryFallback: allowsQueryFallback,
+            hasDeviceDNSAddresses: !orderedDeviceDNSAddresses.isEmpty)
+        let shouldFallbackToDeviceDNS = tierTwo == .deviceDNS
+        // A Device-DNS *primary* (the configured preset, not the device-DNS-fallback mode) gets a
+        // per-query encrypted fallback so a wedged local resolver doesn't strand the user. Opt-in
+        // (default off — enabling a third-party encrypted resolver is explicit), and off for the
+        // smoke probe (allowsQueryFallback == false) so the probe still measures the *primary*
+        // device resolver's health.
+        let shouldFallbackToEncrypted = tierTwo.isResolver
+        // WHETHER A PLAN CAN BE BUILT IS SEPARATE FROM WHICH TIER WAS CHOSEN. A user whose
+        // fallback selection is itself Device DNS has chosen T2 — `shouldFallbackToEncrypted`
+        // stays true, and with it `treatsResolverRejectionAsFallbackTrigger` below — but there is
+        // no encrypted plan to route it through, so the nested plan is nil exactly as before.
+        // The nested plan disables its own fallbacks, so no rung can spawn a rung.
+        let encryptedFallback: DNSResolverFallbackPlan? = tierTwo.resolverPreset
+            .flatMap { preset -> DNSResolverFallbackPlan? in
+                guard preset.transport != .deviceDNS else { return nil }
+                return DNSResolverFallbackPlan(DNSResolverRuntimePlan.make(
+                    resolver: preset,
+                    fallbackToDeviceDNS: false,
+                    usesEncryptedDeviceDNSFallback: false,
+                    deviceDNSAddresses: [],
+                    networkKind: networkKind,
+                    deviceDNSFallbackModeActive: false,
+                    allowsQueryFallback: false,
+                    configuredPrimaryTier: .tierTwo
+                ))
+            }
+        // Only let a device error reply engage the fallback once the
         // resolver is health-confirmed as broadly wedged; otherwise a refusal is an
         // authoritative per-domain verdict and is honored. (No-response failures
         // engage the fallback regardless — see ResolverOrchestrator.)
@@ -296,6 +415,8 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
             : ""
         let encryptedFallbackIdentifier = encryptedFallback.map { "|fallback:encrypted:" + $0.plan.cacheIdentifier } ?? ""
         let fallbackModeIdentifier = usesDeviceDNSFallbackMode ? "|mode:device-dns-fallback" : ""
+        let tierIdentifier = configuredPrimaryTier == .tierOne
+            ? "" : "|configured-primary:\(configuredPrimaryTier.rawValue)"
 
         return DNSResolverRuntimePlan(
             transport: effectiveTransport,
@@ -303,13 +424,14 @@ public struct DNSResolverRuntimePlan: Equatable, Sendable {
             dohEndpoints: dohEndpoints,
             dotEndpoints: dotEndpoints,
             doqEndpoints: doqEndpoints,
-            cacheIdentifier: primaryCacheIdentifier + fallbackIdentifier + encryptedFallbackIdentifier + fallbackModeIdentifier,
+            cacheIdentifier: primaryCacheIdentifier + fallbackIdentifier + encryptedFallbackIdentifier + fallbackModeIdentifier + tierIdentifier,
             deviceDNSFallbackAddresses: orderedDeviceDNSAddresses,
             shouldFallbackToDeviceDNS: shouldFallbackToDeviceDNS,
             usesDeviceDNSFallbackMode: usesDeviceDNSFallbackMode,
             shouldFallbackToEncrypted: shouldFallbackToEncrypted,
             encryptedFallback: encryptedFallback,
-            treatsResolverRejectionAsFallbackTrigger: treatsResolverRejectionAsFallbackTrigger
+            treatsResolverRejectionAsFallbackTrigger: treatsResolverRejectionAsFallbackTrigger,
+            configuredPrimaryTier: configuredPrimaryTier
         )
     }
 

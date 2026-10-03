@@ -1,43 +1,61 @@
 import SwiftUI
 import UIKit
+import LavaSecKit
 
 struct LavaNavigationCardBadge {
     let content: AnyView
-    let background: Color
-    let cornerRadius: CGFloat
 
+    // Keep the existing factory labels while the shared row owns glyph geometry.
+    // Navigation glyphs have no individual badge background in either host.
     static func systemImage(
         _ systemImage: String,
-        font: Font = .headline,
-        tint: Color = LavaStyle.safeGreen,
-        background: Color = LavaStyle.softGreen,
-        cornerRadius: CGFloat = LavaSurface.iconBadgeCornerRadius
+        font _: Font = .headline,
+        tint: Color = LavaStyle.primaryText,
+        background _: Color = LavaStyle.softGreen,
+        cornerRadius _: CGFloat = LavaSurface.iconBadgeCornerRadius
     ) -> LavaNavigationCardBadge {
-        LavaNavigationCardBadge(
+        if systemImage == LavaGlyphSymbol.ranking {
+            return .custom(LavaRankingGlyph().fill(tint)
+                .frame(width: LavaNavigationRowMetrics.glyphPointSize, height: LavaNavigationRowMetrics.glyphPointSize))
+        }
+        return LavaNavigationCardBadge(
             content: AnyView(
                 Image(systemName: systemImage)
-                    .font(font)
+                    .font(.system(size: LavaNavigationRowMetrics.glyphPointSize, weight: .regular))
                     .foregroundStyle(tint)
-            ),
-            background: background,
-            cornerRadius: cornerRadius
+            )
         )
     }
 
     static func custom(
         _ content: some View,
-        background: Color = LavaStyle.softGreen,
-        cornerRadius: CGFloat = LavaSurface.iconBadgeCornerRadius
+        background _: Color = LavaStyle.softGreen,
+        cornerRadius _: CGFloat = LavaSurface.iconBadgeCornerRadius
     ) -> LavaNavigationCardBadge {
         LavaNavigationCardBadge(
-            content: AnyView(content),
-            background: background,
-            cornerRadius: cornerRadius
+            content: AnyView(content)
         )
     }
 }
 
+/// Shared Plus identity for navigation and task-entry rows.
+struct LavaSecurityPlusGlyph: View {
+    var body: some View {
+        Image(systemName: "shield.fill")
+            .font(.system(size: LavaNavigationRowMetrics.glyphPointSize, weight: .regular))
+            .foregroundStyle(LavaStyle.safeGreen)
+            .overlay {
+                Image(systemName: "plus")
+                    .font(.system(size: LavaIconSize.badge, weight: .heavy))
+                    .foregroundStyle(LavaStyle.softGreen)
+                    .offset(y: -1)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 enum LavaNavigationCardSummary {
+    case none
     case standardLocalized(String)
     case localizedUnclamped(String)
     case verbatimSingleLine(String)
@@ -47,11 +65,10 @@ enum LavaNavigationCardSummary {
     @ViewBuilder
     var content: some View {
         switch self {
+        case .none: EmptyView()
         case .standardLocalized(let value):
             Text(value.lavaLocalized)
                 .lavaRowSubtitleText()
-                .lineLimit(2)
-                .minimumScaleFactor(0.82)
         case .localizedUnclamped(let value):
             Text(value.lavaLocalized)
                 .lavaRowSubtitleText()
@@ -71,136 +88,130 @@ enum LavaNavigationCardSummary {
     }
 }
 
-enum LavaNavigationCardAccessory {
+enum LavaNavigationCardAccessory: Equatable {
+    /// Sheets, pickers and commands keep the leading glyph/title, without
+    /// promising a forward navigation transition.
+    case none
     case chevron
     case externalLink
+    case lock
 
+    @ViewBuilder
     var content: some View {
-        Image(systemName: systemImage)
-            .font(.headline.weight(.semibold))
-            .foregroundStyle(.tertiary)
+        if let systemImage {
+            Image(systemName: systemImage)
+                .font(.system(size: LavaNavigationRowMetrics.accessoryPointSize, weight: .regular))
+                .foregroundStyle(LavaStyle.secondaryText)
+        }
     }
 
-    private var systemImage: String {
+    private var systemImage: String? {
         switch self {
+        case .none:
+            nil
         case .chevron:
             "chevron.right"
         case .externalLink:
             "arrow.up.right"
+        case .lock:
+            "lock.fill"
         }
     }
 }
 
 struct LavaNavigationCardLabel: View {
     let badge: LavaNavigationCardBadge?
-    let badgeSize: CGFloat
-    let rowSpacing: CGFloat
     let title: String
+    let titleTint: Color
+    let localizesTitle: Bool
     let titleLineLimit: Int?
     let summary: LavaNavigationCardSummary
     let accessory: LavaNavigationCardAccessory
 
     init(
         badge: LavaNavigationCardBadge?,
-        badgeSize: CGFloat,
-        rowSpacing: CGFloat,
+        badgeSize _: CGFloat,
+        rowSpacing _: CGFloat,
         title: String,
+        titleTint: Color = LavaStyle.primaryText,
+        localizesTitle: Bool = true,
         titleLineLimit: Int? = nil,
         summary: LavaNavigationCardSummary,
         accessory: LavaNavigationCardAccessory
     ) {
         self.badge = badge
-        self.badgeSize = badgeSize
-        self.rowSpacing = rowSpacing
         self.title = title
+        self.titleTint = titleTint
+        self.localizesTitle = localizesTitle
         self.titleLineLimit = titleLineLimit
         self.summary = summary
         self.accessory = accessory
     }
 
     var body: some View {
-        HStack(spacing: rowSpacing) {
+        HStack(spacing: LavaSpacing.md) {
             if let badge {
                 badge.content
-                    .frame(width: badgeSize, height: badgeSize)
-                    .background(badge.background, in: RoundedRectangle(cornerRadius: badge.cornerRadius))
+                    .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
                     .accessibilityHidden(true)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title.lavaLocalized)
-                    .lavaCardTitleText()
-                    .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: LavaSpacing.xs) {
+                Text(localizesTitle ? title.lavaLocalized : title)
+                    .lavaRowTitleText()
+                    .foregroundStyle(titleTint)
                     .lineLimit(titleLineLimit)
 
                 summary.content
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: LavaSpacing.sm)
-
-            accessory.content
-                .accessibilityHidden(true)
+            // Reserve the same trailing slot for page links and task entries;
+            // the caller chooses whether a navigation glyph belongs in it.
+            ZStack {
+                accessory.content
+                    .accessibilityHidden(true)
+            }
+            .frame(width: LavaNavigationRowMetrics.accessoryPointSize)
         }
-        .padding(LavaSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .lavaSurface(.card)
-        .contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous))
+        .padding(.horizontal, LavaRowHeight.horizontalInset)
+        .padding(.vertical, LavaRowHeight.verticalInset)
+        .frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
-struct LavaNavigationRow<Destination: View>: View {
-    let icon: LavaIconRole?
-    let title: String
-    let summary: String
-    let destination: Destination
+/// Shared activation wrapper for navigation-card labels used by sheet task rows.
+/// The label owns row geometry; this wrapper owns the single button target and the
+/// disabled treatment so import, picker and utility adopters cannot drift apart.
+struct LavaNavigationCardButton<Label: View>: View {
+    let action: () -> Void
+    let isEnabled: Bool
+    let label: Label
 
     init(
-        icon: LavaIconRole? = nil,
-        title: String,
-        summary: String,
-        @ViewBuilder destination: () -> Destination
+        isEnabled: Bool = true,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
     ) {
-        self.icon = icon
-        self.title = title
-        self.summary = summary
-        self.destination = destination()
+        self.action = action
+        self.isEnabled = isEnabled
+        self.label = label()
     }
 
     var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            LavaNavigationCardLabel(
-                badge: icon.map { .systemImage($0.sfSymbolName) },
-                badgeSize: 34,
-                rowSpacing: LavaSpacing.md,
-                title: title,
-                summary: .standardLocalized(summary),
-                accessory: .chevron
-            )
+        Button(action: action) {
+            label
+                .contentShape(Rectangle())
         }
-        .buttonStyle(LavaNavigationRowButtonStyle())
-        .hoverEffect(.highlight)
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.5)
     }
 }
 
-private struct LavaNavigationRowButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .overlay {
-                RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
-            }
-            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
-    }
-}
-
-struct LavaPanelActionButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-
+/// Tinted action role; existing callers retain their optional shape argument.
+struct LavaPanelActionButtonStyle: PrimitiveButtonStyle {
     let cornerRadius: CGFloat
 
     init(cornerRadius: CGFloat = LavaSurface.controlCornerRadius) {
@@ -208,127 +219,55 @@ struct LavaPanelActionButtonStyle: ButtonStyle {
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(LavaStyle.panelActionGreen)
-            .lineLimit(1)
-            .minimumScaleFactor(0.82)
-            .frame(maxWidth: .infinity)
-            .frame(height: LavaSurface.actionButtonHeight)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(configuration.isPressed ? LavaStyle.panelActionPressedFill : LavaStyle.panelActionFill)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
-                    }
-            }
-            .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .opacity(isEnabled ? 1 : 0.55)
-            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
+        LavaFullWidthActionPrimitiveStyle(role: .panel, cornerRadius: cornerRadius)
+            .makeBody(configuration: configuration)
     }
 }
 
-struct LavaStandaloneActionButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-
+/// Neutral companion to the primary action; anatomy and interaction states are shared.
+struct LavaSecondaryActionButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .minimumScaleFactor(0.82)
-            .frame(maxWidth: .infinity)
-            .frame(height: LavaSurface.actionButtonHeight)
-            .background {
-                RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
-                    .fill(LavaStyle.safeControlGreen)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
-                            .fill(Color.black.opacity(configuration.isPressed ? 0.10 : 0))
-                    }
-            }
-            .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .opacity(isEnabled ? 1 : 0.45)
-            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
+        LavaFullWidthActionPrimitiveStyle(role: .secondary).makeBody(configuration: configuration)
     }
 }
 
-/// Neutral "secondary action" companion to `LavaStandaloneActionButtonStyle`.
-/// Same 44pt filled-pill footprint, but in system-neutral colors so it reads as
-/// the calm/escape choice (e.g. a dialog's "Not now") beside the green primary —
-/// never competing with it for emphasis.
-struct LavaSecondaryActionButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-    let disabledOpacity: Double
+/// Native switches share the list row title and geometry. Parents own their
+/// surface and external helper; the hint preserves that association for VoiceOver.
+struct LavaToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    var accessibilityHint: String? = nil
 
-    init(disabledOpacity: Double = 0.45) {
-        self.disabledOpacity = disabledOpacity
-    }
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color(uiColor: .secondaryLabel))
-            .lineLimit(1)
-            .minimumScaleFactor(0.82)
-            .frame(maxWidth: .infinity)
-            .frame(height: LavaSurface.actionButtonHeight)
-            .background {
-                RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemFill))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LavaSurface.controlCornerRadius, style: .continuous)
-                            .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
-                    }
-            }
-            .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .opacity(isEnabled ? 1 : disabledOpacity)
-            .animation(LavaFlowTransition.incidental(.easeOut(duration: 0.12), reduceMotion: reduceMotion), value: configuration.isPressed)
-    }
-}
-
-/// Flat action-row button for a row inside a `LavaCondensedList`. Unlike the filled-pill
-/// `LavaStandaloneActionButtonStyle`, it paints no surface of its own — the list supplies the
-/// card — and only owns the row's disabled fade plus press feedback.
-///
-/// Use it instead of `.buttonStyle(.plain)` whenever a condensed-list row can be `.disabled()`: a
-/// plain button dims its OWN label when disabled, so a gated row that ALSO stacked an explicit
-/// `.opacity(0.45)` double-dimmed and rendered a darker, inconsistent grey than sibling controls at
-/// the same nominal opacity (Account & Backup's signed-out Back Up Now / Restore measured lum 95 vs
-/// the Automatic Backup toggle's 136). Owning the fade here via `isEnabled` keeps exactly one 0.45,
-/// matching the toggle and the standalone/secondary/DNS action styles.
-/// pinned: AccountSignInSourceTests.testEncryptedBackupRowsFadeOnceWhenDisabled
-struct LavaCondensedRowButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.45)
+    var body: some View {
+        Toggle(title.lavaLocalized, isOn: $isOn)
+            .lavaRowTitleText()
+            .tint(LavaStyle.safeGreen)
+            .lavaRow()
+            .accessibilityHint((accessibilityHint ?? "").lavaLocalized)
     }
 }
 
 extension View {
-    /// The shared body of a single-line row: horizontal inset plus the `LavaRowHeight`
+    /// The shared body of a control row: content insets plus the `LavaRowHeight`
     /// tap-target floor, with content vertically centered. One definition so a toggle
     /// row, an action row, and a system-link row share the exact same height. Surface is
     /// applied separately — a row inside a `LavaCondensedList` inherits the list's card;
     /// a standalone row uses `lavaControlRowCard()`.
     ///
-    /// Single-line rows take no extra vertical padding (the floor centers the control),
-    /// which is why a toggle lands at `LavaRowHeight.standard` rather than inflating the
-    /// way a `LavaPlainCard`-wrapped control did (card pad + the floor stacked to ~72pt).
+    /// Padding is INSIDE the minimum-height frame: ordinary single-line toggles still
+    /// occupy the standard floor, while wrapped translations and Dynamic Type labels
+    /// grow with breathing room above and below instead of touching the card edges.
     func lavaRow() -> some View {
         self
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, LavaRowHeight.horizontalInset)
+            .padding(.vertical, LavaRowHeight.verticalInset)
             .frame(maxWidth: .infinity, minHeight: LavaRowHeight.standard, alignment: .leading)
             .contentShape(Rectangle())
     }
 
     /// A standalone single control (toggle, segmented picker, lone action) in its own
-    /// card at the shared row height. Use instead of `LavaPlainCard` for one-control
+    /// card at the shared minimum row height. Use instead of `LavaPlainCard` for one-control
     /// rows; `LavaPlainCard` stays right for genuinely multi-content cards, and multi-row
     /// groups belong in a `LavaCondensedList` of `lavaRow`s.
     func lavaControlRowCard() -> some View {
@@ -336,19 +275,21 @@ extension View {
     }
 }
 
-struct LavaPlainCard<Content: View>: View {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    var body: some View {
+/// Recovery phrase display and entry share one field surface and hit target.
+/// The sensitive word remains owned by the caller; this modifier never stores it.
+struct LavaRecoveryWordSurface: ViewModifier {
+    func body(content: Content) -> some View {
         content
-            .padding(LavaSpacing.lg)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .lavaSurface(.card)
+            .padding(.horizontal, LavaSpacing.md)
+            .padding(.vertical, LavaSpacing.sm)
+            .frame(maxWidth: .infinity, minHeight: LavaSurface.actionButtonHeight, alignment: .leading)
+            .background(LavaStyle.groupedBackground,
+                        in: RoundedRectangle(cornerRadius: LavaSurface.selectionCornerRadius, style: .continuous))
     }
+}
+
+extension View {
+    func lavaRecoveryWordSurface() -> some View { modifier(LavaRecoveryWordSurface()) }
 }
 
 struct LavaTextInputPanel<Content: View>: View {
@@ -381,7 +322,7 @@ struct LavaTextInputRow<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.lavaLocalized)
-                .font(.caption.weight(.semibold))
+                .font(LavaTypography.fieldLabel)
                 .foregroundStyle(LavaStyle.secondaryText)
 
             content
@@ -392,10 +333,26 @@ struct LavaTextInputRow<Content: View>: View {
 }
 
 struct LavaTextEditorInputRow: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.lavaSheetScrollProxy) private var scrollProxy
+    @Environment(\.lavaSheetScrollViewport) private var scrollViewport
+    @FocusState private var isFocused: Bool
+    @State private var revealAnchorID = UUID()
+
     let title: String
     @Binding var text: String
     let placeholder: String
     var minHeight: CGFloat = 96
+    /// When set, pins the editor to this height and scrolls overflow, instead of the
+    /// default `minHeight` that grows with content. A focused sheet editor can become
+    /// shorter to fit the measured usable viewport; its existing text view scrolls within it.
+    /// A growing editor is right for a prose field,
+    /// but where controls sit BELOW the editor (the chained config page's Choose File / Save row)
+    /// it pushes them down the screen as the operator pastes — the moving-button behaviour that
+    /// page must not have. `.frame(height:)` on the call site does NOT fix it: it proposes a
+    /// height the inner `minHeight` `TextEditor` grows straight past. The bound has to live on the
+    /// `TextEditor` itself (Kilo/Codex, PR #549).
+    var fixedHeight: CGFloat? = nil
     /// When set, shows a live character counter and hard-caps input at this length (UR-29).
     var characterLimit: Int? = nil
 
@@ -412,11 +369,26 @@ struct LavaTextEditorInputRow: View {
                     }
 
                     TextEditor(text: $text)
+                        .focused($isFocused)
                         .font(.body)
-                        .frame(minHeight: minHeight)
+                        // Preserve the usual fixed/growing bounds outside focused sheet
+                        // editing. Inside a constrained viewport, the same UITextView is
+                        // shortened so its internal scrolling can keep the caret visible.
+                        .frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)
                         .scrollContentBackground(.hidden)
                         // TextEditor keeps UITextView line padding; pull it back to align with the row label.
                         .padding(.leading, -5)
+                        .background(alignment: .top) {
+                            // The measured local scroll surface already clears its header.
+                            // Add only shared breathing room, not the inherited top inset
+                            // again. This anchor changes no layout or editor identity.
+                            Color.clear
+                                .frame(width: 1, height: 1)
+                                .alignmentGuide(.top) { dimension in
+                                    dimension[.top] + LavaSpacing.sm
+                                }
+                                .id(revealAnchorID)
+                        }
                 }
 
                 if let characterLimit {
@@ -424,7 +396,7 @@ struct LavaTextEditorInputRow: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(text.count >= characterLimit ? LavaStyle.lavaOrangeText : LavaStyle.tertiaryText)
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .accessibilityLabel("\(text.count) of \(characterLimit) characters used")
+                        .accessibilityLabel("%lld of %lld characters used".lavaLocalizedFormat(text.count, characterLimit))
                         .onChange(of: text) { _, newValue in
                             if newValue.count > characterLimit {
                                 text = String(newValue.prefix(characterLimit))
@@ -433,6 +405,36 @@ struct LavaTextEditorInputRow: View {
                 }
             }
         }
+        .onChange(of: isEnabled) { _, enabled in
+            // Concealment disables the editor without changing its geometry. Release
+            // focus so revealing it cannot reopen the keyboard or scroll the sheet.
+            if !enabled { isFocused = false }
+        }
+        .onChange(of: isFocused) { _, focused in
+            if focused { revealFocusedEditor() }
+        }
+        .onChange(of: scrollViewport) { _, _ in
+            revealFocusedEditor()
+        }
+    }
+
+    private var editorMaxHeight: CGFloat? {
+        guard isFocused, let scrollViewport, scrollViewport.usableHeight > 0 else { return fixedHeight }
+        // The anchor targets the text view itself, so the label and enclosing panel
+        // can scroll above it. No guessed label or panel height is subtracted here.
+        let visibleHeight = max(LavaSurface.actionButtonHeight, scrollViewport.usableHeight - 2 * LavaSpacing.sm)
+        return min(fixedHeight ?? visibleHeight, visibleHeight)
+    }
+
+    private var editorMinHeight: CGFloat {
+        min(fixedHeight ?? minHeight, editorMaxHeight ?? minHeight)
+    }
+
+    private func revealFocusedEditor() {
+        guard isFocused, let scrollViewport, scrollViewport.usableHeight > 0 else { return }
+        // Focus acquisition and measured viewport changes are the only triggers.
+        // Typing and manual scrolling must not pull the reader back to this field.
+        scrollProxy?.scrollTo(revealAnchorID, anchor: .top)
     }
 }
 
@@ -526,40 +528,10 @@ struct LavaInfoCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(LavaSpacing.lg)
+            .padding(.horizontal, LavaSpacing.infoPanelHorizontalInset)
+            .padding(.vertical, LavaSpacing.infoPanelVerticalInset)
             .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
-            .lavaPanelBackground(cornerRadius: 20, borderTint: borderTint)
-    }
-}
-
-struct LavaOverviewMetricBlock: View {
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(LavaTypography.metricNumeral)
-                .foregroundStyle(LavaStyle.ink)
-                .monospacedDigit()
-                .lineLimit(2)
-                .allowsTightening(true)
-                .minimumScaleFactor(0.9)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 52)
-
-            Text(label.lavaLocalized)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(LavaStyle.secondaryText)
-                .lineLimit(2)
-                .minimumScaleFactor(0.9)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: 20)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 74)
-        .accessibilityElement(children: .combine)
+            .lavaPanelBackground(borderTint: borderTint)
     }
 }
 
@@ -610,6 +582,7 @@ struct LavaInfoPanel: View {
     let systemImage: String?
     let tint: Color
     var borderTint: Color? = nil
+    private var action: AnyView? = nil
 
     init(
         title: String,
@@ -625,20 +598,35 @@ struct LavaInfoPanel: View {
         self.borderTint = borderTint
     }
 
+    /// Optional panel action remains a separate accessibility element below its explanation.
+    init<Action: View>(
+        title: String,
+        description: String? = nil,
+        systemImage: String? = nil,
+        tint: Color = LavaStyle.safeGreen,
+        borderTint: Color? = nil,
+        @ViewBuilder action: () -> Action
+    ) {
+        self.init(title: title, description: description, systemImage: systemImage, tint: tint, borderTint: borderTint)
+        self.action = AnyView(action())
+    }
+
     var body: some View {
         // Floor to the shared row height so a single-line panel (e.g. a status row like
         // "Ready after sign-in") lines up with the rows beside it instead of sitting
         // shorter. Multi-line panels already exceed this, so it's a no-op there.
         LavaInfoCard(borderTint: borderTint, minHeight: LavaRowHeight.standard) {
-            VStack(alignment: .leading, spacing: description == nil ? 0 : 10) {
-                header
-
-                if let description {
-                    Text(description.lavaLocalized)
-                        .lavaSupportingText()
+            VStack(alignment: .leading, spacing: LavaSpacing.explanationToLink) {
+                VStack(alignment: .leading, spacing: description == nil ? 0 : 10) {
+                    header
+                    if let description {
+                        Text(description.lavaLocalized)
+                            .lavaSupportingText()
+                    }
                 }
+                .accessibilityElement(children: .combine)
+                if let action { action }
             }
-            .accessibilityElement(children: .combine)
         }
     }
 
@@ -680,5 +668,118 @@ enum LavaAccessibilityAnnouncer {
     static func announce(_ message: String) {
         guard UIAccessibility.isVoiceOverRunning else { return }
         UIAccessibility.post(notification: .announcement, argument: message)
+    }
+}
+
+/// Navigation between visited task steps. Unlike a segmented selection, steps
+/// can be unavailable individually and their labels must wrap at large text.
+struct LavaStepNavigation<Step: Identifiable>: View {
+    let steps: [Step]
+    let title: (Step) -> String
+    let isSelected: (Step) -> Bool
+    let isEnabled: (Step) -> Bool
+    let select: (Step) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(steps) { step in
+                    stepButton(step)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            VStack(spacing: 8) {
+                ForEach(steps) { step in stepButton(step) }
+            }
+        }
+    }
+
+    private func stepButton(_ step: Step) -> some View {
+        Button { select(step) } label: {
+            Text(verbatim: title(step))
+                .font(LavaTypography.rowTitle)
+                .fontWeight(isSelected(step) ? .heavy : .semibold)
+                .foregroundStyle(isEnabled(step) ? LavaStyle.primaryText : LavaStyle.secondaryText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+                .lavaSurface(.selection(isSelected: isSelected(step)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled(step))
+        .accessibilityAddTraits(isSelected(step) ? [.isSelected] : [])
+    }
+}
+
+/// Read-only diagnostic evidence. Keep the label/value pair together for
+/// accessibility; long identifiers and larger text can use the full line below.
+struct LavaDiagnosticValueRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                label.fixedSize()
+                valueText.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                label
+                valueText
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var label: some View {
+        Text(title.lavaLocalized)
+            .font(LavaTypography.rowTitle)
+            .foregroundStyle(LavaStyle.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var valueText: some View {
+        Text(verbatim: value)
+            .font(LavaTypography.rowMetadata)
+            .monospacedDigit()
+            .foregroundStyle(LavaStyle.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Native counterpart of the Share QR privacy scaffold: static blurred artwork,
+/// eye-slash, and the shared panel action. No secret is rendered behind the cover.
+struct LavaPrivateContentCover: View {
+    var title: String
+    var actionTitle: String?
+    var reveal: () -> Void = {}
+    var body: some View {
+        ZStack {
+            VStack(alignment: .leading, spacing: LavaSpacing.md) {
+                ForEach(0..<5) { index in
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(LavaStyle.secondaryText.opacity(0.22))
+                        .frame(width: index % 2 == 0 ? 200 : 150, height: 12)
+                }
+            }
+            .blur(radius: 10)
+            .accessibilityHidden(true)
+            VStack(spacing: LavaSpacing.md) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.title2).foregroundStyle(LavaStyle.secondaryText)
+                if actionTitle == nil { Text(title.lavaLocalized).font(LavaTypography.rowMetadata) }
+                if let actionTitle {
+                    Button(actionTitle.lavaLocalized, action: reveal)
+                        .buttonStyle(LavaPanelActionButtonStyle())
+                }
+            }
+            .padding(LavaSpacing.lg)
+        }
+        .frame(maxWidth: .infinity, minHeight: 184)
+        .clipped()
     }
 }

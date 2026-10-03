@@ -1,0 +1,17 @@
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+platform :ios, '18.0'
+project 'LavaSecRN', 'Debug' => :debug, 'Release' => :release, 'QA' => :release
+workspace 'LavaSecRN'
+prepare_react_native_project!
+target 'LavaSec' do
+  pod 'RNScreens', :path => '../node_modules/react-native-screens'
+  pod 'react-native-safe-area-context', :path => '../node_modules/react-native-safe-area-context'
+  use_react_native!(
+    :path => '../node_modules/react-native',
+    :app_path => File.expand_path('..', __dir__),
+    :config_file_dir => File.expand_path('..', __dir__)
+  )
+  post_install do |installer|
+    react_native_post_install(installer, '../node_modules/react-native', :mac_catalyst_enabled => false)
+  end
+end

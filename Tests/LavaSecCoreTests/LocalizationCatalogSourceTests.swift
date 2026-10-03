@@ -71,6 +71,60 @@ final class LocalizationCatalogSourceTests: XCTestCase {
         }
     }
 
+    func testRetryableFilterSaveAndSwitchFailuresCoverAllLocales() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        let expectedAppLocales = try Self.expectedAppLocales()
+
+        for key in [
+            "That filter changed while it was being prepared. Try again.",
+            "This filter is now active. Review your changes, then save again."
+        ] {
+            let localizations = try XCTUnwrap(
+                strings[key]?["localizations"] as? [String: Any],
+                "The retryable filter failure is rendered through message.lavaLocalized and must be registered: \(key)"
+            )
+
+            XCTAssertEqual(Set(localizations.keys), expectedAppLocales)
+        }
+    }
+
+    func testChainedStartupFailureMessageCoversAllLocales() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        let expectedAppLocales = try Self.expectedAppLocales()
+        // Both are dynamic `.lavaLocalized` chained-failure lines the string-coverage script
+        // cannot see: the terminal surrender message, and the refusal shown when an explicit
+        // Guard retry cannot advance the marker it is gated on.
+        for key in [
+            "DNS filtering is on. Reconnect to retry VPN forwarding.",
+            "Lava could not clear the previous VPN chaining failure. Try again in a moment."
+        ] {
+            let localizations = try XCTUnwrap(
+                strings[key]?["localizations"] as? [String: Any],
+                "The terminal chained failure is rendered through .lavaLocalized and must be registered: \(key)"
+            )
+
+            XCTAssertEqual(
+                Set(localizations.keys),
+                expectedAppLocales,
+                "The terminal chained failure must be translated in every app locale: \(key)")
+        }
+    }
+
+    func testGuardVerificationAndDynamicActionsCoverEveryLocale() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        for key in ["Reconnecting VPN", "Lava is restoring VPN forwarding.", "Checking VPN", "Waiting for traffic to confirm VPN forwarding.",
+                    "Turn on", "Turn off", "Reconnect", "Resume now", "Protection off",
+                    "Starting local filtering.", "Stopping local filtering.",
+                    "Turn on local protection when you are ready.", "Turn on to set up protection.",
+                    "Lava can't confirm whether protection is active."] {
+            let localizations = try XCTUnwrap(strings[key]?["localizations"] as? [String: Any], key)
+            XCTAssertEqual(Set(localizations.keys), try Self.expectedAppLocales(), key)
+        }
+    }
+
     private static func catalog(_ sourceFile: SourceFile) throws -> [String: Any] {
         let data = try Data(contentsOf: sourceFileURL(sourceFile))
 

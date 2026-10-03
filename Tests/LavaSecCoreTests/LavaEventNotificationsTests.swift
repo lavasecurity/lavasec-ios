@@ -7,6 +7,18 @@ final class LavaEventNotificationsTests: XCTestCase {
         UserDefaults(suiteName: "notif-prefs-\(UUID().uuidString)")!
     }
 
+    func testSwitchBannerIncludesEmojiInSuccessAndRefusalAcrossLanguages() {
+        let label = FilterIdentityPolicy.displayName(name: "Extra", emoji: "💐")
+        for language in ["en", "de", "es", "fr", "it", "ja", "ko", "pt-BR", "zh-Hans", "zh-Hant"] {
+            for committed in [false, true] {
+                let body = LavaEventNotificationPoster.filterSwitchBody(
+                    committed: committed, filterName: label, languageCode: language)
+                XCTAssertTrue(body.contains("💐 Extra"), "\(language)/\(committed)")
+                XCTAssertFalse(body.contains("%@"))
+            }
+        }
+    }
+
     func testEveryCategoryDefaultsOnWhenUnset() {
         let defaults = makeDefaults()
         for category in LavaNotificationCategory.allCases {
@@ -94,7 +106,7 @@ final class LavaEventNotificationsTests: XCTestCase {
         )
         XCTAssertEqual(
             LavaEventNotificationPoster.filterSwitchBody(committed: false, filterName: "Work"),
-            "Couldn't switch to Work"
+            "Couldn’t switch to Work"
         )
     }
 
@@ -112,7 +124,7 @@ final class LavaEventNotificationsTests: XCTestCase {
         )
         XCTAssertEqual(
             LavaEventNotificationPoster.filterSwitchBody(committed: true, filterName: "Work", languageCode: "zh-Hans"),
-            "已将过滤器切换到 Work"
+            "已将筛选器切换到 Work"
         )
     }
 

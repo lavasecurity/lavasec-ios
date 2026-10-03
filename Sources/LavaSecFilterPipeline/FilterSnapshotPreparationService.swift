@@ -71,11 +71,25 @@ public actor FilterSnapshotPreparationService {
     }
 
     /// Creates a preparation service backed by the supplied blocklist cache directory.
-    public init(cacheDirectoryURL: URL) {
-        self.synchronizer = BlocklistCatalogSynchronizer(cacheDirectoryURL: cacheDirectoryURL)
+    ///
+    /// `dataFetcher` defaults to the ordinary pinned-HTTPS fetch. The app overrides it with
+    /// `BlocklistCatalogSynchronizer.bootstrapAwareDataFetcher(broker:)` so a device whose
+    /// tunnel is fail-closed can still resolve its blocklist sources — see that method for why
+    /// the repair path would otherwise deadlock against its own sinkhole.
+    public init(
+        cacheDirectoryURL: URL,
+        dataFetcher: @escaping BlocklistCatalogDataFetcher =
+            BlocklistCatalogSynchronizer.defaultDataFetcher
+    ) {
+        self.synchronizer = BlocklistCatalogSynchronizer(
+            cacheDirectoryURL: cacheDirectoryURL, dataFetcher: dataFetcher)
     }
 
     /// Synchronizes selected sources, enforces rule budgets, and builds a prepared snapshot.
+    /// - Parameter diagnosticFailureEvent: Invoked synchronously in the actor's catch at the
+    ///   producing failure boundary. `nil` or an event-capture failure propagates the error raw;
+    ///   cancellation is carried as the wrapper's underlying error so callers retain its classification,
+    ///   and an already-wrapped diagnostic failure is rethrown unchanged.
     public func prepare(
         configuration: AppConfiguration,
         customSources: [CustomBlocklistSource],
@@ -84,9 +98,46 @@ public actor FilterSnapshotPreparationService {
         catalogCacheOnly: Bool = false,
         maxDeviceRuleCount: Int = FilterSnapshotMemoryBudget.maxFilterRuleCount,
         tierRuleLimit: FilterRuleTierLimit? = nil,
+        diagnosticFailureEvent: (@Sendable () -> FocusSwitchDiagnosticEvent?)? = nil,
         reportProgress: ProgressHandler? = nil,
         trace: LatencyTrace? = nil,
         parentSpan: LatencySpan? = nil
+    ) async throws -> FilterSnapshotPreparationResult {
+        do {
+            return try await prepareUnwrapped(
+                configuration: configuration,
+                customSources: customSources,
+                catalogFreshnessMaxAge: catalogFreshnessMaxAge,
+                customListPolicy: customListPolicy,
+                catalogCacheOnly: catalogCacheOnly,
+                maxDeviceRuleCount: maxDeviceRuleCount,
+                tierRuleLimit: tierRuleLimit,
+                reportProgress: reportProgress,
+                trace: trace,
+                parentSpan: parentSpan
+            )
+        } catch let cancellation as CancellationError {
+            guard let event = diagnosticFailureEvent?() else { throw cancellation }
+            throw FocusSwitchDiagnosticFailure(underlying: cancellation, event: event)
+        } catch let diagnosticFailure as FocusSwitchDiagnosticFailure {
+            throw diagnosticFailure
+        } catch {
+            guard let event = diagnosticFailureEvent?() else { throw error }
+            throw FocusSwitchDiagnosticFailure(underlying: error, event: event)
+        }
+    }
+
+    private func prepareUnwrapped(
+        configuration: AppConfiguration,
+        customSources: [CustomBlocklistSource],
+        catalogFreshnessMaxAge: TimeInterval,
+        customListPolicy: CustomBlocklistSyncPolicy,
+        catalogCacheOnly: Bool,
+        maxDeviceRuleCount: Int,
+        tierRuleLimit: FilterRuleTierLimit?,
+        reportProgress: ProgressHandler?,
+        trace: LatencyTrace?,
+        parentSpan: LatencySpan?
     ) async throws -> FilterSnapshotPreparationResult {
         await reportProgress?(FilterPreparationProgressUpdate(progress: 0.05, phase: .downloading))
 
@@ -97,7 +148,6 @@ public actor FilterSnapshotPreparationService {
             in: synchronizer.cacheDirectoryURL,
             maxAge: catalogFreshnessMaxAge
         )
-        await reportProgress?(FilterPreparationProgressUpdate(progress: 0.2, phase: .downloading))
 
         let syncSpan = trace?.beginSpan("prepare.catalogSync", parent: parentSpan, details: [
             "freshCache": "\(hasFreshCache)",
@@ -114,18 +164,28 @@ public actor FilterSnapshotPreparationService {
             // cache underneath a concurrent switch's warm-reuse guard (which only skips reuse on
             // isCatalogSyncInFlight), reintroducing the stale-cache race. A cache miss propagates
             // so the (best-effort, background) warm caller simply skips this filter.
-            catalogResult = try await synchronizer.loadCached(enabledSourceIDs: enabledIDs)
+            catalogResult = try await synchronizer.loadCached(
+                enabledSourceIDs: enabledIDs,
+                failsWhenNoCatalogSourceSurvives: customSources.isEmpty)
         } else if hasFreshCache {
             do {
-                catalogResult = try await synchronizer.loadCached(enabledSourceIDs: enabledIDs)
+                catalogResult = try await synchronizer.loadCached(
+                enabledSourceIDs: enabledIDs,
+                failsWhenNoCatalogSourceSurvives: customSources.isEmpty)
             } catch {
-                catalogResult = try await synchronizer.sync(enabledSourceIDs: enabledIDs)
+                catalogResult = try await synchronizer.sync(
+                enabledSourceIDs: enabledIDs,
+                failsWhenNoCatalogSourceSurvives: customSources.isEmpty)
             }
         } else {
             do {
-                catalogResult = try await synchronizer.sync(enabledSourceIDs: enabledIDs)
+                catalogResult = try await synchronizer.sync(
+                enabledSourceIDs: enabledIDs,
+                failsWhenNoCatalogSourceSurvives: customSources.isEmpty)
             } catch {
-                catalogResult = try await synchronizer.loadCached(enabledSourceIDs: enabledIDs)
+                catalogResult = try await synchronizer.loadCached(
+                enabledSourceIDs: enabledIDs,
+                failsWhenNoCatalogSourceSurvives: customSources.isEmpty)
             }
         }
 
@@ -171,10 +231,57 @@ public actor FilterSnapshotPreparationService {
             configuration,
             applyingCustomBlocklistHashes: customResult.sourceHashes
         )
+        // 🔴 A CATALOG ENTRY THAT NO LONGER EXISTS IS ALSO A DEAD SOURCE, and the sync cannot
+        // see it: `compile` filters the catalog by the enabled set, so an ID we have since
+        // REMOVED simply produces nothing to fail, never reaches the classifier, and lands
+        // here as `missingEnabledBlocklistSource` — wedging the device exactly as an
+        // unfetchable source used to.
+        //
+        // That matters the moment we retire an entry. Nothing prunes enabled IDs from a saved
+        // configuration (`AppConfiguration` decodes them verbatim), so removing a dead list
+        // from the catalog would take out every device that had it enabled — the tidy-up would
+        // ship the outage instead of ending it.
+        //
+        // Checked against BOTH source kinds, because `enabledBlocklistIDs` carries custom
+        // identifiers alongside curated ones; a custom list that is merely failing must not be
+        // mistaken for one that no longer exists.
+        let knownSourceIDs = Set(combinedResult.catalog.sources.map(\.id))
+            .union(customSources.map(\.id))
+        var quarantinedSourceIDs = Set(combinedResult.quarantinedSourceIDs.keys)
+        for sourceID in snapshotConfiguration.enabledBlocklistIDs
+        where combinedResult.sourceRuleSets[sourceID] == nil && !knownSourceIDs.contains(sourceID) {
+            quarantinedSourceIDs.insert(sourceID)
+        }
+
+        // 🔴 NOTHING SURVIVED means fail closed, and this guard has to live HERE as well as in
+        // the sync. The sync's copy only sees sources the catalog still contains, so an ID
+        // that was RETIRED never reaches it — and a configuration whose only enabled list is a
+        // retired one would sail through, publishing an artifact with no blocklist rules that
+        // declares as much, which coverage then accepts. An artifact that blocks nothing while
+        // reporting healthy is the fail-open this whole design exists to avoid.
+        //
+        // A configuration with no blocklists at all is legitimate. Explicit catalog withdrawals
+        // are also intentional removals and are excluded below; unexplained losses still fail.
+        let loadedEnabledSourceCount = snapshotConfiguration.enabledBlocklistIDs
+            .filter { combinedResult.sourceRuleSets[$0] != nil }
+            .count
+        // An explicit catalog withdrawal is an authorized removal, not a fetch failure.
+        // It may retire the last selected catalog source; unrelated missing/custom sources
+        // still fail closed. The omission remains declared in the persisted summary.
+        // pinned: CatalogAuthorizationTests.testWithdrawalsRequireConfiguredVerifiedAuthorization
+        let withdrawnIDs = combinedResult.catalog.withdrawnBlocklistIDs(in: snapshotConfiguration)
+        if !quarantinedSourceIDs.subtracting(withdrawnIDs).isEmpty, loadedEnabledSourceCount == 0 {
+            throw BlocklistCatalogSyncError.missingEnabledBlocklistSource(
+                sourceID: quarantinedSourceIDs.sorted().joined(separator: ","))
+        }
+
         try Self.validateEnabledBlocklistSources(
             in: snapshotConfiguration,
-            sourceRuleSets: combinedResult.sourceRuleSets
+            sourceRuleSets: combinedResult.sourceRuleSets,
+            quarantinedSourceIDs: quarantinedSourceIDs
         )
+
+        await reportProgress?(FilterPreparationProgressUpdate(progress: 0.2, phase: .downloading))
 
         await reportProgress?(FilterPreparationProgressUpdate(progress: 0.42, phase: .compiling))
         let mergeSpan = trace?.beginSpan("prepare.mergeRules", parent: parentSpan)
@@ -226,7 +333,6 @@ public actor FilterSnapshotPreparationService {
             )
         }
 
-        await reportProgress?(FilterPreparationProgressUpdate(progress: 0.72, phase: .compiling))
         let buildSpan = trace?.beginSpan("prepare.buildSnapshot", parent: parentSpan)
         let snapshot = snapshotConfiguration.filterSnapshot(
             blockRules: mergedBlockRules,
@@ -247,10 +353,17 @@ public actor FilterSnapshotPreparationService {
                 ),
                 // Persist the exact budget total this gate just evaluated, so a later warm reuse can
                 // apply the identical tier rule-limit check without recompiling (Codex #133 r1).
-                tierBudgetRuleCount: totalRuleCount
+                tierBudgetRuleCount: totalRuleCount,
+                // DECLARE the omissions. Without this the artifact holds fewer sources than
+                // the configuration enables and `coversEnabledBlocklists` refuses it — which
+                // is exactly right, and exactly the wedge, until the omission is on the
+                // record. Empty on every ordinary prepare.
+                quarantinedBlocklistIDs: quarantinedSourceIDs.isEmpty ? nil : quarantinedSourceIDs
             )
         )
         buildSpan?.end(details: ["blockRuleCount": "\(preparedSnapshot.summary.blockRuleCount)"])
+
+        await reportProgress?(FilterPreparationProgressUpdate(progress: 0.72, phase: .compiling))
 
         return FilterSnapshotPreparationResult(
             catalogResult: combinedResult,
@@ -308,13 +421,22 @@ public actor FilterSnapshotPreparationService {
         /// The lock was held but `supersededWhileLocked` reported a newer on-disk
         /// configuration, so the flip was skipped (degrade-ABORT).
         case abortedSuperseded
-        /// A `tryOrAbort` caller was already cancelled (the BGTask expired) before
-        /// staging, so nothing was encoded/written or flipped. Distinct from
-        /// `abortedContended` so telemetry can tell a deadline apart from lock contention.
+        /// A `tryOrAbort` caller was cancelled before staging or at the in-lock
+        /// check after staging. The active pointer never flips; staged files may
+        /// remain for reuse or cleanup. Distinct from `abortedContended` so
+        /// diagnostics can distinguish cancellation from lock contention.
         case abortedCancelled
     }
 
     /// Stages an artifact set and publishes its pointer under the requested lock policy.
+    /// - Parameter configurationWriteLockURL: Optional outer lock for a paired configuration commit.
+    ///   Staging happens before either lock. The order is configuration then publication; a caller
+    ///   writing configuration in `commitBeforeFlip` must not acquire that lock again.
+    /// - Parameter onPublished: Runs synchronously after the pointer write at the publication
+    ///   boundary. It is skipped for every aborted outcome because nothing was published.
+    /// - Parameter diagnosticFailureEvent: Invoked synchronously in the actor's catch at the
+    ///   producing failure boundary. `nil` or an event-capture failure propagates the error raw;
+    ///   cancellation and an already-wrapped diagnostic failure always remain unwrapped.
     @discardableResult
     public func persistArtifacts(
         _ preparedSnapshot: PreparedFilterSnapshot,
@@ -322,14 +444,54 @@ public actor FilterSnapshotPreparationService {
         snapshotFilename: String,
         compactSnapshotFilename: String,
         publishLockURL: URL? = nil,
+        configurationWriteLockURL: URL? = nil,
         lockMode: PublishLockMode = .blocking,
         supersededWhileLocked: (@Sendable (_ currentPointerToken: String?) -> Bool)? = nil,
         commitBeforeFlip: (@Sendable () throws -> Void)? = nil,
+        onPublished: (@Sendable () -> Void)? = nil,
+        diagnosticFailureEvent: (@Sendable () -> FocusSwitchDiagnosticEvent?)? = nil,
         // Extra versioned tokens to keep alive during GC. Multi-filter passes each
         // hosted filter's `lastCompiledToken` so a recently-used filter's compiled
         // directory survives, making a switch back to it an instant pointer flip
         // instead of a cold compile. Empty ⇒ today's behaviour (keep live+previous).
         additionalRetainedTokens: [String] = []
+    ) throws -> PublishOutcome {
+        do {
+            return try persistArtifactsUnwrapped(
+                preparedSnapshot,
+                containerURL: containerURL,
+                snapshotFilename: snapshotFilename,
+                compactSnapshotFilename: compactSnapshotFilename,
+                publishLockURL: publishLockURL,
+                configurationWriteLockURL: configurationWriteLockURL,
+                lockMode: lockMode,
+                supersededWhileLocked: supersededWhileLocked,
+                commitBeforeFlip: commitBeforeFlip,
+                onPublished: onPublished,
+                additionalRetainedTokens: additionalRetainedTokens
+            )
+        } catch let cancellation as CancellationError {
+            throw cancellation
+        } catch let diagnosticFailure as FocusSwitchDiagnosticFailure {
+            throw diagnosticFailure
+        } catch {
+            guard let event = diagnosticFailureEvent?() else { throw error }
+            throw FocusSwitchDiagnosticFailure(underlying: error, event: event)
+        }
+    }
+
+    private func persistArtifactsUnwrapped(
+        _ preparedSnapshot: PreparedFilterSnapshot,
+        containerURL: URL,
+        snapshotFilename: String,
+        compactSnapshotFilename: String,
+        publishLockURL: URL?,
+        configurationWriteLockURL: URL?,
+        lockMode: PublishLockMode,
+        supersededWhileLocked: (@Sendable (_ currentPointerToken: String?) -> Bool)?,
+        commitBeforeFlip: (@Sendable () throws -> Void)?,
+        onPublished: (@Sendable () -> Void)?,
+        additionalRetainedTokens: [String]
     ) throws -> PublishOutcome {
         // FilterArtifactStore is the single owner of artifact paths, atomic
         // writes, and the manifest-last ordering.
@@ -364,6 +526,9 @@ public actor FilterSnapshotPreparationService {
         // the flip, so the tunnel is never pointed at a snapshot built from a superseded
         // config. Runs inside the held publish lock.
         let flipUnderLock: () throws -> PublishOutcome = {
+            // An intent/BGTask may expire during staging or lock acquisition. Abort before
+            // committing side state; there is no cancellation boundary between that write and flip.
+            if lockMode == .tryOrAbort, Task.isCancelled { return .abortedCancelled }
             // The live pointer at the linearization point. Read FIRST so the supersession
             // check can compare against it: a degrade-abort (background) caller uses it to
             // detect that a concurrent publish moved the pointer since the caller captured
@@ -387,11 +552,10 @@ public actor FilterSnapshotPreparationService {
             // grace-protected, so it is never exposed — for it this stays a pure no-op.
             _ = try artifactStore.stageVersionedArtifacts(preparedSnapshot: preparedSnapshot, writtenAt: writtenAt)
             // Commit any caller-supplied side state (e.g. the background catalog cache's
-            // latest.json) ATOMICALLY with the flip: it runs inside the same held lock, only
-            // once the supersession check has passed, and BEFORE the pointer moves. A throw
-            // here aborts before any state change (no committed side state, no flip), so a
-            // caller that detects its own basis went stale can veto the publish without
-            // leaving the side state ahead of the pointer.
+            // latest.json) immediately before the flip, inside the same held lock and after
+            // supersession checks. A veto before writing leaves both unchanged. Multi-file I/O
+            // can still partially fail or be terminated; the caller owns recovery of side state.
+            // There is no actor suspension between this callback and the pointer write.
             try commitBeforeFlip?()
             // GC even if the pointer flip throws, so a failed flip never leaks the
             // freshly-staged dir (it is retained this cycle and reused/reaped next).
@@ -401,14 +565,26 @@ public actor FilterSnapshotPreparationService {
                 )
             }
             try artifactStore.writeArtifactPointer(pointer)
+            onPublished?()
             return .published
         }
 
+        let publish: () throws -> PublishOutcome = {
+            switch lockMode {
+            case .blocking:
+                return try FilterPublishLock.withExclusiveLock(at: publishLockURL, flipUnderLock)
+            case .tryOrAbort:
+                return try FilterPublishLock.withTryExclusiveLock(at: publishLockURL, flipUnderLock) ?? .abortedContended
+            }
+        }
+        guard let configurationWriteLockURL else { return try publish() }
+        // SharedFilterStatePersistence's documented ordering: configuration → publication.
+        // A contended headless transaction changes neither the selection nor the live pointer.
         switch lockMode {
         case .blocking:
-            return try FilterPublishLock.withExclusiveLock(at: publishLockURL, flipUnderLock)
+            return try FilterPublishLock.withExclusiveLock(at: configurationWriteLockURL, publish)
         case .tryOrAbort:
-            return try FilterPublishLock.withTryExclusiveLock(at: publishLockURL, flipUnderLock) ?? .abortedContended
+            return try FilterPublishLock.withTryExclusiveLock(at: configurationWriteLockURL, publish) ?? .abortedContended
         }
     }
 
@@ -499,7 +675,30 @@ public actor FilterSnapshotPreparationService {
     ) -> [String: Int] {
         var sourceRuleCounts: [String: Int] = [:]
         for sourceID in enabledSourceIDs {
-            sourceRuleCounts[sourceID] = sourceRuleSets[sourceID]?.count ?? 0
+            // 🔴 NO `?? 0`, and this is the load-bearing line of the whole coverage gate.
+            //
+            // `CompactFilterSnapshot.Summary.coversEnabledBlocklists` asks ONLY whether the
+            // key is present — it never looks at the value. So writing `0` for a source that
+            // produced no rule set records "I loaded this list and it had no rules" for a
+            // list that was never loaded at all, and coverage then holds for an artifact that
+            // is missing it.
+            //
+            // Today `validateEnabledBlocklistSources` throws first, so the old `?? 0` was
+            // unreachable — dead defensive code that was WRONG rather than merely redundant.
+            // The moment anything relaxes that validation to survive one unfetchable source,
+            // the `?? 0` wakes up and turns `coversEnabledBlocklists` into a tautology: the
+            // partial artifact publishes clean, passes the flip veto, every reuse gate, and
+            // last-known-good, permanently, because nothing downstream records which sources
+            // actually landed. A loud outage becomes a silent protection downgrade.
+            //
+            // Absent key = never loaded. Key with 0 = loaded, parsed, genuinely no rules
+            // (a list of nothing but comments). Those are different facts and the summary
+            // has to be able to tell them apart.
+            // pinned: FilterSnapshotPreparationServiceTests.testAnUnloadedSourceGetsNoCountKey
+            guard let rules = sourceRuleSets[sourceID] else {
+                continue
+            }
+            sourceRuleCounts[sourceID] = rules.count
         }
 
         return sourceRuleCounts
@@ -537,15 +736,26 @@ public actor FilterSnapshotPreparationService {
             sourceRuleSets: combinedRuleSets,
             guardrailRuleSet: catalogResult.guardrailRuleSet,
             metadataBySourceID: catalogResult.metadataBySourceID,
-            usedCachedSourceIDs: catalogResult.usedCachedSourceIDs.union(customResult.usedCachedSourceIDs)
+            usedCachedSourceIDs: catalogResult.usedCachedSourceIDs.union(customResult.usedCachedSourceIDs),
+            // Custom sources are never quarantined — only the catalog path classifies —
+            // so this is the catalog result's set unchanged.
+            quarantinedSourceIDs: catalogResult.quarantinedSourceIDs,
+            localCustomRuleCounts: customResult.localCustomRuleCounts
         )
     }
 
     internal static func validateEnabledBlocklistSources(
         in configuration: AppConfiguration,
-        sourceRuleSets: [String: DomainRuleSet]
+        sourceRuleSets: [String: DomainRuleSet],
+        quarantinedSourceIDs: Set<String> = []
     ) throws {
-        for sourceID in configuration.enabledBlocklistIDs where sourceRuleSets[sourceID] == nil {
+        // A quarantined source is EXPECTED to be absent — the sync already decided it is
+        // permanently unusable, and the artifact will declare it so coverage still holds.
+        // Everything else missing is a real inconsistency and still throws.
+        //
+        // The default is empty, so every existing caller keeps the strict behaviour.
+        for sourceID in configuration.enabledBlocklistIDs
+        where sourceRuleSets[sourceID] == nil && !quarantinedSourceIDs.contains(sourceID) {
             throw BlocklistCatalogSyncError.missingEnabledBlocklistSource(sourceID: sourceID)
         }
     }

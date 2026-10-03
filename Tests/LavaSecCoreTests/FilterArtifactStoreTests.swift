@@ -186,6 +186,31 @@ final class FilterArtifactStoreTests: XCTestCase {
         }
     }
 
+    func testReusableSelectionRejectsStaleCompactSchemaWithoutPreparedFallback() throws {
+        try withTemporaryDirectory { directoryURL in
+
+            let store = FilterArtifactStore(directoryURL: directoryURL)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            let manifest = FilterArtifactManifest(
+                preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog),
+                compactSchemaVersion: CompactFilterSnapshot.fileVersion - 1,
+                writtenAt: Date(timeIntervalSince1970: 2_000),
+                availableArtifacts: [.prepared, .compact]
+            )
+
+            try store.writeManifest(manifest)
+            try Data("stale compact artifact".utf8).write(to: store.compactSnapshotURL)
+            try JSONEncoder().encode(Self.preparedSnapshot(configuration: configuration, catalog: catalog))
+                .write(to: store.preparedSnapshotURL)
+
+            // A STALE compact schema (the upgrade from a v1 build) must not serve the dirty
+            // prepared fallback — decoding a large paid config's DomainRuleSet would exceed
+            // the packet-tunnel jetsam budget. Regeneration is forced instead.
+            XCTAssertNil(try store.reusableArtifact(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
     func testReusableSelectionRejectsEnabledBlocklistsWithoutSourceCounts() throws {
         try withTemporaryDirectory { directoryURL in
 
@@ -398,10 +423,147 @@ final class FilterArtifactStoreTests: XCTestCase {
         }
     }
 
+    func testHealthyCurrentCompactArtifactSkipsPublication() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7)
+            try store.persist(preparedSnapshot: prepared)
+            XCTAssertFalse(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
+    func testSurvivingManifestDoesNotHideMissingOrCorruptCompactArtifact() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7)
+            try store.persist(preparedSnapshot: prepared)
+            let manifest = try Data(contentsOf: store.manifestURL)
+            try FileManager.default.removeItem(at: store.compactSnapshotURL)
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+            try Data("damaged".utf8).write(to: store.compactSnapshotURL)
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+            XCTAssertEqual(try Data(contentsOf: store.manifestURL), manifest)
+            // The existing publisher restores readiness without any configuration or catalog change.
+            try store.persist(preparedSnapshot: prepared)
+            XCTAssertFalse(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
+    func testValidHeaderDoesNotHideCorruptRuleOrdering() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"], blockedDomains: ["aaa.example", "bbb.example"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            try store.persist(preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 9))
+            var data = try Data(contentsOf: store.compactSnapshotURL)
+            let range = try XCTUnwrap(data.range(of: Data("aaa.example".utf8), options: .backwards))
+            data.replaceSubrange(range, with: Data("zzz.example".utf8))
+            XCTAssertNoThrow(try CompactFilterSnapshot.readSummary(from: data))
+            XCTAssertThrowsError(try CompactFilterSnapshot.decode(from: data))
+            try data.write(to: store.compactSnapshotURL)
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
+    func testCancelledPayloadChecksumDoesNotAcceptTheArtifact() async throws {
+        let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+        let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+        let data = try CompactFilterSnapshot(preparedSnapshot:
+            Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7)).encodedData()
+        let validation = Task {
+            while !Task.isCancelled { await Task.yield() }
+            do {
+                _ = try FilterArtifactStore.compactPayloadChecksum(data)
+                return false
+            } catch is CancellationError { return true }
+            catch { return false }
+        }
+        validation.cancel()
+        let cancelled = await validation.value
+        XCTAssertTrue(cancelled)
+    }
+
+    func testMetadataCorruptionCannotHideBehindValidTablesAndIdentity() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            try store.persist(preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7))
+            let original = try Data(contentsOf: store.compactSnapshotURL)
+            for key in ["tierBudgetRuleCount", "blocklistRuleCount"] {
+                var data = original
+                let range = try XCTUnwrap(data.range(of: Data("\"\(key)\":7".utf8)))
+                data.replaceSubrange(range, with: Data("\"\(key)\":3".utf8))
+                XCTAssertNoThrow(try CompactFilterSnapshot.readSummary(from: data))
+                XCTAssertNoThrow(try CompactFilterSnapshot.decode(from: data))
+                try data.write(to: store.compactSnapshotURL)
+                XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog), key)
+            }
+        }
+    }
+
+    func testChangedSelectionCatalogAndMissingBudgetRequirePublication() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            try store.persist(preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog))
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+            try store.persist(preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7))
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: AppConfiguration(enabledBlocklistIDs: []), cachedCatalog: catalog))
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog:
+                Self.catalog(sourceVersionID: "source-v2", guardrailVersionID: "guardrail-v1")))
+            try store.persist(preparedSnapshot: Self.preparedSnapshot(configuration: configuration, catalog: catalog,
+                tierBudgetRuleCount: configuration.limits.maxFilterRules + 1))
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
+    func testWellFormedRuleByteCorruptionStillRequiresRepair() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"],
+                blockedDomains: ["aaa.example", "bbb.example", "ccc.example"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 10)
+            try store.persist(preparedSnapshot: prepared)
+            var data = try Data(contentsOf: store.compactSnapshotURL)
+            let range = try XCTUnwrap(data.range(of: Data("bbb.example".utf8), options: .backwards))
+            data.replaceSubrange(range, with: Data("bbc.example".utf8))
+            XCTAssertNoThrow(try CompactFilterSnapshot.decode(from: data))
+            try data.write(to: store.compactSnapshotURL)
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+            try store.persist(preparedSnapshot: prepared)
+            XCTAssertFalse(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
+    func testLegacyManifestWithoutPayloadChecksumGetsRepairedOnRefresh() throws {
+        try withTemporaryDirectory { url in
+            let store = FilterArtifactStore(directoryURL: url)
+            let configuration = AppConfiguration(enabledBlocklistIDs: ["source-a"])
+            let catalog = Self.catalog(sourceVersionID: "source-v1", guardrailVersionID: "guardrail-v1")
+            let prepared = Self.preparedSnapshot(configuration: configuration, catalog: catalog, tierBudgetRuleCount: 7)
+            try store.persist(preparedSnapshot: prepared)
+            var manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.manifestURL)) as? [String: Any])
+            XCTAssertNotNil(manifest.removeValue(forKey: "compactPayloadSHA256"))
+            try JSONSerialization.data(withJSONObject: manifest).write(to: store.manifestURL)
+            XCTAssertNotNil(try store.reusableArtifact(configuration: configuration, cachedCatalog: catalog))
+            XCTAssertTrue(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+            try store.persist(preparedSnapshot: prepared)
+            XCTAssertFalse(store.needsCompactArtifactRepair(configuration: configuration, cachedCatalog: catalog))
+        }
+    }
+
     private static func preparedSnapshot(
         configuration: AppConfiguration,
         catalog: BlocklistCatalog,
-        blocklistSourceRuleCounts: [String: Int]? = ["source-a": 7]
+        blocklistSourceRuleCounts: [String: Int]? = ["source-a": 7],
+        tierBudgetRuleCount: Int? = nil
     ) -> PreparedFilterSnapshot {
         let snapshot = configuration.filterSnapshot(generatedAt: Date(timeIntervalSince1970: 1_500))
         return PreparedFilterSnapshot(
@@ -410,7 +572,8 @@ final class FilterArtifactStoreTests: XCTestCase {
             summary: PreparedFilterSnapshotSummary(
                 snapshot: snapshot,
                 blocklistRuleCount: 7,
-                blocklistSourceRuleCounts: blocklistSourceRuleCounts
+                blocklistSourceRuleCounts: blocklistSourceRuleCounts,
+                tierBudgetRuleCount: tierBudgetRuleCount
             )
         )
     }

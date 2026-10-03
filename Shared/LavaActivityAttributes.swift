@@ -10,6 +10,7 @@ enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable,
     case cherryQuartz = "strawberryObsidian"
     case emerald
     case kiwiCreme
+    case aquamarine
 
     var id: Self {
         self
@@ -31,6 +32,8 @@ enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable,
             "Emerald"
         case .kiwiCreme:
             "Kiwi Crème"
+        case .aquamarine:
+            "Aquamarine"
         }
     }
 
@@ -51,6 +54,8 @@ enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable,
             "AppIconEmerald"
         case .kiwiCreme:
             "AppIconKiwiCreme"
+        case .aquamarine:
+            "AppIconAquamarine"
         }
     }
 }
@@ -66,6 +71,7 @@ struct LavaActivityAttributes: ActivityAttributes {
         // Drives the "Pause for N min" expanded-view button label. Travels with
         // the activity content so changing the length in Settings relabels the
         // live button on the next reconcile.
+        var pauseConfirmation: LiveActivityPauseConfirmation?
         var pauseMinutes: Int
 
         init(
@@ -80,6 +86,7 @@ struct LavaActivityAttributes: ActivityAttributes {
             self.pauseRequiresAuthentication = pauseRequiresAuthentication
             self.shieldStyle = shieldStyle
             self.pauseMinutes = pauseMinutes
+            pauseConfirmation = nil
         }
 
         init(from decoder: Decoder) throws {
@@ -93,6 +100,7 @@ struct LavaActivityAttributes: ActivityAttributes {
             resumeDate = try container.decodeIfPresent(Date.self, forKey: .resumeDate)
             pauseRequiresAuthentication = try container.decode(Bool.self, forKey: .pauseRequiresAuthentication)
             shieldStyle = try container.decodeIfPresent(GuardianShieldStyle.self, forKey: .shieldStyle) ?? .original
+            pauseConfirmation = try container.decodeIfPresent(LiveActivityPauseConfirmation.self, forKey: .pauseConfirmation)
             pauseMinutes = try container.decodeIfPresent(Int.self, forKey: .pauseMinutes)
                 ?? LiveActivityPausePreference.defaultMinutes
         }
@@ -135,6 +143,28 @@ struct LavaActivityAttributes: ActivityAttributes {
             case .restarting:
                 "Restarting…"
             }
+        }
+    }
+}
+
+extension LavaActivityAttributes.ContentState {
+    // Both transient states carry their self-resolve deadline in `resumeDate`, and
+    // the expanded views advance on a 1-second TimelineView, so the Dynamic Island
+    // resolves them on its OWN clock without a fresh push from the app:
+    //  - paused → on at the resume time,
+    //  - restarting → on at the restart deadline (so a restart killed mid-flight,
+    //    before the app could restore state, can't strand the island on
+    //    "Restarting…"; on-demand brings the tunnel back, and the next app wake
+    //    reconciles the true state).
+    func effectiveProtectionState(now: Date) -> LavaActivityAttributes.ProtectionState {
+        switch protectionState {
+        case .paused, .restarting:
+            guard let resumeDate, resumeDate <= now else {
+                return protectionState
+            }
+            return .on
+        case .on:
+            return .on
         }
     }
 }

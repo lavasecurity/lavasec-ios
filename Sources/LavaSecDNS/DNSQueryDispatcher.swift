@@ -7,9 +7,8 @@ public enum DNSQueryDecision: Equatable, Sendable {
     case bootstrap(Data)
     /// Protection is temporarily paused; forward upstream (pause TTL applies).
     case pausedForward
-    /// The filter evaluated the domain; the provider forwards or synthesizes a
-    /// blocked response per `decision.action`, and records `decision` as the
-    /// diagnostic outcome.
+    /// The filter evaluated the question; an allowed query is checked again with its
+    /// reachable answer aliases before the provider records the final diagnostic outcome.
     case filtered(FilterDecision)
 }
 
@@ -27,6 +26,29 @@ public enum DNSQueryDecision: Equatable, Sendable {
 public struct DNSQueryDispatcher: Sendable {
     /// Creates a stateless dispatcher; all policy inputs are supplied lazily to each decision.
     public init() {}
+
+    /// The filtering outcome and TTL limit for one forwarded client response.
+    public struct ForwardedDecision: Equatable, Sendable {
+        /// Final domain-filter decision, including the user's current temporary pause.
+        public let decision: FilterDecision
+        /// Existing or pause-imposed TTL limit; nil leaves the resolver TTL unchanged.
+        public let maximumAnswerTTL: UInt32?
+    }
+
+    /// Applies current pause intent to a question-and-alias decision. Would-block answers
+    /// get a short TTL while paused so client caches cannot outlive resumed protection.
+    public func decideForwardedResponse(
+        filterDecision: FilterDecision,
+        isProtectionPaused: Bool,
+        maximumAnswerTTL: UInt32?,
+        pausedWouldBlockTTL: UInt32
+    ) -> ForwardedDecision {
+        let pauseTTL = isProtectionPaused && filterDecision.action == .block ? pausedWouldBlockTTL : nil
+        return ForwardedDecision(
+            decision: isProtectionPaused ? .pausedAllow : filterDecision,
+            maximumAnswerTTL: [maximumAnswerTTL, pauseTTL].compactMap { $0 }.min()
+        )
+    }
 
     /// Evaluates bootstrap, pause, then filtering in order and invokes no lower-priority closure after a match.
     public func decide(

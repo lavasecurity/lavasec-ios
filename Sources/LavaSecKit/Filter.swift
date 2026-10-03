@@ -24,6 +24,7 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
 
     public let id: String
     public var name: String
+    public var emoji: String
 
     // The four filter-scoped fields. These mirror `AppConfiguration`'s filter subset.
     public var enabledBlocklistIDs: Set<String>
@@ -44,6 +45,7 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     public init(
         id: String = defaultFilterID,
         name: String = defaultFilterName,
+        emoji: String? = nil,
         enabledBlocklistIDs: Set<String> = [],
         customBlocklists: [CustomBlocklistSource] = [],
         blockedDomains: Set<String> = [],
@@ -54,6 +56,8 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.name = Filter.sanitizedName(name)
+        self.emoji = emoji.flatMap { FilterIdentityPolicy.isValidEmoji($0) ? $0 : nil }
+            ?? FilterIdentityPolicy.defaultEmoji(id: id, name: self.name)
         self.enabledBlocklistIDs = enabledBlocklistIDs
         self.customBlocklists = customBlocklists
         self.blockedDomains = blockedDomains
@@ -86,6 +90,7 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case emoji
         case enabledBlocklistIDs
         case customBlocklists
         case blockedDomains
@@ -99,6 +104,9 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? Filter.defaultFilterID
         name = Filter.sanitizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+        let decodedEmoji = try container.decodeIfPresent(String.self, forKey: .emoji)
+        emoji = decodedEmoji.flatMap { FilterIdentityPolicy.isValidEmoji($0) ? $0 : nil }
+            ?? FilterIdentityPolicy.defaultEmoji(id: id, name: name)
         enabledBlocklistIDs = try container.decodeIfPresent(Set<String>.self, forKey: .enabledBlocklistIDs) ?? []
         customBlocklists = try container.decodeIfPresent([CustomBlocklistSource].self, forKey: .customBlocklists) ?? []
         blockedDomains = try container.decodeIfPresent(Set<String>.self, forKey: .blockedDomains) ?? []
@@ -125,6 +133,19 @@ public struct Filter: Identifiable, Codable, Equatable, Sendable {
     /// silence — the UI must treat it as an unprotected/alarm state.
     public var isEmpty: Bool {
         enabledBlocklistIDs.isEmpty && blockedDomains.isEmpty
+    }
+
+    /// Whether the four filter-rule/configuration fields still match another snapshot.
+    ///
+    /// Metadata and device-local cache state (`name`, timestamps, and `lastCompiledToken`) are
+    /// intentionally excluded. An async switch uses this at its commit edge: an edit to the target's
+    /// actual rules invalidates the prepared plan, while an unrelated rename or warm-token promotion
+    /// must not turn a valid switch into a retry.
+    public func hasSameFilterScopedFields(as other: Filter) -> Bool {
+        enabledBlocklistIDs == other.enabledBlocklistIDs
+            && customBlocklists == other.customBlocklists
+            && blockedDomains == other.blockedDomains
+            && allowedDomains == other.allowedDomains
     }
 
     /// Apply the four filter-scoped fields from an `AppConfiguration` onto this filter

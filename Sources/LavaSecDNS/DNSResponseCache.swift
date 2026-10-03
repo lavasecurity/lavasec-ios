@@ -32,7 +32,10 @@ package enum DNSResponseCachePolicy {
     private static let maximumNegativeTTL: TimeInterval = 60
 
     package static func cacheTTL(for response: Data) -> TimeInterval? {
-        guard response.count >= 12 else {
+        // Cached errors bypass new resolver attempts and can prolong a recovered outage.
+        // Use the same complete response-code and wire-validity bar as live service evidence.
+        // pinned: DNSResponseCacheTests.testCacheAdmissionUsesTheWholeResponseCodeForEverySectionShape
+        guard DNSResolverSmokeProbe.indicatesServedAnswer(response) else {
             return nil
         }
 
@@ -91,23 +94,13 @@ package enum DNSResponseCachePolicy {
         return min(TimeInterval(minimumTTL), maximumTTL)
     }
 
-    /// RFC 2308 negative caching for empty-answer responses — NOERROR/NODATA and
-    /// NXDOMAIN ONLY. SERVFAIL/REFUSED (rcodes 2/5) must NEVER be cached:
-    /// `indicatesResolverFailure` keys encrypted-fallback engagement off exactly
-    /// those rcodes, and the tunnel's synthesized SERVFAILs flow through `store()`
-    /// too — a cached failure would keep replaying while masking the signal that
-    /// recovers from it. The rcode gate here is load-bearing for fail-closed.
+    /// Applies RFC 2308 SOA bounds after the shared service-admission gate.
     private static func negativeCacheTTL(
         for response: Data,
         questionCount: Int,
         authorityCount: Int,
         additionalCount: Int
     ) -> TimeInterval? {
-        let rcode = response[3] & 0x0F
-        guard rcode == 0 || rcode == 3 else {
-            return nil
-        }
-
         // No SOA in the authority section -> no negative TTL to honor (RFC 2308 §5).
         guard authorityCount > 0 else {
             return nil
@@ -298,6 +291,7 @@ package enum DNSResponseCachePolicy {
 public final class DNSResponseCache {
     private struct CachedDNSResponse {
         let response: Data
+        let storedAt: Date
         let expiresAt: Date
     }
 
@@ -305,6 +299,7 @@ public final class DNSResponseCache {
     private let cleanupInterval: TimeInterval
     private var entries: [DNSCacheKey: CachedDNSResponse] = [:]
     private var lastCleanupAt = Date.distantPast
+    private var latestObservedTime: Date?
 
     /// Creates a cache with a positive entry cap and a lazy-expiry sweep interval measured in seconds.
     public init(maximumEntryCount: Int = 512, cleanupInterval: TimeInterval = 30) {
@@ -316,9 +311,9 @@ public final class DNSResponseCache {
         entries.count
     }
 
-    /// A hit returns the cached response with its transaction ID rewritten
-    /// from `query`. Expired entries are evicted lazily and report a miss.
+    /// Replays remaining ordinary-record TTLs and the asking transaction ID; expired entries miss.
     public func cachedResponse(for key: DNSCacheKey, query: Data, now: Date = Date()) -> Data? {
+        observeTime(now)
         guard let cached = entries[key] else {
             return nil
         }
@@ -328,7 +323,14 @@ public final class DNSResponseCache {
             return nil
         }
 
-        return DNSWireMessage.replacingTransactionID(in: cached.response, from: query)
+        // Round remaining seconds down so fractional ages cannot extend a downstream lease.
+        // Always transform the stored original; repeated hits must not subtract elapsed time twice.
+        let elapsed = UInt32(min(ceil(now.timeIntervalSince(cached.storedAt)), Double(UInt32.max)))
+        guard let aged = DNSWireMessage.agingCacheableTTLs(in: cached.response, elapsedSeconds: elapsed) else {
+            entries.removeValue(forKey: key)
+            return nil
+        }
+        return DNSWireMessage.replacingTransactionID(in: aged, from: query)
     }
 
     /// Caches the response when `DNSResponseCachePolicy` yields a TTL; the
@@ -336,22 +338,19 @@ public final class DNSResponseCache {
     /// expiry sweep and the size trim on the write path, exactly like the
     /// inline implementation it replaces.
     public func store(_ response: Data, for key: DNSCacheKey, now: Date = Date()) {
+        observeTime(now)
         guard let cacheTTL = DNSResponseCachePolicy.cacheTTL(for: response) else {
             return
         }
 
-        // A negative entry's REPLAY must carry the clamped TTL too: the packet's
-        // original SOA values would otherwise let the downstream stub resolver
-        // negative-cache a transient NXDOMAIN for the full upstream TTL (hours),
-        // defeating the 60s clamp for repeat clients. Positive entries keep their
-        // original record TTLs - replaying honest positive TTLs is long-standing
-        // behavior and ages out harmlessly.
+        // Negative replay carries the local cap in the SOA TTL; hits age that cap as well.
         let responseToStore = DNSResponseCachePolicy.isNegativeEntry(response)
             ? DNSWireMessage.cappingAnswerTTLs(in: response, to: UInt32(cacheTTL))
             : response
 
         entries[key] = CachedDNSResponse(
             response: DNSWireMessage.clearingTransactionID(in: responseToStore),
+            storedAt: now,
             expiresAt: now.addingTimeInterval(cacheTTL)
         )
 
@@ -362,6 +361,16 @@ public final class DNSResponseCache {
     /// Drops every resolver-scoped response immediately, such as after a runtime identity change.
     public func removeAll() {
         entries = [:]
+    }
+
+    private func observeTime(_ now: Date) {
+        // A wall-clock correction must never restore TTL already spent. Dropping this bounded
+        // cache is safer than guessing elapsed time; the next network reply seeds a fresh entry.
+        if let latestObservedTime, now < latestObservedTime {
+            entries.removeAll(keepingCapacity: true)
+            lastCleanupAt = .distantPast
+        }
+        latestObservedTime = now
     }
 
     private func removeExpiredEntriesIfNeeded(now: Date) {

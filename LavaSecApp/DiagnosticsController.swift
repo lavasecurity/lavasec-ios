@@ -65,7 +65,7 @@ private struct BugReportRateLimitedError: Error {}
 // the 32-byte SHA256 of the attested public key); `attestationBase64` is the
 // base64 CBOR attestation object; `challenge` is the one-time token we attested
 // over. Server side: backend/worker/src/app-attest.ts.
-private struct AppAttestHeaders {
+private struct AppAttestHeaders: Sendable {
     let challenge: String
     let keyId: String
     let attestationBase64: String
@@ -77,41 +77,56 @@ private struct AppAttestHeaders {
     }
 }
 
+private enum BugReportAttestationError: String, Error, LocalizedError {
+    case unsupported, challenge, service, timeout
+    var errorDescription: String? {
+        switch self {
+        case .unsupported: "Feedback requires a supported physical device.".lavaLocalized
+        case .challenge: "Could not prepare secure feedback. Please try again.".lavaLocalized
+        case .service, .timeout: "Could not verify this build. Please try again.".lavaLocalized
+        }
+    }
+}
+
 private enum AppAttestClient {
-    // False on the Simulator and on hardware without the Secure Enclave; callers
-    // must degrade gracefully (submit unattested) rather than block the user.
-    static var isSupported: Bool {
-        DCAppAttestService.shared.isSupported
+    static var isSupported: Bool { DCAppAttestService.shared.isSupported }
+
+    // One fresh key per report; bind the exact request body to the one-time
+    // challenge. A late Apple callback cannot restart submission after timeout.
+    static func attest(challenge: String, bodyHash: Data) async throws -> AppAttestHeaders {
+        let service = DCAppAttestService.shared
+        guard service.isSupported else { throw BugReportAttestationError.unsupported }
+        return try await withCheckedThrowingContinuation { continuation in
+            let reply = Reply(continuation)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { reply.finish(.failure(.timeout)) }
+            service.generateKey { keyId, error in
+                guard let keyId, error == nil else { reply.finish(.failure(.service)); return }
+                var clientData = Data(challenge.utf8)
+                clientData.append(bodyHash)
+                let clientDataHash = Data(SHA256.hash(data: clientData))
+                service.attestKey(keyId, clientDataHash: clientDataHash) { attestation, error in
+                    guard let attestation, error == nil else { reply.finish(.failure(.service)); return }
+                    reply.finish(.success(AppAttestHeaders(challenge: challenge, keyId: keyId,
+                        attestationBase64: attestation.base64EncodedString())))
+                }
+            }
+        }
     }
 
-    // Generate a fresh hardware-backed key and attest it over the server
-    // challenge. We attest per submission (a new key each time) rather than
-    // registering a key and asserting against it, so nothing device-linked is
-    // stored server-side. Returns nil on any failure.
-    //
-    // Replay hardening: the attestation is bound to BOTH the one-time challenge and
-    // SHA256(the exact request body) via clientDataHash, so a captured attestation
-    // cannot be replayed against a different report body. The server recomputes the
-    // identical clientDataHash — keep the two in lockstep (backend/worker/src/app-attest.ts).
-    //   clientDataHash = SHA256( utf8(challenge) ‖ bodyHash ), bodyHash = SHA256(body)
-    static func attest(challenge: String, bodyHash: Data) async -> AppAttestHeaders? {
-        let service = DCAppAttestService.shared
-        guard service.isSupported else {
-            return nil
-        }
-        do {
-            let keyId = try await service.generateKey()
-            var clientData = Data(challenge.utf8)
-            clientData.append(bodyHash)
-            let clientDataHash = Data(SHA256.hash(data: clientData))
-            let attestation = try await service.attestKey(keyId, clientDataHash: clientDataHash)
-            return AppAttestHeaders(
-                challenge: challenge,
-                keyId: keyId,
-                attestationBase64: attestation.base64EncodedString()
-            )
-        } catch {
-            return nil
+    /// Completion, error and deadline race; the lock consumes the continuation once.
+    private final class Reply: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<AppAttestHeaders, Error>?
+        init(_ continuation: CheckedContinuation<AppAttestHeaders, Error>) { self.continuation = continuation }
+        func finish(_ result: Result<AppAttestHeaders, BugReportAttestationError>) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            switch result {
+            case .success(let headers): pending?.resume(returning: headers)
+            case .failure(let error): pending?.resume(throwing: error)
+            }
         }
     }
 }
@@ -225,7 +240,7 @@ final class DiagnosticsController: ObservableObject {
             return "Once protection sees DNS activity, Lava will summarize it here."
         }
 
-        return "\(allowed.formatted()) allowed locally. All local logs stay on this phone."
+        return "%@ allowed locally. All local logs stay on this device.".lavaLocalizedFormat(allowed.formatted())
     }
 
     /// Glanceable stat under the Guard "What Lava has caught" row — how many
@@ -373,6 +388,34 @@ final class DiagnosticsController: ObservableObject {
         clearIncidentLedger()
         clearDeviceDebugLog()
         clearSelfReconnectGapMarkers()
+        // The Focus diagnostics are the ONE record that survives into a Release build, so the
+        // user's "erase everything" gesture has to reach them. It did not: this function already
+        // cleared the device debug log and the incident ledger and left these two slots behind
+        // (MECE panel, PR #625).
+        // Under the CONFIGURATION-WRITE lock only. 🔴 The FOCUS-SWITCH lock is deliberately absent:
+        // ordering this against the whole switch froze the UI for seconds (PR #626). The clear
+        // instead stamps a watermark before deleting the slots. A headless switch that decided
+        // before the clear can record after slot deletion, but its record is still dropped by the
+        // read side; a decision after the watermark remains visible.
+        if let container = LavaSecAppGroup.containerURL {
+            FocusSwitchDiagnostics.withResolvedConsent(
+                configurationURL: container.appendingPathComponent(
+                    LavaSecAppGroup.configurationFilename),
+                lockURL: container.appendingPathComponent(
+                    LavaSecAppGroup.configurationWriteLockFilename)
+            ) { _ in
+                FocusSwitchDiagnostics.clear(
+                    in: LavaSecAppGroup.sharedDefaults,
+                    orderingLockURL: container.appendingPathComponent(
+                        LavaSecAppGroup.focusDiagnosticOrderingLockFilename),
+                    now: { clearedAt })
+            }
+        } else {
+            FocusSwitchDiagnostics.clear(
+                in: LavaSecAppGroup.sharedDefaults,
+                orderingLockURL: nil,
+                now: { clearedAt })
+        }
 
         do {
             try writeDiagnosticsClearControl(clearDomainHistory: true, clearFilteringCounts: true, at: clearedAt)
@@ -596,21 +639,24 @@ final class DiagnosticsController: ObservableObject {
         bugReportSendState = .idle
     }
 
-    /// Cheap per-keystroke draft refresh: re-wrap the user-entered `context`
-    /// around the environment snapshot captured by the last `prepareBugReport`,
-    /// instead of re-reading the diagnostics/health/debug-log files and
-    /// rebuilding the full blocklist union on every keystroke (UR-5: Feedback
-    /// typing lag). Only the affected-site decision is recomputed, and that is a
-    /// lookup against the already-built snapshot. Falls back to a full prepare
-    /// when no snapshot has been captured yet.
+    /// Ordinary edits retain the deliberately captured environment. Only a changed
+    /// affected site needs another lookup; there are no disk reads or filter identity
+    /// rebuilds here. Entry and Submit own full preparation (infra #245).
     func refreshBugReportDraftContext(context: BugReportContext) {
-        guard let inputs = preparedBugReportInputs else {
-            prepareBugReport(context: context)
-            return
-        }
+        guard let inputs = preparedBugReportInputs, let draft = bugReportDraft else { return }
+        guard draft.context != context else { return }
+        let decision = draft.context.normalizedAffectedSite == context.normalizedAffectedSite
+            ? draft.filters.affectedSiteDecision
+            : BugReportAffectedSiteFilterDecision.make(rawAffectedSite: context.normalizedAffectedSite, snapshot: inputs.snapshot)
+        bugReportDraft = draft.updatingContext(context, affectedSiteDecision: decision)
+        resetBugReportSendState()
+    }
 
-        bugReportDraft = makeBugReportBundle(context: context, inputs: inputs)
-        bugReportSendState = .idle
+    /// Ends an abandoned editing session without preparing an empty replacement.
+    func discardBugReportDraft() {
+        preparedBugReportInputs = nil
+        bugReportDraft = nil
+        resetBugReportSendState()
     }
 
     func sendBugReport(context: BugReportContext) async {
@@ -632,6 +678,7 @@ final class DiagnosticsController: ObservableObject {
     }
 
     func resetBugReportSendState() {
+        guard bugReportSendState != .idle else { return }
         bugReportSendState = .idle
     }
 
@@ -660,11 +707,8 @@ final class DiagnosticsController: ObservableObject {
 
     // The wide-hub-state ASSEMBLY stays a hub bridge method (Phase D4 bridge-width
     // judgement — see DiagnosticsHubBridging's doc): this seam passes in the pieces the
-    // controller owns. The live local-observability reads (`diagnostics`, the gap
-    // markers, the incident ledger) are evaluated here per-make — same per-keystroke
-    // read behavior as the pre-peel assembly, which read them inline while building
-    // the bundle (only the position within the build moved; nothing else touches
-    // those stores in between).
+    // controller owns. Live diagnostics, gap markers and the incident ledger are
+    // captured for entry and Submit. Ordinary draft edits reuse that capture.
     private func makeBugReportBundle(
         context: BugReportContext,
         inputs: PreparedBugReportInputs
@@ -788,26 +832,26 @@ final class DiagnosticsController: ObservableObject {
     private func submitBugReport(_ bundle: BugReportBundle) async throws -> String {
         let body = bundle.makeRequestBody()
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-        // Best-effort App Attest: prove this is a genuine build on real hardware.
-        // nil on unsupported devices/simulators or any failure — the server is
-        // fail-open during rollout, so we simply submit without the headers then.
+        // Enforced attestation failures remain retryable with the draft intact;
+        // an unsupported or unverifiable build does not send an unattested POST.
         // Bind the attestation to SHA256(this exact body) so a captured attestation can't be
         // replayed against a different report; the server recomputes the same clientDataHash.
         let bodyHash = Data(SHA256.hash(data: data))
-        let attestation = await Self.acquireAppAttestation(bodyHash: bodyHash)
+        let attestation = try await Self.acquireAppAttestation(bodyHash: bodyHash)
         var lastError: Error?
 
         for endpoint in Self.bugReportEndpointURLs {
             do {
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
+                request.timeoutInterval = 30
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                attestation?.apply(to: &request)
+                attestation.apply(to: &request)
                 request.httpBody = data
 
-                let (responseData, response) = try await URLSession.shared.data(for: request)
+                let (responseData, response) = try await PrivateServiceSession.shared.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw BugReportSubmissionError(message: "The server returned an invalid response.")
+                    throw BugReportSubmissionError(message: "The server returned an invalid response.".lavaLocalized)
                 }
 
                 guard 200..<300 ~= httpResponse.statusCode else {
@@ -816,9 +860,9 @@ final class DiagnosticsController: ObservableObject {
                     if httpResponse.statusCode == 429 {
                         throw BugReportRateLimitedError()
                     }
-                    let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body"
+                    let serverMessage = String(data: responseData, encoding: .utf8) ?? "No response body".lavaLocalized
                     throw BugReportSubmissionError(
-                        message: "The server returned HTTP \(httpResponse.statusCode): \(serverMessage)"
+                        message: "The server returned HTTP %lld: %@".lavaLocalizedFormat(httpResponse.statusCode, serverMessage)
                     )
                 }
 
@@ -835,26 +879,22 @@ final class DiagnosticsController: ObservableObject {
             }
         }
 
-        throw lastError ?? BugReportSubmissionError(message: "Could not send the bug report.")
+        throw lastError ?? BugReportSubmissionError(message: "Could not send the bug report.".lavaLocalized)
     }
 
-    // Fetch a one-time challenge from the API and produce an Apple App Attest
-    // attestation over it. Returns nil (submit proceeds unattested) when App
-    // Attest is unsupported, no challenge could be fetched, or attestation fails.
-    private static func acquireAppAttestation(bodyHash: Data) async -> AppAttestHeaders? {
-        guard AppAttestClient.isSupported else {
-            return nil
+    // Only the fixed stage code is recorded; drafts, keys and attestation objects
+    // never enter diagnostic logs. Server identity failures remain server-owned.
+    private static func acquireAppAttestation(bodyHash: Data) async throws -> AppAttestHeaders {
+        do {
+            guard AppAttestClient.isSupported else { throw BugReportAttestationError.unsupported }
+            guard let challenge = await fetchAppAttestChallenge() else { throw BugReportAttestationError.challenge }
+            return try await AppAttestClient.attest(challenge: challenge, bodyHash: bodyHash)
+        } catch let error as BugReportAttestationError {
+            LavaSecDeviceDebugLog.append(component: "app", event: "feedback-attest-failed", details: ["stage": error.rawValue])
+            throw error
         }
-        guard let challenge = await fetchAppAttestChallenge() else {
-            return nil
-        }
-        return await AppAttestClient.attest(challenge: challenge, bodyHash: bodyHash)
     }
 
-    // Cap each challenge fetch so a slow or blackholed /v1/attest-challenge cannot
-    // hold the feedback sheet in "Submitting". Attestation is best-effort, so a
-    // timeout just falls through to the next endpoint and ultimately to nil (submit
-    // proceeds unattested) rather than waiting out URLSession's default ~60s.
     private static let appAttestChallengeTimeout: TimeInterval = 3
 
     // The App Attest challenge is a globally-shared, stateless HMAC token: the SAME worker
@@ -878,12 +918,10 @@ final class DiagnosticsController: ObservableObject {
             .appendingPathComponent("attest-challenge")
         var request = URLRequest(url: url)
         request.timeoutInterval = appAttestChallengeTimeout
-        // Best-effort and intentionally silent on failure: attestation is fail-open (a nil
-        // challenge just submits the report unattested, never blocking the user), and the
-        // server already records the outcome (`app_attest_ok` / `app_attest_soft_fail`), so a
-        // client-side log of the fetch failure would be redundant.
+        // Host attempts are bounded; the combined acquisition reports one sanitized
+        // failure stage if neither host provides a usable challenge.
         do {
-            let (responseData, response) = try await URLSession.shared.data(for: request)
+            let (responseData, response) = try await PrivateServiceSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 return nil
             }
@@ -1025,7 +1063,7 @@ final class DiagnosticsController: ObservableObject {
     /// window) instead of the 250-entry JSON buffer. Honors a local "Clear Domain History" via
     /// the shared-defaults floor. Returns `[]` when the store isn't available yet (the list
     /// then simply shows its empty state until the tunnel has written the first events).
-    func domainHistoryEvents(action: FilterAction, searchText: String, limit: Int) -> [DNSQueryEvent] {
+    func domainHistoryEvents(action: FilterAction?, searchText: String, limit: Int) -> [DNSQueryEvent] {
         guard let log = domainHistoryLog() else {
             // Before the tunnel has run once on this build, dns-events.sqlite doesn't exist yet
             // (or failed to open), but diagnostics.json can still hold the pre-existing last-250
@@ -1034,12 +1072,10 @@ final class DiagnosticsController: ObservableObject {
             // is cleared by clearDomainHistory, so this path honors clears too.
             return diagnostics.recentEvents(action: action, searchText: searchText, limit: limit)
         }
-        return log.page(
-            action: action,
-            searchText: searchText,
-            since: domainHistorySince(now: Date()),
-            limit: limit
-        ).map(Self.domainHistoryEvent)
+        let since = domainHistorySince(now: Date())
+        let entries = action.map { log.page(action: $0, searchText: searchText, since: since, limit: limit) }
+            ?? log.pageAllActions(searchText: searchText, since: since, limit: limit)
+        return entries.map(Self.domainHistoryEvent)
     }
 
     /// A streaming source of the full retained Domain History for the explicit local export.

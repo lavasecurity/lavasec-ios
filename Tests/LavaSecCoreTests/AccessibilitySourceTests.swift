@@ -9,18 +9,6 @@ final class AccessibilitySourceTests: XCTestCase {
 
     // MARK: LavaComponents — compact metric/detail blocks read as one VoiceOver element
 
-    func testOverviewMetricBlockCombinesValueAndLabel() throws {
-        let block = try sourceBlock(
-            in: try readSource(.lavaComponents),
-            startingAt: "struct LavaOverviewMetricBlock",
-            endingBefore: "struct LavaOverviewBannerRow"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityElement(children: .combine)"),
-            "LavaOverviewMetricBlock must group its value + label into a single VoiceOver element."
-        )
-    }
-
     func testDetailRowHidesIconAndCombines() throws {
         let block = try sourceBlock(
             in: try readSource(.lavaComponents),
@@ -43,7 +31,7 @@ final class AccessibilitySourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.lavaComponents),
             startingAt: "struct LavaNavigationCardLabel",
-            endingBefore: "struct LavaNavigationRow"
+            endingBefore: "struct LavaNavigationCardButton<Label: View>: View"
         )
         let hiddenCount = block.components(separatedBy: ".accessibilityHidden(true)").count - 1
         XCTAssertGreaterThanOrEqual(
@@ -62,7 +50,7 @@ final class AccessibilitySourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.lavaScaffold),
             startingAt: "struct LavaSectionGroup",
-            endingBefore: "enum LavaToolbarMetrics"
+            endingBefore: "struct LavaToolbarIconButton"
         )
         XCTAssertTrue(
             block.contains(".accessibilityAddTraits(.isHeader)"),
@@ -84,62 +72,13 @@ final class AccessibilitySourceTests: XCTestCase {
 
     // MARK: GuardView — protection status surfaces (WS-G)
 
-    private func protectionStatusPanelSource() throws -> String {
-        try sourceBlock(
-            in: try readSource(.guardView),
-            startingAt: "struct ProtectionStatusPanel",
-            endingBefore: "private struct ProtectionPrimaryActionButton"
-        )
-    }
-
-    func testGuardStatusExposesLabeledSummary() throws {
-        let block = try protectionStatusPanelSource()
-        XCTAssertTrue(
-            block.contains(".accessibilityElement(children: .ignore)"),
-            "The Guard status header must collapse into a single VoiceOver summary element."
-        )
-        // A STABLE label ("Protection status", localized via the app catalog) that does not change
-        // with VPN state, with the live state carried in the value.
-        XCTAssertTrue(
-            block.contains("accessibilityLabel(Text(\"Protection status\"))"),
-            "The Guard status summary must use a stable 'Protection status' label, not the mutable state string."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityValue(Text(viewModel.protectionTitle.lavaLocalized)"),
-            "The Guard status summary must speak the localized protection state as its value."
-        )
-    }
-
-    func testGuardMascotHiddenFromAccessibility() throws {
-        // Pin the hidden modifier to the mascot's own sub-block (up to its tap gesture) so an
-        // unrelated .accessibilityHidden elsewhere in the panel (e.g. the message icon) can't
-        // satisfy this guardrail.
-        let mascot = try sourceBlock(
-            in: try readSource(.guardView),
-            startingAt: "SoftShieldGuardian(",
-            endingBefore: ".onTapGesture"
-        )
-        XCTAssertTrue(
-            mascot.contains(".accessibilityHidden(true)"),
-            "The decorative Guard mascot must be hidden from accessibility — its state is already in the summary."
-        )
-    }
-
-    func testGuardPanelMessageHasNonColorCue() throws {
-        let block = try protectionStatusPanelSource()
-        XCTAssertTrue(
-            block.contains("exclamationmark.triangle.fill"),
-            "The Guard panel error message needs a non-color (symbol) cue so error vs info survives grayscale."
-        )
-    }
-
     // MARK: OnboardingFlowView — first-run flow (WS-O)
 
     func testOnboardingStepHeadingIsHeader() throws {
         let block = try sourceBlock(
-            in: try readSource(.onboardingFlowView),
-            startingAt: "struct OnboardingStepHeading",
-            endingBefore: "private extension OnboardingProtectionLevel"
+            in: try readSource(.lavaScaffold),
+            startingAt: "struct LavaSetupStepHeading",
+            endingBefore: "struct LavaSetupChoiceRow"
         )
         XCTAssertTrue(
             block.contains(".accessibilityAddTraits(.isHeader)"),
@@ -154,8 +93,8 @@ final class AccessibilitySourceTests: XCTestCase {
             endingBefore: "private var footerButtons"
         )
         XCTAssertTrue(
-            block.contains("of \\(OnboardingPage.allCases.count)"),
-            "Progress dots must announce 'Step X of Y', not just the bare step number."
+            block.contains("\"Step %lld of %lld\".lavaLocalizedFormat(dotPage.rawValue + 1, OnboardingPage.allCases.count)"),
+            "Progress dots must announce the localized current step and total, not just the bare step number."
         )
         XCTAssertTrue(
             block.contains(".accessibilityAddTraits(dotPage == page ? [.isSelected]"),
@@ -163,61 +102,37 @@ final class AccessibilitySourceTests: XCTestCase {
         )
     }
 
-    func testOnboardingChecklistExposesOnOffValue() throws {
-        let block = try sourceBlock(
-            in: try readSource(.onboardingFlowView),
-            startingAt: "struct OnboardingProtectionLevelPanel",
-            endingBefore: "private var segments"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityValue(Text(isOn ? \"On\" : \"Off\"))"),
-            "Each protection-checklist row must expose an On/Off accessibility value, not glyph + dimming alone."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityHidden(true)"),
-            "The checklist's decorative checkmark/circle glyph must be hidden — the value carries the state."
-        )
+    func testOnboardingChoicesExposeTheirStateAndFullRowAction() throws {
+        let source = try readSource(.onboardingFlowView)
+        let choices = try sourceBlock(in: source, startingAt: "private struct OnboardingProtectionLevelPanel", endingBefore: "private struct OnboardingConnectionPanel")
+        XCTAssertTrue(choices.contains("ForEach(OnboardingProtectionLevel.allCases"))
+        XCTAssertTrue(choices.contains("isSelected: selection == level"))
+        XCTAssertTrue(choices.contains("selection = level"))
+        XCTAssertTrue(choices.contains(".accessibilityValue(Text(selection == level ? \"On\" : \"Off\"))"))
+        XCTAssertTrue(choices.contains(".accessibilityAddTraits(selection == level ? .isSelected : [])"))
+        let connections = try sourceBlock(in: source, startingAt: "private struct OnboardingConnectionPanel", endingBefore: "private struct OnboardingPermissionButton")
+        XCTAssertTrue(connections.contains("Button { updateOnboardingSelection { isOn.wrappedValue.toggle() } }"))
+        XCTAssertTrue(connections.contains(".accessibilityValue(Text(isOn.wrappedValue ? \"On\" : \"Off\"))"))
+        XCTAssertTrue(connections.contains(".accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])"))
+        let row = try sourceBlock(in: source, startingAt: "private struct OnboardingSelectionLabel", endingBefore: "private struct OnboardingRowGlyph")
+        XCTAssertTrue(row.contains(".contentShape(RoundedRectangle("))
+        XCTAssertTrue(row.contains(".accessibilityElement(children: .combine)"))
+        XCTAssertFalse(row.contains(".lineLimit("), "Instructions must expand at accessibility sizes.")
     }
 
-    func testOnboardingMockPermissionDialogsHidden() throws {
+    func testOnboardingPermissionsAreAccessibleCardsWithVPNOnlyGate() throws {
         let source = try readSource(.onboardingFlowView)
-        let vpn = try sourceBlock(
-            in: source,
-            startingAt: "private var vpnPage",
-            endingBefore: "private var notificationsPage"
-        )
-        XCTAssertTrue(
-            vpn.contains("OnboardingVPNPermissionDialogIllustration()") && vpn.contains(".accessibilityHidden(true)"),
-            "The mock VPN-permission illustration (fake buttons) must be hidden from assistive tech."
-        )
-        let notifications = try sourceBlock(
-            in: source,
-            startingAt: "private var notificationsPage",
-            endingBefore: "private var donePage"
-        )
-        XCTAssertTrue(
-            notifications.contains("OnboardingNotificationPromptCard()") && notifications.contains(".accessibilityHidden(true)"),
-            "The mock notification-prompt illustration (fake buttons) must be hidden from assistive tech."
-        )
+        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"onboarding.install-vpn\")"))
+        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"onboarding.notifications\")"))
+        XCTAssertTrue(source.contains(".accessibilityElement(children: .combine)"))
+        XCTAssertTrue(source.contains("Enable notifications (optional)"))
+        XCTAssertTrue(source.contains("isDisabled: !vpnInstalled || isBusy"))
+        let install = try sourceBlock(in: source, startingAt: "private func installVPN()", endingBefore: "private func requestNotifications()")
+        XCTAssertTrue(install.contains("guard !isBusy, isMock || !viewModel.isConfiguringVPN"))
+        XCTAssertFalse(install.contains("goForward()"))
     }
 
     // MARK: FiltersView — connection-preview picker (WS-FL)
-
-    func testFiltersConnectionPickerExposesValueAndSelection() throws {
-        let block = try sourceBlock(
-            in: try readSource(.filtersView),
-            startingAt: "private var connectionSelector",
-            endingBefore: "var blockedSecondHop"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityValue(Text(preview.label.lavaLocalized))"),
-            "The connection-preview chip must expose the current option as its accessibility value."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(option == preview ? [.isSelected] : [])"),
-            "The connection-preview popover must mark the selected option with the selected trait."
-        )
-    }
 
     // MARK: SettingsView — feedback + navigation rows (WS-S)
 
@@ -230,30 +145,32 @@ final class AccessibilitySourceTests: XCTestCase {
     }
 
     func testSettingsStepProgressHasNonColorCurrentCue() throws {
-        let block = try sourceBlock(
+        let adopter = try sourceBlock(
             in: try readSource(.bugReportSettingsView),
             startingAt: "private struct BugReportStepProgressView",
             endingBefore: "private struct BugReportPreviewSectionCard"
         )
+        let block = try sourceBlock(
+            in: try readSource(.lavaComponents),
+            startingAt: "struct LavaStepNavigation<Step: Identifiable>: View",
+            endingBefore: "struct LavaDiagnosticValueRow: View"
+        )
+        XCTAssertTrue(adopter.contains("LavaStepNavigation("))
+        XCTAssertTrue(adopter.contains("isSelected: { $0 == currentStep }"))
         XCTAssertTrue(
-            block.contains(".font(.caption.weight(step == currentStep ? .heavy : .semibold))"),
+            block.contains(".fontWeight(isSelected(step) ? .heavy : .semibold)"),
             "The current bug-report step needs a non-color weight cue so it survives grayscale, not just the tint swap."
         )
         XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(step == currentStep ? [.isSelected] : [])"),
+            block.contains(".accessibilityAddTraits(isSelected(step) ? [.isSelected] : [])"),
             "The current bug-report step must expose the selected trait to VoiceOver."
         )
     }
 
-    func testSettingsNavigationRowHidesDecorativeGlyphs() throws {
-        let block = try sourceBlock(
-            in: try readSource(.settingsView),
-            startingAt: "private struct SettingsNavigationRow",
-            endingBefore: "private struct SettingsExternalLinkRow"
-        )
-        XCTAssertTrue(block.contains("LavaNavigationCardLabel("))
-        XCTAssertFalse(block.contains(".accessibilityHidden(true)"),
-                       "Decorative hiding belongs to the shared label, not the authenticated wrapper.")
+    func testRetiredSettingsNavigationRowIsAbsent() throws {
+        let source = try readSource(.settingsView)
+        XCTAssertFalse(source.contains("private struct SettingsNavigationRow"))
+        XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("export function SettingsScreen()"))
     }
 
     // MARK: SecurityController — full-screen security overlays (WS-R)

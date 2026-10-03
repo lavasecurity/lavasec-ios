@@ -199,6 +199,10 @@ public enum GuardianLongPressHaptics {
     /// How long the user must hold before the picker sheet reveals.
     public static let holdDuration: TimeInterval = 1.2
 
+    /// Finger drift allowed during a deliberate mascot hold, in screen points.
+    /// A larger drag fails the hold so the containing page can continue scrolling.
+    public static let movementTolerance: Double = 24
+
     /// Uniform spacing between pulses — the tightest ("most frequent") cadence, held CONSTANT so
     /// the buildup is a crescendo carried by rising strength, not by a changing rhythm.
     public static let pulseInterval: TimeInterval = 0.1
@@ -226,8 +230,8 @@ public enum GuardianLongPressHaptics {
 
     /// Silence before the first pulse. The gesture's `onPressingChanged(true)` fires on
     /// finger-DOWN — before the long press is recognized — so without this, a quick tap or an
-    /// aborted press would buzz (and an awake tap would get this pulse *plus* the tap haptic,
-    /// while sleeping/paused taps would vibrate even though the tap haptic is suppressed there).
+    /// aborted press would buzz, and a quick tap in any mood would get this pulse *plus* the
+    /// tap acknowledgment. Keep taps to a single acknowledgment in every expression.
     /// Holding this far is already past a tap, so the first pulse only lands once the touch is a
     /// deliberate press. // pinned: GuardianLongPressHapticsTests.testScheduleWaitsForGraceThenStaysWithinTheHold
     public static let gracePeriod: TimeInterval = 0.3

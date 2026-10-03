@@ -117,9 +117,15 @@ final class LavaLiveActivityController: AmbientProtectionPresenter {
 
         if let activity = adoptedActivity {
             currentActivity = activity
-            // ActivityKit updates are cross-process IPC; status refreshes repeat
-            // with identical state, so only publish actual changes.
-            guard lastPublishedActivityID != activity.id || lastPublishedContentState != state else {
+            // Intents also publish content; our cached last write is not the current
+            // ActivityKit truth. Reconcile clears their pending confirmation even if
+            // our desired state still matches the value cached before the intent ran.
+            // pinned: LiveActivityPauseConfirmationTests.testReconcileChecksActualActivityContent
+            guard lastPublishedActivityID != activity.id
+                || lastPublishedContentState != state
+                || activity.content.state != state
+                || activity.content.staleDate != content.staleDate
+            else {
                 return
             }
             await activity.update(content)

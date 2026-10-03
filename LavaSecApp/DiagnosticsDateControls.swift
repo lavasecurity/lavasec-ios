@@ -79,284 +79,50 @@ struct ActivityDateRange: Equatable {
     }
 }
 
-private enum ActivityDateRangeEndpoint {
-    case start
-    case end
-}
-
+// Presets live on Activity. This sheet edits only the two calendar endpoints;
+// selection is committed by Apply, so dismissing it leaves the prior range intact.
 struct ActivityDateRangePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedRange: ActivityDateRange
-    @State private var draftRange: ActivityDateRange
-    @State private var activeEndpoint: ActivityDateRangeEndpoint = .start
-    @State private var didScrollToLatestMonth = false
+    @State private var start: Date
+    @State private var end: Date
 
     init(selectedRange: Binding<ActivityDateRange>) {
         _selectedRange = selectedRange
-        _draftRange = State(initialValue: selectedRange.wrappedValue)
+        _start = State(initialValue: selectedRange.wrappedValue.start)
+        _end = State(initialValue: selectedRange.wrappedValue.end)
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            NavigationStack {
-                LavaSheetScaffold(
-                    spacing: 14,
-                    viewAlignedScrolling: true
-                ) {
-                    VStack(spacing: 10) {
-                        HStack(spacing: 10) {
-                            ActivityDateEndpointButton(
-                                title: "Start",
-                                date: draftRange.start,
-                                isActive: activeEndpoint == .start
-                            ) {
-                                activeEndpoint = .start
-                            }
-
-                            ActivityDateEndpointButton(
-                                title: "End",
-                                date: draftRange.end,
-                                isActive: activeEndpoint == .end
-                            ) {
-                                activeEndpoint = .end
-                            }
-                        }
-
-                        ActivityDateTodayButton {
-                            draftRange = ActivityDateRange.today()
-                            activeEndpoint = .start
-                        }
-                    }
-                } content: {
-                    LazyVStack(spacing: 18) {
-                        ForEach(calendarMonths, id: \.self) { month in
-                            ActivityDateRangeCalendarMonth(
-                                month: month,
-                                range: draftRange,
-                                activeEndpoint: activeEndpoint,
-                                selectDate: selectDate
-                            )
-                            .id(month)
-                        }
-                    }
-                } footer: {
-                    Button("Show Activity") {
-                        selectedRange = draftRange
+        NavigationStack {
+            Form {
+                DatePicker("Start".lavaLocalized, selection: $start, in: earliest...end, displayedComponents: .date)
+                    .accessibilityIdentifier("activity.date.start")
+                DatePicker("End".lavaLocalized, selection: $end, in: start...Date(), displayedComponents: .date)
+                    .accessibilityIdentifier("activity.date.end")
+            }
+            .scrollContentBackground(.hidden)
+            .background(LavaStyle.groupedBackground)
+            .navigationTitle("Custom dates".lavaLocalized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel, action: dismiss.callAsFunction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    NativeToolbarIconButton(systemName: "checkmark", accessibilityLabel: "Apply", role: .confirm) {
+                        selectedRange = ActivityDateRange(start: start, end: end)
                         dismiss()
                     }
-                    .buttonStyle(LavaStandaloneActionButtonStyle())
-                }
-                .navigationTitle("Change Dates")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
-                    }
                 }
             }
-            .onAppear {
-                guard !didScrollToLatestMonth else {
-                    return
-                }
-
-                didScrollToLatestMonth = true
-                if let latestMonth = calendarMonths.last {
-                    DispatchQueue.main.async {
-                        proxy.scrollTo(latestMonth, anchor: .bottom)
-                    }
-                }
-            }
-            .presentationDetents([.fraction(0.62), .large])
-            .presentationDragIndicator(.visible)
         }
     }
 
-    private var calendarMonths: [Date] {
+    private var earliest: Date {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: today)) ?? today
-
-        return (0..<24).reversed().compactMap { offset in
-            calendar.date(byAdding: .month, value: -offset, to: currentMonth)
-        }
-    }
-
-    private func selectDate(_ date: Date) {
-        switch activeEndpoint {
-        case .start:
-            draftRange = ActivityDateRange(start: date, end: max(date, draftRange.end))
-            activeEndpoint = .end
-        case .end:
-            draftRange = ActivityDateRange(start: draftRange.start, end: date)
-            activeEndpoint = .start
-        }
-    }
-}
-
-private struct ActivityDateEndpointButton: View {
-    let title: String
-    let date: Date
-    let isActive: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Text(title.lavaLocalized)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(LavaStyle.secondaryText)
-
-                Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isActive ? LavaStyle.safeGreen : LavaStyle.ink)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 56)
-            .lavaSurface(.selection(isSelected: isActive))
-        }
-        .buttonStyle(ActivityDateEndpointButtonStyle())
-    }
-}
-
-private struct ActivityDateEndpointButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(uiColor: .tertiarySystemFill).opacity(configuration.isPressed ? 1 : 0))
-            }
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct ActivityDateTodayButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label("Today", systemImage: "calendar")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(LavaStyle.secondaryText)
-                .padding(.horizontal, 14)
-                .frame(height: 34)
-                .contentShape(Capsule(style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Reset Activity dates to today")
-    }
-}
-
-private struct ActivityDateRangeCalendarMonth: View {
-    let month: Date
-    let range: ActivityDateRange
-    let activeEndpoint: ActivityDateRangeEndpoint
-    let selectDate: (Date) -> Void
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(month.formatted(.dateTime.month(.wide).year()))
-                .font(.headline)
-                .foregroundStyle(LavaStyle.ink)
-
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(weekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(LavaStyle.secondaryText)
-                        .frame(height: 22)
-                }
-
-                ForEach(Array(calendarDays.enumerated()), id: \.offset) { _, date in
-                    ActivityDateRangeCalendarDay(
-                        date: date,
-                        range: range,
-                        selectDate: selectDate
-                    )
-                }
-            }
-        }
-    }
-
-    private var weekdaySymbols: [String] {
-        let calendar = Calendar.current
-        let symbols = calendar.veryShortStandaloneWeekdaySymbols
-        let firstIndex = calendar.firstWeekday - 1
-        return Array(symbols[firstIndex..<symbols.count]) + Array(symbols[0..<firstIndex])
-    }
-
-    private var calendarDays: [Date?] {
-        let calendar = Calendar.current
-        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: month)),
-              let dayRange = calendar.range(of: .day, in: .month, for: monthStart)
-        else {
-            return []
-        }
-
-        let firstWeekday = calendar.component(.weekday, from: monthStart)
-        let leadingBlankCount = (firstWeekday - calendar.firstWeekday + 7) % 7
-        let days = dayRange.compactMap { day -> Date? in
-            calendar.date(byAdding: .day, value: day - 1, to: monthStart)
-        }
-
-        return Array(repeating: nil, count: leadingBlankCount) + days
-    }
-}
-
-private struct ActivityDateRangeCalendarDay: View {
-    let date: Date?
-    let range: ActivityDateRange
-    let selectDate: (Date) -> Void
-
-    var body: some View {
-        if let date {
-            Button {
-                selectDate(date)
-            } label: {
-                ZStack {
-                    if range.contains(date) || isEndpoint {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(isEndpoint ? LavaStyle.safeControlGreen : LavaStyle.softGreen)
-                    }
-
-                    Text("\(Calendar.current.component(.day, from: date))")
-                        .font(.subheadline.weight(isEndpoint ? .semibold : .regular))
-                        .foregroundStyle(dayTextColor)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 38)
-            }
-            .buttonStyle(.plain)
-            .disabled(isFuture)
-            .opacity(isFuture ? 0.32 : 1)
-        } else {
-            Color.clear
-                .frame(height: 38)
-        }
-    }
-
-    private var isEndpoint: Bool {
-        guard let date else {
-            return false
-        }
-        return range.isStart(date) || range.isEnd(date)
-    }
-
-    private var isFuture: Bool {
-        guard let date else {
-            return false
-        }
-        return Calendar.current.compare(date, to: Date(), toGranularity: .day) == .orderedDescending
-    }
-
-    private var dayTextColor: Color {
-        if isEndpoint {
-            return .white
-        }
-
-        return LavaStyle.ink
+        let month = calendar.date(from: calendar.dateComponents([.year, .month], from: Date())) ?? Date()
+        let first = calendar.date(byAdding: .month, value: -23, to: month) ?? month
+        return min(first, start)
     }
 }

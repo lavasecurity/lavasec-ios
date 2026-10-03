@@ -67,6 +67,9 @@ public extension OnboardingProtectionLevel {
         }
     }
 
+    /// Setup and newly seeded filters share the same identity policy.
+    var emoji: String { FilterIdentityPolicy.defaultEmoji(id: filterID, name: displayName) }
+
     /// This level as a library filter (name + its derived blocklist set).
     func seededFilter(catalog: [BlocklistSource] = DefaultCatalog.curatedSources) -> Filter {
         Filter(id: filterID, name: displayName, enabledBlocklistIDs: enabledBlocklistIDs(catalog: catalog))
@@ -92,6 +95,24 @@ public extension FilterLibrary {
 
 /// Supplies the recommended fresh-install configuration.
 public extension AppConfiguration {
+    /// App bootstrap uses the onboarding DNS defaults before its first persist.
+    /// This is not the global model/decoder default or a migration: loading a saved
+    /// configuration replaces it, and all non-DNS constructor defaults stay intact.
+    static var lavaAppInitialDefaults: AppConfiguration {
+        var initial = AppConfiguration()
+        let recommended = lavaRecommendedDefaults
+        initial.resolverPresetID = recommended.resolverPresetID
+        initial.usesEncryptedDeviceDNSFallback = recommended.usesEncryptedDeviceDNSFallback
+        initial.fallbackResolverPresetID = recommended.fallbackResolverPresetID
+        return initial
+    }
+
+    /// The DNS onboarding step owns only this toggle. Preserving all other fields
+    /// makes revisiting setup safe for a saved provider or custom endpoint.
+    mutating func applyOnboardingEncryptedFallback(_ enabled: Bool) {
+        usesEncryptedDeviceDNSFallback = enabled
+    }
+
     /// Protection defaults used before the user customizes onboarding selections.
     static var lavaRecommendedDefaults: AppConfiguration {
         AppConfiguration(
@@ -100,14 +121,14 @@ public extension AppConfiguration {
             resolverPresetID: DNSResolverPreset.device.id,
             fallbackToDeviceDNS: true,
             // Device DNS is the primary resolver; if it stops answering, allowed
-            // lookups are carried over Mullvad DoH (the default encrypted fallback)
+            // lookups are carried over Quad9 DoH (the default encrypted fallback)
             // and return to the device's own DNS once its recovery probes succeed
             // again. That return path exists because the captured resolver is never
             // discarded on masked-read evidence alone (UR-55 / INV-DNS-5); after a
             // real network change the NEW network's resolver is only learnable at
             // the next tunnel start (Phase 0 — no in-place read exists).
             usesEncryptedDeviceDNSFallback: true,
-            fallbackResolverPresetID: DNSResolverPreset.mullvadDoH.id,
+            fallbackResolverPresetID: DNSResolverPreset.quad9UnfilteredDoH.id,
             keepFilteringCounts: true,
             keepDomainDiagnostics: true,
             keepNetworkActivity: true
@@ -138,7 +159,7 @@ package struct OnboardingDefaultsSummary: Equatable, Sendable {
     }
 
     // When Device DNS is the primary resolver the meaningful safety net is the
-    // encrypted fallback (Mullvad DoH by default), so the summary names that
+    // encrypted fallback (Quad9 DoH by default), so the summary names that
     // resolver; for an encrypted primary it's the device-DNS net (On/Off) instead.
     private static func deviceDNSFallbackText(for configuration: AppConfiguration) -> String {
         guard configuration.resolverPreset.transport == .deviceDNS else {

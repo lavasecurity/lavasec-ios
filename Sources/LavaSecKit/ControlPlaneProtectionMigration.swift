@@ -20,9 +20,10 @@ import Foundation
 /// pair writer's callers use, target-selection-tested against a fixture container.
 /// - pinned: ControlPlaneProtectionMigrationTests.testControlPlaneTargetsSelectExactlyTheControlPlaneFiles
 public enum ControlPlaneProtectionMigration {
-    /// `UserDefaults` bool key latching a fully-successful migration pass. Versioned (`v1`)
-    /// so a future protection-class change can ship as a fresh one-shot key.
-    public static let migrationCompletedDefaultsKey = "lavasec.protection.controlPlaneClassMigration.v1" // mobsf-ignore: ios_hardcoded_secret — versioned latch key, not a credential (gitleaks is the secret gate)
+    /// `UserDefaults` bool key latching a fully-successful migration pass. Versioned (`v2`)
+    /// so installs that already latched v1 still re-stamp the newly safety-critical lifecycle
+    /// state and lock files, and a future protection-class change can use another fresh key.
+    public static let migrationCompletedDefaultsKey = "lavasec.protection.controlPlaneClassMigration.v2" // mobsf-ignore: ios_hardcoded_secret — versioned latch key, not a credential (gitleaks is the secret gate)
 
     /// Result of scanning the container for control-plane files.
     public struct ControlPlaneTargetScan {
@@ -38,15 +39,16 @@ public enum ControlPlaneProtectionMigration {
 
     /// The existing control-plane files under `containerURL` that must carry
     /// Class-None (INV-PERSIST-2): the shared config/library pair, tunnel
-    /// health, the legacy root artifact trio, and every file under the versioned artifact
-    /// area (`filter-artifacts/`, including the publish pointer) and the tunnel's retained
-    /// in-extension compile (`catalog-cache/tunnel-compiled-artifact/`).
+    /// health, the protection lifecycle state + required locks, the legacy root artifact trio,
+    /// and every file under the versioned artifact area (`filter-artifacts/`, including the
+    /// publish pointer) and the tunnel's retained in-extension compile
+    /// (`catalog-cache/tunnel-compiled-artifact/`).
     ///
     /// Everything else is deliberately EXCLUDED: the privacy stores (DNS events,
     /// diagnostics, activity/incident/debug logs, the rest of `catalog-cache`) stay
-    /// Class C, and the advisory lock files stay default-class — they are content-free,
-    /// every pre-unlock toucher already degrades on a failed open, and re-stamping them
-    /// buys nothing (see INV-PERSIST-2's exclusion note).
+    /// Class C, as do best-effort advisory locks whose callers intentionally degrade on a failed
+    /// open. The two required lifecycle locks are included because their callers fail closed and
+    /// must coordinate before first unlock (see INV-PERSIST-2's exclusion note).
     ///
     /// Pure file enumeration — no attribute writes — so it is executable-testable on the
     /// macOS CI host, where the protection APIs do not exist.
@@ -60,9 +62,9 @@ public enum ControlPlaneProtectionMigration {
         containerURL: URL,
         fileManager: FileManager = .default
     ) -> ControlPlaneTargetScan {
-        // Root singles: the pair + tunnel health, plus the legacy pre-pointer root trio
-        // (still read by the tunnel's readableStore fallback before the first versioned
-        // publish and after a rollback).
+        // Root singles: the pair + tunnel health + lifecycle coordination, plus the legacy
+        // pre-pointer root trio (still read by the tunnel's readableStore fallback before the
+        // first versioned publish and after a rollback).
         let rootFilenames = [
             "app-configuration.json",
             "filter-library.json",
@@ -70,6 +72,9 @@ public enum ControlPlaneProtectionMigration {
             "filter-snapshot.json",
             "filter-snapshot.compact",
             "filter-artifact-manifest.json",
+            "protection-lifecycle-state.json",
+            "protection-command.lock",
+            "protection-lifecycle-mutation.lock",
         ]
         var targets = rootFilenames
             .map { containerURL.appendingPathComponent($0) }

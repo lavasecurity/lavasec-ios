@@ -1,113 +1,106 @@
 import XCTest
-@testable import LavaSecCore
-@testable import LavaSecKit
+import LavaSecKit
 
 final class BoundedWorkAdmissionTests: XCTestCase {
-    func testAdmitsUpToBoundImmediately() {
-        let admission = BoundedWorkAdmission<Int>(bound: 3)
+    private let now = ContinuousClock().now
 
-        XCTAssertEqual(admission.admit(1), 1)
-        XCTAssertEqual(admission.admit(2), 2)
-        XCTAssertEqual(admission.admit(3), 3)
-        XCTAssertEqual(admission.activeWorkCount, 3)
-        XCTAssertEqual(admission.pendingWorkCount, 0)
+    func testBurstBoundsActivePendingCountAndBytes() throws {
+        let owner = BoundedWorkAdmission<Int>(bound: 2, maximumPendingCount: 3, maximumPendingBytes: 10)
+        let deadline = MonotonicDeadline(after: 10, now: now)
+        var accepted = 0
+        for id in 0..<10_000 {
+            if owner.submit(id, retainedBytes: 4, deadline: deadline, now: now).accepted { accepted += 1 }
+        }
+        XCTAssertEqual(accepted, 4)
+        XCTAssertEqual(owner.activeWorkCount, 2)
+        XCTAssertEqual(owner.pendingWorkCount, 2)
+        XCTAssertEqual(owner.pendingByteCount, 8)
+        XCTAssertFalse(owner.submit(-1, retainedBytes: Int.max, deadline: deadline, now: now).accepted)
+        let countBound = BoundedWorkAdmission<Int>(bound: 1, maximumPendingCount: 2, maximumPendingBytes: 100)
+        for id in 0..<20 { _ = countBound.submit(id, retainedBytes: 1, deadline: deadline, now: now) }
+        XCTAssertEqual(countBound.pendingWorkCount, 2)
     }
 
-    func testOverBoundSubmissionsWaitInFifo() {
-        let admission = BoundedWorkAdmission<Int>(bound: 2)
-        _ = admission.admit(1)
-        _ = admission.admit(2)
-
-        XCTAssertNil(admission.admit(3), "A submission over the bound must wait, not run immediately.")
-        XCTAssertNil(admission.admit(4))
-        XCTAssertEqual(admission.activeWorkCount, 2, "The bound never rises while work is pending.")
-        XCTAssertEqual(admission.pendingWorkCount, 2)
+    func testCompletionPromotesFIFOAndRejectsDuplicateRetirement() throws {
+        let owner = BoundedWorkAdmission<Int>(bound: 1)
+        let deadline = MonotonicDeadline(after: 10, now: now)
+        let first = try XCTUnwrap(owner.submit(1, retainedBytes: 3, deadline: deadline, now: now).started)
+        XCTAssertTrue(owner.submit(2, retainedBytes: 3, deadline: deadline, now: now).accepted)
+        XCTAssertTrue(owner.submit(3, retainedBytes: 3, deadline: deadline, now: now).accepted)
+        let second = try XCTUnwrap(owner.complete(first.id, now: now).started)
+        XCTAssertEqual(second.work, 2)
+        XCTAssertNil(owner.complete(first.id, now: now).started)
+        XCTAssertEqual(owner.activeWorkCount, 1)
+        let third = try XCTUnwrap(owner.complete(second.id, now: now).started)
+        XCTAssertEqual(third.work, 3)
+        XCTAssertNil(owner.complete(third.id, now: now).started)
+        XCTAssertEqual(owner.activeWorkCount, 0)
+        XCTAssertEqual(owner.pendingByteCount, 0)
     }
 
-    func testReleaseStartsNextPendingInFifoOrder() {
-        let admission = BoundedWorkAdmission<Int>(bound: 1)
-        XCTAssertEqual(admission.admit(1), 1)
-        XCTAssertNil(admission.admit(2))
-        XCTAssertNil(admission.admit(3))
-
-        // First release hands back the oldest waiter and keeps the slot claimed.
-        XCTAssertEqual(admission.release(), 2)
-        XCTAssertEqual(admission.activeWorkCount, 1, "One out, one in — the bound holds exactly.")
-        XCTAssertEqual(admission.pendingWorkCount, 1)
-
-        XCTAssertEqual(admission.release(), 3, "FIFO order: 3 follows 2.")
-        XCTAssertEqual(admission.activeWorkCount, 1)
-        XCTAssertEqual(admission.pendingWorkCount, 0)
+    func testClientExpiryDoesNotReleaseAnActiveSocketSlot() throws {
+        let owner = BoundedWorkAdmission<Int>(bound: 1)
+        let soon = MonotonicDeadline(after: 1, now: now)
+        let later = MonotonicDeadline(after: 10, now: now)
+        let first = try XCTUnwrap(owner.submit(1, retainedBytes: 1, deadline: soon, now: now).started)
+        _ = owner.submit(2, retainedBytes: 1, deadline: soon, now: now)
+        _ = owner.submit(3, retainedBytes: 1, deadline: later, now: now)
+        let expiredAt = now.advanced(by: .seconds(1))
+        XCTAssertEqual(Set(owner.expire(now: expiredAt)), [1, 2])
+        XCTAssertEqual(owner.activeWorkCount, 1, "client completion is not socket retirement")
+        XCTAssertEqual(owner.pendingWorkCount, 1)
+        XCTAssertEqual(owner.pendingByteCount, 1)
+        XCTAssertEqual(owner.nextDeadline, later)
+        XCTAssertEqual(owner.expire(now: expiredAt), [])
+        XCTAssertFalse(owner.submit(4, retainedBytes: 1, deadline: soon, now: expiredAt).accepted)
+        XCTAssertEqual(owner.complete(first.id, now: expiredAt).started?.work, 3)
     }
 
-    func testReleaseWithoutPendingDropsTheActiveCount() {
-        let admission = BoundedWorkAdmission<Int>(bound: 2)
-        _ = admission.admit(1)
-        _ = admission.admit(2)
-
-        XCTAssertNil(admission.release(), "Nothing waiting — release frees the slot and starts nothing.")
-        XCTAssertEqual(admission.activeWorkCount, 1)
-        XCTAssertNil(admission.release())
-        XCTAssertEqual(admission.activeWorkCount, 0)
+    func testRuntimeInvalidationPurgesPendingButRetainsActiveOwnership() throws {
+        let owner = BoundedWorkAdmission<Int>(bound: 1)
+        let deadline = MonotonicDeadline(after: 10, now: now)
+        let active = try XCTUnwrap(owner.submit(1, retainedBytes: 1, deadline: deadline, now: now).started)
+        _ = owner.submit(2, retainedBytes: 2, deadline: deadline, now: now)
+        _ = owner.submit(3, retainedBytes: 3, deadline: deadline, now: now)
+        XCTAssertEqual(owner.discardPending(), [2, 3])
+        XCTAssertEqual(owner.pendingWorkCount, 0)
+        XCTAssertEqual(owner.pendingByteCount, 0)
+        XCTAssertEqual(owner.activeWorkCount, 1)
+        XCTAssertEqual(owner.discardPending(), [])
+        _ = owner.submit(4, retainedBytes: 1, deadline: deadline, now: now)
+        XCTAssertEqual(owner.complete(active.id, now: now).started?.work, 4)
     }
 
-    func testFreedSlotAdmitsANewSubmissionImmediately() {
-        let admission = BoundedWorkAdmission<Int>(bound: 1)
-        XCTAssertEqual(admission.admit(1), 1)
-        XCTAssertNil(admission.admit(2))
-
-        // Drain the pending item first, then the slot re-opens for a brand-new submission.
-        XCTAssertEqual(admission.release(), 2)
-        XCTAssertNil(admission.release(), "2 completes with an empty FIFO — the slot frees.")
-        XCTAssertEqual(admission.admit(3), 3, "A fresh submission is admitted immediately once under the bound.")
-    }
-
-    func testNeverExceedsBoundAcrossAnInterleavedBurst() {
-        // Simulate an outage-style burst: 50 submissions against a bound of 8, interleaving
-        // releases. The invariant is that activeWorkCount never exceeds the bound and every
-        // submission is eventually run exactly once, in FIFO order.
-        let bound = 8
-        let admission = BoundedWorkAdmission<Int>(bound: bound)
-        let total = 50
-
-        var running: [Int] = []
+    func testNeverExceedsBoundAndRunsEveryAcceptedItemOnce() throws {
+        let owner = BoundedWorkAdmission<Int>(bound: 8)
+        let deadline = MonotonicDeadline(after: 10, now: now)
+        var running: [BoundedWorkAdmission<Int>.Lease] = []
         var started: [Int] = []
-
-        func begin(_ work: Int?) {
-            guard let work else { return }
-            running.append(work)
-            started.append(work)
-            XCTAssertLessThanOrEqual(admission.activeWorkCount, bound, "The concurrency bound must never be exceeded.")
-            XCTAssertLessThanOrEqual(running.count, bound)
+        for id in 0..<50 {
+            let submission = owner.submit(id, retainedBytes: 1, deadline: deadline, now: now)
+            XCTAssertTrue(submission.accepted)
+            if let lease = submission.started { running.append(lease); started.append(lease.work) }
         }
-
-        // Submit everything; only the first `bound` start, the rest queue.
-        for id in 0..<total {
-            begin(admission.admit(id))
-        }
-        XCTAssertEqual(running.count, bound)
-        XCTAssertEqual(admission.pendingWorkCount, total - bound)
-
-        // Complete work items one at a time; each release starts the next FIFO waiter until
-        // the backlog drains, then simply retires the running items.
-        while !running.isEmpty {
+        while let lease = running.first {
             running.removeFirst()
-            begin(admission.release())
+            if let next = owner.complete(lease.id, now: now).started {
+                running.append(next)
+                started.append(next.work)
+            }
+            XCTAssertLessThanOrEqual(owner.activeWorkCount, 8)
+            XCTAssertEqual(owner.activeWorkCount, running.count)
         }
-
-        XCTAssertEqual(started.sorted(), Array(0..<total), "Every submission runs exactly once.")
-        XCTAssertEqual(started, Array(0..<total), "Submissions start in strict FIFO order.")
-        XCTAssertEqual(admission.activeWorkCount, 0)
-        XCTAssertEqual(admission.pendingWorkCount, 0)
+        XCTAssertEqual(started, Array(0..<50))
+        XCTAssertEqual(owner.pendingByteCount, 0)
     }
 
-    func testNonPositiveBoundIsClampedToOne() {
-        let zero = BoundedWorkAdmission<Int>(bound: 0)
-        XCTAssertEqual(zero.bound, 1)
-        XCTAssertEqual(zero.admit(1), 1)
-        XCTAssertNil(zero.admit(2), "Clamped to a serial lane — the second submission waits.")
-
-        let negative = BoundedWorkAdmission<Int>(bound: -5)
-        XCTAssertEqual(negative.bound, 1)
+    func testNonPositiveLimitsCannotCreateExtraCapacity() {
+        let owner = BoundedWorkAdmission<Int>(bound: 0, maximumPendingCount: -1, maximumPendingBytes: -1)
+        let deadline = MonotonicDeadline(after: 1, now: now)
+        XCTAssertEqual(owner.bound, 1)
+        XCTAssertTrue(owner.submit(1, retainedBytes: 1, deadline: deadline, now: now).accepted)
+        XCTAssertFalse(owner.submit(2, retainedBytes: 1, deadline: deadline, now: now).accepted)
+        XCTAssertEqual(deadline.remainingSeconds(now: now), 1, accuracy: 0.000_001)
+        XCTAssertTrue(deadline.hasExpired(now: now.advanced(by: .seconds(2))))
     }
 }

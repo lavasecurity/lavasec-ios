@@ -17,6 +17,57 @@ struct StreamingCompileBudgetExceeded: LocalizedError {
     }
 }
 
+/// The threat intersection retains heap strings, unlike the streamed block entry table.
+/// A separate pre-insertion bound keeps that transient small and fails closed for app preparation.
+struct StreamingCompileGuardrailBudgetExceeded: LocalizedError {
+    let ruleCount: Int
+
+    var errorDescription: String? {
+        "Retaining \(ruleCount) threat guardrails exceeds the in-extension heap budget "
+            + "(\(FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount)). "
+            + "Deferring to the app to prepare it."
+    }
+}
+
+/// The tunnel holds at most the configured allowances, never the full guardrail
+/// source. Ancestor checks walk hostname labels; reversed names make descendant
+/// allowances a contiguous range for each streamed guardrail rule.
+struct AllowedSuffixIntersectionIndex: Sendable {
+    private let allowedRules: DomainRuleSet
+    private let reversedDomains: [(key: String, domain: String)]
+
+    init(normalizedDomains: [String]) {
+        let unique = Set(normalizedDomains)
+        allowedRules = DomainRuleSet(suffixDomains: unique)
+        reversedDomains = unique.map { (String($0.reversed()), $0) }
+            .sorted { $0.key < $1.key }
+    }
+
+    var isEmpty: Bool { reversedDomains.isEmpty }
+
+    func containsAncestor(of domain: String) -> Bool {
+        allowedRules.containsNormalized(domain)
+    }
+
+    func forEachDescendant(of domain: String, _ visit: (String) throws -> Void) rethrows {
+        let prefix = String(domain.reversed()) + "."
+        var lower = 0
+        var upper = reversedDomains.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if reversedDomains[middle].key < prefix {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        while lower < reversedDomains.count, reversedDomains[lower].key.hasPrefix(prefix) {
+            try visit(reversedDomains[lower].domain)
+            lower += 1
+        }
+    }
+}
+
 /// Compiles the runtime filter snapshot INSIDE the packet-tunnel extension without ever
 /// holding the dirty `DomainRuleSet` union of all enabled block sources in memory — the
 /// transient that can blow the ~50 MiB jetsam budget for a large multi-list configuration.
@@ -25,7 +76,8 @@ struct StreamingCompileBudgetExceeded: LocalizedError {
 /// fine under ample memory), it:
 ///   1. STREAM-PARSES each source straight through `BlocklistParser.forEachBlockRule`
 ///      (`streamCachedForInExtensionCompile`), appending each accepted rule's domain bytes to
-///      an on-disk blob and recording only a compact `Entry` (offset + length, ~8 B/rule) in
+///      an on-disk blob and recording only a compact `Entry` (a 4-byte offset; the
+///      length rides in the blob as a 1-byte prefix, ~4 B/rule) in
 ///      heap — NO per-source `DomainRuleSet` is ever built, so a single source's size no
 ///      longer bounds the compile; only the aggregate entry arrays grow (gated per-rule, so a
 ///      too-large config fails closed instead of overshooting or truncating);
@@ -35,10 +87,11 @@ struct StreamingCompileBudgetExceeded: LocalizedError {
 ///   3. streams a byte-valid `CompactFilterSnapshot` to disk via
 ///      `CompactFilterSnapshot.writeStreaming` (the single source of truth for the format);
 ///   4. memory-maps and decodes it, so the resident snapshot costs ~entries only (the
-///      domain bytes are file-backed/paged) — the same 9 B/rule shape the app produces.
+///      domain bytes are file-backed/paged) — the same 4 B/rule shape the app produces.
 ///
-/// The allow rules and the (allowed-domain-intersected) threat rules are small and built
-/// in heap. `baseSnapshot` already carries the manual block rules AND any QA probe domains
+/// The allow rules are small and built in heap. The allowed-domain-intersected threat
+/// rules have a separate pre-insertion heap budget: a single broad allowance can contain
+/// many descendants. `baseSnapshot` already carries the manual block rules AND any QA probe domains
 /// (its `applyingQAProbeSet` ran in `AppConfiguration.filterSnapshot()`), so they are folded
 /// in by appending `baseSnapshot.blockRules`/`allowRules`/`nonAllowableThreatRules` — no
 /// QA-specific code lives here.
@@ -84,6 +137,9 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         stampIdentity: PreparedFilterSnapshotIdentity? = nil,
         retainedArtifactURL: URL? = nil
     ) async throws -> CompactFilterSnapshot {
+        guard baseSnapshot.nonAllowableThreatRules.count <= FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount else {
+            throw StreamingCompileGuardrailBudgetExceeded(ruleCount: baseSnapshot.nonAllowableThreatRules.count)
+        }
         let synchronizer = BlocklistCatalogSynchronizer(
             cacheDirectoryURL: cacheDirectoryURL,
             parseBudget: .inExtension
@@ -125,46 +181,65 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         var writeBuffer = Data()
         writeBuffer.reserveCapacity(CompactFilterSnapshot.streamingFlushThreshold + 256)
 
+        func reserveAggregateRule() throws {
+            let nextCount = aggregateCount + 1
+            guard nextCount <= FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount else {
+                throw StreamingCompileBudgetExceeded(ruleCount: nextCount)
+            }
+            aggregateCount = nextCount
+        }
+
         func appendDomain(_ domain: String, isSuffix: Bool) throws {
             let bytes = Data(domain.utf8)
             // In-extension we MUST NOT crash on a pathological domain (the in-heap encoder
             // `precondition`s); throw so the caller falls back fail-CLOSED instead.
-            guard bytes.count <= Int(UInt16.max) else {
+            // A 1-byte length prefix caps the domain at 255 bytes — normalized domains are
+            // ≤253, so this is enforced, not merely assumed.
+            guard bytes.count <= Int(UInt8.max) else {
                 throw CompactFilterSnapshotError.domainTooLong(domain)
             }
-            guard blobOffset + bytes.count <= Int(UInt32.max) else {
+            guard blobOffset + 1 + bytes.count <= Int(UInt32.max) else {
                 throw CompactFilterSnapshotError.artifactTooLarge
             }
-            let entry = CompactDomainRuleSet.Entry(offset: UInt32(blobOffset), length: UInt16(bytes.count))
+            // Reserve before growing either entry array or the write buffer.
+            try reserveAggregateRule()
+            let entry = UInt32(blobOffset)
             if isSuffix {
                 suffixEntries.append(entry)
             } else {
                 exactEntries.append(entry)
             }
+            writeBuffer.append(UInt8(bytes.count))
             writeBuffer.append(bytes)
-            blobOffset += bytes.count
-            aggregateCount += 1
-            // Per-DOMAIN gate: fail closed the instant the entry arrays cross the ceiling.
-            // Because sources stream in uncapped (no per-source Set), this is what bounds a
-            // single huge source — it stops the parse mid-source (the throw propagates up
-            // through `forEachBlockRule`) instead of overshooting by a whole source.
-            if aggregateCount > FilterSnapshotMemoryBudget.maxStreamingCompileRuleCount {
-                throw StreamingCompileBudgetExceeded(ruleCount: aggregateCount)
-            }
+            blobOffset += 1 + bytes.count
             if writeBuffer.count >= CompactFilterSnapshot.streamingFlushThreshold {
                 try blobHandle.lavaWrite(writeBuffer)
                 writeBuffer.removeAll(keepingCapacity: true)
             }
         }
 
-        // Threat rules are the guardrail set intersected with the user's allowed domains,
-        // so they are bounded by `allowedDomains.count` (tiny). When there are no allowed
+        // Threat rules intersect the allowed suffix scopes; their descendant count is NOT
+        // bounded by the number of allowances. When there are no allowed
         // domains the effective threat set is empty regardless, so we skip streaming the
-        // guardrails entirely. Otherwise each streamed guardrail rule is checked against the
-        // small allowlist — the full guardrail union is never resident.
+        // guardrails entirely. Otherwise each streamed rule queries the bounded
+        // allowance index — the full guardrail union is never resident.
         let normalizedAllowedDomains = configuration.allowedDomains.compactMap { try? DomainName.normalize($0) }
-        let needGuardrails = includesGuardrails && !normalizedAllowedDomains.isEmpty
+        let allowedIndex = AllowedSuffixIntersectionIndex(normalizedDomains: normalizedAllowedDomains)
+        let needGuardrails = includesGuardrails && !allowedIndex.isEmpty
         var effectiveThreat = DomainRuleSet()
+
+        func appendThreat(_ domain: String, isSuffix: Bool) throws {
+            let rule = try DomainRule(domain: domain, matchesSubdomains: isSuffix)
+            // Duplicate source lines and overlapping allowances must not consume another
+            // entry. Coverage membership would wrongly merge exact and suffix semantics.
+            guard !effectiveThreat.containsRule(rule) else { return }
+            let nextCount = effectiveThreat.count + 1
+            guard nextCount <= FilterSnapshotMemoryBudget.maxStreamingHeapGuardrailRuleCount else {
+                throw StreamingCompileGuardrailBudgetExceeded(ruleCount: nextCount)
+            }
+            try reserveAggregateRule()
+            effectiveThreat.insert(rule)
+        }
 
         // INV-TIER-1 stamp input: the recorded tier total must match the cold gate's
         // formula, whose block part is `list-merge (WITHOUT manual) + blockedDomains` —
@@ -193,26 +268,25 @@ struct StreamingCompactSnapshotCompiler: Sendable {
                 try appendDomain(domain, isSuffix: matchesSubdomains)
             },
             onGuardrailRule: { domain, matchesSubdomains in
-                // Reproduce `nonAllowableRulesForAllowedDomains` over the streamed guardrail
-                // union: an allowed domain is non-allowable iff the guardrails contain it — a
-                // suffix rule `g` covers `g` and anything under it; an exact rule covers only
-                // `g`. (Union of per-rule matches == matching the union; `contains` is
-                // monotonic.)
-                for allowed in normalizedAllowedDomains {
-                    let blocked = matchesSubdomains
-                        ? (allowed == domain || allowed.hasSuffix("." + domain))
-                        : (allowed == domain)
-                    if blocked {
-                        try? effectiveThreat.insert(domain: allowed, matchesSubdomains: true)
+                // Preserve exact/suffix semantics and every overlapping allowed
+                // descendant without comparing this rule to every allowance.
+                if allowedIndex.containsAncestor(of: domain) {
+                    try appendThreat(domain, isSuffix: matchesSubdomains)
+                }
+                if matchesSubdomains {
+                    try allowedIndex.forEachDescendant(of: domain) { allowed in
+                        try appendThreat(allowed, isSuffix: true)
                     }
                 }
             }
         )
 
-        // Every enabled ID must have produced a source (catalog or custom), matching the
-        // app's gate — otherwise we'd silently serve a snapshot missing an enabled list.
+        // Every enabled ID must produce a source or be explicitly withdrawn by the admitted
+        // catalog. Record withdrawals in the summary so omission is never inferred from absence.
+        // pinned: CatalogAuthorizationTests.testWithdrawalsRequireConfiguredVerifiedAuthorization
+        let withdrawnIDs = load.resolvedCatalog.withdrawnBlocklistIDs(in: configuration)
         for sourceID in configuration.enabledBlocklistIDs
-            where !load.deliveredBlockSourceIDs.contains(sourceID) {
+            where !load.deliveredBlockSourceIDs.contains(sourceID) && !withdrawnIDs.contains(sourceID) {
             throw BlocklistCatalogSyncError.missingEnabledBlocklistSource(sourceID: sourceID)
         }
 
@@ -226,7 +300,15 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         for domain in baseSnapshot.blockRules.suffixDomainList {
             try appendDomain(domain, isSuffix: true)
         }
-        effectiveThreat.formUnion(baseSnapshot.nonAllowableThreatRules)
+        // The base contribution has the same unique-entry and aggregate gates as streamed
+        // threats. Its count was checked before scratch allocation, so these sorted views
+        // are bounded too; an unchecked union would reopen the heap-budget bypass.
+        for domain in baseSnapshot.nonAllowableThreatRules.exactDomainList {
+            try appendThreat(domain, isSuffix: false)
+        }
+        for domain in baseSnapshot.nonAllowableThreatRules.suffixDomainList {
+            try appendThreat(domain, isSuffix: true)
+        }
 
         if !writeBuffer.isEmpty {
             try blobHandle.lavaWrite(writeBuffer)
@@ -278,7 +360,8 @@ struct StreamingCompactSnapshotCompiler: Sendable {
             tierBudgetRuleCount: blockRuleCount
                 + manualDomainsMatchedInLists.count
                 + allowRules.count
-                + threatRules.count
+                + threatRules.count,
+            quarantinedBlocklistIDs: withdrawnIDs.isEmpty ? nil : withdrawnIDs
         )
 
         let identity = stampIdentity ?? PreparedFilterSnapshotIdentity.make(
@@ -389,21 +472,25 @@ struct StreamingCompactSnapshotCompiler: Sendable {
         _ lhs: CompactDomainRuleSet.Entry,
         _ rhs: CompactDomainRuleSet.Entry
     ) -> Int {
-        let lhsOffset = Int(lhs.offset)
-        let rhsOffset = Int(rhs.offset)
-        let shared = min(Int(lhs.length), Int(rhs.length))
+        let lhsOffset = Int(lhs)
+        let rhsOffset = Int(rhs)
+        let lhsLength = Int(table[lhsOffset])
+        let rhsLength = Int(table[rhsOffset])
+        let lhsStart = lhsOffset + 1
+        let rhsStart = rhsOffset + 1
+        let shared = min(lhsLength, rhsLength)
         var index = 0
         while index < shared {
-            let l = table[lhsOffset + index]
-            let r = table[rhsOffset + index]
+            let l = table[lhsStart + index]
+            let r = table[rhsStart + index]
             if l != r {
                 return l < r ? -1 : 1
             }
             index += 1
         }
-        if lhs.length == rhs.length {
+        if lhsLength == rhsLength {
             return 0
         }
-        return lhs.length < rhs.length ? -1 : 1
+        return lhsLength < rhsLength ? -1 : 1
     }
 }

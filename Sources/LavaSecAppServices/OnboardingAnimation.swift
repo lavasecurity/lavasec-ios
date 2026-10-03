@@ -88,7 +88,7 @@ public enum OnboardingFeatureTransitionPlan {
 /// Repeating timeline that maps elapsed seconds to a full-circle lava-wave phase.
 public enum OnboardingLavaWaveTimeline {
     /// Duration, in seconds, of one complete wave cycle.
-    public static let duration = 4.8
+    public static let duration = 18.0
 
     /// Returns a phase in the half-open range from zero to two pi for any finite elapsed time.
     public static func phase(at elapsed: Double) -> Double {
@@ -99,5 +99,17 @@ public enum OnboardingLavaWaveTimeline {
         let progress = elapsed.truncatingRemainder(dividingBy: duration) / duration
         let normalizedProgress = progress < 0 ? progress + 1 : progress
         return normalizedProgress * .pi * 2
+    }
+}
+
+/// Clock-driven travel is independent of surrounding SwiftUI layout transactions.
+public enum OnboardingGuardTravel {
+    /// Duration of the full onboarding-to-Guard journey, in seconds.
+    public static let duration = 1.4
+
+    /// Cubic ease-out: move immediately, then arrive gently at the measured target.
+    public static func progress(at elapsed: Double) -> Double {
+        let t = min(max(elapsed / duration, 0), 1)
+        return 1 - pow(1 - t, 3)
     }
 }

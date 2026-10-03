@@ -32,81 +32,6 @@ struct DomainRejectPanel: View {
     }
 }
 
-struct FilterConfirmationSheet: View {
-    @EnvironmentObject private var viewModel: AppViewModel
-    @Environment(\.dismiss) private var dismiss
-
-    let origin: FilterReviewOrigin
-    @State private var didConfirm = false
-
-    var body: some View {
-        NavigationStack {
-            LavaSheetScaffold(spacing: 18) {
-                Text("%@ will be prepared and saved locally.".lavaLocalizedFormat(viewModel.filterDraftChangeCountText))
-                    .lavaBodySupportingText()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let validationMessage = viewModel.filterDraftValidationMessage {
-                    DomainRejectPanel(
-                        title: "Review cannot continue",
-                        message: validationMessage
-                    )
-                }
-
-                let diff = viewModel.filterDraftDiff
-                if !diff.addedAllowedDomains.isEmpty {
-                    LavaInfoPanel(
-                        title: "Be extra careful",
-                        description: "Allowed exceptions let a site through even when a blocklist would catch it.",
-                        systemImage: "exclamationmark.triangle.fill",
-                        tint: LavaStyle.lavaOrange
-                    )
-                }
-                DiffGroup(
-                    title: "Blocklists",
-                    added: diff.addedBlocklistIDs.map { viewModel.blocklistName(for: $0) },
-                    removed: diff.removedBlocklistIDs.map { viewModel.blocklistName(for: $0) }
-                )
-                DiffGroup(title: "Blocked Domains", added: diff.addedBlockedDomains, removed: diff.removedBlockedDomains)
-                DiffGroup(title: "Allowed Exceptions", added: diff.addedAllowedDomains, removed: diff.removedAllowedDomains)
-            } footer: {
-                Button("Confirm Changes") {
-                    didConfirm = true
-                    dismiss()
-                    Task {
-                        await viewModel.prepareAndApplyFilterDraft(origin: origin)
-                    }
-                }
-                .buttonStyle(LavaStandaloneActionButtonStyle())
-                .disabled(!viewModel.filterDraftCanConfirm)
-            }
-            .navigationTitle("Review".lavaLocalized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Cancel", role: .cancel) {
-                        cancelIfStandaloneReview()
-                        dismiss()
-                    }
-                }
-            }
-            .lavaTier(.calm)
-        }
-        .presentationDetents([.medium, .large])
-        .onDisappear {
-            cancelIfStandaloneReview()
-        }
-    }
-
-    private func cancelIfStandaloneReview() {
-        guard origin == .domainHistory, !didConfirm else {
-            return
-        }
-
-        viewModel.cancelFilterEditing()
-    }
-}
-
 struct DiffGroup: View {
     let title: String
     let added: [String]
@@ -129,7 +54,7 @@ struct DiffGroup: View {
     }
 
     private var rows: [(symbol: String, title: String, tint: Color)] {
-        added.map { ("+", $0, LavaStyle.safeGreen) } + removed.map { ("-", $0, LavaStyle.lavaOrange) }
+        added.map { ("+", $0, LavaStyle.safeGreen) } + removed.map { ("-", $0, LavaStyle.errorText) }
     }
 }
 
@@ -144,11 +69,12 @@ struct FilterReviewChangeRow: View {
     var localizesTitle: Bool = true
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        LavaTableRow {
+          HStack(alignment: .center, spacing: 12) {
             Image(systemName: systemImage)
-                .font(.body.weight(.bold))
+                .font(.system(size: LavaToolbarMetrics.framedIconPointSize, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
+                .frame(width: LavaToolbarMetrics.iconFrameSize, height: LavaToolbarMetrics.iconFrameSize)
                 .accessibilityHidden(true)
 
             Text(localizesTitle ? title.lavaLocalized : title)
@@ -158,11 +84,8 @@ struct FilterReviewChangeRow: View {
                 .minimumScaleFactor(0.86)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+          }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 56)
-        .frame(maxWidth: .infinity, alignment: .leading)
         // The +/- glyph is the only visual add/remove cue and is color-tinted, so expose the
         // action as a stable localized label ("Added"/"Removed") with the item name as the value —
         // otherwise VoiceOver would read only the name and lose the add-vs-remove distinction.
@@ -178,6 +101,7 @@ struct FilterReviewChangeRow: View {
 
 struct FilterPreparationScreen: View {
     @EnvironmentObject private var viewModel: AppViewModel
+    @EnvironmentObject private var drafts: FilterDraftController
     // The mascot look lives on the customization controller (Phase D5 peel).
     @EnvironmentObject private var customization: CustomizationController
     // Gate the bar's eased fill + the checkmark reveal on Reduce Motion, matching the sibling
@@ -206,7 +130,7 @@ struct FilterPreparationScreen: View {
             VStack(spacing: 24) {
                 Spacer()
 
-                switch viewModel.filterPreparationState {
+                switch drafts.preparationState {
                 case .idle:
                     SoftShieldGuardian(size: 76, state: .waking, shieldStyle: customization.lavaGuardLook)
                     PreparationTickerTitle(FilterPreparationPresentation.message(for: .downloading))
@@ -256,7 +180,7 @@ struct FilterPreparationScreen: View {
                         // A dead-end failure (switch target deleted/frozen mid-prepare) isn't
                         // retryable — retrying just re-fails — so "Keep Current Filter" is the
                         // only recovery there.
-                        if viewModel.filterPreparationFailureIsRetryable {
+                        if drafts.preparationFailureIsRetryable {
                             Button("Try Again") {
                                 viewModel.retryFilterPreparation()
                             }
@@ -299,9 +223,9 @@ struct FilterPreparationScreen: View {
             // this cover (AppViewModel.prepareAndApplyFilterDraft / switchToFilter), so the screen
             // can mount already-terminal — `.onChange` would never fire for that state. Announce
             // whatever terminal outcome is already on screen at mount; `.onChange` covers the rest.
-            announceFilterPreparationOutcome(viewModel.filterPreparationState)
+            announceFilterPreparationOutcome(drafts.preparationState)
         }
-        .onChange(of: viewModel.filterPreparationState) { _, newState in
+        .onChange(of: drafts.preparationState) { _, newState in
             // The result glyph / ticker title change in place inside the already-presented cover,
             // so VoiceOver does not move focus to them on its own. `.onChange` fires only on a
             // DISTINCT state, so a terminal outcome speaks exactly once (not on each progress tick,
@@ -331,7 +255,7 @@ struct FilterPreparationScreen: View {
     /// True while the cover is showing the terminal Success state (`progress >= 1`). Drives the
     /// fill-to-full-then-checkmark handoff; false for every in-progress or non-terminal state.
     private var isTerminalSuccess: Bool {
-        if case .preparing(let progress, _) = viewModel.filterPreparationState {
+        if case .preparing(let progress, _) = drafts.preparationState {
             return progress >= 1
         }
         return false

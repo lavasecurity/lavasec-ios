@@ -45,10 +45,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Persistence boundary keeps the library in lockstep
 
     func testConfigOnlyPersistSyncsAndWritesTheLibrary() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
-            startingAt: "private func persistConfigurationOnly(",
+            startingAt: "func persistConfigurationOnly(",
             endingBefore: "private func syncActiveFilterFromConfiguration()"
         )
         XCTAssertTrue(block.contains("syncActiveFilterFromConfiguration()"),
@@ -58,11 +58,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testSharedStatePersistSyncsRecordsTokenAndWritesLibrary() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "let didRewriteArtifacts = rewritesRuleArtifacts",
-            endingBefore: "private func persistConfigurationOnly("
+            endingBefore: "func persistConfigurationOnly("
         )
         XCTAssertTrue(block.contains("syncActiveFilterFromConfiguration()"))
         XCTAssertTrue(block.contains("SharedFilterStatePersistence.writeConfigurationAndLibrary("))
@@ -74,11 +74,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testSyncActiveFilterClearsStaleTokenOnlyOnRealChange() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func syncActiveFilterFromConfiguration() {",
-            endingBefore: "private func persistFilterLibrary()"
+            endingBefore: "func persistFilterLibrary("
         )
         // No-op guard prevents @Published churn; a real change clears the now-stale token.
         XCTAssertTrue(block.contains("guard filter.applyFilterFields(from: configuration) else { return }"))
@@ -92,10 +92,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Migration
 
     func testLaunchLoadMigratesLegacyConfigIntoOneDefaultFilter() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let loadBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadPersistedConfiguration() {",
+            startingAt: "func loadPersistedConfiguration() {",
             endingBefore: "private func loadOrMigrateFilterLibrary()"
         )
         XCTAssertTrue(loadBlock.contains("loadOrMigrateFilterLibrary()"),
@@ -104,9 +104,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
-            // member after the migrate + generation-reconcile pair is the artifact persist.
-            endingBefore: "private func persistPreparedSnapshotArtifacts("
+            // Include migration and generation reconciliation within the persistence concern.
+            endingBefore: "// MARK: - Sudoku easter egg persistence"
         )
         XCTAssertTrue(migrateBlock.contains(".seededDefaults(active: .balanced)"),
                       "Absent/empty/old-schema library ⇒ seed the three default filters with Balanced active.")
@@ -148,10 +147,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - GC widen
 
     func testArtifactPublishRetainsEveryFilterCompiledToken() throws {
-        let appSource = try readSource(.appViewModel)
+        let appSource = try readAppViewModelSource()
         let publishBlock = try sourceBlock(
             in: appSource,
-            startingAt: "private func persistPreparedSnapshotArtifacts(",
+            startingAt: "func persistPreparedSnapshotArtifacts(",
             endingBefore: "private func retainedFilterArtifactTokens()"
         )
         XCTAssertTrue(publishBlock.contains("additionalRetainedTokens: retainedFilterArtifactTokens()"),
@@ -160,7 +159,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let retainBlock = try sourceBlock(
             in: appSource,
             startingAt: "private func retainedFilterArtifactTokens() -> [String] {",
-            endingBefore: "private func persistSharedState("
+            endingBefore: "func persistSharedState("
         )
         XCTAssertTrue(retainBlock.contains("filter.lastCompiledToken"),
                       "Retention is built from each hosted filter's compiled token.")
@@ -177,12 +176,99 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
     // MARK: - Phase 1: switch / create / delete (view-model)
 
+    func testFilterSwitchConfigurationOwnershipIsExplicitAndComplete() throws {
+        let source = try readAppViewModelSource()
+        let configurationSource = try readSource(.appConfiguration)
+        let filterPlanFields: Set<String> = [
+            "enabledBlocklistIDs",
+            "customBlocklists",
+            "blockedDomains",
+            "allowedDomains",
+        ]
+        let deviceGlobalFields: Set<String> = [
+            "dnsPatchEnabled",
+            "usesExplicitDNSTiers",
+            "savedDNSResolutionSelections",
+            "protectionEnabled",
+            "resolverPresetID",
+            "customResolverAddress",
+            "customResolverSecondaryAddress",
+            "customResolverName",
+            "fallbackToDeviceDNS",
+            "usesEncryptedDeviceDNSFallback",
+            "fallbackResolverPresetID",
+            "fallbackCustomResolverAddress",
+            "fallbackCustomResolverSecondaryAddress",
+            "fallbackCustomResolverName",
+            "keepFilteringCounts",
+            "keepDomainDiagnostics",
+            "keepNetworkActivity",
+            "keepLavaGuardProgress",
+            "isPaid",
+            "qaProbeSet",
+            "lavaGuardUnlocks",
+            "configurationGeneration",
+            "chainedUpstreamEnabled",
+            "wireGuardSetupEnabled",
+            "chainedTierOneFallbackEnabled",
+        ]
+        let allFields = filterPlanFields.union(deviceGlobalFields)
+
+        XCTAssertEqual(allFields.count, 29)
+        XCTAssertEqual(filterPlanFields.intersection(deviceGlobalFields), [])
+        let declaredFields = Set(
+            configurationSource
+                .split(separator: "\n")
+                .compactMap { line -> String? in
+                    let line = line.trimmingCharacters(in: .whitespaces)
+                    guard line.hasPrefix("public var "), !line.contains("{") else { return nil }
+                    return line
+                        .dropFirst("public var ".count)
+                        .split(separator: ":", maxSplits: 1)
+                        .first
+                        .map(String.init)
+                }
+        )
+        XCTAssertEqual(declaredFields, allFields,
+                       "Every AppConfiguration field must be classified as filter-plan or device-global")
+
+        let merge = try sourceBlock(
+            in: source,
+            startingAt: "private func applyingFilterPlan(",
+            endingBefore: "enum SwitchPublication")
+        let mergeCode = sourceCodeOnly(merge)
+        XCTAssertTrue(mergeCode.contains("var mergedConfiguration = liveConfiguration"))
+        for field in filterPlanFields {
+            XCTAssertTrue(
+                mergeCode.contains("mergedConfiguration.\(field) = plannedConfiguration.\(field)"),
+                "The switch must merge filter-plan field \(field)")
+        }
+        for field in deviceGlobalFields {
+            XCTAssertFalse(
+                mergeCode.contains("mergedConfiguration.\(field) ="),
+                "The switch must preserve device-global field \(field) from the live configuration")
+        }
+        XCTAssertTrue(mergeCode.contains("return mergedConfiguration"))
+
+        let publicationCheck = try sourceBlock(
+            in: source,
+            startingAt: "private func switchPublicationMatchesLiveConfiguration(",
+            endingBefore: "enum SwitchPublication")
+        let publicationCheckCode = sourceCodeOnly(publicationCheck)
+        XCTAssertTrue(publicationCheckCode.contains("hasSameConfiguration(as: configuration)"))
+        XCTAssertTrue(
+            publicationCheckCode.contains("preparedSnapshot.snapshot.resolver == configuration.resolverPreset"),
+            "The snapshot check must distinguish resolver selections sharing one transport")
+        XCTAssertTrue(publicationCheckCode.contains("FilterRuleBudget.fitsTierBudget"))
+        XCTAssertTrue(publicationCheckCode.contains("configuration.limits.maxFilterRules"))
+    }
+
     func testSwitchCommitsOnlyAfterPrepareAndKeepsPreviousOnFailure() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
-            endingBefore: "private enum SwitchPublication"
+            endingBefore: "enum SwitchPublication"
         )
         // Refuses no-op / unknown / frozen targets (no-op + unknown via the shared FilterSwitchPlan).
         XCTAssertTrue(block.contains("FilterSwitchPlan.make(toFilterID: id, configuration: configuration, library: library)"))
@@ -191,14 +277,75 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let prepareIdx = try XCTUnwrap(block.range(of: "prepareSwitchPublication(")?.lowerBound)
         let commitIdx = try XCTUnwrap(block.range(of: "library.setActiveFilter(id: id)")?.lowerBound)
         XCTAssertLessThan(prepareIdx, commitIdx, "The switch must commit only after prepare/reuse succeeds.")
-        XCTAssertTrue(block.contains("configuration = nextConfiguration"))
-        XCTAssertTrue(block.contains("try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)"))
+        XCTAssertTrue(block.contains("var switchConfiguration = applyingFilterPlan(from: nextConfiguration, onto: configuration)"))
+        XCTAssertTrue(block.contains("while true"),
+                      "The live merge must be rechecked after any snapshot rebuild await.")
+        XCTAssertTrue(
+            block.contains("switchPublicationMatchesLiveConfiguration(publication, configuration: switchConfiguration)"),
+            "The prepared artifact must be checked against the live merged configuration.")
+        XCTAssertTrue(
+            block.contains("publication = .compiled(try await prepareFilterSnapshot(")
+                && block.contains("for: switchConfiguration"),
+            "A stale prepared artifact must be rebuilt from the live merged configuration.")
+        XCTAssertTrue(
+            block.contains("let captureDiagnosticFailureEvent: @Sendable () -> FocusSwitchDiagnosticEvent?")
+                && block.components(separatedBy: "diagnosticFailureEvent: captureDiagnosticFailureEvent").count - 1 == 4,
+            "Every prepare/rebuild/persist boundary must use the same lock-backed diagnostic capture.")
+        XCTAssertTrue(
+            block.contains("applyingCustomBlocklistHashes: prepared.customResult.sourceHashes"),
+            "A rebuild must carry accepted custom-list hashes into the local filter plan.")
+        XCTAssertEqual(
+            block.components(separatedBy: "switchConfiguration = applyingFilterPlan(from: nextConfiguration, onto: configuration)").count - 1,
+            2,
+            "The local target must be refreshed after each snapshot rebuild await.")
+        XCTAssertTrue(
+            block.contains("try await persistSharedState(")
+                && block.contains("preparedSnapshot: publication.preparedSnapshot"))
+        let rebuildIdx = try XCTUnwrap(
+            block.range(of: "for: switchConfiguration")?.lowerBound)
+        let rebuildGateIdx = try XCTUnwrap(
+            block.range(
+                of: "guard configurationReplacementGate.isCurrent(switchToken) else {",
+                range: rebuildIdx..<block.endIndex
+            )?.lowerBound)
+        let commitConfigurationIdx = try XCTUnwrap(
+            block.range(of: "configuration = switchConfiguration", range: rebuildGateIdx..<block.endIndex)?.lowerBound)
+        let rebuiltTargetGuardIdx = try XCTUnwrap(
+            block.range(
+                of: "guard let liveTarget = library.filter(id: id), !isFilterFrozen(id) else {",
+                range: rebuildIdx..<block.endIndex
+            )?.lowerBound)
+        let unchangedTargetGuardIdx = try XCTUnwrap(
+            block.range(
+                of: "guard liveTarget.hasSameFilterScopedFields(as: target) else {",
+                range: rebuiltTargetGuardIdx..<block.endIndex
+            )?.lowerBound)
+        XCTAssertLessThan(rebuildIdx, rebuildGateIdx,
+                          "A rebuild await must be followed by a supersession check before commit.")
+        XCTAssertLessThan(rebuildGateIdx, commitIdx,
+                          "A superseded rebuild must bail before committing the switch.")
+        XCTAssertLessThan(rebuildIdx, rebuiltTargetGuardIdx,
+                          "The target must be revalidated after the final snapshot rebuild.")
+        XCTAssertLessThan(rebuiltTargetGuardIdx, commitConfigurationIdx,
+                          "A deleted or frozen target must bail before the commit configuration is installed.")
+        XCTAssertLessThan(rebuiltTargetGuardIdx, unchangedTargetGuardIdx)
+        XCTAssertLessThan(unchangedTargetGuardIdx, commitConfigurationIdx,
+                          "A target edited during preparation must bail before the stale prepared plan commits.")
+        XCTAssertLessThan(rebuildGateIdx, commitConfigurationIdx,
+                          "The target configuration must stay local until rebuild ownership is confirmed.")
         // Derived rule caches (applyCatalogSyncResult / applyReusablePreparedSnapshot) are applied only
         // AFTER the throwing persist, so a failed switch never leaves them describing the target (the
         // rollback can't restore them).
-        let persistIdx = try XCTUnwrap(block.range(of: "try await persistSharedState(preparedSnapshot: publication.preparedSnapshot)")?.lowerBound)
+        let persistIdx = try XCTUnwrap(block.range(of: "try await persistSharedState(")?.lowerBound)
         let applyCatalogIdx = try XCTUnwrap(block.range(of: "applyCatalogSyncResult(prepared.catalogResult)")?.lowerBound)
-        XCTAssertLessThan(persistIdx, applyCatalogIdx, "Derived catalog/rule state must be applied only after the switch persists.")
+        // GUARDED, NOT ASSERTED. `XCTAssertLessThan` is non-fatal and execution continues, so the
+        // `block[persistIdx..<applyCatalogIdx]` below traps if the two calls are ever reordered —
+        // and a trap kills the xctest process, so the whole bundle reports nothing instead of this
+        // one test going red (Codex P2, PR #605).
+        guard persistIdx < applyCatalogIdx else {
+            return XCTFail(
+                "Derived catalog/rule state must be applied only after the switch persists.")
+        }
         // persistSharedState ends in an artifact-actor await; a superseded switch must re-check the
         // gate AFTER it, before the derived-cache tail, or it desyncs caches vs the newer owner's config.
         let postPersistRegion = String(block[persistIdx..<applyCatalogIdx])
@@ -210,6 +357,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(successPart.contains("filterEditTargetID = nil"))
         XCTAssertFalse(successPart.contains("filterEditDraft = nil"),
                        "Per-filter: a switch must NOT clear the previous filter's draft.")
+        let detailTargetClearIdx = try XCTUnwrap(successPart.range(of: "filterEditTargetID = nil")?.lowerBound)
+        let tunnelNotifyIdx = try XCTUnwrap(successPart.range(of: "await notifyTunnelSnapshotUpdated()")?.lowerBound)
+        XCTAssertLessThan(
+            detailTargetClearIdx, tunnelNotifyIdx,
+            "Once the switch is durably published, the editor must stop routing the new active filter through the non-active save path before notify/restore can suspend.")
         // Overlapping switches AND switch-vs-restore/import are serialized by the shared
         // configuration-replacement gate: the attempt claims a token and bails before committing
         // if a newer replacement superseded it. Cover ownership follows presentsPreparationCover —
@@ -221,11 +373,17 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // The target may have been deleted OR frozen (Plus lapsed) during the async prepare —
         // re-validate both before commit, and surface it as a NON-retryable failure (retrying a
         // gone/frozen target just re-fails) instead of silently dropping the cover.
-        XCTAssertTrue(block.contains("guard library.filter(id: id) != nil, !isFilterFrozen(id) else {"))
-        let unavailableGuardIdx = try XCTUnwrap(successPart.range(of: "guard library.filter(id: id) != nil, !isFilterFrozen(id) else {")?.upperBound)
+        XCTAssertTrue(block.contains("guard let liveTarget = library.filter(id: id), !isFilterFrozen(id) else {"))
+        let unavailableGuardIdx = try XCTUnwrap(successPart.range(of: "guard let liveTarget = library.filter(id: id), !isFilterFrozen(id) else {")?.upperBound)
         let unavailableBody = String(successPart[unavailableGuardIdx...])
         XCTAssertTrue(unavailableBody.contains("filterPreparationFailureIsRetryable = false"),
                       "A deleted/frozen target must surface a non-retryable failure.")
+        let changedTargetGuardIdx = try XCTUnwrap(
+            successPart.range(of: "guard liveTarget.hasSameFilterScopedFields(as: target) else {")?.upperBound)
+        let changedTargetBody = String(successPart[changedTargetGuardIdx...])
+        XCTAssertTrue(changedTargetBody.contains("filterPreparationFailureIsRetryable = true"),
+                      "An edited target must stay retryable so a fresh attempt prepares its new fields.")
+        XCTAssertTrue(changedTargetBody.contains("That filter changed while it was being prepared. Try again."))
         // The switch records a retry target so the failure screen's Try Again retries it.
         XCTAssertTrue(block.contains("pendingSwitchFilterID = id"))
         // On failure: a .failed state, and the previously-loaded filter is RESTORED
@@ -236,13 +394,18 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(catchBlock.contains("guard configurationReplacementGate.isCurrent(switchToken) else {"),
                       "The rollback path must also gate on the replacement token.")
         XCTAssertTrue(catchBlock.contains("filterPreparationState = .failed("))
-        XCTAssertTrue(catchBlock.contains("configuration = previousConfiguration"),
-                      "Failure must roll the config back to the previously-loaded filter.")
+        XCTAssertTrue(
+            catchBlock.contains("configuration = applyingFilterPlan(from: previousConfiguration, onto: configuration)"),
+            "Failure must roll only the filter plan back onto the live configuration.")
         XCTAssertTrue(catchBlock.contains("library.setActiveFilter(id: previousActiveID)"),
                       "Failure must roll the active id back to the previously-loaded filter.")
-        XCTAssertTrue(catchBlock.contains("try? persistConfigurationOnly()"),
-                      "The rollback must be persisted (persistSharedState may have written the target to disk before the publish threw).")
-        XCTAssertFalse(catchBlock.contains("configuration = nextConfiguration"), "Failure must not commit the target config.")
+        XCTAssertTrue(catchBlock.contains("try? persistConfigurationOnly(rejectsAdvancedBeyond: rollbackGeneration)"),
+                      "A post-write rollback must persist without overwriting a newer cross-process commit.")
+        let switchCode = sourceCodeOnly(block)
+        XCTAssertFalse(switchCode.contains("configuration = nextConfiguration"),
+                       "Success must not install the stale whole configuration.")
+        XCTAssertFalse(switchCode.contains("configuration = previousConfiguration"),
+                       "Failure must not install the stale whole configuration.")
         XCTAssertFalse(catchBlock.contains("setActiveFilter(id: id)"), "Failure must not commit the target active id.")
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
@@ -253,18 +416,18 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// Instant switch-back: a switch reuses the target filter's still-warm compiled artifacts (a
     /// pointer flip) when valid, and only cold-compiles on a miss — without ever serving stale rules.
     func testSwitchReusesWarmArtifactBeforeCompiling() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         // prepareSwitchPublication: try warm reuse FIRST (gated on the target's lastCompiledToken),
         // fall back to the cold prepareFilterSnapshot on a miss.
         let prepareBlock = try sourceBlock(
             in: source,
             startingAt: "private func prepareSwitchPublication(",
-            endingBefore: "private func warmReusableSnapshotForSwitch("
+            endingBefore: "func warmReusableSnapshotForSwitch("
         )
         // Try the shared warm-reuse helper FIRST, fall back to the cold prepareFilterSnapshot on a miss.
         let warmIdx = try XCTUnwrap(prepareBlock.range(of: "warmReusableSnapshotForSwitch(target: target")?.lowerBound)
-        let coldIdx = try XCTUnwrap(prepareBlock.range(of: "try await prepareFilterSnapshot(for: configuration)")?.lowerBound)
+        let coldIdx = try XCTUnwrap(prepareBlock.range(of: "try await prepareFilterSnapshot(")?.lowerBound)
         XCTAssertLessThan(warmIdx, coldIdx, "Warm reuse must be attempted before a cold compile.")
         // Warm reuse is skipped while a catalog sync is in flight — the quiescence gate that makes the
         // warm fast path mutually exclusive with syncs (it bails to a cold compile, which coalesces
@@ -278,7 +441,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // the library token + the sidecar token, each validated by the per-token loader.
         let warmCandidateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func warmReusableSnapshotForSwitch(",
+            startingAt: "func warmReusableSnapshotForSwitch(",
             endingBefore: "private func loadReusableWarmSnapshotForSwitch("
         )
         XCTAssertTrue(warmCandidateBlock.contains("target.lastCompiledToken"),
@@ -292,7 +455,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let appLoadBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadReusableWarmSnapshotForSwitch(",
-            endingBefore: "private func duplicateName(of name: String)"
+            endingBefore: "func duplicateName(of name: String)"
         )
         XCTAssertTrue(appLoadBlock.contains("WarmFilterSnapshotLoader.loadReusable("),
                       "The app loader must delegate to the shared core validator, not reimplement reuse safety.")
@@ -360,7 +523,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let switchBlock = try sourceBlock(
             in: source,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
-            endingBefore: "private enum SwitchPublication"
+            endingBefore: "enum SwitchPublication"
         )
         XCTAssertTrue(switchBlock.contains("applyReusablePreparedSnapshot(reusable)"),
                       "A warm reuse applies the reused snapshot's derived state.")
@@ -384,7 +547,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // rotation that keeps catalog_version constant is still caught.
         XCTAssertTrue(switchBlock.contains("reusable.preparedSnapshot.identity.snapshotInputMismatches("),
                       "Catalog movement is detected by snapshot-input identity (per-source hashes).")
-        XCTAssertTrue(switchBlock.contains("publication = .compiled(try await prepareFilterSnapshot(for: nextConfiguration))"),
+        XCTAssertTrue(switchBlock.contains("publication = .compiled(try await prepareFilterSnapshot(")
+                        && switchBlock.contains("for: nextConfiguration"),
                       "...recompiling cold against the now-current catalog rather than publishing a stale warm flip.")
         // Post-persist: the .warm branch guards the apply against a sync that moved the catalog while
         // persistSharedState was suspended — applyReusablePreparedSnapshot would otherwise roll
@@ -398,8 +562,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "The warm switch must publish once — no post-persist inline recompile/republish.")
         let rehydrateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func rehydrateRuleSetCachesAfterWarmSwitch(",
-            endingBefore: "private func duplicateName(of name: String)"
+            startingAt: "func rehydrateRuleSetCachesAfterWarmSwitch(",
+            endingBefore: "func duplicateName(of name: String)"
         )
         XCTAssertTrue(rehydrateBlock.contains("loadCached(enabledSourceIDs: enabledIDs)"),
                       "Rehydration loads the now-active filter's enabled source rule sets from cache.")
@@ -427,8 +591,8 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The warm switch must mark the per-source caches pending so in-place edits defer.")
         let applyResultBlock = try sourceBlock(
             in: source,
-            startingAt: "private func applyCatalogSyncResult(",
-            endingBefore: "private func loadCachedCatalogAfterSyncFailure("
+            startingAt: "func applyCatalogSyncResult(",
+            endingBefore: "func loadCachedCatalogAfterSyncFailure("
         )
         XCTAssertTrue(applyResultBlock.contains("cachedBlockRuleSets = result.sourceRuleSets")
                         && applyResultBlock.contains("hasPendingWarmSwitchCacheRehydration = false"),
@@ -462,7 +626,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let warmBlock = try sourceBlock(
             in: source,
             startingAt: "func warmFilterArtifact(forFilterID",
-            endingBefore: "private func reconcileWarmNonActiveFilters("
+            endingBefore: "func reconcileWarmNonActiveFilters("
         )
         // A background warm must stay read-only w.r.t. the shared catalog cache: it skips when a
         // low-risk launch migration is pending (prepareFilterSnapshot's migrate can purge latest.json
@@ -494,7 +658,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// and PROMOTES valid entries into the library. The load-bearing safety invariant is that the
     /// background warm loop never writes filter-library.json / app-configuration.json.
     func testBackgroundWarmIndexSidecarWiring() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         // Switch read-fallback: try BOTH the library token and the sidecar token (validated
         // identically). A non-nil-but-STALE library token must not block the fresh sidecar one
@@ -522,7 +686,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // Promotion: reconcile promotes a valid sidecar token into the library instead of recompiling.
         let reconcileBlock = try sourceBlock(
             in: source,
-            startingAt: "private func reconcileWarmNonActiveFilters(",
+            startingAt: "func reconcileWarmNonActiveFilters(",
             endingBefore: "/// Promote a sidecar"
         )
         XCTAssertTrue(reconcileBlock.contains("warmIndex.token(forFilterID:"),
@@ -539,19 +703,24 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let promoteBlock = try sourceBlock(
             in: source,
             startingAt: "private func promoteWarmTokenIntoLibrary(",
-            endingBefore: "private func warmNonActiveFiltersInBackground("
+            endingBefore: "func warmNonActiveFiltersInBackground("
         )
         XCTAssertTrue(promoteBlock.contains("persistLibraryOnlyChange(rollingBackTo:"),
                       "Promotion is a foreground library-only write.")
 
         // The background warm loop is wired into the BGTask refresh, after the active publish.
-        XCTAssertTrue(source.contains("await warmNonActiveFiltersInBackground()"),
-                      "The background refresh must warm non-active filters after publishing the active one.")
+        XCTAssertTrue(source.contains("await warmNonActiveFiltersInBackground(window: .processing)"),
+                      "The background refresh must warm non-active filters after publishing the active one, "
+                        + "in the LONG window: the fetch window's admission and contention policies would "
+                        + "make the post-publish pass hand itself away or skip large filters (PR #646).")
 
+        // Anchored on the UNDER-LOCK pass, not the single-flight wrapper that now precedes it — the
+        // assertions below are about the loop, and the wrapper would make the block a superset that
+        // happens to satisfy them (PR #646).
         let bgBlock = try sourceBlock(
             in: source,
-            startingAt: "private func warmNonActiveFiltersInBackground(",
-            endingBefore: "// MARK: - Focus auto-switch coordination (LAV-100 Phase 3)"
+            startingAt: "private func warmNonActiveFiltersInBackgroundUnderLock(",
+            endingBefore: "static var isWarmPassInFlight"
         )
         XCTAssertTrue(bgBlock.contains("guard isHeadless"),
                       "The background warm loop runs only headless (the foreground uses the library path).")
@@ -561,8 +730,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The background warm loop records warmed filters in the sidecar (its only write).")
         XCTAssertTrue(bgBlock.contains("configuration.limits.maxFilterRules"),
                       "The per-run budget must be sized to the user's TIER, not the free ceiling, or Plus-sized filters never background-warm (panel finding).")
-        XCTAssertTrue(bgBlock.contains("min(estimatedRuleCount(forFilterID: id), perRunRuleBudget)"),
-                      "The over-counting estimate must be capped at the budget so the coldest candidate always fits (panel finding).")
+        XCTAssertTrue(bgBlock.contains("window.admitsCandidate("),
+                      "Admission is the WINDOW's decision now: the long window still caps the over-counting "
+                        + "estimate at the budget so its coldest candidate always fits (panel finding), but a "
+                        + "fetch window must refuse an oversized candidate instead — admitting it first is what "
+                        + "made the short window never finish a run (PR #646). BackgroundWarmPassWindowTests "
+                        + "covers both behaviours.")
         XCTAssertEqual(bgBlock.components(separatedBy: "guard !Task.isCancelled else { return }").count - 1, 3,
                        "Every app-group-mutating path (empty-candidates save, post-loop save, pre-GC) must be deadline-guarded (panel findings).")
         XCTAssertTrue(bgBlock.contains("estimatedRuleCount(forFilterID:"),
@@ -605,7 +778,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     /// the post-persist (artifact-actor await) side-effect tail — otherwise a superseded replacer
     /// silently reverts a concurrent one or desyncs the rule caches.
     func testEveryWholesaleReplacerClaimsAndRechecksTheGate() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // Import: claims importToken, re-checks before commit AND after the persist (applyCatalogSyncResult
         // is deferred past the persist so a superseded import can't desync caches).
@@ -615,9 +788,13 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             endingBefore: "func retryFilterPreparation()"
         )
         XCTAssertTrue(importBlock.contains("let importToken = configurationReplacementGate.begin()"))
-        let importPersistIdx = try XCTUnwrap(importBlock.range(of: "try await persistSharedState(preparedSnapshot: prepared.snapshot)")?.lowerBound)
+        let importPersistIdx = try XCTUnwrap(importBlock.range(of: "try await persistSharedState(preparedSnapshot: prepared.snapshot,")?.lowerBound)
         let importApplyIdx = try XCTUnwrap(importBlock.range(of: "applyCatalogSyncResult(prepared.catalogResult)")?.lowerBound)
-        XCTAssertLessThan(importPersistIdx, importApplyIdx, "Import must defer derived-cache apply past the persist.")
+        // GUARDED, NOT ASSERTED — the range below traps if these are ever reordered, and a
+        // trap kills the whole test bundle rather than failing this test (Codex P2, PR #605).
+        guard importPersistIdx < importApplyIdx else {
+            return XCTFail("Import must defer derived-cache apply past the persist.")
+        }
         XCTAssertTrue(String(importBlock[importPersistIdx..<importApplyIdx]).contains("guard configurationReplacementGate.isCurrent(importToken)"),
                       "Import must re-check the gate after the persist await, before its tail.")
         let importCommitIdx = try XCTUnwrap(importBlock.range(of: "configuration = nextConfiguration")?.lowerBound)
@@ -639,7 +816,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertLessThan(draftPrecheckIdx, draftCommitIdx, "Draft apply must re-check the gate before committing.")
         let draftPersistIdx = try XCTUnwrap(draftBlock.range(of: "try await persistSharedState(preparedSnapshot: prepared.snapshot)")?.lowerBound)
         let draftApplyIdx = try XCTUnwrap(draftBlock.range(of: "applyCatalogSyncResult(prepared.catalogResult)")?.lowerBound)
-        XCTAssertLessThan(draftPersistIdx, draftApplyIdx, "Draft apply must defer derived-cache apply past the persist.")
+        // GUARDED, NOT ASSERTED — the range below traps if these are ever reordered, and a
+        // trap kills the whole test bundle rather than failing this test (Codex P2, PR #605).
+        guard draftPersistIdx < draftApplyIdx else {
+            return XCTFail("Draft apply must defer derived-cache apply past the persist.")
+        }
         XCTAssertTrue(String(draftBlock[draftPersistIdx..<draftApplyIdx]).contains("guard configurationReplacementGate.isCurrent(draftToken) else {"),
                       "Draft apply must re-check the gate after the persist await, before its tail.")
         // The catch must ALSO re-check (like switchToFilter's catch): a superseded apply that throws
@@ -661,29 +842,30 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                        "Only the draft apply owns the cover unconditionally.")
         XCTAssertEqual(app.components(separatedBy: "begin(ownsPreparationCover: presentsPreparationCover)").count - 1, 1,
                        "The filter switch claims cover ownership conditionally (silent for a Focus reconcile apply).")
-        XCTAssertTrue(app.contains("private func dismissPreparationCoverIfStrandedBySupersession()"),
+        XCTAssertTrue(app.contains("func dismissPreparationCoverIfStrandedBySupersession()"),
                       "A superseded cover-driver dismisses its stranded cover via a shared helper.")
         XCTAssertTrue(app.contains("guard !configurationReplacementGate.currentOwnerOwnsPreparationCover else { return }"),
                       "The dismiss helper must no-op when the new owner is itself a cover-driver.")
         // Every supersession bail in the two cover-driving replacers routes through the helper. Each
-        // path (switch / draft apply) bails at: commit + post-persist + saving-top-before-tick +
+        // path (switch / draft apply) bails at: commit + post-rebuild + post-persist + saving-top-before-tick +
         // render-yield-before-Success + success-hold + rollback/catch = 6 each. The three progress-bar
         // bails guard the shared cover against a newer preparation superseding us during the
         // notify/restore awaits, the 3/4-render yield, and the 1.2s success hold respectively (#284 P2).
-        XCTAssertEqual(app.components(separatedBy: "dismissPreparationCoverIfStrandedBySupersession()").count - 1, 13,
-                       "Twelve supersession bails call the dismiss helper, plus its one definition.")
+        XCTAssertEqual(app.components(separatedBy: "dismissPreparationCoverIfStrandedBySupersession()").count - 1, 14,
+                       "Thirteen supersession bails call the dismiss helper, plus its one definition.")
 
         // The retryable flag must ONLY be reset to true at the two fresh-attempt entry points
         // (switch + draft apply) — not scattered — and set false only on the dead-end edge. Total
-        // `= true` sites = 1 property-declaration default + those 2 resets.
+        // The declaration default is now owned by FilterDraftController.
         XCTAssertEqual(app.components(separatedBy: "filterPreparationFailureIsRetryable = true").count - 1, 3,
-                       "Retryability resets only at the two fresh-attempt entry points (+ the declaration default).")
+                       "Retryability is enabled at the two fresh-attempt entry points and the target-changed retry exit.")
+        XCTAssertTrue(try readSource(.filterDraftController).contains("@Published var preparationFailureIsRetryable = true"))
         XCTAssertEqual(app.components(separatedBy: "filterPreparationFailureIsRetryable = false").count - 1, 1,
                        "Retryability is cleared only on the single deleted/frozen dead-end edge.")
     }
 
     func testWarmArtifactRetentionKeepsEveryNonFrozenFilter() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "private func retainedFilterArtifactTokens() -> [String] {",
@@ -702,7 +884,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testCreateFilterIsPlusGatedAndLibraryOnly() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let block = try sourceBlock(
             in: source,
             startingAt: "func createFilter(name: String, duplicatingFilterID:",
@@ -711,7 +893,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(block.contains("guard canCreateFilter else { return nil }"),
                       "Creating a filter must be gated on the tier filter cap.")
         XCTAssertTrue(block.contains("library.append(newFilter)"))
-        XCTAssertTrue(block.contains("persistFilterLibrary()"))
+        // Anchored on what createFilter itself calls. This previously matched a bare
+        // `persistFilterLibrary()` that lives in `persistLibraryOnlyChange` — which falls inside
+        // this block's boundaries — so it passed without ever describing createFilter.
+        XCTAssertTrue(block.contains("persistLibraryOnlyChange(rollingBackTo: previousLibrary)"))
+        XCTAssertFalse(
+            block.contains("try await persistSharedState("),
+            "Creation is library-only: no config write, no publish."
+        )
         // The new filter is warmed off the hot path (background Task) so a later switch is an
         // instant pointer flip; creation itself stays library-only and never republishes.
         XCTAssertTrue(block.contains("Task { await warmFilterArtifact(forFilterID: newID) }"),
@@ -725,7 +914,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testDeleteFilterDelegatesToInvariantSafeRemoval() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let deleteBlock = try sourceBlock(
             in: source,
             startingAt: "func deleteFilter(id: String) -> Bool {",
@@ -741,32 +930,22 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // rename enforces the same model-level freeze.
         let renameBlock = try sourceBlock(
             in: source,
-            startingAt: "func renameFilter(id: String, to name: String) {",
+            startingAt: "func renameFilter(id: String, to name: String, emoji: String? = nil) -> Bool {",
             endingBefore: "func deleteFilter(id: String) -> Bool {"
         )
         XCTAssertTrue(renameBlock.contains("!isFilterFrozen(id)"),
                       "Rename must refuse a frozen (read-only) filter at the model layer.")
     }
 
-    func testFrozenFilterRuleMatchesDowngradeSemantics() throws {
-        let source = try readSource(.appViewModel)
-        // Freeze is count-aware: nothing freezes while the library fits the tier cap (Free's three
-        // seeded filters are all switchable); only a lapsed-Plus library OVER the cap freezes its
-        // excess non-active filters. The active filter is never frozen.
-        XCTAssertTrue(source.contains("guard library.filters.count > cap, id != library.activeFilterID else { return false }"),
-                      "Freeze only applies when the library exceeds the tier cap; the active filter is never frozen.")
-    }
-
     func testMigrationWriteIsSkippedForHeadlessRefreshAndRetryRoutesToSwitch() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         // The headless background-refresh model must not persist the migration (read-only),
         // or it could overwrite a foreground-created library (read→write race).
         let migrateBlock = try sourceBlock(
             in: source,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
-            // member after the migrate + generation-reconcile pair is the artifact persist.
-            endingBefore: "private func persistPreparedSnapshotArtifacts("
+            // Include migration and generation reconciliation within the persistence concern.
+            endingBefore: "// MARK: - Sudoku easter egg persistence"
         )
         XCTAssertTrue(migrateBlock.contains("if !isHeadless {"),
                       "Migration persist must be gated to foreground (non-headless) instances.")
@@ -789,19 +968,19 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "The backup payload must carry the whole filter library.")
         XCTAssertTrue(core.contains("func restoredFilterLibrary() -> FilterLibrary?"))
 
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         XCTAssertTrue(app.contains("filterLibrary: library"),
                       "Turn-on must seal the library into the payload.")
-        XCTAssertTrue(app.contains("payload.restoredFilterLibrary()"),
-                      "Restore must rebuild every hosted filter.")
-        XCTAssertTrue(app.contains("private func persistLibraryOnlyChange(rollingBackTo previousLibrary: FilterLibrary)"),
+        XCTAssertTrue(app.contains("library = plan.library"),
+                      "Restore must apply the reviewed authoritative library.")
+        XCTAssertTrue(app.contains("func persistLibraryOnlyChange("),
                       "Library-only changes must schedule a backup, like config changes.")
         // A failed library-only write must roll the published library back to its pre-mutation
         // snapshot, so a change reported as failed isn't left live (or persisted later by config).
         let persistLibBlock = try sourceBlock(
             in: app,
-            startingAt: "private func persistLibraryOnlyChange(rollingBackTo previousLibrary: FilterLibrary)",
-            endingBefore: "func renameFilter(id: String, to name: String)"
+            startingAt: "func persistLibraryOnlyChange(",
+            endingBefore: "func renameFilter(id: String, to name: String, emoji: String? = nil)"
         )
         XCTAssertTrue(persistLibBlock.contains("library = previousLibrary"),
                       "A failed library-only write must roll back the in-memory library.")
@@ -837,19 +1016,21 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // switch); the actual stamp is single-sourced in the shared writer (asserted below at lines ~813).
         let persistFilterLibraryBlock = try sourceBlock(
             in: app,
-            startingAt: "private func persistFilterLibrary(",
+            startingAt: "func persistFilterLibrary(",
             // loadCustomizationPreferences moved to CustomizationController (Phase D5);
             // the next hub member after the library-only persist is the progress load.
-            endingBefore: "private func loadLavaGuardProgress()"
+            endingBefore: "func loadLavaGuardProgress()"
         )
         XCTAssertTrue(persistFilterLibraryBlock.contains("persistConfigurationOnly("),
                       "persistFilterLibrary must delegate to persistConfigurationOnly so a library-only edit bumps the shared generation (and the extension's fence can trip).")
+        XCTAssertTrue(
+            persistFilterLibraryBlock.contains("rejectsAdvancedBeyond: configuration.configurationGeneration"),
+            "A foreground library-only write must fence against its loaded generation so it cannot overwrite a newer headless filter switch with a stale whole pair.")
         let loadBlock = try sourceBlock(
             in: app,
             startingAt: "private func loadOrMigrateFilterLibrary() {",
-            // persistDiagnostics moved to DiagnosticsController (Phase D4); the next hub
-            // member after the migrate + generation-reconcile pair is the artifact persist.
-            endingBefore: "private func persistPreparedSnapshotArtifacts("
+            // Include migration and generation reconciliation within the persistence concern.
+            endingBefore: "// MARK: - Sudoku easter egg persistence"
         )
         XCTAssertTrue(loadBlock.contains("lostWriteRace(againstConfigurationGeneration: configuration.configurationGeneration)"),
                       "Load must reject a library that lost the two-file write race against the config.")
@@ -867,7 +1048,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(core.contains("public func resealingPayload("),
                       "The envelope must re-seal a new payload while keeping every key slot.")
 
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         // The backup cluster lives in BackupController since the Phase D1 peel; the hub
         // keeps the restore-application half (applyRestoredBackupPayload) pinned below.
         let controller = try readSource(.backupController)
@@ -879,7 +1060,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let scheduleBlock = try sourceBlock(
             in: controller,
             startingAt: "func scheduleAutomaticBackupAfterConfigurationChange() {",
-            endingBefore: "private func runScheduledAutomaticBackup()"
+            endingBefore: "private func runScheduledAutomaticBackup("
         )
         let resealIdx = try XCTUnwrap(scheduleBlock.range(of: "refreshLocalEncryptedBackupEnvelope()")?.lowerBound)
         // Re-seal must run BEFORE the cached-state gate, not after: a stale .off encryptedBackupState
@@ -888,98 +1069,42 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertLessThan(resealIdx, configuredGateIdx,
                           "Re-seal must be decoupled from the cached backup state (run before the isConfigured gate).")
 
-        // Restore is library-authoritative: the restored library's active filter regenerates
-        // config. This half stays on the HUB (applyRestoredBackupPayload — the bridge method
-        // the controller's restore calls after its gate re-check + envelope staging).
-        let restoreBlock = try sourceBlock(
-            in: app,
-            startingAt: "if let restoredLibrary = payload.restoredFilterLibrary()",
-            endingBefore: "try await persistSharedState("
-        )
-        XCTAssertTrue(restoreBlock.contains("mirrorActiveFilterIntoConfiguration()"),
-                      "Restore must recover the active id + contents together from the restored library.")
-        // EVERY hosted filter's known custom blocklists migrate to catalog sources (not just the
-        // active one mirrored into config), then normalize BEFORE the isValid check (mirrors the
-        // launch load path): a backup with filters but a stale activeFilterID is repaired, not
-        // discarded down to one migrated filter.
-        let migrateIdx = try XCTUnwrap(restoreBlock.range(of: ".migratingKnownCustomBlocklistsToCatalogSources()")?.lowerBound)
-        let normalizeIdx = try XCTUnwrap(restoreBlock.range(of: ".normalized()")?.lowerBound)
-        XCTAssertLessThan(migrateIdx, normalizeIdx,
-                          "Restore must migrate every hosted filter, then normalize, before isValid.")
-        XCTAssertTrue(restoreBlock.contains("filterEditDrafts.removeAll()"),
-                      "Restore must wipe all per-filter drafts so none can overwrite the restored library.")
-
-        // After restore the envelope is on disk, so the cached backup state must be refreshed
-        // from the store (it was .off on a fresh device); otherwise post-restore edits are gated
-        // off by the stale .off state and never re-seal / re-upload.
-        let restoreFnBlock = try sourceBlock(
-            in: controller,
-            startingAt: "func restoreEncryptedBackup(secret: String, mode: BackupRestoreMode) async throws {",
-            endingBefore: "func clearEncryptedBackup() async {"
-        )
-        XCTAssertTrue(restoreFnBlock.contains("loadEncryptedBackupState()"),
-                      "Restore must refresh the cached backup state from the now-present envelope.")
-        // Restore opts into config-first persistence: a partial write must lose the re-restorable
-        // library, never the unreconstructable device-global config. The persist lives in the
-        // hub's applyRestoredBackupPayload (the controller must not touch the persist funnel).
-        let applyRestoredBlock = try sourceBlock(
-            in: app,
-            startingAt: "func applyRestoredBackupPayload(_ payload: BackupConfigurationPayload) async throws {"
-        )
-        XCTAssertTrue(applyRestoredBlock.contains("persistSharedState(prioritizesConfigurationDurability: true)"),
-                      "Restore must persist config-first so a partial write can't reset device-global config to defaults.")
-
-        // A new-device restore (recovery phrase / passkey) re-keys the envelope's device slot
-        // with a fresh device secret so the device can re-seal later (otherwise post-restore
-        // edits silently never back up). The recovery-phrase candidate loop is executable in
-        // BackupRecoveryPhraseUnlockTests (Phase D1 drop-down).
-        XCTAssertTrue(core.contains("unlockingAssistedRecoveryPhrase"))
-        XCTAssertTrue(core.contains("unlockingPasskeyPRFOutput"))
-        XCTAssertTrue(controller.contains("rekeyingDeviceSlotWithNormalizedRecoveryPhrase("))
-        XCTAssertTrue(controller.contains("unlockingPasskeyPRFOutput: prfOutput"))
-        // The rekey is REQUIRED for recovery/passkey restores (guard/throw), not best-effort: a
-        // silent rekey failure would fall into the device-key path with no saved secret, so
-        // post-restore edits would silently stop backing up (Codex r22).
-        XCTAssertTrue(restoreFnBlock.contains("guard let rekeyed = envelope.rekeyingDeviceSlotWithNormalizedRecoveryPhrase("),
-                      "A failed recovery-phrase rekey must fail the restore, not proceed.")
-        XCTAssertTrue(restoreFnBlock.contains("guard let rekeyed = try? envelope.rekeyingDeviceSlot("),
-                      "A failed passkey rekey must fail the restore, not proceed.")
-        XCTAssertFalse(restoreFnBlock.contains("if let rekeyed = envelope.rekeyingDeviceSlotWithNormalizedRecoveryPhrase("),
-                       "The recovery rekey must not be best-effort (if let).")
-        // The re-key writes must PROPAGATE (not try?) so a failed persist fails the restore
-        // instead of silently leaving a saved secret that can't unwrap the on-disk envelope.
-        let rekeyPersist = try sourceBlock(
-            in: controller,
-            startingAt: "if didRekeyDeviceSlot {",
-            endingBefore: "try await hub.applyRestoredBackupPayload(payload)"
-        )
-        XCTAssertTrue(rekeyPersist.contains("try backupKeychainStore.saveDeviceSecret(freshDeviceSecret)"))
-        XCTAssertTrue(rekeyPersist.contains("try saveLocalEncryptedBackupEnvelope(localEnvelope)"))
-        XCTAssertFalse(rekeyPersist.contains("try? backupKeychainStore.saveDeviceSecret"))
-
-        // Restore is serialized against switch/import by the shared replacement gate (still
-        // hub-owned; the controller holds only opaque tokens via the bridge): it claims the
-        // token at entry (superseding a suspended switch) and re-checks it after the unlock
-        // awaits, BEFORE any disk write or app-state mutation — the hub-side apply — aborting
-        // rather than clobbering a newer owner.
-        let beginIdx = try XCTUnwrap(restoreFnBlock.range(of: "let replacementToken = hub.beginConfigurationReplacement()")?.lowerBound)
-        let recheckIdx = try XCTUnwrap(restoreFnBlock.range(of: "guard hub.isConfigurationReplacementCurrent(replacementToken) else {")?.lowerBound)
-        let applyIdx = try XCTUnwrap(restoreFnBlock.range(of: "try await hub.applyRestoredBackupPayload(payload)")?.lowerBound)
-        XCTAssertLessThan(beginIdx, recheckIdx, "Restore must claim the replacement token at entry.")
-        XCTAssertLessThan(recheckIdx, applyIdx, "Restore must re-check the token before mutating app state.")
-        XCTAssertTrue(restoreFnBlock.contains("throw EncryptedBackupError.supersededByConcurrentConfigurationChange"))
-        // The hub-state mutation happens only inside the bridge's apply, after the token re-check.
-        XCTAssertTrue(applyRestoredBlock.contains("configuration = payload.restoredConfiguration()"))
-        // The bridge maps the tokens straight onto the hub's gate.
-        XCTAssertTrue(app.contains("configurationReplacementGate.begin()"))
-        XCTAssertTrue(app.contains("configurationReplacementGate.isCurrent(token)"))
-
-        // deviceKey reseal-clobber fix: the local envelope is staged BEFORE the hub persist
-        // (whose re-seal then reflects the restored state), and there is NO post-persist save
-        // to clobber it.
-        let lastStageIdx = try XCTUnwrap(restoreFnBlock.range(of: "saveLocalEncryptedBackupEnvelope(localEnvelope)", options: .backwards)?.lowerBound)
-        XCTAssertLessThan(lastStageIdx, applyIdx,
-                          "Every local-envelope save must precede the persist so the persist's re-seal isn't clobbered.")
+        // Library migration and active-field projection execute in BackupRestorePlanTests.
+        // These pins cover only the app-only staging, persistence and notification boundaries.
+        let prepare = try sourceBlock(in: controller, startingAt: "func prepareEncryptedBackupRestore(",
+                                      endingBefore: "func discardPreparedBackupRestore(")
+        let confirm = try sourceBlock(in: controller, startingAt: "func confirmPreparedBackupRestore(",
+                                      endingBefore: "func clearEncryptedBackup() async {")
+        let apply = try sourceBlock(in: app, startingAt: "func applyReviewedBackup(",
+                                    endingBefore: "// MARK: - LavaSecurity+ hub bridge")
+        XCTAssertTrue(prepare.contains("let replacementToken = hub.beginConfigurationReplacement()"))
+        XCTAssertTrue(prepare.contains("hub.isConfigurationReplacementCurrent(replacementToken) else"))
+        XCTAssertTrue(prepare.contains("try Task.checkCancellation()"))
+        XCTAssertTrue(prepare.contains("try hub.prepareBackupRestorePlan(payload)"))
+        XCTAssertFalse(prepare.contains("saveDeviceSecret("))
+        XCTAssertFalse(prepare.contains("saveLocalEncryptedBackupEnvelope("))
+        XCTAssertFalse(prepare.contains("applyReviewedBackup("))
+        XCTAssertTrue(prepare.contains("guard let rekeyed = envelope.rekeyingDeviceSlotWithNormalizedRecoveryPhrase("))
+        XCTAssertTrue(prepare.contains("guard let rekeyed = try? envelope.rekeyingDeviceSlot("))
+        XCTAssertTrue(confirm.contains("pending.review.id == id"))
+        let check = try XCTUnwrap(confirm.range(of: "try hub.validateBackupRestorePlan(")?.lowerBound)
+        let consume = try XCTUnwrap(confirm.range(of: "pendingRestore = nil")?.lowerBound)
+        let key = try XCTUnwrap(confirm.range(of: "try backupKeychainStore.saveDeviceSecret(")?.lowerBound)
+        let save = try XCTUnwrap(confirm.range(of: "try backupEnvelopeStore.saveEnvelope(acceptedEnvelope)")?.lowerBound)
+        let applyIndex = try XCTUnwrap(confirm.range(of: "try await hub.applyReviewedBackup(")?.lowerBound)
+        XCTAssertLessThan(check, consume)
+        XCTAssertLessThan(consume, key)
+        XCTAssertLessThan(applyIndex, key)
+        XCTAssertLessThan(key, save)
+        XCTAssertFalse(confirm.contains("try? backupKeychainStore.saveDeviceSecret"))
+        XCTAssertTrue(confirm.contains("loadEncryptedBackupState()"))
+        XCTAssertTrue(apply.contains("try validateBackupRestorePlan(plan, resolverChangeConfirmed: resolverChangeConfirmed)"))
+        XCTAssertTrue(apply.contains("configuration = plan.configuration"))
+        XCTAssertTrue(apply.contains("library = plan.library"))
+        XCTAssertTrue(apply.contains("filterDrafts.resetSessions()"))
+        XCTAssertTrue(apply.contains("prioritizesConfigurationDurability: true"))
+        XCTAssertTrue(apply.contains("expectedConfigurationGeneration: plan.previousConfiguration.configurationGeneration"))
+        XCTAssertTrue(app.contains("rejectsAdvancedBeyond: expectedConfigurationGeneration"))
     }
 
     func testRestoreToDefaultClearsEditDraftAndClaimsTheReplacementGate() throws {
@@ -988,7 +1113,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // draft — otherwise a draft preserved by the edge-swipe path resumes on the next My
         // filter open and Save applies a pre-restore edit over the freshly seeded Balanced
         // filter with no second restore confirmation (#118 follow-up).
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         let restore = try sourceBlock(
             in: app,
             startingAt: "func restoreFiltersToDefault() {",
@@ -997,10 +1122,10 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(restore.contains("configurationReplacementGate.begin()"),
                       "Restore must claim the replacement gate.")
         // Per-filter: restore reseeds the whole library, so it wipes ALL drafts (not a single slot).
-        XCTAssertTrue(restore.contains("filterEditDrafts.removeAll()"),
+        XCTAssertTrue(restore.contains("filterDrafts.resetSessions()"),
                       "Restore must wipe every per-filter draft before reseeding.")
         // The draft wipe must precede the library swap (drafts are sourced from the old library).
-        let clearIdx = try XCTUnwrap(restore.range(of: "filterEditDrafts.removeAll()")?.lowerBound)
+        let clearIdx = try XCTUnwrap(restore.range(of: "filterDrafts.resetSessions()")?.lowerBound)
         let swapIdx = try XCTUnwrap(restore.range(of: "library = .seededDefaults(active: .balanced)")?.lowerBound)
         XCTAssertLessThan(clearIdx, swapIdx, "Drafts must be wiped before the library is replaced.")
     }
@@ -1008,77 +1133,29 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     // MARK: - Phase 1: surfaces (FiltersView)
 
     func testFiltersViewExposesInEffectRowAllFiltersPageAndSwitch() throws {
-        let source = try readFiltersSourceAggregate()
-        // The in-effect ("Now filtering") row and the library entry are consolidated
-        // under a single conversational "What's filtering?" section.
-        XCTAssertTrue(source.contains(#"LavaSectionGroup("What's filtering?")"#))
-        XCTAssertTrue(source.contains("struct FilterInEffectRow"))
-        XCTAssertTrue(source.contains("struct AllFiltersView"))
-        XCTAssertTrue(source.contains("struct FilterLibraryRow"))
-        XCTAssertTrue(source.contains("struct CreateFilterSheet"))
-        XCTAssertTrue(source.contains("viewModel.switchToFilter(id: filter.id)"))
-        // Tapping a non-active filter opens an Apply/View dialog; the row defers to it.
-        XCTAssertTrue(source.contains("chooseAction: { filterActionChoice = filter }"))
-        // Per-filter drafts: Apply/View act directly with no discard confirmation (neither destroys
-        // another filter's draft).
-        XCTAssertFalse(source.contains("filterActionDiscardsUnsavedDraft"),
-                       "Per-filter: the discard-confirmation predicate must be gone.")
-        XCTAssertFalse(source.contains("Discard unsaved changes?"),
-                       "Per-filter: the Apply/View discard dialog must be gone.")
-        // applyFilter switches — a live protection change gated behind the same fresh-auth surface
-        // as save/import (the guard must precede the switch call).
-        let applyBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func applyFilter(_ filter: Filter) {",
-            endingBefore: "private func viewFilter(_ filter: Filter) {"
-        )
-        let authIdx = try XCTUnwrap(applyBlock.range(of: "requireFreshAuthentication(")?.lowerBound)
-        let switchIdx = try XCTUnwrap(applyBlock.range(of: "switchToFilter(id: filter.id)")?.lowerBound)
-        XCTAssertLessThan(authIdx, switchIdx, "Fresh-auth must gate the filter switch.")
-        XCTAssertTrue(applyBlock.contains("for: .filterEditing"))
-        // viewFilter opens the tapped (non-active) filter's detail without loading it.
-        let viewBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func viewFilter(_ filter: Filter) {",
-            endingBefore: "@ViewBuilder private var restoreDefaultsButton"
-        )
-        XCTAssertTrue(viewBlock.contains("viewModel.beginViewingFilterDetail(id: filter.id)"),
-                      "View must point the detail page at the tapped non-active filter.")
-        XCTAssertTrue(viewBlock.contains("isShowingDetail = true"))
-        XCTAssertTrue(source.contains("viewModel.createFilter(name: name, duplicatingFilterID: duplicateFromID)"))
-        // The off/empty alarm appears on both the in-effect row and the current-filter detail.
-        XCTAssertTrue(source.contains("Blocks nothing — not protected"))
-        XCTAssertTrue(source.contains("viewModel.library.activeFilter.isEmpty"))
-        // Create routes through the paywall when the user is at the free filter cap.
-        XCTAssertTrue(source.contains("if viewModel.canCreateFilter {"))
-        XCTAssertTrue(source.contains("isShowingPaywall = true"))
-        // The filter-preparation cover must have exactly ONE owner in this view (AllFiltersView
-        // pushes MyListCover, so two covers would race), and — since this tab body stays mounted —
-        // it must gate on a Filters origin so a Domain History action can't present it.
-        let coverCount = source.components(separatedBy: "FilterPreparationScreen(origin: .filters)").count - 1
-        XCTAssertEqual(coverCount, 1, "Exactly one filter-preparation cover owner in FiltersView.")
-        XCTAssertTrue(source.contains("viewModel.filterPreparationOrigin == .filters"),
-                      "The Filters cover must gate on a Filters origin, not the shared boolean alone.")
+        let source = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(source.contains("model.beginViewingFilterDetail(id: id)"))
+        XCTAssertTrue(source.contains("model.beginCreatingFilter(duplicatingFilterID: templateID)"))
+        XCTAssertTrue(source.contains("await model.switchToFilter(id: id)"))
+        XCTAssertTrue(source.contains("guard library.editSession == reviewedSession, library.commitStagedDeletions()"))
     }
 
     func testNonActiveFilterViewIsDecoupledFromTheActiveFilter() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
-        // PER-FILTER STORAGE: drafts are a dictionary keyed by filter id, with a computed proxy
-        // (current = target ?? active) and an active-keyed accessor. This is what dissolves the
-        // single-slot aliasing the #120/#121 guards worked around.
-        XCTAssertTrue(app.contains("var filterEditDrafts: [String: FilterEditDraft] = [:]"))
+        // The app forwards to the sole draft owner. Per-filter keying, clean/dirty
+        // teardown, and rollback are executable in FilterDraftSessionStateTests.
+        XCTAssertTrue(app.contains("private(set) lazy var filterDrafts = FilterDraftController(context: self)"))
+        XCTAssertFalse(app.contains("var filterEditDrafts:"))
         XCTAssertTrue(app.contains("var filterEditTargetID: String?"))
         let proxy = try sourceBlock(
             in: app,
             startingAt: "var filterEditDraft: FilterEditDraft? {",
             endingBefore: "var activeFilterDraft: FilterEditDraft? {"
         )
-        XCTAssertTrue(proxy.contains("get { filterEditDrafts[currentEditKey] }"))
-        XCTAssertTrue(proxy.contains("set { filterEditDrafts[currentEditKey] = newValue }"))
-        XCTAssertTrue(app.contains("filterEditTargetID ?? activeFilterID"),
-                      "currentEditKey resolves to the active filter when no non-active target is set.")
-        XCTAssertTrue(app.contains("get { filterEditDrafts[activeFilterID] }"),
+        XCTAssertTrue(proxy.contains("get { filterDrafts.draft(activeFilterID: activeFilterID) }"))
+        XCTAssertTrue(proxy.contains("set { filterDrafts.setCurrentDraft(newValue, activeFilterID: activeFilterID) }"))
+        XCTAssertTrue(app.contains("get { filterDrafts.sessions.drafts[activeFilterID] }"),
                       "activeFilterDraft keys by the active id regardless of the detail target.")
 
         // FilterEditScope is gone (it was vestigial — only .blockedDomains was ever used); "is
@@ -1091,14 +1168,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // seeds the draft from it.
         let baseline = try sourceBlock(
             in: app,
-            startingAt: "private var filterDetailBaseline: AppConfiguration {",
+            startingAt: "var filterDetailBaseline: AppConfiguration {",
             endingBefore: "var detailFilter: Filter {"
         )
-        XCTAssertTrue(baseline.contains("guard let id = filterEditTargetID, let target = library.filter(id: id) else"))
+        XCTAssertTrue(baseline.contains("guard let id = filterEditTargetID, let target = filter(id: id) else"))
         for field in ["enabledBlocklistIDs", "customBlocklists", "blockedDomains", "allowedDomains"] {
             XCTAssertTrue(baseline.contains("baseline.\(field) = target.\(field)"))
         }
-        XCTAssertTrue(app.contains("filterEditDraft = FilterEditDraft(configuration: filterDetailBaseline)"))
+        XCTAssertTrue(app.contains("filterDrafts.beginEditing(baseline: filterDetailBaseline, activeFilterID: activeFilterID)"))
 
         // beginViewingFilterDetail just points the page at a filter — no stale-draft drop, because
         // each filter's draft lives under its own key (opening B never touches A's draft).
@@ -1107,7 +1184,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             startingAt: "func beginViewingFilterDetail(id: String?) {",
             endingBefore: "func endViewingFilterDetail() {"
         )
-        XCTAssertTrue(begin.contains("filterEditTargetID = (id == nil || id == library.activeFilterID) ? nil : id"))
+        XCTAssertTrue(begin.contains("filterDrafts.beginViewing(id: id, activeFilterID: activeFilterID)"))
         XCTAssertFalse(begin.contains("filterEditDraft = nil"), "Per-filter: opening a filter must not drop another's draft.")
 
         // endViewingFilterDetail unifies active/non-active: drop a CLEAN draft, keep a DIRTY one in
@@ -1117,9 +1194,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             startingAt: "func endViewingFilterDetail() {",
             endingBefore: "var isFilterEditing: Bool {"
         )
-        XCTAssertTrue(end.contains("if !filterDraftHasChanges {"))
-        XCTAssertTrue(end.contains("filterEditDraft = nil"))
-        XCTAssertTrue(end.contains("filterEditTargetID = nil"))
+        XCTAssertTrue(end.contains("filterDrafts.endViewing(activeFilterID: activeFilterID, hasChanges: filterDraftHasChanges)"))
 
         // The single-slot guards are GONE: no discard-prediction, no Apply/View discard dialogs, no
         // root-nav reset, no cancelFilterEditingOnPageDisappear.
@@ -1145,34 +1220,16 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             startingAt: "func deleteFilter(id: String) -> Bool {",
             endingBefore: "func restoreFiltersToDefault()"
         )
-        XCTAssertTrue(delete.contains("filterEditDrafts[id] = nil"))
+        XCTAssertTrue(delete.contains("filterDrafts.setDraft(nil, for: id)"))
 
-        // FiltersView: teardown still driven by the navigation binding (both MyListCover sites), the
-        // self-healing onAppear re-assert + dismiss-on-stale are kept, and the discard dialogs +
-        // PendingFilterAction are gone.
-        let filtersView = try [
-            readSource(.filtersView),
-            readSource(.filterLibraryView),
-        ].joined(separator: "\n")
-        let filtersFeature = try readFiltersSourceAggregate()
-        let teardownSites = filtersView.components(separatedBy: "if !presented { viewModel.endViewingFilterDetail() }").count - 1
-        XCTAssertEqual(teardownSites, 2, "Both MyListCover navigationDestinations must tear down on dismissal.")
-        XCTAssertFalse(filtersFeature.contains("PendingFilterAction"))
-        XCTAssertFalse(filtersFeature.contains("Discard unsaved changes?"))
-        let myList = try sourceBlock(
-            in: try readSource(.filterMyListView),
-            startingAt: "struct MyListCover: View",
-            endingBefore: "private enum BlockedDomainSheet"
-        )
-        XCTAssertFalse(myList.contains(".onDisappear"))
-        XCTAssertTrue(myList.contains("let detailTargetID: String?"))
-        XCTAssertTrue(myList.contains("if viewModel.filterEditTargetID != detailTargetID {"))
-        XCTAssertTrue(myList.contains("if let id = detailTargetID, viewModel.library.filter(id: id) == nil {"))
-        XCTAssertTrue(myList.contains("dismiss()"))
+        let bridge = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(bridge.contains("model.endViewingFilterDetail()"))
+        XCTAssertTrue(bridge.contains("model.beginViewingFilterDetail(id: id)"))
+
     }
 
     func testNonActiveFilterEditAppliesLibraryOnlyWithNoRecompile() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
 
         // The non-active save is a dedicated method (NOT the active prepareAndApplyFilterDraft
         // path): it returns a message on failure so the caller shows it inline rather than the
@@ -1185,7 +1242,27 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // Library-only: mutateFilter + persistLibraryOnlyChange, invalidates the compiled token.
         XCTAssertTrue(nonActive.contains("library.mutateFilter(id: targetID)"))
         XCTAssertTrue(nonActive.contains("filter.lastCompiledToken = nil"))
-        XCTAssertTrue(nonActive.contains("persistLibraryOnlyChange(rollingBackTo: previousLibrary)"))
+        let activeRecheck = try XCTUnwrap(
+            nonActive.range(of: "guard targetID != library.activeFilterID else {")?.lowerBound,
+            "A target that became active must leave the library-only save path before mutation.")
+        let mutation = try XCTUnwrap(nonActive.range(of: "library.mutateFilter(id: targetID)")?.lowerBound)
+        XCTAssertLessThan(activeRecheck, mutation)
+        XCTAssertTrue(
+            nonActive.contains("filterEditTargetID = nil"),
+            "When the target became active, route the detail surface back to active context while preserving its keyed draft.")
+
+        let persist = try XCTUnwrap(
+            nonActive.range(
+                of: "persistLibraryOnlyChange(\n            rollingBackTo: previousLibrary,\n            refusesIfOnDiskActiveFilterIs: targetID")?.lowerBound,
+            "The write must also refuse when a cross-process switch made the target active on disk.")
+        let keyedDraftClear = try XCTUnwrap(
+            nonActive.range(of: "filterDrafts.setDraft(nil, for: targetID)", range: persist..<nonActive.endIndex)?.lowerBound)
+        let warm = try XCTUnwrap(nonActive.range(of: "Task { await warmFilterArtifact(forFilterID: targetID) }")?.lowerBound)
+        XCTAssertFalse(
+            nonActive.contains("configurationReplacementGate.begin()"),
+            "A library-only save must not steal replacement ownership from a switch that already committed its pair but still owes the cache/tunnel tail.")
+        XCTAssertLessThan(persist, keyedDraftClear)
+        XCTAssertLessThan(keyedDraftClear, warm)
         // Validation runs but reports inline (returns the message) — no failure cover.
         XCTAssertTrue(nonActive.contains("return validationMessage"))
         // The inline save never compiles, writes shared state, reloads the tunnel, or presents the
@@ -1203,15 +1280,9 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertFalse(nonActive.contains("catalogStatusIsError"),
                        "A non-active library-only failure must not flip the global catalog/protection error flag.")
 
-        // The detail page routes a non-active save to this method and shows its message inline.
-        let filtersView = try readSource(.filterMyListView)
-        let saveChanges = try sourceBlock(
-            in: filtersView,
-            startingAt: "private func saveChanges() {",
-            endingBefore: "private enum BlockedDomainSheet"
-        )
-        XCTAssertTrue(saveChanges.contains("if viewModel.isViewingNonActiveFilter {"))
-        XCTAssertTrue(saveChanges.contains("nonActiveSaveError = viewModel.saveNonActiveFilterDraft()"))
+        let bridge = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(bridge.contains("if model.isViewingNonActiveFilter {"))
+        XCTAssertTrue(bridge.contains("saveNonActiveFilterDraft()"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
@@ -1223,7 +1294,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testPreparationCoverIsOriginScopedAndReSealClearsUploadMarker() throws {
-        let app = try readSource(.appViewModel)
+        let app = try readAppViewModelSource()
         // Origin-scoped preparation cover: the model tracks which surface owns the shared cover,
         // set at the apply/switch entry points (not at staging, so it can't go stale).
         XCTAssertTrue(app.contains("var filterPreparationOrigin: FilterReviewOrigin"))
@@ -1232,7 +1303,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let switchBlock = try sourceBlock(
             in: app,
             startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
-            endingBefore: "private func duplicateName(of name: String)"
+            endingBefore: "func duplicateName(of name: String)"
         )
         XCTAssertTrue(switchBlock.contains("filterPreparationOrigin = .filters"),
                       "A switch is a Filters-tab action and must claim the Filters origin.")
@@ -1280,15 +1351,15 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // Domain History applies through the shared review flow with its own origin, and its cover
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.
         let review = try readSource(.filterReviewFlowView)
-        XCTAssertTrue(review.contains("prepareAndApplyFilterDraft(origin: origin)"))
-        let diagnostics = try readSource(.diagnosticsDomainHistory)
-        XCTAssertTrue(diagnostics.contains("viewModel.filterPreparationOrigin == .domainHistory"),
-                      "The Domain History cover must gate on its own origin.")
+        let bridge = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(bridge.contains("prepareAndApplyFilterDraft(origin: .filters)"))
+        XCTAssertTrue(bridge.contains("prepareAndApplyFilterDraft(origin: standaloneToken == nil ? .filters : .domainHistory)"))
+        XCTAssertTrue(bridge.contains("standaloneDomainReviews"))
 
         // The shared failure screen tailors its affordances: "Try Again" only when the failure is
         // retryable (a deleted/frozen switch target is a dead end), and "Back to Edit"/"Back to
         // Review" only when there's an editor/review to return to (a switch has neither).
-        XCTAssertTrue(review.contains("if viewModel.filterPreparationFailureIsRetryable {"),
+        XCTAssertTrue(review.contains("if drafts.preparationFailureIsRetryable {"),
                       "Try Again must be hidden for a non-retryable (deleted/frozen-target) failure.")
         XCTAssertTrue(review.contains("if viewModel.filterPreparationFailureOffersEditReturn {"),
                       "Back to Edit/Review must be hidden when there's no editor (a filter switch).")
@@ -1298,50 +1369,11 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
     }
 
     func testFrozenFiltersAreReadOnlyAndEditModeIsAuthGated() throws {
-        let librarySource = try readSource(.filterLibraryView)
-        let myListSource = try readSource(.filterMyListView)
-        // Frozen (lapsed-Plus) filters are read-only: delete is gated and rename is refused, but
-        // they remain VIEWABLE — the dialog drops Apply and opens a read-only View (Codex r6).
-        XCTAssertTrue(librarySource.contains("&& !viewModel.isFilterFrozen(filter.id)"),
-                      "canDelete must exclude frozen filters.")
-        XCTAssertTrue(librarySource.contains("if !isFrozen && !isPendingDeletion { rename() }"),
-                      "Rename must be refused for frozen filters (and for a staged-for-delete row).")
-        // The Apply button is only offered for non-frozen filters (can't switch to a frozen one).
-        XCTAssertTrue(librarySource.contains("if !viewModel.isFilterFrozen(filter.id) {"),
-                      "Apply must be hidden for frozen filters.")
-        // MyListCover renders a frozen filter read-only: no Edit affordance, and beginEditing is
-        // guarded.
-        let myList = try sourceBlock(
-            in: myListSource,
-            startingAt: "struct MyListCover: View",
-            endingBefore: "private enum BlockedDomainSheet"
-        )
-        XCTAssertTrue(myList.contains("private var isReadOnly: Bool {"))
-        XCTAssertTrue(myList.contains("return viewModel.isFilterFrozen(id)"))
-        XCTAssertTrue(myList.contains("if !isReadOnly {"),
-                      "The Edit affordance must be hidden for a read-only (frozen) filter.")
-        XCTAssertTrue(myList.contains("guard !isReadOnly else { return }"),
-                      "beginEditing must refuse a read-only (frozen) filter.")
-        // If a filter became frozen (Plus lapsed) while a draft was preserved, the page must drop
-        // the draft on appear (read-only view) and the save path must report it, not silently no-op.
-        XCTAssertTrue(myList.contains("if isReadOnly, viewModel.filterEditDraft != nil {"),
-                      "A now-frozen filter must drop its preserved draft on appear.")
-        let app = try readSource(.appViewModel)
-        let save = try sourceBlock(
-            in: app,
-            startingAt: "func saveNonActiveFilterDraft() -> String? {",
-            endingBefore: "// MARK: - Multi-filter library"
-        )
-        XCTAssertTrue(save.contains("guard !isFilterFrozen(targetID) else {"),
-                      "Saving a frozen target must return a locked message, not nil.")
-
-        // Entering library edit mode (add/rename/delete) is gated on the filter-editing
-        // surface, like My filter's edit entry point — auth must precede isEditing = true.
-        let editButton = try sourceBlock(in: librarySource, startingAt: "accessibilityLabel: \"Edit\") {", endingBefore: ".navigationDestination(")
-        let authIdx = try XCTUnwrap(editButton.range(of: "requireAuthentication(")?.lowerBound)
-        let enterIdx = try XCTUnwrap(editButton.range(of: "isEditing = true")?.lowerBound)
-        XCTAssertLessThan(authIdx, enterIdx, "Auth must gate entering edit mode.")
-        XCTAssertTrue(editButton.contains("for: .filterEditing"))
+        let source = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(source.contains("!library.isFilterFrozen(id)"))
+        XCTAssertTrue(source.contains("if model.isFilterFrozen(id) { model.cancelFilterEditing()"))
+        XCTAssertTrue(source.contains("try await authorize(.filterEditing, \"Manage filters\")"))
+        XCTAssertTrue(source.contains("try await authorize(.filterEditing, \"Switch filter\", fresh: true)"))
     }
 
     // MARK: - Helpers

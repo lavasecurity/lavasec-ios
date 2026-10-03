@@ -92,6 +92,8 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
     public static let currentEnvelopeVersion = 1
     /// PBKDF2 iteration count used by production factories unless a caller overrides it.
     public static let defaultPasswordIterations = 210_000
+    /// Maximum accepted PBKDF2 iterations per slot, including legacy slots.
+    public static let maximumPasswordIterations = 1_000_000
     package static let testingPasswordIterations = 8
     private static let supportedKeyDerivationFunction = "PBKDF2-HMAC-SHA256"
     private static let prfKeyDerivationFunction = "HKDF-SHA256"
@@ -647,12 +649,16 @@ public struct ZeroKnowledgeBackupEnvelope: Codable, Equatable, Sendable {
     }
 
     private static func deriveKey(secret: String, salt: Data, iterations: Int) throws -> SymmetricKey {
+        // Envelope metadata is untrusted. Reject excessive work without clamping the value:
+        // changing a valid historical count derives a different key.
+        // pinned: ZeroKnowledgeBackupEnvelopeTests.testRejectsExcessiveStoredPBKDFWorkBeforeUnlock
+        guard let rounds = UInt32(exactly: iterations), rounds > 0,
+              iterations <= maximumPasswordIterations else {
+            throw ZeroKnowledgeBackupEnvelopeError.keyDerivationFailed(Int32(kCCParamError))
+        }
         let outputByteCount = 32
         var derivedBytes = [UInt8](repeating: 0, count: outputByteCount)
         let passwordData = Data(secret.utf8)
-        guard let rounds = UInt32(exactly: iterations), rounds > 0 else {
-            throw ZeroKnowledgeBackupEnvelopeError.keyDerivationFailed(Int32(kCCParamError))
-        }
 
         let status = passwordData.withUnsafeBytes { passwordBytes in
             salt.withUnsafeBytes { saltBytes in

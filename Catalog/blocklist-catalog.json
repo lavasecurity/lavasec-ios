@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "_generated": "DO NOT EDIT — regenerate via scripts/build-catalog.py from blocklist-catalog.yml",
+  "_generated": "DO NOT EDIT — generated from lavasecurity/lavasec-filters/catalog/lists.json",
   "categories": [
     {
       "id": "security",
@@ -65,29 +65,12 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": true,
-      "size_hint": "medium",
-      "counsel_status": "not_reviewed"
-    },
-    {
-      "id": "blocklistproject-malware",
-      "name": "Block List Malware",
-      "provider": "blocklistproject",
-      "category": "security",
-      "license": "Unlicense",
-      "license_text_url": null,
-      "source_url": "https://blocklistproject.github.io/Lists/malware.txt",
-      "project_url": "https://github.com/blocklistproject/Lists",
-      "parse_format": "hosts",
-      "redistribution_mode": "source_url_only",
-      "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
     {
       "id": "blocklistproject-phishing",
-      "name": "Block List Phishing",
+      "name": "Block List Project Phishing",
       "provider": "blocklistproject",
       "category": "security",
       "license": "Unlicense",
@@ -97,13 +80,12 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
     {
       "id": "blocklistproject-ransomware",
-      "name": "Block List Ransomware",
+      "name": "Block List Project Ransomware",
       "provider": "blocklistproject",
       "category": "security",
       "license": "Unlicense",
@@ -113,13 +95,12 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
     {
       "id": "blocklistproject-scam",
-      "name": "Block List Scam",
+      "name": "Block List Project Scam",
       "provider": "blocklistproject",
       "category": "security",
       "license": "Unlicense",
@@ -129,7 +110,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -140,12 +120,11 @@
       "category": "security",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/tif.mini-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -161,7 +140,6 @@
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -177,7 +155,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "required"
     },
@@ -193,7 +170,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "required"
     },
@@ -204,12 +180,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/light-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -220,12 +195,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/multi-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -236,12 +210,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/pro-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -252,12 +225,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.mini-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/pro.mini-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -268,12 +240,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.mini-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/pro.plus.mini-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -284,12 +255,11 @@
       "category": "multi_purpose",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate.mini-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/ultimate.mini-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "aggressive",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -305,7 +275,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -321,7 +290,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -337,7 +305,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": true,
       "size_hint": "medium",
       "counsel_status": "approved"
     },
@@ -353,7 +320,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -369,7 +335,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "normal",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -385,7 +350,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -401,7 +365,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -412,12 +375,11 @@
       "category": "social",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/social-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/social-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -433,7 +395,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "required"
     },
@@ -444,12 +405,11 @@
       "category": "nsfw",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/nsfw-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/nsfw-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "aggressive",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -465,7 +425,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "aggressive",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "not_reviewed"
     },
@@ -481,7 +440,6 @@
       "parse_format": "adblock",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -497,7 +455,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "aggressive",
-      "default_enabled": false,
       "size_hint": "large",
       "counsel_status": "required"
     },
@@ -513,7 +470,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -524,12 +480,11 @@
       "category": "gambling",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/gambling-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     },
@@ -545,7 +500,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "required"
     },
@@ -561,7 +515,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -577,7 +530,6 @@
       "parse_format": "hosts",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "small",
       "counsel_status": "not_reviewed"
     },
@@ -588,12 +540,11 @@
       "category": "piracy",
       "license": "GPL-3.0",
       "license_text_url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
-      "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/anti.piracy-onlydomains.txt",
+      "source_url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@37522026.221.30748/wildcard/anti.piracy-onlydomains.txt",
       "project_url": "https://github.com/hagezi/dns-blocklists",
       "parse_format": "domain_list",
       "redistribution_mode": "source_url_only",
       "warning_level": "advanced",
-      "default_enabled": false,
       "size_hint": "medium",
       "counsel_status": "not_reviewed"
     }

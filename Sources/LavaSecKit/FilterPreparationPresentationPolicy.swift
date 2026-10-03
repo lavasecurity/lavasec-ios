@@ -39,13 +39,15 @@ public struct FilterPreparationPresentationPolicy: Equatable, Sendable {
     /// ~0.05–0.2, compiling ~0.42–0.72, saving ~0.86) so each visible step fills an
     /// equal quarter of the bar: download 0–1/4, build 1/4–2/4, save 2/4–3/4, and the
     /// terminal Success step 3/4–1 (set by the caller when it finishes the apply).
-    /// `rawProgress` only positions the fill within the phase's nominal sub-range — the
-    /// magnitudes need to be monotonic, not exact — and is clamped to that quarter.
+    /// The ranges match FilterSnapshotPreparationService's start/completed checkpoints.
+    /// Completion is reported after sync/build finishes, never before that work. Using
+    /// the next phase's start as this phase's end leaves each quarter partly empty
+    /// and produces an uneven jump at the next label. Values clamp to their own quarter.
     public static func equalStepsProgress(phase: FilterPreparationPhase, rawProgress: Double) -> Double {
         let (index, rawStart, rawEnd): (Double, Double, Double)
         switch phase {
-        case .downloading: (index, rawStart, rawEnd) = (0, 0.0, 0.42)
-        case .compiling:   (index, rawStart, rawEnd) = (1, 0.42, 0.86)
+        case .downloading: (index, rawStart, rawEnd) = (0, 0.05, 0.2)
+        case .compiling:   (index, rawStart, rawEnd) = (1, 0.42, 0.72)
         case .saving:      (index, rawStart, rawEnd) = (2, 0.86, 1.0)
         }
 

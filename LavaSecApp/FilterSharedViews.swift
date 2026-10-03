@@ -7,25 +7,8 @@ struct LavaPlusUpgradeSheet: View {
     var body: some View {
         NavigationStack {
             LavaPlusUpgradeDestination()
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        NativeToolbarIconButton(systemName: "xmark", accessibilityLabel: "Close", role: .close, action: dismiss.callAsFunction)
-                    }
-                }
+                .lavaFullSheetHeader("Lava Plus", close: dismiss.callAsFunction)
         }
-    }
-}
-
-struct FilterAddButton: View {
-    let title: String
-    var systemImage: String? = nil
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            FilterActionLabel(title: title, systemImage: systemImage)
-        }
-        .buttonStyle(LavaPanelActionButtonStyle())
     }
 }
 
@@ -52,9 +35,9 @@ struct FilterActionLabel: View {
             }
 
             Text(title.lavaLocalized)
+                .lavaRowTitleText()
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        .lineLimit(1)
-        .minimumScaleFactor(0.82)
     }
 }

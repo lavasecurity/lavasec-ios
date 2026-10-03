@@ -28,6 +28,19 @@ const makeTarget = (name, type, dependencies, overrides = {}) => ({
   type,
   ...overrides,
 });
+// A prebuilt-artifact target: no reviewed source, `packageAccess: false`, and an
+// artifact path instead of a source dir. Whitelisted by exact shape (see
+// `binary_target` in the checker) so a second one cannot appear unreviewed.
+const makeBinaryTarget = (name, path) => ({
+  dependencies: [],
+  exclude: [],
+  name,
+  packageAccess: false,
+  path,
+  resources: [],
+  settings: [],
+  type: "binary",
+});
 const makeProduct = (name, targets) => ({
   name,
   settings: [],
@@ -51,6 +64,7 @@ function approvedPackageDump() {
     products: [
       makeProduct("LavaSecCore", ["LavaSecCore", ...layers]),
       ...layers.map((name) => makeProduct(name, [name])),
+      makeProduct("LavaSecChainedUpstream", ["LavaSecChainedUpstream"]),
     ],
     providers: null,
     swiftLanguageVersions: null,
@@ -76,7 +90,16 @@ function approvedPackageDump() {
         ["LavaSecKit", "LavaSecFilterPipeline"],
       ),
       makeTarget("LavaSecCore", "regular", layers),
-      makeTarget("LavaSecCoreTests", "test", ["LavaSecCore", ...layers]),
+      makeBinaryTarget(
+        "LavaSecWGCore",
+        "ThirdParty/wireguard-core/build/LavaSecWGCore.xcframework",
+      ),
+      makeTarget("LavaSecChainedUpstream", "regular", ["LavaSecKit", "LavaSecWGCore"]),
+      makeTarget("LavaSecCoreTests", "test", [
+        "LavaSecCore",
+        ...layers,
+        "LavaSecChainedUpstream",
+      ]),
       makeTarget("LavaSecCoreFacadeCompileTests", "test", ["LavaSecCore"]),
     ],
     toolsVersion: { _version: "6.0.0" },
@@ -219,6 +242,62 @@ test("rejects relocated, hidden, executable, and selectively compiled targets", 
 
       assert.notEqual(result.status, 0);
       assert.match(result.output, /package target .* differs|package target set differs/);
+    });
+  }
+});
+
+// A binary target is the one place bytes nobody reviewed can enter the package graph, so
+// its admission is pinned adversarially: every mutation below is a plausible way the
+// prebuilt-artifact allowance could be widened, and each must still be rejected.
+test("rejects widened prebuilt-artifact admission", async (t) => {
+  const binaryIndex = (dump) =>
+    dump.targets.findIndex((target) => target.name === "LavaSecWGCore");
+  const cases = new Map([
+    ["remote artifact (url + checksum, bytes CI never rebuilt)", (dump) => {
+      const target = dump.targets[binaryIndex(dump)];
+      delete target.path;
+      target.url = "https://example.invalid/LavaSecWGCore.xcframework.zip";
+      target.checksum = "0".repeat(64);
+    }],
+    ["relocated artifact path", (dump) => {
+      dump.targets[binaryIndex(dump)].path = "Unreviewed/LavaSecWGCore.xcframework";
+    }],
+    ["a second binary target", (dump) => {
+      dump.targets.push(
+        makeBinaryTarget("SmuggledCore", "ThirdParty/smuggled/Smuggled.xcframework"),
+      );
+    }],
+    ["binary target granted package access", (dump) => {
+      dump.targets[binaryIndex(dump)].packageAccess = true;
+    }],
+    ["binary target given dependencies", (dump) => {
+      dump.targets[binaryIndex(dump)].dependencies = [byName("LavaSecKit")];
+    }],
+    ["binary target given build settings", (dump) => {
+      dump.targets[binaryIndex(dump)].settings = [{
+        kind: { unsafeFlags: { _0: ["-load-all"] } },
+        tool: "linker",
+      }];
+    }],
+    ["engine wrapper smuggled into the compatibility facade", (dump) => {
+      const facade = dump.products.find((product) => product.name === "LavaSecCore");
+      facade.targets = [...facade.targets, "LavaSecChainedUpstream"];
+    }],
+    ["a layer taking a dependency on the engine wrapper", (dump) => {
+      const dns = dump.targets.find((target) => target.name === "LavaSecDNS");
+      dns.dependencies = [...dns.dependencies, byName("LavaSecChainedUpstream")];
+    }],
+  ]);
+
+  for (const [name, mutate] of cases) {
+    await t.test(name, async (subtest) => {
+      const dump = approvedPackageDump();
+      mutate(dump);
+
+      const result = await runChecker(subtest, dump);
+
+      assert.notEqual(result.status, 0, "the widened graph must be rejected");
+      assert.match(result.output, /package target .* differs|package target set differs|package products differ/);
     });
   }
 });

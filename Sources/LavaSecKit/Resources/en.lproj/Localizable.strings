@@ -1,10 +1,10 @@
 /* LavaSecCore notification body strings — localized via Bundle.module (app + extension + tunnel). */
 
 "notif.body.switchedTo" = "Filter switched to %@";
-"notif.body.couldNotSwitchTo" = "Couldn't switch to %@";
+"notif.body.couldNotSwitchTo" = "Couldn’t switch to %@";
 "notif.body.pauseEnded" = "Pause ended — protection is back on.";
 "notif.body.reconnectTitle" = "Reconnect Lava";
-"notif.body.reconnectMessage" = "DNS is not resolving on this network. Tap to reconnect protection.";
+"notif.body.reconnectMessage" = "DNS isn’t resolving on this network. Tap to reconnect protection.";
 "notif.body.dnsSlowTitle" = "Lava DNS is slow";
 "notif.body.dnsSlowMessage" = "Your DNS provider is responding slowly. Tap to reconnect protection.";
 
@@ -13,22 +13,22 @@
 "dialog.filterSwitchedTo" = "Switched to %@.";
 "dialog.filterAlreadyActive" = "%@ is already your active filter.";
 "dialog.filterWillApplyAutomatically" = "%@ will apply automatically.";
-"dialog.filterSwitchDisallowed" = "Couldn't switch to %@. Open Lava to check your filter settings.";
+"dialog.filterSwitchDisallowed" = "Couldn’t switch to %@. Open Lava to check your filter settings.";
 
 /* Live Activity / widget UI (shared via Bundle.module so the widget extension localizes). */
-"widget.state.on" = "Lava Security is on";
-"widget.state.paused" = "Lava Security is paused";
-"widget.state.restartingTitle" = "Restarting…";
-"widget.a11y.restarting" = "Lava Security is restarting";
+"widget.state.on" = "Lava is on";
+"widget.state.paused" = "Lava is paused";
+"widget.state.restartingTitle" = "Reconnecting…";
+"widget.a11y.restarting" = "Lava is reconnecting";
 "widget.status.on" = "On";
 "widget.status.paused" = "Paused";
-"widget.status.restarting" = "Restarting";
+"widget.status.restarting" = "Reconnecting";
 "widget.action.resume" = "Resume";
-"widget.action.restart" = "Restart";
+"widget.action.restart" = "Reconnect";
 "widget.action.pauseForMinutes" = "Pause for %d min";
 /* Compact Pause-button label (duration only; the pause glyph carries the verb). Full phrase: widget.action.pauseForMinutes. */
 "widget.action.pauseForMinutesShort" = "%d min";
-"a11y.shieldGuardian" = "Lava shield guardian";
+"a11y.shieldGuardian" = "Lava Guard";
 
 /* Domain-action error messages (localized at the producer; interpolation-safe). */
 "core.domainError.alreadyBlocked" = "%@ is already in your blocked domains.";
@@ -39,36 +39,106 @@
 /* Localization sweep — resolver/endpoint/domain/filter-budget/catalog-sync/backup messages. */
 "core.resolver.empty" = "Enter one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or DNS stamp.";
 "core.resolver.unsupported" = "Use one IPv4/6 DNS server, DoH URL, DoT URL, DoQ URL, or sdns:// DNS stamp.";
-"core.resolver.doqUnsupported" = "DNS over QUIC is not supported on this device.";
-"core.resolver.badStamp" = "DNS stamp could not be read. Check the stamp and try again.";
+"core.resolver.doqUnsupported" = "DNS over QUIC isn’t supported on this device.";
+"core.resolver.badStamp" = "DNS stamp couldn’t be read. Check the stamp and try again.";
 "core.resolver.missingDoHPath" = "DNS-over-HTTPS URLs must include a path, such as /dns-query.";
-"core.resolver.credentialsNotAllowed" = "Custom DNS URLs cannot include usernames or passwords.";
-"core.resolver.secondaryTransportMismatch" = "Secondary DNS must use the same transport as Primary DNS.";
-"core.endpoint.credentialsNotAllowed" = "URLs with usernames or passwords are not supported.";
-"core.endpoint.localhostNotAllowed" = "Localhost cannot be used as a DNS resolver here.";
+"core.resolver.credentialsNotAllowed" = "Custom DNS URLs can’t include usernames or passwords.";
+"core.resolver.secondaryTransportMismatch" = "The secondary server must use the same transport as the primary server.";
+"core.endpoint.credentialsNotAllowed" = "URLs with usernames or passwords aren’t supported.";
+"core.endpoint.localhostNotAllowed" = "Localhost can’t be used as a DNS server here.";
 "core.endpoint.privateNetworkNotAllowed" = "Custom blocklist URLs must use a public host.";
-"core.endpoint.unusableResolverAddress" = "Enter a usable DNS resolver address, not a loopback, multicast, or unspecified address.";
-"core.endpoint.invalidResolverHost" = "Enter a valid DNS resolver host.";
+"core.endpoint.unusableResolverAddress" = "Enter a usable DNS server address, not a loopback, multicast, or unspecified address.";
+"core.endpoint.invalidResolverHost" = "Enter a valid DNS server host.";
 "core.customBlocklist.invalidURL" = "Enter a valid blocklist URL.";
 "core.customBlocklist.unsupportedScheme" = "Custom blocklists must use HTTPS.";
 "core.customBlocklist.missingHost" = "Custom blocklist URL must include a host.";
 "core.customBlocklist.privateNetworkHost" = "Custom blocklist URLs must use a public host.";
-"core.customBlocklist.credentialsNotAllowed" = "Custom blocklist URLs cannot include usernames or passwords.";
+"core.customBlocklist.credentialsNotAllowed" = "Custom blocklist URLs can’t include usernames or passwords.";
 "core.domain.empty" = "Domain is empty.";
 "core.domain.tooLong" = "Domain is too long.";
 "core.domain.needsTwoLabels" = "Enter a full domain, such as example.com.";
-"core.domain.invalidLabel" = "Invalid domain label: %@";
-"core.domain.ipNotAllowed" = "IP addresses are not supported here.";
-"core.filterBudget.exceedsDeviceMemory" = "This selection needs about %1$@ filter rules, more than your device can hold (%2$@). Remove a list to turn on protection.";
+"core.domain.invalidLabel" = "“%@” isn’t valid in a domain name.";
+"core.domain.ipNotAllowed" = "IP addresses aren’t supported here.";
+"core.filterBudget.exceedsDeviceMemory" = "This selection needs about %1$@ filter rules, more than your device can hold (%2$@). Remove a blocklist to turn on protection.";
 "core.filterBudget.exceedsTierLimit" = "Your blocklists use about %1$@ of %2$@ filter rules. %3$@";
-"core.filterBudget.action.remove" = "Remove a list to turn on protection.";
-"core.filterBudget.action.removeOrUpgrade" = "Remove a list or upgrade to Plus.";
+"core.filterBudget.action.remove" = "Remove a blocklist to turn on protection.";
+"core.filterBudget.action.removeOrUpgrade" = "Remove a blocklist or upgrade to Lava Plus.";
 "core.filterBudget.largestSuffix" = " Largest: %@.";
-"core.catalogSync.invalidBlocklistEncoding" = "The downloaded blocklist for %@ is not valid UTF-8.";
+"core.catalogSync.invalidBlocklistEncoding" = "The downloaded blocklist for %@ isn’t valid UTF-8.";
 "core.catalogSync.blocklistTooLarge" = "The downloaded blocklist for %1$@ is too large (%2$lld bytes).";
 "core.catalogSync.blocklistExceedsRuleLimit" = "The blocklist for %1$@ has more than %2$lld rules. Reduce its size or remove it.";
-"core.catalogSync.noRulesAvailable" = "No enabled downloaded filters are available yet.";
+"core.catalogSync.noRulesAvailable" = "No downloaded blocklists are available yet.";
 "core.catalogSync.customBlocklistUnavailable" = "Couldn’t load the custom blocklist “%1$@”. %2$@";
-"core.domainError.freeBlockedLimit" = "Free protection includes %lld additional blocked domains.";
-"core.domainError.freeAllowedLimit" = "Free protection includes %lld allowed exceptions.";
+"core.domainError.freeBlockedLimit" = "The free plan includes %lld additional blocked domains.";
+"core.domainError.freeAllowedLimit" = "The free plan includes %lld allowed exceptions.";
 "core.backup.lastUploaded" = "Last uploaded %@";
+
+/* Resolver and protection-scope disclosure (P0: resolver-and-protection-scope-disclosure plan, Task 1). */
+"core.disclosure.resolver" = "Lava's block decisions happen on this iPhone. The resolver you selected, currently %@, can receive allowed DNS lookups, handled under that provider's policy.";
+"core.disclosure.resolverNetworkProvided" = "Lava's block decisions happen on this iPhone. The DNS servers this iPhone picked up from a Wi-Fi, cellular, or system setting can receive allowed DNS lookups. A Lava server never does.";
+"core.disclosure.resolverSelfEntered" = "Lava's block decisions happen on this iPhone. The custom DNS you configured can receive allowed DNS lookups.";
+"core.disclosure.dnsScope" = "Lava checks domain names, not full URLs, page paths, page text, forms, or messages. It can block a whole domain, but it cannot block a single page on a domain you allow.";
+"core.disclosure.vpn" = "iPhone calls this a VPN because Lava needs a local protected path to check domain names. Your browsing traffic is not sent to Lava servers.";
+"core.disclosure.encryptedFallbackRecipient" = "The encrypted fallback you selected, %@, can also receive allowed lookups.";
+"core.disclosure.chainedRecipient" = "While Lava is chained to another VPN, the DNS servers in that VPN's configuration are the first that can receive allowed DNS lookups. Lava cannot say who operates them.";
+"core.disclosure.fallbackNetworkProvided" = "The DNS servers this iPhone picked up from the network can also receive allowed lookups.";
+"core.disclosure.plainFallbackRecipient" = "The fallback you selected, %@, can also receive allowed lookups. It is not encrypted.";
+"core.disclosure.upstreamFilteringRecipient" = "%@ does its own filtering, so it can block a domain Lava allowed.";
+"core.disclosure.selfEnteredRecipients" = "You entered those DNS servers yourself, so Lava cannot say who operates them. Every address you entered can receive allowed DNS lookups.";
+"core.disclosure.selfEnteredRecipient" = "You entered that DNS server yourself, so Lava cannot say who operates it.";
+
+/* Current filter failure; no domain or resolver identifiers. */
+"notif.body.filteringUnavailableTitle" = "Lava needs attention";
+"notif.body.filteringUnavailableMessage" = "Your selected blocklists still exceed the rule limit, so DNS is blocked. Open Lava to review your blocklists.";
+/* A foreground-only custom-source refresh is required; no source names are disclosed. */
+"notif.body.customFilterRefreshMessage" = "A custom blocklist needs an update that can’t run in the background, so DNS is blocked. Open Lava to update your custom blocklists.";
+
+"widget.action.confirmPause" = "Confirm";
+"Activity" = "Activity";
+"Confirmation" = "Confirmation";
+
+"A saved configuration's key is unavailable. Import it again." = "A saved configuration's key is unavailable. Import it again.";
+"Choose a different DNS for the second tier." = "Choose a different DNS for the second tier.";
+"Choose a valid DNS provider and transport." = "Choose a valid DNS provider and transport.";
+"Custom DNS requires Lava Plus." = "Custom DNS requires Lava Plus.";
+"Keep one primary DNS and, optionally, one secondary DNS." = "Keep one primary DNS and, optionally, one secondary DNS.";
+"No accepted blocklist checksum is available for %@." = "No accepted blocklist checksum is available for %@.";
+"No enabled blocklist source is available for %@." = "No enabled blocklist source is available for %@.";
+"No saved Lava Security catalog is available yet." = "No saved Lava Security catalog is available yet.";
+"Supabase Auth returned status %lld." = "Supabase Auth returned status %lld.";
+"Supabase Auth returned status %lld: %@" = "Supabase Auth returned status %lld: %@";
+"The Lava Security catalog could not be read." = "The Lava Security catalog could not be read.";
+"The Lava Security catalog server returned HTTP %lld." = "The Lava Security catalog server returned HTTP %lld.";
+"The Supabase Auth endpoint is not valid." = "The Supabase Auth endpoint is not valid.";
+"The Supabase Auth response was not valid." = "The Supabase Auth response was not valid.";
+"The download exceeded the %lld MB size limit (%lld bytes)." = "The download exceeded the %lld MB size limit (%lld bytes).";
+"The downloaded blocklist checksum did not match for %@." = "The downloaded blocklist checksum did not match for %@.";
+"The first configuration needs an IP endpoint address." = "The first configuration needs an IP endpoint address.";
+"The first configuration's AllowedIPs must include the second VPN's endpoint." = "The first configuration's AllowedIPs must include the second VPN's endpoint.";
+"The first configuration's MTU must be at least 1340 for two VPN hops." = "The first configuration's MTU must be at least 1340 for two VPN hops.";
+"The saved configurations changed. Reopen the editor and try again." = "The saved configurations changed. Reopen the editor and try again.";
+"The second configuration needs an IPv4 endpoint address." = "The second configuration needs an IPv4 endpoint address.";
+"You can add up to two WireGuard configurations." = "You can add up to two WireGuard configurations.";
+
+"%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@." = "%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@.";
+"Third-party source project" = "Third-party source project";
+
+"Latest encrypted settings backup size is %@." = "Latest encrypted settings backup size is %@.";
+"Added %@" = "Added %@";
+"This domain will be blocked after you save." = "This domain will be blocked after you save.";
+"This exception will take effect after you save." = "This exception will take effect after you save.";
+"Pending setup" = "Pending setup";
+"Set up encrypted backup for this account." = "Set up encrypted backup for this account.";
+"Off" = "Off";
+"Sign in to set up encrypted backup." = "Sign in to set up encrypted backup.";
+"Not uploaded yet" = "Not uploaded yet";
+"Encrypted locally. Back up now to store a copy online." = "Encrypted locally. Back up now to store a copy online.";
+"Ready after sign-in" = "Ready after sign-in";
+"Encrypted locally. Sign in to upload." = "Encrypted locally. Sign in to upload.";
+"Needs attention" = "Needs attention";
+"Domain cannot be added" = "Can’t add this domain";
+"Already blocked" = "Already blocked";
+"Blocked domain limit reached" = "Blocked domain limit reached";
+"Exception cannot be added" = "Can’t add this exception";
+"Already allowed" = "Already allowed";
+"Allowed exception limit reached" = "Allowed exception limit reached";

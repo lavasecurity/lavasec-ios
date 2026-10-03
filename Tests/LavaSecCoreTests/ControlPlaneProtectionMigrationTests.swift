@@ -33,6 +33,11 @@ final class ControlPlaneProtectionMigrationTests: XCTestCase {
         try place("filter-snapshot.json", isControlPlane: true)
         try place("filter-snapshot.compact", isControlPlane: true)
         try place("filter-artifact-manifest.json", isControlPlane: true)
+        // Protection lifecycle coordination is required before first unlock too: the state carries
+        // the cross-process owner/generation, and both lock files gate safety-critical mutations.
+        try place("protection-lifecycle-state.json", isControlPlane: true)
+        try place("protection-command.lock", isControlPlane: true)
+        try place("protection-lifecycle-mutation.lock", isControlPlane: true)
         // The versioned artifact area: a token directory's trio + the publish pointer.
         let token = "fixture-token-1234"
         try place("filter-artifacts/\(token)/filter-snapshot.json", isControlPlane: true)
@@ -64,6 +69,10 @@ final class ControlPlaneProtectionMigrationTests: XCTestCase {
             "The migration must re-stamp exactly the control-plane set — a missed file stays boot-unreadable; an extra file drags a privacy store to Class None."
         )
         XCTAssertTrue(scan.scanIsComplete, "A clean fixture container must scan complete.")
+        XCTAssertTrue(
+            ControlPlaneProtectionMigration.migrationCompletedDefaultsKey.hasSuffix(".v2"),
+            "Already-latched v1 installs need a fresh migration pass for lifecycle state and required locks."
+        )
     }
 
     func testRunIsOneShotAndASecondRunAppliesNothing() throws {

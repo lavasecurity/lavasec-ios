@@ -3,6 +3,264 @@ import XCTest
 @testable import LavaSecKit
 
 final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
+    private func historyURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        return directory.appendingPathComponent("notifications.json")
+    }
+
+    func testAtomicHistoryClaimCannotOverwriteAHigherPriorityProducer() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let health = TunnelHealthSnapshot(lastUpstreamFailureAt: now, failClosedServedQueryCount: 1,
+            lastFailClosedAt: now, lastFailClosedReason: "snapshot-unavailable")
+        let assessment = ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
+        let low = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, now: now))
+        let high = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(high, at: url, legacyHistory: .empty,
+            assessment: assessment, health: health, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now), .recorded(supersededIdentifiers: []))
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(low, at: url, legacyHistory: .empty,
+            assessment: assessment, health: health, now: now), .refused)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: .empty)?.unresolvedProblemKind, .filteringUnavailable)
+        let healthy = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: .empty,
+            assessment: healthy, health: health, now: now)?.resolvedIdentifiers, [])
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: .empty,
+            assessment: healthy, health: health, filteringUnavailable: false, now: now)?.resolvedIdentifiers, [high.identifier])
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: .empty)?.lastDeliveredAt, now)
+    }
+
+    func testIncidentDeduplicationPreservesTheWinningProducersUniqueRequestForCleanup() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let health = TunnelHealthSnapshot(lastUpstreamFailureAt: now)
+        let assessment = ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
+        let notice = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, now: now))
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(notice, requestIdentifier: "app-attempt",
+            at: url, legacyHistory: .empty, assessment: assessment, health: health, now: now), .recorded(supersededIdentifiers: []))
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(notice, requestIdentifier: "tunnel-attempt",
+            at: url, legacyHistory: .empty, assessment: assessment, health: health, now: now), .refused)
+        let history = try XCTUnwrap(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: .empty))
+        XCTAssertEqual(history.lastDeliveredNotificationID, notice.identifier)
+        XCTAssertEqual(history.unresolvedProblemNotificationID, "app-attempt")
+        XCTAssertEqual(history.unresolvedProblemIncidentID, notice.identifier)
+        let recoveredAt = now.addingTimeInterval(1)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: .empty,
+            assessment: .init(severity: .healthy, primaryAction: .turnOff),
+            health: TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: recoveredAt), now: recoveredAt)?.resolvedIdentifiers, ["app-attempt"])
+    }
+
+    func testAtomicHistoryRefusesAnOlderIncidentOfTheSameKind() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let assessment = ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
+        let notice = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: TunnelHealthSnapshot(lastDNSSmokeProbeAt: now), history: .empty, now: now))
+        let latest = now.addingTimeInterval(10)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(notice, at: url, legacyHistory: .empty,
+            assessment: assessment, health: TunnelHealthSnapshot(lastDNSSmokeProbeAt: latest), now: latest), .refused)
+        XCTAssertNil(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: .empty)?.unresolvedProblemIncidentID)
+    }
+
+    func testFilterGracePreservesEscalationAfterResolverRecovery() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let history = ProtectionConnectivityNotificationHistory(lastDeliveredNotificationID: "reconnect-needed:890",
+            lastDeliveredAt: now.addingTimeInterval(-5), unresolvedProblemNotificationID: "resolver-attempt",
+            unresolvedProblemIncidentID: "reconnect-needed:890", unresolvedProblemKind: .reconnectNeeded)
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        func reconcile(at time: Date) -> ProtectionConnectivityNotificationStore.Reconciliation? {
+            ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: history, assessment: assessment,
+                health: TunnelHealthSnapshot(lastPrimaryUpstreamSuccessAt: now.addingTimeInterval(-1),
+                    failClosedServedQueryCount: 1, lastFailClosedAt: time, lastFailClosedReason: "snapshot-unavailable"),
+                filteringUnavailable: true, filteringUnavailableSince: now,
+                filteringIntervention: .reviewFilterSelection, now: time)
+        }
+        let duringGrace = try XCTUnwrap(reconcile(at: now))
+        XCTAssertTrue(duringGrace.resolvedIdentifiers.isEmpty)
+        XCTAssertNil(duringGrace.notification)
+        let afterGrace = try XCTUnwrap(reconcile(at: now.addingTimeInterval(30)))
+        XCTAssertEqual(afterGrace.notification?.kind, .filteringUnavailable)
+        XCTAssertEqual(afterGrace.notification?.supersededNotificationIdentifiers, ["resolver-attempt"])
+    }
+
+    func testAtomicHistoryEscalatesAndOnlyImportsLegacyStateOnce() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let health = TunnelHealthSnapshot(failClosedServedQueryCount: 1, lastFailClosedAt: now, lastFailClosedReason: "snapshot-unavailable")
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        let legacy = ProtectionConnectivityNotificationHistory(lastDeliveredNotificationID: "reconnect-needed:899",
+            lastDeliveredAt: now, unresolvedProblemNotificationID: "reconnect-needed:899", unresolvedProblemKind: .reconnectNeeded)
+        let notice = try XCTUnwrap(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: legacy,
+            assessment: assessment, health: health, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now)?.notification)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(notice, at: url, legacyHistory: legacy,
+            assessment: assessment, health: health, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now), .recorded(supersededIdentifiers: ["reconnect-needed:899"]))
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.claimDelivery(notice, at: url, legacyHistory: legacy,
+            assessment: assessment, health: health, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now), .alreadyOwned)
+        XCTAssertEqual(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: legacy)?.unresolvedProblemKind, .filteringUnavailable)
+    }
+
+    func testAtomicHistoryRefusesContentionAndMalformedState() throws {
+        let url = try historyURL()
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        _ = FilterPublishLock.withTryExclusiveLock(at: url.appendingPathExtension("lock")) {
+            XCTAssertNil(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: .empty,
+                assessment: assessment, health: TunnelHealthSnapshot()))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        try Data("invalid".utf8).write(to: url)
+        XCTAssertNil(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: .empty,
+            assessment: assessment, health: TunnelHealthSnapshot()))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "invalid")
+        XCTAssertNil(ProtectionConnectivityNotificationStore.load(at: nil, legacyHistory: .empty))
+    }
+
+    func testContendedRecoveryRetriesAndClearsTheDeliveredFilterIncident() throws {
+        let url = try historyURL()
+        let now = Date(timeIntervalSince1970: 900)
+        let history = ProtectionConnectivityNotificationHistory(unresolvedProblemNotificationID: "filter-attempt",
+            unresolvedProblemIncidentID: "filtering-unavailable:reviewFilterSelection:800", unresolvedProblemKind: .filteringUnavailable)
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        var delivery = ProtectionNotificationDeliveryState()
+        delivery.update(.init(assessment: assessment, health: TunnelHealthSnapshot(), filteringUnavailable: false))
+        _ = FilterPublishLock.withTryExclusiveLock(at: url.appendingPathExtension("lock")) {
+            XCTAssertNil(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: history,
+                assessment: assessment, health: TunnelHealthSnapshot(), filteringUnavailable: false, now: now))
+            XCTAssertEqual(delivery.deferEvaluation(now: now), now.addingTimeInterval(60))
+        }
+        let recovered = try XCTUnwrap(ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: history,
+            assessment: assessment, health: TunnelHealthSnapshot(), filteringUnavailable: false, now: now.addingTimeInterval(60)))
+        delivery.reconciledHistory()
+        XCTAssertEqual(recovered.resolvedIdentifiers, ["filter-attempt"])
+        XCTAssertNil(recovered.notification)
+        XCTAssertNil(delivery.retryDeadline)
+        XCTAssertNil(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: history)?.unresolvedProblemNotificationID)
+    }
+
+    func testAtomicHistoryEncryptedCoveragePreservesTheReflapGrace() throws {
+        let now = Date(timeIntervalSince1970: 900)
+        let legacy = ProtectionConnectivityNotificationHistory(lastDeliveredNotificationID: "reconnect-needed:899",
+            lastDeliveredAt: now, unresolvedProblemNotificationID: "reconnect-needed:899", unresolvedProblemKind: .reconnectNeeded)
+        for outstanding in [true, false] {
+            let url = try historyURL()
+            let history = outstanding ? legacy : ProtectionConnectivityNotificationHistory(
+                lastDeliveredNotificationID: legacy.lastDeliveredNotificationID, lastDeliveredAt: now)
+            _ = ProtectionConnectivityNotificationStore.reconcile(at: url, legacyHistory: history,
+                assessment: ProtectionConnectivityAssessment(severity: .usingEncryptedFallback, primaryAction: .turnOff),
+                health: TunnelHealthSnapshot(), now: now)
+            let stored = try XCTUnwrap(ProtectionConnectivityNotificationStore.load(at: url, legacyHistory: legacy))
+            XCTAssertNil(stored.lastDeliveredNotificationID)
+            XCTAssertNil(stored.unresolvedProblemNotificationID)
+            XCTAssertEqual(stored.lastDeliveredAt, outstanding ? now.addingTimeInterval(-540) : now)
+        }
+    }
+
+    func testFailedNotificationRetryAllowsOnlyHigherPriorityIncidents() {
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.canEscalate(from: .dnsSlow, to: .reconnectNeeded))
+        XCTAssertTrue(ProtectionConnectivityNotificationPolicy.canEscalate(from: .reconnectNeeded, to: .filteringUnavailable))
+        XCTAssertFalse(ProtectionConnectivityNotificationPolicy.canEscalate(from: .filteringUnavailable, to: .reconnectNeeded))
+        XCTAssertFalse(ProtectionConnectivityNotificationPolicy.canEscalate(from: .filteringUnavailable, to: .filteringUnavailable))
+    }
+
+    func testObservedFilterFailureUsesTheExistingProblemBannerAndDeduplicates() throws {
+        let now = Date(timeIntervalSince1970: 900)
+        let health = TunnelHealthSnapshot(failClosedServedQueryCount: 1, lastFailClosedAt: now.addingTimeInterval(-1), lastFailClosedReason: "snapshot-unavailable")
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        let notice = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        XCTAssertEqual(notice.kind, .filteringUnavailable)
+        XCTAssertEqual(notice.identifier, "filtering-unavailable:reviewFilterSelection:870")
+        XCTAssertEqual(notice.title, "Lava needs attention")
+        XCTAssertEqual(notice.body, "Your selected blocklists still exceed the rule limit, so DNS is blocked. Open Lava to review your blocklists.")
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: notice.identifier, lastDeliveredAt: now,
+            unresolvedProblemNotificationID: notice.identifier, unresolvedProblemKind: notice.kind)
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: history, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now.addingTimeInterval(1)))
+    }
+
+    func testHistoricalOrUnservedFilterFailureCannotCreateAnOutageBanner() {
+        let now = Date(timeIntervalSince1970: 900)
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        let health = TunnelHealthSnapshot(failClosedServedQueryCount: 1, lastFailClosedAt: now, lastFailClosedReason: "snapshot-unavailable")
+        for current: Bool? in [nil, false] {
+            XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+                for: assessment, health: health, history: .empty, filteringUnavailable: current, now: now))
+        }
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: TunnelHealthSnapshot(), history: .empty, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now.addingTimeInterval(121)))
+    }
+
+    func testOnlyCurrentTunnelPostureClearsAFilterFailureBanner() {
+        let now = Date(timeIntervalSince1970: 900)
+        var health = TunnelHealthSnapshot()
+        health.lastPrimaryUpstreamSuccessAt = now
+        let history = ProtectionConnectivityNotificationHistory(
+            unresolvedProblemNotificationID: "filtering-unavailable:899", unresolvedProblemKind: .filteringUnavailable)
+        for severity: ProtectionConnectivitySeverity in [.healthy, .usingEncryptedFallback] {
+            let assessment = ProtectionConnectivityAssessment(severity: severity, primaryAction: .turnOff)
+            for current: Bool? in [nil, true] {
+                XCTAssertTrue(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+                    for: assessment, health: health, history: history, filteringUnavailable: current, now: now).isEmpty)
+            }
+            XCTAssertEqual(ProtectionConnectivityNotificationPolicy.resolvedProblemNotificationIdentifiers(
+                for: assessment, health: health, history: history, filteringUnavailable: false, now: now),
+                ["filtering-unavailable:899"])
+            XCTAssertNil(ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear(
+                for: assessment, history: history, now: now))
+        }
+    }
+
+    func testFilterFailureEscalatesOnceAndHonorsCooldownAfterRecovery() throws {
+        let now = Date(timeIntervalSince1970: 900)
+        let health = TunnelHealthSnapshot(failClosedServedQueryCount: 1, lastFailClosedAt: now, lastFailClosedReason: "snapshot-unavailable")
+        let assessment = ProtectionConnectivityAssessment(severity: .needsReconnect, primaryAction: .reconnect)
+        let history = ProtectionConnectivityNotificationHistory(
+            lastDeliveredNotificationID: "reconnect-needed:899", lastDeliveredAt: now.addingTimeInterval(-1),
+            unresolvedProblemNotificationID: "reconnect-needed:899", unresolvedProblemKind: .reconnectNeeded)
+        let notice = try XCTUnwrap(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: history, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        XCTAssertEqual(notice.supersededNotificationIdentifiers, ["reconnect-needed:899"])
+        let clearedHistory = ProtectionConnectivityNotificationHistory(lastDeliveredAt: now.addingTimeInterval(-1))
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: clearedHistory, filteringUnavailable: true, filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+    }
+
+    func testFilterRepairNoticeWaitsForPersistentFailureAndRejectsTransientEvidence() {
+        let now = Date(timeIntervalSince1970: 900)
+        let assessment = ProtectionConnectivityAssessment(severity: .healthy, primaryAction: .turnOff)
+        var health = TunnelHealthSnapshot(failClosedServedQueryCount: 1, lastFailClosedAt: now,
+                                          lastFailClosedReason: "snapshot-unavailable")
+        for start: Date? in [nil, now, now.addingTimeInterval(-29), now.addingTimeInterval(1)] {
+            XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+                for: assessment, health: health, history: .empty, filteringUnavailable: true,
+                filteringUnavailableSince: start, filteringIntervention: .reviewFilterSelection, now: now))
+        }
+        XCTAssertNotNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        health.lastFailClosedReason = "transient-protection-unavailable"
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+        health.lastFailClosedReason = "snapshot-unavailable"
+        health.lastFailClosedAt = now.addingTimeInterval(-40)
+        XCTAssertNil(ProtectionConnectivityNotificationPolicy.notification(
+            for: assessment, health: health, history: .empty, filteringUnavailable: true,
+            filteringUnavailableSince: now.addingTimeInterval(-30), filteringIntervention: .reviewFilterSelection, now: now))
+    }
+
     func testDeviceDNSFallbackPostsNoNotification() {
         // Informational, non-actionable: Lava keeps filtering on Device DNS, so it
         // surfaces in-app only — no push banner (we notify only when a tap is needed).
@@ -71,7 +329,7 @@ final class ProtectionConnectivityNotificationPolicyTests: XCTestCase {
         XCTAssertEqual(notification?.kind, .reconnectNeeded)
         XCTAssertEqual(notification?.identifier, "reconnect-needed:297")
         XCTAssertEqual(notification?.title, "Reconnect Lava")
-        XCTAssertEqual(notification?.body, "DNS is not resolving on this network. Tap to reconnect protection.")
+        XCTAssertEqual(notification?.body, "DNS isn’t resolving on this network. Tap to reconnect protection.")
     }
 
     func testReconnectNotificationHonorsPinnedLanguage() {

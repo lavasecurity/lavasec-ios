@@ -9,6 +9,11 @@ public enum ThirdPartyLegalNoticeCategory: String, Codable, Sendable {
     case signInProvider
     /// Notice for a bundled or downloadable blocklist source.
     case blocklistSource
+    /// Notice for a third-party library compiled into a shipped binary. Unlike the
+    /// other categories — which describe services the app *talks to* — this one covers
+    /// code the app *contains*, so its notice must carry the upstream copyright line
+    /// and license, not just an identification of the vendor.
+    case bundledLibrary
 }
 
 /// Display and attribution metadata for one third-party dependency or service.
@@ -71,7 +76,7 @@ public struct ThirdPartyLegalNotice: Identifiable, Hashable, Codable, Sendable {
 /// Built-in third-party notices grouped for the app's legal-notice screens.
 public enum ThirdPartyLegalNotices {
     /// General non-affiliation disclaimer displayed with third-party notices.
-    public static let affiliationDisclaimer = "Third-party names identify services, sign-in providers, or data sources. Lava Security is not affiliated with, endorsed by, sponsored by, or reviewed by these providers or projects."
+    public static let affiliationDisclaimer = "Third-party names identify services, sign-in providers, data sources, or open-source libraries included in Lava. Lava Security is not affiliated with, endorsed by, sponsored by, or reviewed by these providers or projects."
     private static let dnsResolverPlannedUse = "Plain-text identification of a selectable DNS resolver and optional encrypted upstream forwarding for allowed DNS lookups."
 
     /// Notices for the built-in DNS resolver catalog.
@@ -86,12 +91,12 @@ public enum ThirdPartyLegalNotices {
             plannedUse: "Plain-text identification of the device DNS resolver used for allowed DNS lookups when selected or used as fallback."
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.mullvad.id,
-            displayName: DNSResolverPreset.mullvad.displayName,
+            id: DNSResolverPreset.quad9Unfiltered.id,
+            displayName: DNSResolverPreset.quad9Unfiltered.displayName,
             category: .dnsResolver,
-            ownerName: "Mullvad VPN AB",
-            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
-            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
+            ownerName: "Quad9 Foundation",
+            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
+            sourceURL: URL(string: "https://www.quad9.net/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -101,15 +106,6 @@ public enum ThirdPartyLegalNotices {
             ownerName: "Cloudflare, Inc.",
             noticeText: "Cloudflare is a trademark or registered trademark of Cloudflare, Inc. in the United States and other jurisdictions.",
             sourceURL: URL(string: "https://www.cloudflare.com/learning/dns/what-is-1.1.1.1/"),
-            plannedUse: dnsResolverPlannedUse
-        ),
-        ThirdPartyLegalNotice(
-            id: DNSResolverPreset.quad9Secure.id,
-            displayName: DNSResolverPreset.quad9Secure.displayName,
-            category: .dnsResolver,
-            ownerName: "Quad9 Foundation",
-            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
-            sourceURL: URL(string: "https://www.quad9.org/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -131,12 +127,12 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.mullvadDoH.id,
-            displayName: DNSResolverPreset.mullvadDoH.displayName,
+            id: DNSResolverPreset.quad9UnfilteredDoH.id,
+            displayName: DNSResolverPreset.quad9UnfilteredDoH.displayName,
             category: .dnsResolver,
-            ownerName: "Mullvad VPN AB",
-            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
-            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
+            ownerName: "Quad9 Foundation",
+            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
+            sourceURL: URL(string: "https://www.quad9.net/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -146,15 +142,6 @@ public enum ThirdPartyLegalNotices {
             ownerName: "Cloudflare, Inc.",
             noticeText: "Cloudflare is a trademark or registered trademark of Cloudflare, Inc. in the United States and other jurisdictions.",
             sourceURL: URL(string: "https://www.cloudflare.com/learning/dns/what-is-1.1.1.1/"),
-            plannedUse: dnsResolverPlannedUse
-        ),
-        ThirdPartyLegalNotice(
-            id: DNSResolverPreset.quad9SecureDoH.id,
-            displayName: DNSResolverPreset.quad9SecureDoH.displayName,
-            category: .dnsResolver,
-            ownerName: "Quad9 Foundation",
-            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
-            sourceURL: URL(string: "https://www.quad9.org/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -176,12 +163,12 @@ public enum ThirdPartyLegalNotices {
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
-            id: DNSResolverPreset.mullvadDoT.id,
-            displayName: DNSResolverPreset.mullvadDoT.displayName,
+            id: DNSResolverPreset.quad9UnfilteredDoT.id,
+            displayName: DNSResolverPreset.quad9UnfilteredDoT.displayName,
             category: .dnsResolver,
-            ownerName: "Mullvad VPN AB",
-            noticeText: "Mullvad is a trademark of Mullvad VPN AB.",
-            sourceURL: URL(string: "https://mullvad.net/en/help/dns-over-https-and-dns-over-tls"),
+            ownerName: "Quad9 Foundation",
+            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
+            sourceURL: URL(string: "https://www.quad9.net/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -191,15 +178,6 @@ public enum ThirdPartyLegalNotices {
             ownerName: "Cloudflare, Inc.",
             noticeText: "Cloudflare is a trademark or registered trademark of Cloudflare, Inc. in the United States and other jurisdictions.",
             sourceURL: URL(string: "https://www.cloudflare.com/learning/dns/what-is-1.1.1.1/"),
-            plannedUse: dnsResolverPlannedUse
-        ),
-        ThirdPartyLegalNotice(
-            id: DNSResolverPreset.quad9SecureDoT.id,
-            displayName: DNSResolverPreset.quad9SecureDoT.displayName,
-            category: .dnsResolver,
-            ownerName: "Quad9 Foundation",
-            noticeText: "Quad9 is a trademark of Quad9 Foundation.",
-            sourceURL: URL(string: "https://www.quad9.org/about/"),
             plannedUse: dnsResolverPlannedUse
         ),
         ThirdPartyLegalNotice(
@@ -249,7 +227,55 @@ public enum ThirdPartyLegalNotices {
         (DefaultCatalog.curatedSources + DefaultCatalog.guardrailSources).map { blocklistNotice(for: $0) }
     }()
 
-    package static let all: [ThirdPartyLegalNotice] = dnsResolverNotices + signInProviderNotices + blocklistNotices
+    /// Notices for third-party code compiled into a shipped binary.
+    ///
+    /// This category carries a duty the other three do not. A blocklist or a resolver is
+    /// *contacted* at runtime and never redistributed, so a link to its license suffices.
+    /// A bundled library is **redistributed in binary form**, and BSD-3-Clause clause 2
+    /// requires the copyright notice, the full condition list, and the disclaimer to be
+    /// reproduced "in the documentation and/or other materials provided with the
+    /// distribution" — a URL is not reproduction. The verbatim text therefore lives in the
+    /// repository at `ThirdParty/wireguard-core/LICENSE-boringtun.txt`; `licenseTextURL`
+    /// is a convenience link, not the compliance artifact. The Phase-3 UI section must
+    /// render that text, not merely link it.
+    ///
+    /// The trademark sentence is adapted from upstream's own wording in
+    /// `boringtun/README.md`, extended to name Lava Security as well: the mark belongs to
+    /// Jason A. Donenfeld, and neither Cloudflare nor we are endorsed by him.
+    ///
+    /// This is the concise product-facing entry for BoringTun. Complete package and license
+    /// text for every crate present in the shipped Apple-target archives is generated into
+    /// `ThirdParty/wireguard-core/THIRD-PARTY-NOTICES.txt` and copied byte-for-byte into the
+    /// app bundle. `BundledLibraryAttributionSourceTests` checks that inventory and prevents
+    /// a newly linked dependency from entering without attribution.
+    ///
+    /// Note the obligation attaches earlier than the feature ships: the committed
+    /// xcframework is itself a binary redistribution and sits inside the public-export
+    /// scope, so it reaches the public mirror on the next promotion regardless of whether
+    /// any target links it. See `docs/legal/third-party-notices.md` for the current status.
+    public static let bundledLibraryNotices: [ThirdPartyLegalNotice] = [
+        ThirdPartyLegalNotice(
+            id: "boringtun",
+            displayName: "BoringTun",
+            category: .bundledLibrary,
+            ownerName: "Cloudflare, Inc.",
+            noticeText: "Copyright (c) 2019 Cloudflare, Inc. All rights reserved. "
+                + "Used under the BSD 3-Clause License. "
+                + "WireGuard is a registered trademark of Jason A. Donenfeld. "
+                + "BoringTun and Lava Security are not sponsored or endorsed by Jason A. Donenfeld.",
+            sourceURL: URL(string: "https://github.com/cloudflare/boringtun"),
+            licenseTextURL: URL(string: "https://opensource.org/license/bsd-3-clause"),
+            distributionModeDescription: "Vendored upstream source, compiled from a pinned "
+                + "toolchain into a static library that is linked into the app's packet-tunnel "
+                + "extension in every build, whether or not chained upstream is turned on. "
+                + "No code is downloaded at runtime.",
+            plannedUse: "Cryptographic core — Noise handshake and transport encryption — for a "
+                + "user-supplied WireGuard upstream. No logo or provider branding is shown."
+        )
+    ]
+
+    package static let all: [ThirdPartyLegalNotice] =
+        dnsResolverNotices + signInProviderNotices + blocklistNotices + bundledLibraryNotices
 
     package static func notice(id: String) -> ThirdPartyLegalNotice? {
         all.first { $0.id == id }
@@ -301,7 +327,7 @@ public enum ThirdPartyLegalNotices {
         case DefaultCatalog.phishingDatabaseActive.id:
             "Phishing.Database"
         default:
-            "Third-party source project"
+            LavaCoreStrings.localized("Third-party source project")
         }
     }
 
@@ -327,6 +353,6 @@ public enum ThirdPartyLegalNotices {
     }
 
     private static func blocklistNoticeText(for source: BlocklistSource, ownerName: String) -> String {
-        "\(source.name) is a third-party source shown for attribution and source identification. License: \(source.licenseName). Owner or project: \(ownerName)."
+        LavaCoreStrings.localizedFormat("%1$@ is a third-party source shown for attribution and source identification. License: %2$@. Owner or project: %3$@.", source.name, source.licenseName, ownerName)
     }
 }

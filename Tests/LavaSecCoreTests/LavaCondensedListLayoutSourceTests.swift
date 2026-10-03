@@ -25,6 +25,22 @@ final class LavaCondensedListLayoutSourceTests: XCTestCase {
         )
     }
 
+    func testFilterContentRowOwnsTheStrokeOnlyOutcomeMark() throws {
+        let listSource = try readSource(.lavaCondensedList)
+        let rowBlock = try sourceBlock(
+            in: listSource,
+            startingAt: "struct LavaFilterContentRow<Accessory: View>: View",
+            endingBefore: "extension LavaFilterContentRow"
+        )
+
+        XCTAssertTrue(
+            rowBlock.contains("Image(systemName: outcome.symbol)"),
+            "The filter-content row owns the outcome mark so the filter detail and the import review cannot drift."
+        )
+        XCTAssertTrue(listSource.contains("case .blocked: LavaOutcomeSymbol.blockedOutline"))
+        XCTAssertTrue(listSource.contains("case .allowed: LavaOutcomeSymbol.allowedOutline"))
+    }
+
     func testInactiveRowsDoNotDrawThroughLongBlocklistTitles() throws {
         let listSource = try readSource(.lavaCondensedList)
         let itemBlock = try sourceBlock(

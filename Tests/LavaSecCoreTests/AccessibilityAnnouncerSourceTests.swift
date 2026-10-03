@@ -17,19 +17,4 @@ final class AccessibilityAnnouncerSourceTests: XCTestCase {
         )
     }
 
-    func testGuardAnnouncesProtectionTransition() throws {
-        let block = try sourceBlock(
-            in: try readSource(.guardView),
-            startingAt: "struct ProtectionStatusPanel",
-            endingBefore: "private struct ProtectionPrimaryActionButton"
-        )
-        XCTAssertTrue(
-            block.contains(".onChange(of: viewModel.protectionTitle + \" \" + viewModel.protectionSubtitle)"),
-            "Guard must announce on a change to the FULL accessible status (title + subtitle) — the title alone maps healthy + fallback both to Protected, so fallback transitions would be missed."
-        )
-        XCTAssertTrue(
-            block.contains("LavaAccessibilityAnnouncer.announce"),
-            "Guard must route the protection transition through the shared announcer."
-        )
-    }
 }

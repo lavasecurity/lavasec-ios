@@ -1,0 +1,9 @@
+# Pinned so the committed xcframework is reproducible: the CI drift gate rebuilds
+# with exactly this toolchain and byte-compares against the committed artifact.
+# 1.94.0 matches the Phase-0 spike pin (a published stable installable on a fresh
+# machine); bumping it is a deliberate re-baseline that re-commits the artifact.
+[toolchain]
+channel = "1.94.0"
+# aarch64-apple-darwin is deliberate: the macOS slice is what lets executable
+# package tests drive the real Noise state machine under `swift test` (plan D4).
+targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim", "aarch64-apple-darwin"]

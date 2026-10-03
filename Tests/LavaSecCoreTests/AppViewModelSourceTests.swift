@@ -1,101 +1,51 @@
 import XCTest
 
 final class AppViewModelSourceTests: XCTestCase {
-    func testNotifierUsesPreClearHistoryAndOnlyProblemsAdvanceThrottle() throws {
-        let source = try readSource(.appViewModel)
 
-        // The app notifier must evaluate notification(for:) against the captured
-        // pre-clear `history`, not a re-read (which would have dropped the
-        // unresolved-problem marker the silent banner-clear keys off).
-        let scheduleBlock = try sourceBlock(
-            in: source,
-            startingAt: "func scheduleIfNeeded(",
-            endingBefore: "func requestAuthorization()"
-        )
-        XCTAssertTrue(
-            scheduleBlock.contains("clearResolvedProblemNotifications(")
-                && scheduleBlock.contains("resolvedNotificationIdentifiers,")
-                && scheduleBlock.contains("cooldownAnchor: ProtectionConnectivityNotificationPolicy.deliveryCooldownAnchorAfterClear("),
-            "The clear must pass the encrypted-fallback cooldown anchor so a covered-then-lapsed wedge re-posts."
-        )
-        XCTAssertFalse(
-            scheduleBlock.contains("history: notificationHistory,"),
-            "The notifier must use the pre-clear `history`, not a re-read."
-        )
-
-        // The 600s problem throttle keys off the delivered-at timestamp, so only a
-        // problem delivery may advance it. (Only actionable problem banners are
-        // delivered now — no recovery acknowledgement.)
-        let recordBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func recordDelivery(of notification:",
-            endingBefore: "private func removeSupersededNotifications("
-        )
-        let prefix = try sourceBlock(
-            in: recordBlock,
-            startingAt: "defaults.set(",
-            endingBefore: "if notification.kind.isProblem {"
-        )
-        XCTAssertFalse(prefix.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
-        let problemBranch = try sourceBlock(
-            in: source,
-            startingAt: "if notification.kind.isProblem {",
-            endingBefore: "private func removeSupersededNotifications("
-        )
-        XCTAssertTrue(problemBranch.contains("protectionLastDeliveredNotificationAtDefaultsKeyName"))
-        // No recovery-acknowledgement delivery path remains in recordDelivery.
-        XCTAssertFalse(recordBlock.contains(".reconnected"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("notificationHistory"))
+    /// Collapse a source block to one line so a pin can assert an EXPRESSION without also
+    /// asserting the formatter's line breaks and continuation indent.
+    private func normalizedPersistBlockForCoverage(_ block: String) -> String {
+        block.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: " ")
     }
 
-    func testEncryptedFallbackSilentClearAlsoLiftsTheDuplicateGuardID() throws {
-        let source = try readSource(.appViewModel)
-        // Back-dating `lastDeliveredAt` alone is not enough: the silent supersede removed
-        // the reconnect banner, so the persisted last-delivered *id* must also be cleared.
-        // Otherwise a lapse back to `.needsReconnect` with the same event id is suppressed by
-        // notification(for:)'s exact-id duplicate guard until a later probe shifts the id,
-        // defeating the back-dated cooldown. The clear must live in the cooldown branch so a
-        // real `.healthy` recovery (cooldownAnchor == nil) keeps its duplicate guard intact.
-        let cooldownBranch = try sourceBlock(
-            in: source,
-            startingAt: "if let cooldownAnchor {",
-            endingBefore: "let requestIdentifiers = identifiers.map {"
-        )
-        XCTAssertTrue(
-            cooldownBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
-            "The encrypted-fallback silent clear must also clear the duplicate-guard id so a lapsed wedge re-posts."
-        )
+    func testNotifierUsesSharedAtomicHistoryAndCleansRecoveryBeforePreferences() throws {
+        let source = try readSource(.protectionUserNotificationController)
+        let block = try sourceBlock(in: source, startingAt: "func scheduleIfNeeded(", endingBefore: "func requestAuthorization()")
+        let reconcile = try XCTUnwrap(block.range(of: "ProtectionConnectivityNotificationStore.reconcile("))
+        let cleanup = try XCTUnwrap(block.range(of: "removeProblemNotifications(reconciliation.resolvedIdentifiers)"))
+        let preference = try XCTUnwrap(block.range(of: "guard LavaNotificationPreferences.isEnabled"))
+        XCTAssertLessThan(reconcile.lowerBound, cleanup.lowerBound)
+        XCTAssertLessThan(cleanup.lowerBound, preference.lowerBound)
+        XCTAssertFalse(block.contains("defaults.set("))
+        XCTAssertFalse(block.contains("defaults.removeObject("))
     }
 
-    func testEncryptedFallbackCoverageLiftsDuplicateGuardWithNoOutstandingBanner() throws {
-        let source = try readSource(.appViewModel)
-        let scheduleBlock = try sourceBlock(
-            in: source,
-            startingAt: "func scheduleIfNeeded(",
-            endingBefore: "func requestAuthorization()"
-        )
-        // When coverage engages with no problem banner outstanding (the resolved-ids list is
-        // empty so clearResolvedProblemNotifications never runs), the duplicate-guard id must
-        // still be lifted, else a later lapse to a same-second reconnect id is suppressed.
-        let coverageBranch = try sourceBlock(
-            in: scheduleBlock,
-            startingAt: "} else if assessment.severity == .usingEncryptedFallback {",
-            endingBefore: "// Use the pre-clear"
-        )
-        XCTAssertTrue(
-            coverageBranch.contains("removeObject(forKey: LavaSecAppGroup.protectionLastDeliveredNotificationIDDefaultsKeyName)"),
-            "Coverage with no outstanding banner must lift the duplicate-guard id so a lapsed reconnect can re-post."
-        )
+    func testAppNotificationUsesSharedDeliveryStateAcrossSuspensionPoints() throws {
+        let block = try sourceBlock(in: try readSource(.protectionUserNotificationController), startingAt: "func scheduleIfNeeded(", endingBefore: "func requestAuthorization()")
+        let auth = try XCTUnwrap(block.range(of: "await Self.canSendNotifications"))
+        let authorized = try XCTUnwrap(block.range(of: "delivery.authorized(attempt"))
+        let add = try XCTUnwrap(block.range(of: "try await notificationCenter.add(request)"))
+        let submitted = try XCTUnwrap(block.range(of: "delivery.submitted(submission"))
+        let claim = try XCTUnwrap(block.range(of: "ProtectionConnectivityNotificationStore.claimDelivery("))
+        XCTAssertLessThan(auth.lowerBound, authorized.lowerBound)
+        XCTAssertLessThan(authorized.lowerBound, add.lowerBound)
+        XCTAssertLessThan(add.lowerBound, submitted.lowerBound)
+        XCTAssertLessThan(submitted.lowerBound, claim.lowerBound)
+        XCTAssertTrue(block.contains("delivery.update(.init(assessment: assessment, health: health))"))
+        XCTAssertTrue(block.contains("assessment: posture.assessment, health: posture.health)"))
+        XCTAssertTrue(block.contains("delivery.retryDeadline == deadline"))
+        XCTAssertTrue(block.contains("reevaluateLatestPosture()"))
+        XCTAssertTrue(block.contains("protectionNotificationRequestIdentifier(for: submission.requestIdentifier)"))
+        XCTAssertTrue(block.contains("removeProblemNotifications([submission.requestIdentifier])"))
     }
 
     func testLiveDNSSmokeCanForceResolverPresetFromLaunchArguments() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let runtimeSupportBlock = try sourceBlock(
             in: source,
-            startingAt: "private static let protectionStopWaitTimeout",
+            startingAt: "static let protectionStopWaitTimeout",
             endingBefore: "#if DEBUG || LAVA_QA_TOOLS"
         )
         let launchArgumentBlock = try sourceBlock(
@@ -134,11 +84,11 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testLiveDNSSmokeDebugProbeAlwaysRestartsTunnelAfterPersistingResolverOverride() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let probeBlock = try sourceBlock(
             in: source,
-            startingAt: "private func runVPNStartupDebugProbe() async",
-            endingBefore: "private func logVPNDebugEvent"
+            startingAt: "func runVPNStartupDebugProbe() async",
+            endingBefore: "func logVPNDebugEvent"
         )
 
         XCTAssertTrue(probeBlock.contains("if Self.isLiveDNSSmokeTestRequested"))
@@ -148,7 +98,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNLifecycleSmokeDebugProbeExercisesPauseResumeCommandPath() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let launchArgumentBlock = try sourceBlock(
             in: source,
             startingAt: "static let liveDNSSmokeTestLaunchArgument",
@@ -157,11 +107,11 @@ final class AppViewModelSourceTests: XCTestCase {
         let lifecycleProbeBlock = try sourceBlock(
             in: source,
             startingAt: "private func runVPNLifecycleSmokeProbe() async",
-            endingBefore: "private func logVPNDebugEvent"
+            endingBefore: "func logVPNDebugEvent"
         )
 
         XCTAssertTrue(launchArgumentBlock.contains("static let vpnLifecycleSmokeTestLaunchArgument = \"-lava-vpn-lifecycle-smoke-test\""))
-        XCTAssertTrue(launchArgumentBlock.contains("private static var isVPNLifecycleSmokeTestRequested: Bool"))
+        XCTAssertTrue(launchArgumentBlock.contains("static var isVPNLifecycleSmokeTestRequested: Bool"))
         XCTAssertTrue(lifecycleProbeBlock.contains("await waitForProtectionToConnectForDebugProbe()"))
         XCTAssertTrue(lifecycleProbeBlock.contains("try await LavaProtectionCommandService.perform(.pauseFiveMinutes)"))
         XCTAssertTrue(lifecycleProbeBlock.contains("try await LavaProtectionCommandService.perform(.pauseTenMinutes)"))
@@ -176,11 +126,11 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProviderMessagesRecordLatencySpanRequestReplyAndErrors() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let sendTunnelMessageBlock = try sourceBlock(
             in: source,
-            startingAt: "private func sendTunnelMessage(",
-            endingBefore: "private func requestTunnelHealthFlush() async"
+            startingAt: "func sendTunnelMessage(",
+            endingBefore: "func requestTunnelHealthFlush() async"
         )
 
         XCTAssertTrue(sendTunnelMessageBlock.contains("let operationID = operationID ?? LatencyOperationID.make()"))
@@ -200,17 +150,17 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProtectionActionsRecordRootLatencySpansAndPropagateOperationIDs() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let catalogController = try readSource(.catalogController)
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let disableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func disableProtection(",
-            endingBefore: "private func reconnectProtectionNow"
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow"
         )
         let refreshBlock = try sourceBlock(
             in: source,
@@ -224,30 +174,30 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let resumeBlock = try sourceBlock(
             in: source,
-            startingAt: "private func restoreFiltersAfterTemporaryProtectionPause(",
-            endingBefore: "private func clearTemporaryProtectionPause()"
+            startingAt: "func restoreFiltersAfterTemporaryProtectionPause(",
+            endingBefore: "func clearTemporaryProtectionPause()"
         )
         let notifySnapshotBlock = try sourceBlock(
             in: source,
-            startingAt: "private func notifyTunnelSnapshotUpdated(",
-            endingBefore: "private func notifyTunnelProtectionPauseUpdated("
+            startingAt: "func notifyTunnelSnapshotUpdated(",
+            endingBefore: "func notifyTunnelProtectionPauseUpdated("
         )
         let notifyPauseBlock = try sourceBlock(
             in: source,
-            startingAt: "private func notifyTunnelProtectionPauseUpdated(",
-            endingBefore: "private func restoreProtectionIfNeeded"
+            startingAt: "func notifyTunnelProtectionPauseUpdated(",
+            endingBefore: "func restoreProtectionIfNeeded"
         )
         let cachedRefreshFallbackBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadCachedCatalogAfterSyncFailure(",
-            endingBefore: "private func rebuildEnabledBlockRules()"
+            startingAt: "func loadCachedCatalogAfterSyncFailure(",
+            endingBefore: "func rebuildEnabledBlockRules()"
         )
         // The bug-report machinery that used to follow makeLatencyTrace moved to
         // DiagnosticsController (Phase D4); the next hub member is the status mapper.
         let latencyHelperBlock = try sourceBlock(
             in: source,
-            startingAt: "private func makeLatencyTrace(",
-            endingBefore: "private func vpnStatusReportDescription"
+            startingAt: "func makeLatencyTrace(",
+            endingBefore: "func vpnStatusReportDescription"
         )
 
         XCTAssertTrue(latencyHelperBlock.contains("LatencyDebugLogEventSink(operationKind: operationKind)"))
@@ -266,7 +216,7 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(disableBlock.contains("trace.beginSpan(\"action.turnOff\""))
 
         XCTAssertTrue(refreshBlock.contains("operationID: LatencyOperationID"))
-        XCTAssertTrue(catalogController.contains("let operationID = LatencyOperationID.make()"))
+        XCTAssertTrue(catalogController.contains("isBackgroundRefresh: isBackgroundRefresh, operationID: operationID"))
         XCTAssertTrue(refreshBlock.contains("makeLatencyTrace(operationID: operationID, operationKind: \"refreshLists\")"))
         XCTAssertTrue(refreshBlock.contains("trace.beginSpan(\"action.refreshLists\""))
         XCTAssertTrue(refreshBlock.contains("notifyTunnelSnapshotUpdated(operationID: operationID)"))
@@ -293,7 +243,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testSwitchingResolversKeepsSavedCustomDNSEntry() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let setResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func setResolver(_ preset: DNSResolverPreset)",
@@ -314,7 +264,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testSavingCustomResolverPersistsPrimaryAndSecondaryAddressesTogether() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let customResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func setCustomResolverAddresses(primary rawPrimaryValue: String, secondary rawSecondaryValue: String)",
@@ -332,7 +282,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testClearingCustomResolverRemovesSavedEntryAndKeepsActiveResolverValid() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let clearCustomResolverBlock = try sourceBlock(
             in: source,
             startingAt: "func clearCustomResolver(fallback preset: DNSResolverPreset)",
@@ -348,7 +298,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testFallbackResolverSettersMirrorPrimaryAndTargetFallbackFields() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         let toggleBlock = try sourceBlock(
             in: source,
@@ -405,10 +355,10 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistDisplayKeepsSavedSourcesWhileEditing() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let displayedCustomBlocklistsBlock = try sourceBlock(
             in: source,
-            startingAt: "private var displayedCustomBlocklists: [CustomBlocklistSource]",
+            startingAt: "var displayedCustomBlocklists: [CustomBlocklistSource]",
             endingBefore: "var allowlistConfigured: Bool"
         )
 
@@ -430,24 +380,24 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistDraftKeepsSourcesWhenDisabledAndDeletesOnlyFromTrash() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let setDraftBlocklistsBlock = try sourceBlock(
-            in: source,
+            in: try readSource(.filterDraftController),
             startingAt: "func setDraftBlocklists(_ sourceIDs: Set<String>)",
             endingBefore: "func addCustomBlocklistToDraft"
         )
         let removeBlocklistBlock = try sourceBlock(
-            in: source,
+            in: try readSource(.filterDraftController),
             startingAt: "func removeBlocklistFromDraft(_ sourceID: String)",
             endingBefore: "func deleteCustomBlocklistFromDraft"
         )
         let deleteCustomBlocklistBlock = try sourceBlock(
-            in: source,
+            in: try readSource(.filterDraftController),
             startingAt: "func deleteCustomBlocklistFromDraft(_ sourceID: String)",
             endingBefore: "func undoBlocklistDraftChange"
         )
         let undoBlocklistBlock = try sourceBlock(
-            in: source,
+            in: try readSource(.filterDraftController),
             startingAt: "func undoBlocklistDraftChange(_ sourceID: String)",
             endingBefore: "func addBlockedDomainToDraft"
         )
@@ -464,7 +414,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCustomBlocklistMetadataShowsPendingRefreshUntilCompiled() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let metadataBlock = try sourceBlock(
             in: source,
             startingAt: "func blocklistMetadataText(for sourceID: String) -> String?",
@@ -477,16 +427,16 @@ final class AppViewModelSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(source.contains("func customBlocklistEntryCount(for source: CustomBlocklistSource) -> Int?"))
-        XCTAssertTrue(metadataBlock.contains("return \"%@ rules · Custom List\".lavaLocalizedFormat(rules.count.formatted())"))
+        XCTAssertTrue(metadataBlock.contains("return \"%@ rules · Custom List\".lavaLocalizedFormat(count.formatted())"))
         XCTAssertTrue(metadataBlock.contains("return \"Pending refresh · Custom List\""))
         XCTAssertFalse(metadataBlock.contains("return \"Custom Pi-hole URL\""))
         XCTAssertTrue(nameBlock.contains("return customBlocklistPickerTitle(for: customSource)"))
     }
 
     func testCustomBlocklistDraftRejectsOnlyCustomDisplayNameConflicts() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let draftAddBlock = try sourceBlock(
-            in: source,
+            in: try readSource(.filterDraftController),
             startingAt: "func addCustomBlocklistToDraft(displayName: String, rawURL: String) -> String?",
             endingBefore: "func removeBlocklistFromDraft"
         )
@@ -496,14 +446,17 @@ final class AppViewModelSourceTests: XCTestCase {
             endingBefore: "func removeCustomBlocklist"
         )
 
-        XCTAssertTrue(source.contains("private func customBlocklistDisplayKey(for source: CustomBlocklistSource) -> String"))
-        XCTAssertTrue(draftAddBlock.contains("let displayKey = customBlocklistDisplayKey(for: source)"))
+        XCTAssertTrue(source.contains("func customBlocklistDisplayKey(for source: CustomBlocklistSource) -> String"))
+        XCTAssertTrue(draftAddBlock.contains("let displayKey = context.draftCustomBlocklistDisplayKey(for: source)"))
         XCTAssertTrue(draftAddBlock.contains("draft.customBlocklists.contains"))
-        XCTAssertTrue(draftAddBlock.contains("customBlocklistDisplayKey(for: existingSource) == displayKey"))
+        XCTAssertTrue(draftAddBlock.contains("draftCustomBlocklistDisplayKey(for: existingSource) == displayKey"))
         XCTAssertTrue(draftAddBlock.contains("existingSource.sourceURL != source.sourceURL"))
         XCTAssertTrue(draftAddBlock.contains("return \"A custom list with that name already exists.\""))
+        let draftNameCheck = try sourceBlock(in: draftAddBlock,
+            startingAt: "let displayKey = context.draftCustomBlocklistDisplayKey(for: source)",
+            endingBefore: "let updatedIDs")
         XCTAssertFalse(
-            draftAddBlock.contains("blocklists.contains"),
+            draftNameCheck.contains("blocklists.contains"),
             "Custom display-name conflicts should be scoped to custom sources so a custom list can share a curated list name."
         )
         XCTAssertTrue(immediateAddBlock.contains("let displayKey = customBlocklistDisplayKey(for: source)"))
@@ -518,16 +471,16 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testReconnectOnlyRunsFromExplicitUserOrDebugActions() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let refreshTunnelHealthBlock = try sourceBlock(
             in: source,
             startingAt: "func refreshTunnelHealth(force: Bool = false)",
-            endingBefore: "func sampleTunnelHealth() async"
+            endingBefore: "func sampleTunnelHealth(force: Bool = false) async"
         )
         let notificationBlock = try sourceBlock(
             in: source,
-            startingAt: "private func scheduleProtectionNotificationIfNeeded()",
-            endingBefore: "private func appendAppNetworkActivity"
+            startingAt: "func scheduleProtectionNotificationIfNeeded()",
+            endingBefore: "func appendAppNetworkActivity"
         )
         let primaryActionBlock = try sourceBlock(
             in: source,
@@ -537,49 +490,46 @@ final class AppViewModelSourceTests: XCTestCase {
 
         XCTAssertFalse(refreshTunnelHealthBlock.contains("reconnectProtection"))
         XCTAssertFalse(notificationBlock.contains("reconnectProtection"))
-        XCTAssertTrue(primaryActionBlock.contains("protectionConnectivityAssessment.primaryAction == .reconnect"))
+        XCTAssertTrue(primaryActionBlock.contains("performProtectionPrimaryAction(guardStatusPresentation.primaryAction)"))
+        XCTAssertTrue(primaryActionBlock.contains("switch capturedAction"))
         XCTAssertTrue(primaryActionBlock.contains("reconnectProtection()"))
-        XCTAssertTrue(source.contains("private static var isVPNDebugProbeRequested"))
+        XCTAssertTrue(source.contains("static var isVPNDebugProbeRequested"))
         XCTAssertTrue(source.contains("processInfo.arguments.contains(\"--lava-debug-vpn\")"))
         XCTAssertTrue(source.contains("processInfo.environment[\"LAVA_DEBUG_VPN\"] == \"1\""))
     }
 
     func testProtectionHapticsAreOutcomeDrivenAndSkipAutomaticRestores() throws {
-        let source = try readSource(.appViewModel)
-        let hapticBlock = try sourceBlock(
-            in: source,
-            startingAt: "enum ProtectionHapticFeedback",
-            endingBefore: "final class AppViewModel"
-        )
+        let source = try readAppViewModelSource()
+        let hapticBlock = try readSource(.protectionHapticFeedback)
         let updateStatusBlock = try sourceBlock(
             in: source,
-            startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
-            endingBefore: "private func scheduleProtectionNotificationIfNeeded()"
+            startingAt: "func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionStartFailedHaptic()"
         )
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let disableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func disableProtection(",
-            endingBefore: "private func reconnectProtectionNow"
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow"
         )
         let reconnectBlock = try sourceBlock(
             in: source,
-            startingAt: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async",
-            endingBefore: "private func waitForProtectionToStop(timeout:"
+            startingAt: "func reconnectProtectionNow(",
+            endingBefore: "private func waitForProtectionToConnect("
         )
         let restoreBlock = try sourceBlock(
             in: source,
-            startingAt: "private func restoreProtectionIfNeeded(wasEnabled: Bool) async",
-            endingBefore: "private func sendTunnelMessage"
+            startingAt: "func restoreProtectionIfNeeded(_ request: ProtectionRestoreRequest) async",
+            endingBefore: "func reconcileTunnelSnapshotAfterLaunch() async"
         )
         let successHapticBlock = try sourceBlock(
             in: source,
-            startingAt: "private func playProtectionOnSucceededHapticIfNeeded",
-            endingBefore: "private func playProtectionStartFailedHaptic()"
+            startingAt: "private func resolveInitialChainedClaim(",
+            endingBefore: "private func isCurrentChainedLifecycleMutation("
         )
         let failureHapticFeedbackBlock = try sourceBlock(
             in: hapticBlock,
@@ -589,16 +539,16 @@ final class AppViewModelSourceTests: XCTestCase {
         let failureHapticBlock = try sourceBlock(
             in: source,
             startingAt: "private func playProtectionStartFailedHaptic()",
-            endingBefore: "private func scheduleProtectionNotificationIfNeeded()"
+            endingBefore: "// MARK: - Chained-connect lifecycle"
         )
         let turnedOffHapticBlock = try sourceBlock(
             in: hapticBlock,
             startingAt: "case .protectionTurnedOff:",
-            endingBefore: "}"
+            endingBefore: "case .guardianTapAcknowledged:"
         )
 
         XCTAssertFalse(hapticBlock.contains("private enum ProtectionHapticFeedback"))
-        XCTAssertTrue(source.contains("private var awaitsProtectionOnHaptic = false"))
+        XCTAssertTrue(source.contains("var awaitsProtectionOnHaptic = false"))
         XCTAssertFalse(source.contains("playsHapticFeedback"))
         XCTAssertFalse(source.contains("setHapticFeedback"))
         XCTAssertTrue(hapticBlock.contains("case protectionOnSucceeded"))
@@ -608,34 +558,496 @@ final class AppViewModelSourceTests: XCTestCase {
         XCTAssertTrue(failureHapticFeedbackBlock.contains("notificationOccurred(.error)"))
 
         XCTAssertTrue(updateStatusBlock.contains("let previousStatus = vpnStatus"))
-        XCTAssertTrue(updateStatusBlock.contains("playProtectionOnSucceededHapticIfNeeded(previousStatus: previousStatus, currentStatus: currentStatus)"))
+        XCTAssertTrue(
+            updateStatusBlock.contains(
+                "let userInitiated = isFreshConnected && awaitsProtectionOnHaptic"))
+        XCTAssertTrue(updateStatusBlock.contains("awaitsProtectionOnHaptic = false"))
         XCTAssertTrue(enableBlock.contains("if playsOutcomeHaptic"))
         XCTAssertTrue(enableBlock.contains("awaitsProtectionOnHaptic = true"))
         XCTAssertTrue(enableBlock.contains("playProtectionStartFailedHaptic()"))
+        // An explicit start completes at provider-verified setup or returned forwarding proof.
+        // Readiness shares the existing success owner; it must not create a second feedback path.
+        XCTAssertTrue(successHapticBlock.contains("guard confirmed || setupReady,"))
+        XCTAssertTrue(successHapticBlock.contains("userInitiated,"))
+        XCTAssertTrue(successHapticBlock.contains("hasError: self.guardPanelMessageIsError"))
+        XCTAssertTrue(successHapticBlock.contains("status: self.protectionStatus"))
+        XCTAssertEqual(successHapticBlock.components(separatedBy:
+            "ProtectionHapticFeedback.play(.protectionOnSucceeded)").count - 1, 1,
+            "Readiness and later forwarding must share one fenced success publication.")
+        XCTAssertTrue(successHapticBlock.contains("withProtectionLifecycleDescendantMutation("))
         XCTAssertTrue(successHapticBlock.contains("ProtectionHapticFeedback.play(.protectionOnSucceeded)"))
         XCTAssertTrue(failureHapticBlock.contains("ProtectionHapticFeedback.play(.protectionStartFailed)"))
-        XCTAssertTrue(disableBlock.contains("ProtectionHapticFeedback.play(.protectionTurnedOff)"))
-        XCTAssertTrue(turnedOffHapticBlock.contains("UINotificationFeedbackGenerator()"))
-        XCTAssertTrue(turnedOffHapticBlock.contains("notificationOccurred(.warning)"))
-        XCTAssertTrue(reconnectBlock.contains("await enableProtection(logUserAction: false, playsOutcomeHaptic: playsOutcomeHaptic)"))
+        // Turn-off's outcome haptic remains parameterized for its callers, while the default stays
+        // the neutral turned-off feel for the ordinary user action.
+        XCTAssertTrue(disableBlock.contains("outcomeHaptic: ProtectionHapticFeedback = .protectionTurnedOff"))
+        XCTAssertTrue(disableBlock.contains("ProtectionHapticFeedback.play(outcomeHaptic)"))
+        XCTAssertFalse(turnedOffHapticBlock.contains("UINotificationFeedbackGenerator()"))
+        XCTAssertTrue(turnedOffHapticBlock.contains("UIImpactFeedbackGenerator(style: .light)"))
+        XCTAssertTrue(turnedOffHapticBlock.contains("generator.impactOccurred()"))
+        XCTAssertFalse(turnedOffHapticBlock.contains("notificationOccurred(.warning)"))
+        XCTAssertTrue(reconnectBlock.contains(
+            "await enableProtection(\n                logUserAction: false,\n                playsOutcomeHaptic: playsOutcomeHaptic,"))
         XCTAssertTrue(reconnectBlock.contains("playProtectionStartFailedHaptic()"))
-        XCTAssertTrue(restoreBlock.contains("await enableProtection(logUserAction: false, playsOutcomeHaptic: false)"))
+        XCTAssertTrue(restoreBlock.contains("playsOutcomeHaptic: false"))
+        XCTAssertTrue(restoreBlock.contains("continueIfLifecycleLeaseOwned: validateOwnership"))
         // Canary: the negative pins above key on these identifiers - if a rename removes
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
         XCTAssertTrue(source.contains("ProtectionHapticFeedback"))
     }
 
-    func testLavaHapticsToggleGatesEveryPlaybackAndOutcomeSurfaces() throws {
-        let source = try readSource(.appViewModel)
-        let hapticBlock = try sourceBlock(
+    func testAutomaticRestoreUsesRevisionedExplicitUserIntentAcrossEveryCaller() throws {
+        let source = try readAppViewModelSource()
+        XCTAssertTrue(source.contains("var userProtectionIntent = ProtectionRestoreIntentState(isEnabled: false)"))
+
+        let initBlock = try sourceBlock(
             in: source,
-            startingAt: "enum ProtectionHapticFeedback",
-            endingBefore: "final class AppViewModel"
+            startingAt: "init(loadVPNState: Bool = true, headless: Bool = false, platformServices: LavaAppPlatformServices? = nil) {",
+            endingBefore: "deinit {"
         )
+        let loadIndex = try XCTUnwrap(initBlock.range(of: "loadPersistedConfiguration()")?.lowerBound)
+        let initializeIntentIndex = try XCTUnwrap(
+            initBlock.range(of: "recoverUserProtectionIntentFromDurableState()")?.lowerBound
+        )
+        XCTAssertLessThan(loadIndex, initializeIntentIndex)
+
+        let unlockRecovery = try sourceBlock(
+            in: source,
+            startingAt: "func reloadSharedStateIfBlockedByDataProtection() {",
+            endingBefore: "private func loadOrMigrateFilterLibrary()"
+        )
+        let recoveryLoadIndex = try XCTUnwrap(unlockRecovery.range(of: "loadPersistedConfiguration()")?.lowerBound)
+        let recoveryIntentIndex = try XCTUnwrap(
+            unlockRecovery.range(of: "recoverUserProtectionIntentFromDurableState()")?.lowerBound
+        )
+        XCTAssertLessThan(recoveryLoadIndex, recoveryIntentIndex)
+
+        let statusRefresh = try sourceBlock(
+            in: source,
+            startingAt: "func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionStartFailedHaptic()"
+        )
+        XCTAssertNil(
+            sourceCodeOnly(statusRefresh).range(
+                of: #"userProtectionIntent\s*(?:=(?!=)|\.\s*(?:recordUserIntent|recoverFromLoadedConfiguration)\s*\()"#,
+                options: .regularExpression),
+            "Status observation may read the intent revision, but only fenced reconciliation may replace intent.")
+
+        let turnOff = try sourceBlock(in: source, startingAt: "func turnOffProtection()", endingBefore: "func reconnectProtection()")
+        let reconnect = try sourceBlock(in: source, startingAt: "func reconnectProtection()", endingBefore: "func toggleProtection()")
+        let toggle = try sourceBlock(in: source, startingAt: "func toggleProtection()", endingBefore: "// MARK: - Onboarding")
+        for (block, intentWrite) in [
+            (turnOff, "userProtectionIntent.recordUserIntent(isEnabled: false)"),
+            (reconnect, "userProtectionIntent.recordUserIntent(isEnabled: true)"),
+            (toggle, "userProtectionIntent.recordUserIntent(isEnabled: !shouldDisableProtection)"),
+        ] {
+            let claim = try XCTUnwrap(block.range(of: "protectionActionOrchestrator.claim")?.lowerBound)
+            let write = try XCTUnwrap(block.range(of: intentWrite)?.lowerBound)
+            let task = try XCTUnwrap(block.range(of: "Task {")?.lowerBound)
+            XCTAssertLessThan(claim, write)
+            XCTAssertLessThan(write, task, "Accepted user intent must be recorded synchronously before async lifecycle work.")
+        }
+
+        let restore = try sourceBlock(
+            in: source,
+            startingAt: "func restoreProtectionIfNeeded(_ request: ProtectionRestoreRequest) async",
+            endingBefore: "func reconcileTunnelSnapshotAfterLaunch() async"
+        )
+        XCTAssertTrue(restore.contains("self.userProtectionIntent.allows(request)"))
+        XCTAssertFalse(restore.contains("self.configuration.protectionEnabled"),
+                       "A status refresh rewrites configuration.protectionEnabled, so it cannot be the post-refresh intent predicate.")
+
+        let captureCases: [(String, String, String)] = [
+            ("func prepareAndApplyFilterDraft(origin:", "private func prepareSwitchPublication(", "try await prepareFilterSnapshot"),
+            ("func switchToFilter(id:", "enum SwitchPublication", "try await prepareSwitchPublication"),
+            ("func applyImportedShareableConfiguration(", "private func nextSharedFilterName(", "try await prepareFilterSnapshot"),
+            ("func performCatalogSyncTransaction(", "private struct BackgroundCatalogCacheSupersededError", "Task.detached"),
+        ]
+        for (start, end, firstSuspensionAnchor) in captureCases {
+            let block = try sourceBlock(in: source, startingAt: start, endingBefore: end)
+            let capture = try XCTUnwrap(block.range(of: "let restoreRequest = makeProtectionRestoreRequest()")?.lowerBound)
+            let suspension = try XCTUnwrap(block.range(of: firstSuspensionAnchor)?.lowerBound)
+            XCTAssertLessThan(capture, suspension, "Restore intent must be captured before the caller's first suspension.")
+            XCTAssertTrue(block.contains("await restoreProtectionIfNeeded(restoreRequest)"))
+        }
+
+        let focusApply = try sourceBlock(
+            in: source,
+            startingAt: "private func applyPendingFilterSwitchOnce() async {",
+            endingBefore: "private func applyCommittedOnDiskActiveFilter("
+        )
+        let focusCapture = try XCTUnwrap(focusApply.range(of: "let restoreRequest = makeProtectionRestoreRequest()")?.lowerBound)
+        let focusLoad = try XCTUnwrap(focusApply.range(of: "loadPersistedConfiguration()")?.lowerBound)
+        let focusAwait = try XCTUnwrap(focusApply.range(of: "await applyCommittedOnDiskActiveFilter")?.lowerBound)
+        XCTAssertLessThan(focusCapture, focusLoad)
+        XCTAssertLessThan(focusCapture, focusAwait)
+        XCTAssertTrue(focusApply.contains("restoreRequest: restoreRequest"))
+    }
+
+    func testAutomaticRestoreCaptureAndClaimUseCrossProcessIntentCoordination() throws {
+        let source = try readAppViewModelSource()
+        let capture = try sourceBlock(
+            in: source,
+            startingAt: "func makeProtectionRestoreRequest() -> ProtectionRestoreRequest",
+            endingBefore: "func restoreProtectionIfNeeded"
+        )
+        XCTAssertTrue(capture.contains("userProtectionIntent.makeRestoreRequest("))
+        XCTAssertTrue(capture.contains("LavaProtectionCommandService.currentExternalRestartGeneration()"))
+        XCTAssertFalse(capture.contains("configuration.protectionEnabled"))
+        XCTAssertFalse(capture.contains("isProtectionEnabledStatus"))
+
+        let restore = try sourceBlock(
+            in: source,
+            startingAt: "func restoreProtectionIfNeeded(_ request: ProtectionRestoreRequest) async",
+            endingBefore: "func reconcileTunnelSnapshotAfterLaunch() async"
+        )
+        XCTAssertTrue(restore.contains("claimExternalExclusion:"))
+        XCTAssertTrue(restore.contains("expectedExternalRestartGeneration: request.externalRestartGeneration"))
+        XCTAssertTrue(restore.contains("validateExternalExclusion:"))
+        XCTAssertTrue(restore.contains("releaseExternalExclusion:"))
+        XCTAssertTrue(restore.contains("startProtectionLifecycleLeaseRenewal"))
+        XCTAssertTrue(restore.contains("continueIfLifecycleLeaseOwned: validateOwnership"))
+
+        let enable = try sourceBlock(
+            in: source,
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
+        )
+        XCTAssertTrue(enable.contains("continueIfLifecycleLeaseOwned: (@MainActor () -> Bool)? = nil"))
+        XCTAssertTrue(enable.contains("guard shouldContinueProtectionLifecycle() else"))
+        XCTAssertTrue(
+            sourceContainsInOrder([
+                "try await performWhileProtectionLifecycleOwned {",
+                "beginFreshProtectionVPNSession()",
+                "try manager.connection.startVPNTunnel",
+            ], in: enable),
+            "The final session/start mutation must run inside the callback-spanning kernel fence."
+        )
+        XCTAssertFalse(enable.contains("freshProtectionSessionID"))
+        XCTAssertFalse(enable.contains("clearProtectionSessionIfNoLiveLifecycleSuccessor"))
+        XCTAssertFalse(
+            source.contains("func beginFreshProtectionVPNSession() ->"),
+            "The final-boundary session write does not expose an unused session identity."
+        )
+        XCTAssertEqual(
+            enable.components(separatedBy: "continueIfLifecycleLeaseOwned: shouldContinueProtectionLifecycle").count - 1,
+            2,
+            "Both manager create/reload paths must keep lease validation inside the controller's suspended mutation sequence."
+        )
+        XCTAssertEqual(
+            enable.components(separatedBy: "performPreferenceMutation: performWhileProtectionLifecycleOwned").count - 1,
+            2,
+            "Both manager create/reload paths must fence every non-cancellable preferences callback."
+        )
+        XCTAssertTrue(enable.contains("LavaProtectionCommandService.withProtectionLifecyclePreferenceMutation("))
+        XCTAssertFalse(
+            enable.contains("setManagerOnDemand(true"),
+            "current main's reducer owns the delayed on-demand arm for the observed live connection")
+        XCTAssertTrue(
+            enable.contains("} catch is ProtectionLifecycleMutationFenceError {")
+                && enable.contains("return abortSupersededProtectionLifecycle()"),
+            "Busy/expired automatic owners must return false without publishing stale success or error state."
+        )
+        let timeoutPersist = try XCTUnwrap(
+            enable.range(
+                of: "_ = try? await persistSharedState(preparedSnapshot: preparedSnapshot, rewritesRuleArtifacts: false)"
+            )?.lowerBound
+        )
+        let timeoutTail = String(enable[timeoutPersist...])
+        let timeoutPostPersistGuard = try XCTUnwrap(
+            timeoutTail.range(of: "guard shouldContinueProtectionLifecycle() else")?.lowerBound
+        )
+        let timeoutSuccess = try XCTUnwrap(
+            timeoutTail.range(of: "actionStatus = \"timeout\"")?.lowerBound
+        )
+        XCTAssertLessThan(
+            timeoutPostPersistGuard,
+            timeoutSuccess,
+            "A restore superseded during the timeout persist must not publish timeout-success."
+        )
+
+        let managerWrapper = try sourceBlock(
+            in: source,
+            startingAt: "func loadOrCreateTunnelManager(",
+            endingBefore: "func setManagerOnDemand("
+        )
+        XCTAssertTrue(managerWrapper.contains("continueIfLifecycleLeaseOwned: @escaping @MainActor () -> Bool = { true }"))
+        XCTAssertTrue(managerWrapper.contains("continueIfOwned: continueIfLifecycleLeaseOwned"))
+        XCTAssertTrue(managerWrapper.contains("performPreferenceMutation: performPreferenceMutation"))
+    }
+
+    func testReducerDescendantsFenceConnectionIntentAndRestartGeneration() throws {
+        let source = try readAppViewModelSource()
+
+        let sampling = try sourceBlock(
+            in: source,
+            startingAt: "private func startChainedLifecycleSampling(connection: UInt64)",
+            endingBefore: "private func stopChainedLifecycleSampling()"
+        )
+        let identityCapture = try XCTUnwrap(
+            sampling.range(of: "chainedLifecycleMutationIdentity = ChainedLifecycleMutationIdentity(")?
+                .lowerBound
+        )
+        let samplerStart = try XCTUnwrap(
+            sampling.range(
+                of: "chainedLifecycleSamplingTask = Task",
+                range: identityCapture..<sampling.endIndex)?.lowerBound
+        )
+        XCTAssertLessThan(identityCapture, samplerStart)
+        XCTAssertTrue(sampling.contains("protectionIntentRevision: userProtectionIntent.revision"))
+        XCTAssertTrue(sampling.contains("captureExternalRestartGeneration()"))
+
+        let arm = try sourceBlock(
+            in: source,
+            startingAt: "private func startChainedOnDemandArm(id: UInt64, connection: UInt64)",
+            endingBefore: "private func completeChainedOnDemandArm(id: UInt64, confirmed: Bool)"
+        )
+        let armFence = try XCTUnwrap(
+            arm.range(of: "withProtectionLifecycleDescendantMutation(")?.lowerBound
+        )
+        let armLoad = try XCTUnwrap(
+            arm.range(of: "loadExistingTunnelManager()", range: armFence..<arm.endIndex)?.lowerBound
+        )
+        let armSave = try XCTUnwrap(
+            arm.range(
+                of: "try await self.setManagerOnDemand(true, on: manager)",
+                range: armLoad..<arm.endIndex)?.lowerBound
+        )
+        XCTAssertLessThan(armFence, armLoad)
+        XCTAssertLessThan(armLoad, armSave)
+        XCTAssertTrue(arm.contains("capturedGeneration: externalRestartGeneration"))
+        XCTAssertTrue(arm.contains("identity.connection == connection"))
+        XCTAssertTrue(arm.contains("self.isCurrentChainedLifecycleMutation(identity, armID: id)"))
+
+        let ownership = try sourceBlock(
+            in: source,
+            startingAt: "private func isCurrentChainedLifecycleMutation(",
+            endingBefore: "private func startChainedOnDemandArm("
+        )
+        XCTAssertTrue(ownership.contains("chainedLifecycleMutationIdentity == identity"))
+        XCTAssertTrue(ownership.contains("userProtectionIntent.isEnabled"))
+        XCTAssertTrue(
+            ownership.contains("userProtectionIntent.revision == identity.protectionIntentRevision")
+        )
+        XCTAssertTrue(ownership.contains("!isTearingDownProtection"))
+        XCTAssertTrue(ownership.contains("vpnStatus == .connected"))
+
+        let resolution = try sourceBlock(
+            in: source,
+            startingAt: "private func resolveInitialChainedClaim(",
+            endingBefore: "private func isCurrentChainedLifecycleMutation("
+        )
+        XCTAssertTrue(resolution.contains("withProtectionLifecycleDescendantMutation("))
+        XCTAssertTrue(resolution.contains("capturedGeneration: externalRestartGeneration"))
+        XCTAssertTrue(resolution.contains("self.isCurrentChainedLifecycleMutation(identity)"))
+        XCTAssertTrue(resolution.contains("ChainedConnectLifecyclePolicy.successFeedbackDisposition("))
+        XCTAssertTrue(resolution.contains("hasError: self.guardPanelMessageIsError"))
+        XCTAssertTrue(resolution.contains("ProtectionHapticFeedback.play(.protectionOnSucceeded)"))
+        XCTAssertFalse(
+            sourceCodeOnly(source).contains("turnOffAfterFailedChainedEstablishment"),
+            "current main intentionally keeps an unconfirmed tunnel connected and monitored"
+        )
+    }
+
+    func testOrdinaryAppLifecycleActionsShareTheDirectRestartFence() throws {
+        let source = try readAppViewModelSource()
+
+        let enable = try sourceBlock(
+            in: source,
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
+        )
+        XCTAssertTrue(enable.contains("withExclusiveProtectionLifecycleMutation"))
+        XCTAssertTrue(enable.contains("lifecycleMutationFenceIsOwned: true"))
+        XCTAssertTrue(enable.contains("if lifecycleMutationFenceIsOwned {"))
+        let foregroundFenceCatch = try sourceBlock(
+            in: enable,
+            startingAt: "if continueIfLifecycleLeaseOwned == nil, !lifecycleMutationFenceIsOwned {",
+            endingBefore: "func shouldContinueProtectionLifecycle()"
+        )
+        XCTAssertTrue(
+            foregroundFenceCatch.contains("prefix: \"Could not start protection\".lavaLocalized")
+        )
+        XCTAssertTrue(foregroundFenceCatch.contains("vpnMessageIsError = true"))
+        XCTAssertTrue(foregroundFenceCatch.contains("playProtectionStartFailedHaptic()"))
+
+        let disable = try sourceBlock(
+            in: source,
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow("
+        )
+        let disableFence = try XCTUnwrap(
+            disable.range(of: "withExclusiveProtectionLifecycleMutation")?.lowerBound
+        )
+        let disableTeardown = try XCTUnwrap(
+            disable.range(of: "beginProtectionTeardown()")?.lowerBound
+        )
+        let disableDrain = try XCTUnwrap(
+            disable.range(of: "await drainChainedOnDemandArm()")?.lowerBound
+        )
+        let disableUI = try XCTUnwrap(
+            disable.range(of: "vpnMessage = \"Stopping local protection...\"")?.lowerBound
+        )
+        XCTAssertLessThan(disableTeardown, disableDrain)
+        XCTAssertLessThan(
+            disableDrain,
+            disableFence,
+            "Explicit OFF must suspend reducer producers and drain an arm already holding the fence before acquiring it."
+        )
+        XCTAssertLessThan(disableFence, disableUI)
+        XCTAssertTrue(disable.contains("lifecycleMutationFenceIsOwned: true"))
+        XCTAssertTrue(disable.contains("prefix: \"Could not stop protection\".lavaLocalized"))
+        XCTAssertTrue(disable.contains("vpnMessageIsError = true"))
+
+        let reconnect = try sourceBlock(
+            in: source,
+            startingAt: "func reconnectProtectionNow(",
+            endingBefore: "private func waitForProtectionToConnect("
+        )
+        let reconnectFence = try XCTUnwrap(
+            reconnect.range(of: "withExclusiveProtectionLifecycleMutation")?.lowerBound
+        )
+        let reconnectTeardown = try XCTUnwrap(
+            reconnect.range(of: "beginProtectionTeardown()")?.lowerBound
+        )
+        let reconnectDrain = try XCTUnwrap(
+            reconnect.range(of: "await drainChainedOnDemandArm()")?.lowerBound
+        )
+        let reconnectUI = try XCTUnwrap(
+            reconnect.range(of: "vpnMessage = \"Reconnecting local protection...\"")?.lowerBound
+        )
+        XCTAssertLessThan(reconnectTeardown, reconnectDrain)
+        XCTAssertLessThan(reconnectDrain, reconnectFence)
+        XCTAssertLessThan(reconnectFence, reconnectUI)
+        XCTAssertTrue(
+            reconnect.contains("lifecycleMutationFenceIsOwned: true"),
+            "The whole reconnect owns one fence and its nested enable must not reacquire it."
+        )
+        XCTAssertTrue(reconnect.contains("preflightTeardownIsActive = false"))
+        XCTAssertTrue(reconnect.contains("protectionTeardownIsOwned: true"))
+        XCTAssertTrue(reconnect.contains("precondition(isTearingDownProtection)"))
+        XCTAssertTrue(reconnect.contains("prefix: \"Could not reconnect protection\".lavaLocalized"))
+
+        let service = try readSource(.lavaProtectionCommandService)
+        let restartClaim = try sourceBlock(
+            in: service,
+            startingAt: "private static func claimRestartInFlight(",
+            endingBefore: "private static func finishRestartInFlight("
+        )
+        let mutationClaim = try XCTUnwrap(
+            restartClaim.range(of: "acquireProtectionLifecycleMutationFence(wait: false)")?.lowerBound
+        )
+        let generationClaim = try XCTUnwrap(
+            restartClaim.range(of: "store.claimExplicitRestart(")?.lowerBound
+        )
+        XCTAssertLessThan(
+            mutationClaim,
+            generationClaim,
+            "Rejected Restart must not rotate generation before winning the shared fence."
+        )
+        let foregroundFence = try sourceBlock(
+            in: service,
+            startingAt: "static func withExclusiveProtectionLifecycleMutation<T>(",
+            endingBefore: "/// Runs an automatic-restore preference/tunnel mutation"
+        )
+        XCTAssertTrue(
+            foregroundFence.contains("waitUntilAvailable: true"),
+            "A foreground action must asynchronously hand off after an accepted Restart, not disappear as busy."
+        )
+    }
+
+    func testAdminQAVPNProfileMutationsShareTheDirectRestartFence() throws {
+        let source = try readAppViewModelSource()
+        let entry = try sourceBlock(
+            in: source,
+            startingAt: "func applyAdminQAVPNProfileAction(_ action: AdminQAVPNProfileAction) async {",
+            endingBefore: "private func installAdminQAVPNProfile() async"
+        )
+        XCTAssertTrue(
+            entry.contains("LavaProtectionCommandService.withExclusiveProtectionLifecycleMutation"),
+            "QA install save/create, remove stop/delete, and reset delete/recreate must not overlap Live Activity Restart."
+        )
+        XCTAssertTrue(
+            sourceContainsInOrder([
+                "try await LavaProtectionCommandService.withExclusiveProtectionLifecycleMutation {",
+                "switch action {",
+                "await self.installAdminQAVPNProfile()",
+                "await self.removeAdminQAVPNProfile()",
+                "await self.resetAdminQAVPNProfile()",
+            ], in: entry),
+            "One outer escaping fence must explicitly capture self and span each complete QA "
+                + "profile action without nested same-process re-locking."
+        )
+        XCTAssertTrue(entry.contains("vpnMessageIsError = true"))
+
+        let install = try sourceBlock(
+            in: source,
+            startingAt: "private func installAdminQAVPNProfile() async",
+            endingBefore: "private func removeAdminQAVPNProfile() async"
+        )
+        XCTAssertTrue(install.contains("loadOrCreateTunnelManager("))
+        XCTAssertFalse(install.contains("withExclusiveProtectionLifecycleMutation"))
+
+        let remove = try sourceBlock(
+            in: source,
+            startingAt: "private func removeAdminQAVPNProfile() async",
+            endingBefore: "private func resetAdminQAVPNProfile() async"
+        )
+        XCTAssertTrue(remove.contains("manager.connection.stopVPNTunnel()"))
+        XCTAssertTrue(remove.contains("vpnLifecycleController.removeManager(manager)"))
+        XCTAssertFalse(remove.contains("withExclusiveProtectionLifecycleMutation"))
+
+        let reset = try sourceBlock(
+            in: source,
+            startingAt: "private func resetAdminQAVPNProfile() async",
+            endingBefore: "#endif"
+        )
+        XCTAssertTrue(reset.contains("manager.connection.stopVPNTunnel()"))
+        XCTAssertTrue(reset.contains("vpnLifecycleController.removeManager(manager)"))
+        XCTAssertTrue(reset.contains("loadOrCreateTunnelManager(existingManager: nil)"))
+        XCTAssertFalse(reset.contains("withExclusiveProtectionLifecycleMutation"))
+    }
+
+    func testProtectionStatusRefreshCoalescedFollowersAwaitBoundedOwner() throws {
+        let source = try readAppViewModelSource()
+        XCTAssertTrue(source.contains("let protectionStatusRefreshCoordinator = ProtectionStatusRefreshCoordinator()"))
+        // Access-level independent: the class spans files now, so a reintroduced raw mirror would
+        // naturally be an internal `var` and a `private`-spelled needle could never match it.
+        XCTAssertFalse(source.contains("var isRefreshingProtectionStatus"))
+        XCTAssertFalse(source.contains("var needsProtectionStatusRefresh"))
+
+        let refresh = try sourceBlock(
+            in: source,
+            startingAt: "func refreshProtectionStatus(force: Bool = false) async",
+            endingBefore: "// MARK: - Chained-connect lifecycle"
+        )
+        XCTAssertTrue(
+            sourceContainsInOrder([
+                "await protectionStatusRefreshCoordinator.run { [self] in",
+                "let manager = try await self.loadExistingTunnelManager()",
+                "self.tunnelManager = manager",
+                "self.updateProtectionStatus(from: manager)",
+                "self.lastProtectionStatusRefresh = Date()",
+                "if self.vpnStatus == .connected {",
+                "await self.requestTunnelHealthFlush()",
+                "self.refreshTunnelHealth()",
+                "self.vpnMessage = error.localizedDescription",
+                "self.vpnMessageIsError = true",
+                "self.logVPNDebugEvent(\"refresh-status-error\", details: self.errorDebugDetails(error))",
+            ], in: refresh),
+            "The escaping refresh owner must capture self explicitly and qualify every app-model "
+                + "access so the Swift 6 QA device build type-checks the complete closure."
+        )
+        XCTAssertFalse(refresh.contains("guard !isRefreshingProtectionStatus"))
+        XCTAssertFalse(refresh.contains("return\n        }\n\n        isRefreshingProtectionStatus = true"))
+    }
+
+    func testLavaHapticsToggleGatesEveryPlaybackAndOutcomeSurfaces() throws {
+        let source = try readAppViewModelSource()
+        let hapticBlock = try readSource(.protectionHapticFeedback)
         // The toggle setter lives on CustomizationController since the Phase D5 peel;
-        // the ProtectionHapticFeedback choke point (and the protection-outcome play
-        // path) deliberately stays hub-side — the two meet only at the shared
+        // the ProtectionHapticFeedback choke point now lives in its app-only adapter;
+        // the protection-outcome call sites remain hub-side. They share the
         // preferenceDefaultsKeyName.
         let customizationSource = try readSource(.customizationController)
         let setterBlock = try sourceBlock(
@@ -681,14 +1093,14 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testReconnectWaitWithoutBusyPolling() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
-            endingBefore: "private func resumeTemporaryProtectionIfExpired"
+            endingBefore: "func resumeTemporaryProtectionIfExpired"
         )
 
-        XCTAssertTrue(source.contains("private final class ProtectionStopNotificationWaiter"))
+        XCTAssertTrue(source.contains("final class ProtectionStopNotificationWaiter"))
         XCTAssertTrue(source.contains("NotificationCenter.default.addObserver("))
         XCTAssertTrue(source.contains("forName: .NEVPNStatusDidChange"))
         // Deadline, polling, and pending-reload behavior moved into
@@ -703,16 +1115,16 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testCacheFirstTurnOnSkipsSyncWaitWhenArtifactReusable() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let gateBlock = try sourceBlock(
             in: source,
-            startingAt: "private func hasReusableArtifactForCurrentConfiguration() async -> Bool",
-            endingBefore: "private func loadPreparedFilterSummaryForCurrentConfiguration()"
+            startingAt: "func hasReusableArtifactForCurrentConfiguration() async -> Bool",
+            endingBefore: "func loadPreparedFilterSummaryForCurrentConfiguration()"
         )
 
         // Cache-first: turn-on only blocks on an in-flight catalog sync when no
@@ -763,9 +1175,9 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNStopAndStartWaitThroughIOSDisconnectingState() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let rootSource = try readSource(.rootView)
-        let guardSource = try readSource(.guardView)
+        let guardSource = try readSource(.reactNativeAppBridge)
         let initBlock = try sourceBlock(
             in: source,
             startingAt: "if loadVPNState {",
@@ -773,23 +1185,23 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let disableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func disableProtection(",
-            endingBefore: "private func reconnectProtectionNow"
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow"
         )
         let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
-            endingBefore: "private func resumeTemporaryProtectionIfExpired"
+            endingBefore: "func resumeTemporaryProtectionIfExpired"
         )
         let stopPendingStatusBlock = try sourceBlock(
             in: source,
-            startingAt: "private func isProtectionStopPendingStatus",
-            endingBefore: "private func isLocalProtectionUptimeStatus"
+            startingAt: "func isProtectionStopPendingStatus",
+            endingBefore: "func isLocalProtectionUptimeStatus"
         )
 
         XCTAssertTrue(
@@ -802,9 +1214,9 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("var protectionPrimaryActionIsDisabled: Bool"))
         XCTAssertTrue(source.contains("ProtectionLifecyclePolicy.shouldDisablePrimaryAction"))
-        XCTAssertTrue(source.contains("private static let protectionRestartStopWaitTimeout: TimeInterval = 15"))
-        XCTAssertTrue(source.contains("private static let protectionStartWaitTimeout: TimeInterval = 15"))
-        XCTAssertTrue(guardSource.contains(".disabled(viewModel.protectionPrimaryActionIsDisabled)"))
+        XCTAssertTrue(source.contains("static let protectionRestartStopWaitTimeout: TimeInterval = 15"))
+        XCTAssertTrue(source.contains("static let protectionStartWaitTimeout: TimeInterval = 15"))
+        XCTAssertTrue(guardSource.contains("m.protectionPrimaryActionIsDisabled"))
         XCTAssertTrue(rootSource.contains("await viewModel.refreshProtectionStatus(force: true)"))
         XCTAssertTrue(enableBlock.contains("manager.connection.status == .disconnecting"))
         XCTAssertTrue(enableBlock.contains("await waitForProtectionToStop(timeout: Self.protectionRestartStopWaitTimeout)"))
@@ -821,16 +1233,16 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNStopTimeoutLeavesActionableStatusInsteadOfClearingTheMessage() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let disableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func disableProtection(",
-            endingBefore: "private func reconnectProtectionNow"
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow"
         )
         let waitBlock = try sourceBlock(
             in: source,
             startingAt: "private func waitForProtectionToStop(timeout:",
-            endingBefore: "private func resumeTemporaryProtectionIfExpired"
+            endingBefore: "func resumeTemporaryProtectionIfExpired"
         )
 
         // On a stuck stop, turn-off now attempts profile-removal recovery
@@ -854,21 +1266,21 @@ final class AppViewModelSourceTests: XCTestCase {
         // localized BEFORE they reach vpnErrorMessage's format-key composer — the
         // composer only localizes the separator, not the prefix it is handed. QA-only
         // sites (inside #if DEBUG || LAVA_QA_TOOLS) keep their raw English prefix.
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let reconnectBlock = try sourceBlock(
             in: source,
-            startingAt: "private func reconnectProtectionNow(",
-            endingBefore: "@discardableResult"
+            startingAt: "func reconnectProtectionNow(",
+            endingBefore: "private func waitForProtectionToConnect("
         )
         let resumeBlock = try sourceBlock(
             in: source,
-            startingAt: "private func resumeTemporaryProtectionIfExpired(",
-            endingBefore: "private func clearTemporaryProtectionPause("
+            startingAt: "func resumeTemporaryProtectionIfExpired(",
+            endingBefore: "func clearTemporaryProtectionPause("
         )
 
         XCTAssertTrue(enableBlock.contains(
@@ -895,7 +1307,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testVPNLifecycleActionsClaimConfiguringBeforeLaunchingAsyncWork() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let actionBlock = try sourceBlock(
             in: source,
             startingAt: "func turnOffProtection()",
@@ -903,8 +1315,8 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let reconnectBlock = try sourceBlock(
             in: source,
-            startingAt: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async",
-            endingBefore: "@discardableResult"
+            startingAt: "func reconnectProtectionNow(",
+            endingBefore: "private func waitForProtectionToConnect("
         )
 
         // Single-flight is owned by ProtectionActionOrchestrator: entries claim a
@@ -913,7 +1325,7 @@ final class AppViewModelSourceTests: XCTestCase {
         // mirror with no manual writers; claim/release semantics are behavior-
         // tested in ProtectionActionOrchestratorTests.
         XCTAssertTrue(actionBlock.contains("guard protectionActionOrchestrator.claim(.turnOff) else"))
-        XCTAssertTrue(actionBlock.contains("await disableProtection()\n            protectionActionOrchestrator.release(.turnOff)"))
+        XCTAssertTrue(actionBlock.contains("await disableProtection(persistsExplicitIntent: true)\n            protectionActionOrchestrator.release(.turnOff)"))
         XCTAssertTrue(actionBlock.contains("guard protectionActionOrchestrator.claim(.reconnect) else"))
         XCTAssertTrue(actionBlock.contains("guard protectionActionOrchestrator.claim(.toggle) else"))
         // An armed-but-dropped tunnel (awaiting on-demand reconnect) counts as "on" so the toggle's
@@ -933,11 +1345,11 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testProtectionConnectedNetworkActivityIsLoggedOnStatusTransition() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let updateStatusBlock = try sourceBlock(
             in: source,
-            startingAt: "private func updateProtectionStatus(from manager: NETunnelProviderManager?)",
-            endingBefore: "private func playProtectionOnSucceededHapticIfNeeded"
+            startingAt: "func updateProtectionStatus(from manager: NETunnelProviderManager?)",
+            endingBefore: "private func playProtectionStartFailedHaptic()"
         )
 
         XCTAssertTrue(updateStatusBlock.contains("previousStatus != .connected"))
@@ -946,7 +1358,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testNonCriticalAppGroupDefaultsDoNotForceSynchronousFlushes() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         // persistLavaGuardLook lives on CustomizationController since the Phase D5 peel.
         let customizationSource = try readSource(.customizationController)
         let persistLookBlock = try sourceBlock(
@@ -956,8 +1368,8 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let loadPauseBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadTemporaryProtectionPause()",
-            endingBefore: "private func beginFreshProtectionVPNSession()"
+            startingAt: "func loadTemporaryProtectionPause()",
+            endingBefore: "func beginFreshProtectionVPNSession()"
         )
 
         XCTAssertTrue(persistLookBlock.contains("appGroupDefaults.set(look.rawValue, forKey: lavaGuardLookDefaultsKey)"))
@@ -967,7 +1379,7 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testTemporaryProtectionPausePersistsAndResumesRobustly() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let rootSource = try readSource(.rootView)
         let pauseBlock = try sourceBlock(
             in: source,
@@ -976,20 +1388,23 @@ final class AppViewModelSourceTests: XCTestCase {
         )
         let resumeBlock = try sourceBlock(
             in: source,
-            startingAt: "private func resumeTemporaryProtectionIfExpired(now: Date = Date()) async",
-            endingBefore: "private func restoreFiltersAfterTemporaryProtectionPause("
+            startingAt: "func resumeTemporaryProtectionIfExpired(now: Date = Date()) async",
+            endingBefore: "func restoreFiltersAfterTemporaryProtectionPause("
         )
         let restoreBlock = try sourceBlock(
             in: source,
-            startingAt: "private func restoreFiltersAfterTemporaryProtectionPause(",
-            endingBefore: "private func clearTemporaryProtectionPause()"
+            startingAt: "func restoreFiltersAfterTemporaryProtectionPause(",
+            endingBefore: "func clearTemporaryProtectionPause()"
         )
 
         // The @Published mirror + pause/resume orchestration stay in AppViewModel;
         // the resume timer and legacy pause-key cleanup moved to
         // TemporaryProtectionPauseController.
         let pauseController = try readSource(.temporaryProtectionPauseController)
-        XCTAssertTrue(source.contains("@Published private(set) var temporaryProtectionPauseUntil: Date?"))
+        // The setter is internal only because the class spans files (the pause and Sudoku
+        // concerns write it); `AppViewModelEncapsulationSourceTests` pins that nothing outside
+        // the class assigns it.
+        XCTAssertTrue(source.contains("@Published var temporaryProtectionPauseUntil: Date?"))
         XCTAssertTrue(pauseController.contains("private var resumeTask: Task<Void, Never>?"))
         XCTAssertTrue(pauseController.contains("LavaSecAppGroup.protectionTemporaryPauseUntilDefaultsKey"))
         XCTAssertTrue(source.contains("loadTemporaryProtectionPause()"))
@@ -1000,7 +1415,7 @@ final class AppViewModelSourceTests: XCTestCase {
         // The fixed-length entry point delegates to a shared request-based flow
         // that also serves the Live Activity's configured-length Pause button.
         XCTAssertTrue(pauseBlock.contains("pauseProtectionTemporarily(request: option.protectionCommandRequest)"))
-        XCTAssertTrue(pauseBlock.contains("private func pauseProtectionTemporarily(request: LavaLiveActivityActionRequest)"))
+        XCTAssertTrue(pauseBlock.contains("func pauseProtectionTemporarily(request: LavaLiveActivityActionRequest)"))
         XCTAssertTrue(pauseBlock.contains("try await LavaProtectionCommandService.perform(request, commandID: operationID.rawValue)"))
         XCTAssertTrue(pauseBlock.contains("loadTemporaryProtectionPause()"))
         XCTAssertTrue(pauseBlock.contains("scheduleTemporaryProtectionResume()"))
@@ -1049,18 +1464,18 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testTemporaryPauseControlsAreHiddenWhenNoNetworkPath() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let controlsBlock = try sourceBlock(
             in: source,
             startingAt: "var showsTemporaryProtectionPauseControls: Bool",
             endingBefore: "var formattedTemporaryProtectionResumeTime"
         )
 
-        // Pause is meaningless with no network path, so the in-app controls hide
-        // it just as the Dynamic Island no longer maps Network Lost to .on.
-        XCTAssertTrue(controlsBlock.contains("protectionConnectivityAssessment.severity != .networkUnavailable"))
-        XCTAssertTrue(controlsBlock.contains("protectionConnectivityAssessment.primaryAction != .reconnect"))
-        XCTAssertTrue(controlsBlock.contains("!isProtectionTemporarilyPaused"))
+        // The Guard status projection covers Network Lost, reconnect and pause
+        // consistently; this control reads its single pause decision.
+        XCTAssertTrue(controlsBlock.contains("vpnStatus == .connected"))
+        XCTAssertTrue(controlsBlock.contains("guardStatusPresentation.allowsPause"))
+        XCTAssertTrue(controlsBlock.contains("!isConfiguringVPN"))
 
         // The action entry point shares the same guard, so a stale pause intent
         // cannot pause protection while Network Lost is showing.
@@ -1073,26 +1488,26 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testTemporaryProtectionPauseIsBoundToCurrentVPNSession() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let enableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func enableProtection(",
-            endingBefore: "private func disableProtection("
+            startingAt: "func enableProtection(",
+            endingBefore: "func disableProtection("
         )
         let disableBlock = try sourceBlock(
             in: source,
-            startingAt: "private func disableProtection(",
-            endingBefore: "private func reconnectProtectionNow(playsOutcomeHaptic: Bool = true) async"
+            startingAt: "func disableProtection(",
+            endingBefore: "func reconnectProtectionNow("
         )
         let loadPauseBlock = try sourceBlock(
             in: source,
-            startingAt: "private func loadTemporaryProtectionPause()",
-            endingBefore: "private func beginFreshProtectionVPNSession()"
+            startingAt: "func loadTemporaryProtectionPause()",
+            endingBefore: "func beginFreshProtectionVPNSession()"
         )
         let clearPauseBlock = try sourceBlock(
             in: source,
-            startingAt: "private func clearTemporaryProtectionPause()",
-            endingBefore: "private func loadExistingTunnelManager() async throws"
+            startingAt: "func clearTemporaryProtectionPause()",
+            endingBefore: "func loadExistingTunnelManager() async throws"
         )
 
         // Session binding + legacy-key cleanup moved into the controller; the
@@ -1102,10 +1517,16 @@ final class AppViewModelSourceTests: XCTestCase {
 
         let beginSessionIndex = try XCTUnwrap(enableBlock.range(of: "beginFreshProtectionVPNSession()")?.lowerBound)
         let snapshotIndex = try XCTUnwrap(enableBlock.range(of: "preparedSnapshotForProtectionStartup(")?.lowerBound)
+        let startIndex = try XCTUnwrap(enableBlock.range(of: "manager.connection.startVPNTunnel(")?.lowerBound)
+        XCTAssertLessThan(
+            snapshotIndex,
+            beginSessionIndex,
+            "A superseded preparation must not mint a session that never starts a tunnel."
+        )
         XCTAssertLessThan(
             beginSessionIndex,
-            snapshotIndex,
-            "Starting protection must clear stale pause state before writing the startup snapshot."
+            startIndex,
+            "A fresh session must be installed immediately before the tunnel start."
         )
         XCTAssertTrue(disableBlock.contains("endProtectionVPNSession()"))
 
@@ -1132,21 +1553,21 @@ final class AppViewModelSourceTests: XCTestCase {
     }
 
     func testPreparedSnapshotsOnlyPersistWhenSelectedBlocklistsAreCovered() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let summaryBlock = try sourceBlock(
             in: source,
             startingAt: "private func preparedSummary(for snapshot: FilterSnapshot)",
-            endingBefore: "private func preparedSnapshotForCurrentConfiguration()"
+            endingBefore: "func preparedSnapshotForCurrentConfiguration()"
         )
         let prepareBlock = try sourceBlock(
             in: source,
-            startingAt: "private func prepareFilterSnapshot(",
+            startingAt: "func prepareFilterSnapshot(",
             endingBefore: "private func reportFilterPreparationProgress"
         )
         let persistBlock = try sourceBlock(
             in: source,
-            startingAt: "private func persistSharedState(",
-            endingBefore: "private func persistConfigurationOnly("
+            startingAt: "func persistSharedState(",
+            endingBefore: "func persistConfigurationOnly("
         )
 
         XCTAssertTrue(summaryBlock.contains("preparedBlocklistSourceRuleCounts()"))
@@ -1155,7 +1576,22 @@ final class AppViewModelSourceTests: XCTestCase {
             prepareBlock.contains("service.prepare("),
             "Preparation (sync ladder, validation, merge, build) must route through FilterSnapshotPreparationService; its behavior is covered by FilterSnapshotPreparationServiceTests."
         )
-        XCTAssertTrue(persistBlock.contains("summary.coversEnabledBlocklists(in: configuration)"))
+        // Anchored on tokens, NOT on the call's wrapping. The previous form pinned
+        // `"coversEnabledBlocklists(\n            in: configuration)"` — the exact two-line
+        // split plus a 12-space continuation indent — so a formatter joining those lines
+        // reddened the suite with zero behavioural change, and a re-indent did the same.
+        // What this test is for is that the coverage gate feeds the persist decision; the
+        // shape of the line it is written on is not part of that contract.
+        XCTAssertTrue(
+            persistBlock.contains("let coversEnabledBlocklists = snapshotToPersist.summary.coversEnabledBlocklists("),
+            "The persist path must derive coverage from the snapshot it is about to write.")
+        XCTAssertTrue(
+            persistBlock.contains("coversEnabledBlocklists(\n            in: configuration)")
+                || normalizedPersistBlockForCoverage(persistBlock).contains(
+                    "coversEnabledBlocklists( in: configuration)"),
+            "Coverage must be evaluated against the live configuration, not a captured copy. "
+                + "A bare `in: configuration` search would pass on any other occurrence in the "
+                + "block, so this ties the argument to THIS call.")
         XCTAssertTrue(persistBlock.contains("persistPreparedSnapshotArtifacts(")
                         && persistBlock.contains("snapshotToPersist,"),
                       "The artifact publish must route through persistPreparedSnapshotArtifacts(snapshotToPersist, …).")
@@ -1164,70 +1600,158 @@ final class AppViewModelSourceTests: XCTestCase {
         // whether to record the active filter's compiled token). Same guarantee:
         // reused or configuration-only persists must not rewrite identical rule
         // artifacts (warm turn-on cost).
+        // 🔴 NORMALIZED, not split into separate `contains` calls. Splitting was the first
+        // attempt at de-brittling this and it made the pin VACUOUS: `coversEnabledBlocklists`
+        // and `fitsTierBudget` each already appear several times elsewhere in this ~12k-char
+        // block (their own `let` bindings, and the veto log dictionary), so dropping both
+        // terms from the chain left every conjunct true. Collapsing whitespace keeps the
+        // reflow-immunity that motivated the change while still pinning the CHAIN.
+        let normalizedPersistBlock = persistBlock
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: " ")
         XCTAssertTrue(
-            persistBlock.contains("let didRewriteArtifacts = rewritesRuleArtifacts")
-                && persistBlock.contains("&& snapshotToPersist.summary.coversEnabledBlocklists(in: configuration)")
-                && persistBlock.contains("if didRewriteArtifacts {"),
+            normalizedPersistBlock.contains(
+                "let didRewriteArtifacts = rewritesRuleArtifacts && coversEnabledBlocklists "
+                    + "&& fitsTierBudget")
+                && persistBlock.contains("if didRewriteArtifacts {")
+                // The veto must not be silent: a coverage veto strands the config naming
+                // blocklists no artifact covers, and the tunnel then serves block-all forever.
+                && persistBlock.contains("logVPNDebugEvent(\"artifact-flip-vetoed\""),
             "Reused or configuration-only persists must not rewrite identical rule artifacts (warm turn-on cost)."
         )
     }
 
     func testClearAndDisableBackupDivergeOnLocalEnvelopeHandling() throws {
         let source = try readSource(.backupController)
-        let clearBlock = try sourceBlock(
-            in: source,
-            startingAt: "func clearEncryptedBackup() async {",
-            endingBefore: "func disableEncryptedBackup() async {"
-        )
-        let disableBlock = try sourceBlock(
-            in: source,
-            startingAt: "func disableEncryptedBackup() async {",
-            endingBefore: "func deleteLocalUnlockSecretsAfterAccountDeletion() {"
-        )
-
-        // Clear keeps the local envelope (only forgets the upload marker), so backup
-        // stays configured and can re-upload a fresh copy.
-        XCTAssertTrue(clearBlock.contains("backupEnvelopeStore.clearUploadMarker()"))
-        XCTAssertFalse(clearBlock.contains("backupEnvelopeStore.deleteEnvelope()"))
-        XCTAssertFalse(clearBlock.contains("setAutomaticBackupEnabled(false)"))
-
-        // Disable tears the local envelope down and stops automatic backup.
-        XCTAssertTrue(disableBlock.contains("backupEnvelopeStore.deleteEnvelope()"))
-        XCTAssertTrue(disableBlock.contains("setAutomaticBackupEnabled(false)"))
-        XCTAssertFalse(disableBlock.contains("backupEnvelopeStore.clearUploadMarker()"))
-
-        // Both hard-delete the server copy first and only mutate local state when it
-        // is confirmed gone — never claim a deletion that could not be verified.
-        XCTAssertTrue(clearBlock.contains("await deleteRemoteEncryptedBackup()"))
-        XCTAssertTrue(disableBlock.contains("await deleteRemoteEncryptedBackup()"))
-        XCTAssertTrue(clearBlock.contains("case .unconfirmed:"))
-        XCTAssertTrue(disableBlock.contains("case .unconfirmed:"))
+        let clear = try sourceBlock(in: source, startingAt: "func clearEncryptedBackup() async {", endingBefore: "func disableEncryptedBackup() async {")
+        let disable = try sourceBlock(in: source, startingAt: "func disableEncryptedBackup() async {", endingBefore: "func prepareForAccountDeletion(")
+        XCTAssertTrue(clear.contains("backupEnvelopeStore.clearUploadMarker()"))
+        XCTAssertFalse(clear.contains("backupEnvelopeStore.deleteEnvelope()"))
+        XCTAssertTrue(disable.contains("backupEnvelopeStore.deleteEnvelope()"))
+        XCTAssertTrue(disable.contains("setAutomaticBackupEnabled(false)"))
+        XCTAssertTrue(disable.contains("backupKeychainStore.saveDeletionIntent(intent)"))
+        XCTAssertTrue(disable.contains("guard case .deleted = await deleteRemoteEncryptedBackup(expectedAccountID: intent.accountID)"))
+        XCTAssertTrue(disable.contains("finishLocalBackupDeletion(intent)"))
     }
 
     func testBackupMaintenanceAndUploadsAreMutuallyExclusive() throws {
         let source = try readSource(.backupController)
-        let uploadBlock = try sourceBlock(
-            in: source,
-            startingAt: "private func uploadEncryptedBackup(",
-            endingBefore: "func uploadPendingEncryptedBackupIfPossible("
-        )
-        let clearBlock = try sourceBlock(
-            in: source,
-            startingAt: "func clearEncryptedBackup() async {",
-            endingBefore: "func disableEncryptedBackup() async {"
-        )
-        let disableBlock = try sourceBlock(
-            in: source,
-            startingAt: "func disableEncryptedBackup() async {",
-            endingBefore: "func deleteLocalUnlockSecretsAfterAccountDeletion() {"
-        )
-
-        // Uploads refuse to run while a Clear/Disable is in progress, so an in-flight
-        // upload can never re-create the row maintenance just deleted.
-        XCTAssertTrue(uploadBlock.contains("guard !isBackupMaintenanceInProgress else {"))
-        XCTAssertTrue(uploadBlock.contains("isUploadingEncryptedBackup = true"))
-        // And maintenance refuses to run while any upload is in flight.
-        XCTAssertTrue(clearBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
-        XCTAssertTrue(disableBlock.contains("!isBackingUpNow, !isUploadingEncryptedBackup"))
+        let disable = try sourceBlock(in: source, startingAt: "func disableEncryptedBackup() async {", endingBefore: "private func finishLocalBackupDeletion(")
+        let upload = try sourceBlock(in: source, startingAt: "private func uploadEncryptedBackup(", endingBefore: "func uploadPendingEncryptedBackupIfPossible(")
+        XCTAssertTrue(upload.contains("!isBackupMaintenanceInProgress, !hasBackupDeletionFence"))
+        XCTAssertTrue(disable.contains("isBackupMaintenanceInProgress = true"))
+        XCTAssertTrue(disable.contains("await uploadTask?.value"))
+        XCTAssertTrue(disable.contains("lifecycleGeneration &+= 1"))
+        // NativeBackupDeletionCompatibilityTests executes this drain with suspended
+        // uploads and covers the account-deletion failure rescheduling path.
+        XCTAssertTrue(source.contains("if !confirmed, hub.currentBackupAccountID == accountID"))
+        XCTAssertTrue(source.contains("try await hub.refreshCurrentBackupSession()"))
+        XCTAssertTrue(source.contains("try backupKeychainStore.cancelAccountDeletionPreparation(intent)"))
     }
+    /// `logVPNDebugEvent` must be reachable from EVERY build configuration.
+    ///
+    /// It was not. It lived inside the debug-probe region — a 169-line block behind a build-flag
+    /// `#if` — while one caller, `chained-upstream-disabled` (pinned by
+    /// `ChainedUpstreamReconcileSourceTests`), sits outside any region. The Release device
+    /// compile therefore failed with "cannot find 'logVPNDebugEvent' in scope", and main's
+    /// app-compile lane was red from 2026-07-28 until this was found. The other 44 call sites are
+    /// all inside build-flag regions, so nothing else could expose the gap — and `swift test`
+    /// cannot see it at all, because the app target is not in the package.
+    ///
+    /// The check counts `#if`/`#endif` nesting rather than matching a flag name, deliberately:
+    /// naming the internal build flag in tracked source trips the merge-up contamination guard,
+    /// and the property being asserted is "not conditional on anything", which is stronger than
+    /// "not conditional on that one flag".
+    func testTheDebugEventWriterIsAvailableInEveryConfiguration() throws {
+        let source = try readAppViewModelSource()
+        var depth = 0
+        var definitionDepth: Int?
+        var ungatedCallLines: [Int] = []
+
+        for (offset, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#if") {
+                depth += 1
+            } else if trimmed.hasPrefix("#endif") {
+                depth = max(0, depth - 1)
+            }
+
+            guard line.contains("logVPNDebugEvent") else { continue }
+            if trimmed.hasPrefix("func logVPNDebugEvent") {
+                definitionDepth = depth
+            } else if depth == 0 {
+                ungatedCallLines.append(offset + 1)
+            }
+        }
+
+        XCTAssertEqual(
+            definitionDepth, 0,
+            "logVPNDebugEvent is declared inside a conditional-compilation region, so any caller "
+                + "outside one fails to compile in that configuration — which is exactly how the "
+                + "Release device lane broke. Callers at lines \(ungatedCallLines) are unconditional."
+        )
+    }
+
+    /// The SAME regression, one helper along.
+    ///
+    /// `testTheDebugEventWriterIsAvailableInEveryConfiguration` scans `logVPNDebugEvent` and
+    /// nothing else, so it did not catch the actual break: the un-gated
+    /// `launch-snapshot-reconcile-failed` breadcrumb called `errorDebugDetails`, which lives
+    /// inside `#if DEBUG || LAVA_QA_TOOLS`. The writer was fine; its ARGUMENT was not. Both
+    /// halves of that call have to be unconditional, and only one of them was pinned.
+    ///
+    /// Two assertions, because two distinct edits reopen the hole: moving
+    /// `errorIdentityDetails` into a gated region, or reverting the call site to
+    /// `errorDebugDetails`. Neither is visible to `swift test` — the app target is not in the
+    /// package — so the Release `generic/platform=iOS` lane is the only thing that would go
+    /// red, and only after a push.
+    ///
+    /// Depth counting rather than flag matching, for the same reason as its sibling: naming
+    /// the internal build flag in tracked source trips the merge-up contamination guard, and
+    /// "not conditional on anything" is the stronger property.
+    func testTheReconcileFailureBreadcrumbTakesAnUnconditionalArgument() throws {
+        let source = try readAppViewModelSource()
+        var depth = 0
+        var definitionDepth: Int?
+        var sawBreadcrumb = false
+        var breadcrumbUsesIdentityDetails = false
+
+        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#if") {
+                depth += 1
+            } else if trimmed.hasPrefix("#endif") {
+                depth = max(0, depth - 1)
+            }
+
+            if trimmed.hasPrefix("func errorIdentityDetails") {
+                definitionDepth = depth
+            }
+            if line.contains("\"launch-snapshot-reconcile-failed\"") {
+                sawBreadcrumb = true
+                breadcrumbUsesIdentityDetails = line.contains("errorIdentityDetails(error)")
+            }
+        }
+
+        XCTAssertEqual(
+            definitionDepth, 0,
+            "errorIdentityDetails is declared inside a conditional-compilation region. The "
+                + "unconditional launch-snapshot-reconcile-failed breadcrumb calls it, so that "
+                + "configuration fails to compile — the exact break this pin exists for.")
+        // NOT a depth assertion on the CALL SITE, and the first draft of this test got that
+        // wrong — it asserted depth 0 and failed, because `reconcileTunnelSnapshotAfterLaunch`
+        // splits on `#if targetEnvironment(simulator)` and the breadcrumb lives in the device
+        // `#else` arm. Depth 1 there is correct: every real build compiles it. A crude depth
+        // count cannot tell a platform split from a build-flag gate, and the compile-break
+        // class is already closed by the two assertions that remain — a depth-0 helper called
+        // by name means no configuration can fail to compile on this pair.
+        XCTAssertTrue(sawBreadcrumb, "The launch-snapshot-reconcile-failed breadcrumb is gone.")
+        XCTAssertTrue(
+            breadcrumbUsesIdentityDetails,
+            "The breadcrumb must pass errorIdentityDetails(error). errorDebugDetails is both "
+                + "build-gated AND carries localizedDescription, which can interpolate a user's "
+                + "self-hosted blocklist host into the report bundle.")
+    }
+
 }

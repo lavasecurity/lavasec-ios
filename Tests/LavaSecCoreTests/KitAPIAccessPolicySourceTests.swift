@@ -115,7 +115,9 @@ final class KitAPIAccessPolicySourceTests: XCTestCase {
     func testRequiredClientBoundaryRemainsPublic() throws {
         let deepLinks = try readCode(.appDeepLink)
         for declaration in [
-            "public enum LavaImportDeepLinkEntry: String, Equatable, Sendable",
+            // No longer `String`-raw: the entry carries an associated
+            // ShareableFilterConfiguration for fragment-borne shares.
+            "public enum LavaImportDeepLinkEntry: Equatable, Sendable",
             "public enum LavaSettingsDeepLink: Equatable, Sendable",
             "public enum LavaAppDeepLink: Equatable, Sendable",
             "public init?(url: URL)",
@@ -190,7 +192,7 @@ final class KitAPIAccessPolicySourceTests: XCTestCase {
         let shareable = try readCode(.shareableFilterConfiguration)
         for declaration in [
             "public struct ShareableFilterConfiguration: Equatable, Sendable",
-            "public static let currentSchemaVersion = 1",
+            "public static let currentSchemaVersion = 2",
             "public init(",
             "public init(from decoder: Decoder) throws",
             "public func encode(to encoder: Encoder) throws",

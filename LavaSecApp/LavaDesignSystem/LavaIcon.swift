@@ -6,7 +6,7 @@ enum LavaIconRole: Sendable {
     // Primary tabs
     case guardShield, filters, activity, settings
     // Navigation-row destinations
-    case domainHistory, networkActivity, blocked, allowed
+    case domainHistory, networkActivity, ranking, blocked, allowed
     // Recurring chrome
     case chevronRight
 }
@@ -20,10 +20,11 @@ extension LavaIconRole {
         case .filters:         "line.3.horizontal.decrease.circle"
         case .activity:        "chart.bar.xaxis"
         case .settings:        "gearshape"
+        case .ranking:        LavaGlyphSymbol.ranking
         case .domainHistory:   "clock.arrow.circlepath"
         case .networkActivity: "waveform.path.ecg.rectangle"
-        case .blocked:         "hand.raised.fill"
-        case .allowed:         "arrow.right.circle.fill"
+        case .blocked:         LavaOutcomeSymbol.blocked
+        case .allowed:         LavaOutcomeSymbol.allowed
         case .chevronRight:    "chevron.right"
         }
     }

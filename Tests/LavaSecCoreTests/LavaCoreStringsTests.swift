@@ -8,6 +8,28 @@ import XCTest
 /// direct-`.lproj` mechanism the notification posters use. Values assert against the
 /// committed catalogs in `Sources/LavaSecKit/Resources/*.lproj/Localizable.strings`.
 final class LavaCoreStringsTests: XCTestCase {
+    func testSharedErrorAndBackupCopyResolvesInEveryShippedLanguage() {
+        let languages = ["ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"]
+        let keys = [
+            "Choose a valid DNS provider and transport.",
+            "The Supabase Auth response was not valid.",
+            "This domain will be blocked after you save.",
+            "Encrypted locally. Sign in to upload."
+        ]
+        for language in languages {
+            for key in keys {
+                let value = LavaCoreStrings.localized(key, languageCode: language)
+                XCTAssertFalse(value.isEmpty, "\(key)/\(language)")
+                XCTAssertNotEqual(value, key, "Shared copy must resolve from the package bundle: \(key)/\(language)")
+            }
+            let size = LavaCoreStrings.localizedFormat("Latest encrypted settings backup size is %@.", languageCode: language, "42 KB")
+            XCTAssertTrue(size.contains("42 KB"), language)
+            XCTAssertFalse(size.contains("%@"), language)
+            let domain = LavaCoreStrings.localizedFormat("Added %@", languageCode: language, "example.com")
+            XCTAssertTrue(domain.contains("example.com"), language)
+        }
+    }
+
     func testLocalizedWithLanguageCodeSelectsThePinnedLProjIndependentOfProcessLocale() {
         // The whole point of the pin: an explicit languageCode selects the matching
         // .lproj regardless of the running process's locale — Foundation's bundle lookup
@@ -15,11 +37,11 @@ final class LavaCoreStringsTests: XCTestCase {
         // failure the pin exists to fix.
         XCTAssertEqual(
             LavaCoreStrings.localized("widget.state.on", languageCode: "de"),
-            "Lava Security ist aktiviert"
+            "Lava ist aktiviert"
         )
         XCTAssertEqual(
             LavaCoreStrings.localized("widget.state.on", languageCode: "zh-Hant"),
-            "Lava Security 已開啟"
+            "Lava 已開啟"
         )
         // The trailing space is deliberate and load-bearing (render rescue for short space-less
         // ja values in the Live Activity button — see the ja catalog comment); this assertion

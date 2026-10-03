@@ -105,7 +105,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         case .cellularToWifiSwitch:
             "Join Wi-Fi while protected on cellular and confirm the resolver refreshes."
         case .flappingEdgeWifi:
-            "Hold the phone where Wi-Fi oscillates between barely usable and unusable."
+            "Hold the device where Wi-Fi oscillates between barely usable and unusable."
         case .sameSSIDRoaming:
             "Move across mesh or enterprise APs that share an SSID but change BSSID/DNS."
         case .wifiInternetBlackhole:
@@ -161,7 +161,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         case .sameSSIDRoaming:
             [
                 "Walk between two access points that share the same SSID.",
-                "Keep the phone unlocked and protection connected during the roam.",
+                "Keep the device unlocked and protection connected during the roam.",
                 "Run hosted probes before and after the BSSID changes.",
                 "Repeat once while the app is backgrounded."
             ]
@@ -210,7 +210,7 @@ public enum QAInternetNetworkCondition: String, CaseIterable, Identifiable, Send
         case .mtuDoQFragmentation:
             [
                 "Use a path with reduced MTU, UDP fragmentation loss, or QUIC throttling.",
-                "Apply the Custom DoQ DNS setup from Phone QA.",
+                "Apply the Custom DoQ DNS setup from Device QA.",
                 "Run hosted probes until at least one timeout or retry path is visible.",
                 "Switch to DoH and confirm the same probes recover."
             ]
@@ -294,7 +294,7 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         customResolverName: String? = nil,
         fallbackToDeviceDNS: Bool,
         usesEncryptedDeviceDNSFallback: Bool,
-        fallbackResolverPresetID: String = DNSResolverPreset.mullvadDoH.id,
+        fallbackResolverPresetID: String = DNSResolverPreset.quad9UnfilteredDoH.id,
         fallbackCustomResolverAddress: String? = nil,
         fallbackCustomResolverName: String? = nil,
         transport: DNSResolverTransport
@@ -324,15 +324,15 @@ public struct QAInternetDNSSetup: Identifiable, Equatable, Sendable {
         transport: .deviceDNS
     )
 
-    /// Device DNS primary with Mullvad DoH as the encrypted escape path.
+    /// Device DNS primary with Quad9 DoH as the encrypted escape path.
     public static let deviceEncryptedDoHFallback = QAInternetDNSSetup(
         id: "device-encrypted-doh-fallback",
         title: "Device + Encrypted Fallback",
-        summary: "Device resolver primary with Mullvad DoH as the wedged-resolver escape path.",
+        summary: "Device resolver primary with Quad9 DoH as the wedged-resolver escape path.",
         resolverPresetID: DNSResolverPreset.device.id,
         fallbackToDeviceDNS: false,
         usesEncryptedDeviceDNSFallback: true,
-        fallbackResolverPresetID: DNSResolverPreset.mullvadDoH.id,
+        fallbackResolverPresetID: DNSResolverPreset.quad9UnfilteredDoH.id,
         transport: .deviceDNS
     )
 
@@ -601,10 +601,17 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
         self.blocklistLoads = blocklistLoads
     }
 
-    /// Number of scenarios in the complete axis cross-product.
-    public var totalCombinationCount: Int {
-        networkConditions.count * dnsSetups.count * blocklistLoads.count
+    /// Eligible configurations; a QUIC loss procedure cannot qualify another transport.
+    public var scenarios: [QAInternetScenario] {
+        networkConditions.flatMap { condition in
+            dnsSetups.filter { condition != .mtuDoQFragmentation || $0.transport == .dnsOverQUIC }.flatMap { setup in
+                blocklistLoads.map { QAInternetScenario(networkCondition: condition, dnsSetup: setup, blocklistLoad: $0) }
+            }
+        }
     }
+
+    /// Number of eligible guided checks, excluding incompatible configurations.
+    public var totalCombinationCount: Int { scenarios.count }
 
     /// Scenario formed from the first value of each nonempty axis.
     public var startingScenario: QAInternetScenario {
@@ -617,7 +624,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
 
     /// Compact combination-count label.
     public var metadata: String {
-        "\(totalCombinationCount) combos"
+        "\(totalCombinationCount) guided checks"
     }
 
     /// Small Wi-Fi/cellular handover suite using normal and heavy filter loads.
@@ -685,7 +692,7 @@ public struct QAInternetScenarioSuite: Identifiable, Equatable, Sendable {
     public static let fullNetworkSweep = QAInternetScenarioSuite(
         id: "full-network-sweep",
         title: "Full Network Sweep",
-        summary: "Every demanding network condition crossed with every DNS setup and blocklist load.",
+        summary: "Guided network checks across compatible DNS setups and blocklist loads.",
         networkConditions: QAInternetNetworkCondition.allCases,
         dnsSetups: QAInternetDNSSetup.allCases,
         blocklistLoads: QAInternetBlocklistLoad.allCases

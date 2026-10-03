@@ -156,7 +156,7 @@ final class BackupCurrencyTests: XCTestCase {
             filterLibrary: library
         )
         let b = BackupConfigurationPayload(
-            configuration: makeConfiguration(resolverPresetID: DNSResolverPreset.mullvadDoH.id),
+            configuration: makeConfiguration(resolverPresetID: DNSResolverPreset.quad9UnfilteredDoH.id),
             filterLibrary: library
         )
 

@@ -63,6 +63,7 @@ public struct BackupEnvelopeStore: Sendable {
     package enum Keys {
         package static let envelope = "lavasec.encryptedBackupEnvelope.pending"
         package static let lastUploadedAt = "lavasec.encryptedBackup.lastUploadedAt"
+        package static let accountDeletionConfirmation = "lavasec.encryptedBackup.accountDeletionConfirmation"
     }
 
     /// Headroom added to the ciphertext size for the surrounding envelope JSON
@@ -75,6 +76,43 @@ public struct BackupEnvelopeStore: Sendable {
     /// Creates a store using the supplied persistence implementation.
     public init(storage: any BackupEnvelopeStorage = BackupEnvelopeUserDefaultsStorage()) {
         self.storage = storage
+    }
+
+    /// Supplemental server confirmation when the primary Keychain promotion fails.
+    /// It cannot create a fence, enable backup, or authorize unrelated account work.
+    @discardableResult
+    public func saveAccountDeletionConfirmation(_ confirmation: BackupDeletionIntent) -> Bool {
+        guard confirmation.version == 3, confirmation.phase == .localCleanupPending,
+              confirmation.operationID != nil, let data = try? JSONEncoder().encode(confirmation) else { return false }
+        storage.set(data, forKey: Keys.accountDeletionConfirmation)
+        return storage.data(forKey: Keys.accountDeletionConfirmation) == data
+    }
+
+    /// Missing, malformed, stale, or differently owned receipts never advance a fence.
+    public func accountDeletionConfirmation(for preparation: BackupDeletionIntent) -> BackupDeletionIntent? {
+        guard let data = storage.data(forKey: Keys.accountDeletionConfirmation),
+              let confirmation = try? BackupDeletionIntent.decode(data),
+              confirmation.confirmsLocalCleanup(of: preparation) else { return nil }
+        return confirmation
+    }
+
+    /// Exact device-local envelope and upload evidence retained until restore passes its write fence.
+    public struct Checkpoint: Equatable, Sendable {
+        fileprivate let envelopeData: Data?
+        fileprivate let uploadedAt: Date?
+    }
+
+    /// Captures raw storage, preserving absent and malformed pre-existing data without decoding it.
+    public func checkpoint() -> Checkpoint {
+        Checkpoint(envelopeData: storage.data(forKey: Keys.envelope), uploadedAt: storage.date(forKey: Keys.lastUploadedAt))
+    }
+
+    /// Restores an app-owned checkpoint after an uncommitted local backup write, including its upload evidence.
+    public func restoreCheckpoint(_ checkpoint: Checkpoint) {
+        if let data = checkpoint.envelopeData { storage.set(data, forKey: Keys.envelope) }
+        else { storage.removeObject(forKey: Keys.envelope) }
+        if let uploadedAt = checkpoint.uploadedAt { storage.set(uploadedAt, forKey: Keys.lastUploadedAt) }
+        else { storage.removeObject(forKey: Keys.lastUploadedAt) }
     }
 
     /// Encodes an envelope as sorted-key JSON and persists it as the current local envelope.
@@ -127,10 +165,13 @@ public struct BackupEnvelopeStore: Sendable {
     }
 
     /// Removes the local envelope and its upload timestamp, so `currentState()`
-    /// reports `.off`. Used when encrypted backup is fully disabled on this device.
-    public func deleteEnvelope() {
+    /// reports `.off`. Returns true only when both records are confirmed absent, so
+    /// a deletion intent is not completed after failed local cleanup.
+    @discardableResult
+    public func deleteEnvelope() -> Bool {
         storage.removeObject(forKey: Keys.envelope)
         storage.removeObject(forKey: Keys.lastUploadedAt)
+        return storage.data(forKey: Keys.envelope) == nil && storage.date(forKey: Keys.lastUploadedAt) == nil
     }
 
     package func lastUploadedAt() -> Date? {

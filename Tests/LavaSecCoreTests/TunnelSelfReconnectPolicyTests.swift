@@ -83,6 +83,63 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
         )
     }
 
+    func testAuthoritativeOffOrUnavailableIntentBlocksEveryRecoveryRequirement() {
+        // The cached configuration may still be ON while the app is disarming.
+        // Only absence preserves that compatibility value; accepted OFF and an
+        // unavailable sidecar must block the typed tier grant and legacy wedge alike.
+        for outcome in [
+            ProtectionRestoreIntentStore.ReadOutcome.stored(isEnabled: false),
+            .corrupt, .unreadable
+        ] {
+            let wanted = outcome.resolvedIntent(fallingBackTo: true)
+            XCTAssertFalse(wanted)
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: .deviceDNSRecapture,
+                    protectionEnabled: wanted,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: [],
+                    now: now),
+                .noAction
+            )
+            for reason in [
+                TunnelSelfReconnectPolicy.RestartReason.wedge, .deviceDNSRecapture
+            ] {
+                XCTAssertEqual(
+                    TunnelSelfReconnectPolicy.decision(
+                        assessment: assessment(.needsReconnect, .reconnect),
+                        protectionEnabled: wanted,
+                        onDemandEnabled: true,
+                        recentReconnectTimes: [],
+                        reason: reason,
+                        now: now),
+                    .noAction
+                )
+            }
+        }
+    }
+
+    func testAbsentIntentPreservesLegacyConfigurationWhileStoredOnOverridesIt() {
+        for (outcome, configured) in [
+            (ProtectionRestoreIntentStore.ReadOutcome.absent, true),
+            (.stored(isEnabled: true), false)
+        ] {
+            let wanted = outcome.resolvedIntent(fallingBackTo: configured)
+            XCTAssertTrue(wanted)
+            for requirement in [
+                TunnelSelfReconnectPolicy.RecoveryRequirement.deviceDNSRecapture,
+                .sustainedWedge(assessment(.needsReconnect, .reconnect))
+            ] {
+                XCTAssertEqual(
+                    TunnelSelfReconnectPolicy.decision(
+                        requirement: requirement, protectionEnabled: wanted,
+                        onDemandEnabled: true, recentReconnectTimes: [], now: now),
+                    .reconnect
+                )
+            }
+        }
+    }
+
     func testNoActionWhenOnDemandNotArmed() {
         // protectionEnabled can be persisted even when arming Connect-On-Demand
         // failed; without confirmed on-demand a self-cancel would strand the user
@@ -201,7 +258,224 @@ final class TunnelSelfReconnectPolicyTests: XCTestCase {
         XCTAssertEqual(decision, .throttled)
     }
 
-    // MARK: - Track 4: device-DNS recapture restart reason
+    // MARK: - Typed tier recovery admission
+
+    func testDeviceDNSRecaptureGrantDoesNotDependOnAggregateConnectivity() {
+        // A healthy tier can rescue a lookup while Device DNS still needs a fresh
+        // capture. Its explicit tier-owned grant must survive that aggregate health.
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.usingEncryptedFallback, .turnOff),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                reason: .deviceDNSRecapture,
+                now: now
+            ),
+            .noAction
+        )
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                now: now
+            ),
+            .reconnect
+        )
+    }
+
+    func testDeviceDNSRecaptureGrantRequiresProtectionAndConfirmedOnDemand() {
+        for (protection, onDemand) in [(false, true), (true, false), (false, false)] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: .deviceDNSRecapture,
+                    protectionEnabled: protection,
+                    onDemandEnabled: onDemand,
+                    recentReconnectTimes: [],
+                    now: now
+                ),
+                .noAction
+            )
+        }
+    }
+
+    func testDeviceDNSRecaptureGrantSharesCooldownAndPersistedAttemptCeiling() {
+        let attempts = [
+            now.addingTimeInterval(-300),
+            now.addingTimeInterval(-200)
+        ]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .sustainedWedge(assessment(.needsReconnect, .reconnect)),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                now: now
+            ),
+            .throttled
+        )
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                now: now
+            ),
+            .reconnect
+        )
+        for history in [
+            [now.addingTimeInterval(-89)],
+            attempts + [now.addingTimeInterval(-100)]
+        ] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: .deviceDNSRecapture,
+                    protectionEnabled: true,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: history,
+                    now: now
+                ),
+                .throttled
+            )
+        }
+    }
+
+    func testDeviceDNSRecaptureGrantHonorsCooldownAndWindowBoundaries() {
+        // The cooldown is inclusive at its elapsed boundary; window expiry removes
+        // attempts exactly at the boundary so persisted history stays bounded.
+        let attempts = [
+            now.addingTimeInterval(-600),
+            now.addingTimeInterval(-601),
+            now.addingTimeInterval(-90)
+        ]
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: attempts,
+                now: now
+            ),
+            .reconnect
+        )
+    }
+
+    func testDeviceDNSRecaptureGrantCannotEvadeCooldownAfterClockRegression() {
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [now.addingTimeInterval(120)],
+                now: now
+            ),
+            .throttled
+        )
+    }
+
+    func testProductiveRestartCreditDoesNotEraseSharedCooldown() {
+        // Productive credit removes the attempt from the cap store, but the
+        // committed restart marker must still protect both entry points from loops.
+        let committedAt = now.addingTimeInterval(-89)
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                lastCommittedReconnectAt: committedAt,
+                now: now
+            ),
+            .throttled
+        )
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                assessment: assessment(.needsReconnect, .reconnect),
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                lastCommittedReconnectAt: committedAt,
+                now: now
+            ),
+            .throttled
+        )
+    }
+
+    func testProductiveRestartCreditAllowsRecoveryWhenCooldownElapses() {
+        for requirement in [
+            TunnelSelfReconnectPolicy.RecoveryRequirement.deviceDNSRecapture,
+            .sustainedWedge(assessment(.needsReconnect, .reconnect))
+        ] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: requirement,
+                    protectionEnabled: true,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: [],
+                    lastCommittedReconnectAt: now.addingTimeInterval(-90),
+                    now: now
+                ),
+                .reconnect
+            )
+        }
+    }
+
+    func testCommittedRestartMarkerCannotEvadeCooldownAfterClockRegression() {
+        XCTAssertEqual(
+            TunnelSelfReconnectPolicy.decision(
+                requirement: .deviceDNSRecapture,
+                protectionEnabled: true,
+                onDemandEnabled: true,
+                recentReconnectTimes: [],
+                lastCommittedReconnectAt: now.addingTimeInterval(120),
+                now: now
+            ),
+            .throttled
+        )
+    }
+
+    func testCooldownUsesTheNewestAttemptOrCommittedMarker() {
+        for (attempt, marker) in [(-89.0, -300.0), (-300.0, -89.0)] {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: .deviceDNSRecapture,
+                    protectionEnabled: true,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: [now.addingTimeInterval(attempt)],
+                    lastCommittedReconnectAt: now.addingTimeInterval(marker),
+                    now: now
+                ),
+                .throttled
+            )
+        }
+    }
+
+    func testTypedWedgeStillRequiresSustainedReconnectAssessment() {
+        let assessments = [
+            assessment(.healthy, .turnOff),
+            assessment(.dnsSlow, .reconnect),
+            assessment(.usingEncryptedFallback, .turnOff),
+            assessment(.usingDeviceDNSFallback, .turnOff),
+            assessment(.needsReconnect, .turnOff)
+        ]
+        for candidate in assessments {
+            XCTAssertEqual(
+                TunnelSelfReconnectPolicy.decision(
+                    requirement: .sustainedWedge(candidate),
+                    protectionEnabled: true,
+                    onDemandEnabled: true,
+                    recentReconnectTimes: [],
+                    now: now
+                ),
+                .noAction
+            )
+        }
+    }
+
+    // MARK: - Legacy device-DNS recapture restart reason
 
     // Two attempts past the cooldown: the wedge cap (2) is reached, but the recapture
     // cap (3) is not — so the no-fallback recapture restart still fires where the wedge

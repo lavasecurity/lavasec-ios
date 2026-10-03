@@ -86,7 +86,6 @@ final class ColorContrastSourceTests: XCTestCase {
         // "file contains the token somewhere" check. Each banned string is specific enough not to
         // match a legitimately-kept non-text use of `lavaOrange` (bar fills, icon tints, borders).
         let bannedBySite: [(SourceFile, [String])] = [
-            (.guardView,            [".foregroundStyle(LavaStyle.lavaOrange)"]),
             (.settingsView,         [".foregroundStyle(LavaStyle.lavaOrange)"]),
             (.backupSetupView,      [".foregroundStyle(LavaStyle.lavaOrange)"]),
             (.filterReviewFlowView, [".foregroundStyle(LavaStyle.lavaOrange)"]),

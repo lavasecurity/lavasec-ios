@@ -34,4 +34,23 @@ public enum DNSEventLogSignpost {
         os_signpost(.event, log: log, name: name)
         #endif
     }
+
+    /// Opens a named interval on the Instruments timeline. Same rules as ``event(_:)``:
+    /// static, non-sensitive label only, symbol always compiled, body QA-gated.
+    ///
+    /// Intervals use the implicit exclusive signpost ID, so a given `name` must not be
+    /// re-opened before its ``end(_:)`` — every current caller brackets a synchronous span
+    /// on one queue, which satisfies that by construction.
+    public static func begin(_ name: StaticString) {
+        #if DEBUG || LAVA_QA_TOOLS
+        os_signpost(.begin, log: log, name: name)
+        #endif
+    }
+
+    /// Closes the interval opened by ``begin(_:)`` for the same `name`.
+    public static func end(_ name: StaticString) {
+        #if DEBUG || LAVA_QA_TOOLS
+        os_signpost(.end, log: log, name: name)
+        #endif
+    }
 }

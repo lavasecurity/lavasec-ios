@@ -64,7 +64,8 @@
             "value": "篩選器"
           }
         }
-      }
+      },
+      "comment": "Focus intent parameter name: the user selects a saved filter. Translate the common noun."
     },
     "Lava Filter": {
       "extractionState": "manual",
@@ -129,7 +130,8 @@
             "value": "Lava 篩選器"
           }
         }
-      }
+      },
+      "comment": "Focus intent title identifying the Lava filter action."
     },
     "No filter": {
       "extractionState": "manual",
@@ -194,7 +196,8 @@
             "value": "無篩選器"
           }
         }
-      }
+      },
+      "comment": "Focus intent display when no saved filter is selected."
     },
     "Switch to ${filter}": {
       "extractionState": "manual",
@@ -259,7 +262,8 @@
             "value": "切換至 ${filter}"
           }
         }
-      }
+      },
+      "comment": "Focus intent summary. Preserve the ${filter} parameter token."
     },
     "Switch your active Lava filter automatically when a Focus turns on.": {
       "extractionState": "manual",
@@ -324,7 +328,8 @@
             "value": "當「專注模式」開啟時，自動切換目前生效的 Lava 篩選器。"
           }
         }
-      }
+      },
+      "comment": "Focus intent description explaining the automatic filter change."
     }
   },
   "version": "1.0"

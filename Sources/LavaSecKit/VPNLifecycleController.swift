@@ -1,36 +1,53 @@
 import Foundation
 
-// Abstractions over NETunnelProviderManager so VPN manager lifecycle behavior
-// (selection, save/reload, duplicate cleanup, status waits) is testable with
-// fakes. The app target provides NetworkExtension-backed conformances; per the
-// plan's architecture decisions, NetworkExtension types stay out of this module.
+/// Minimal VPN manager state needed for lifecycle selection and status waits.
+///
+/// The app target supplies the NetworkExtension-backed conformance so platform types remain out of
+/// this package and lifecycle behavior stays executable with deterministic fakes.
 
 @MainActor
 public protocol VPNManagerControlling: AnyObject {
+    /// Human-readable profile name used to select the canonical Lava manager.
     var managerDisplayName: String? { get }
+    /// Provider identifier used to reject unrelated system VPN profiles.
     var managerProviderBundleIdentifier: String? { get }
+    /// Current normalized tunnel lifecycle state.
     var lifecycleStatus: ProtectionLifecycleStatus { get }
 }
 
+/// Persistence operations needed to load, configure, save, and remove VPN managers.
 @MainActor
 public protocol VPNManagerRepositoryProtocol {
+    /// Platform-specific manager type controlled by this repository.
     associatedtype Manager: VPNManagerControlling
 
+    /// Loads every saved VPN manager visible to the application.
     func loadAll() async throws -> [Manager]
+    /// Creates an unsaved manager instance.
     func makeManager() -> Manager
+    /// Applies the current Lava configuration to a manager before persistence.
     func applyConfiguration(to manager: Manager)
+    /// Saves a manager and reloads its canonical preference state.
     func saveAndReload(_ manager: Manager) async throws
+    /// Removes a manager from system preferences.
     func remove(_ manager: Manager) async throws
 }
 
+/// Waits for system tunnel-status notifications without exposing NetworkExtension types.
 @MainActor
 public protocol VPNStatusChangeWaiting {
-    // Waits up to `timeout` for a status-change signal; true when a change was
-    // observed before the timeout elapsed.
+    /// Waits up to `timeout` for a status-change signal and reports whether one arrived.
     func waitForStatusChange(timeout: TimeInterval) async -> Bool
 }
 
+/// Signals that an async manager mutation lost its caller-owned lifecycle fence while suspended.
+public enum VPNLifecycleMutationError: Error, Equatable, Sendable {
+    /// Caller ownership changed while an asynchronous preference mutation was suspended.
+    case superseded
+}
+
 extension ProtectionLifecycleStatus {
+    /// Stable diagnostic label for analytics emitted by the lifecycle controller.
     public var debugLabel: String {
         switch self {
         case .invalid: "invalid"
@@ -43,33 +60,37 @@ extension ProtectionLifecycleStatus {
     }
 }
 
+/// Selects and mutates Lava VPN managers while preserving caller-owned lifecycle fencing.
 @MainActor
 public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtocol> {
+    /// Platform-specific manager type supplied by the repository.
     public typealias Manager = Repository.Manager
 
+    /// Timing used while observing connect and stop transitions.
     public struct WaitPolicy: Sendable {
+        /// Maximum interval between status observations.
         public let statusPollInterval: TimeInterval
-        // Right after startVPNTunnel the connection can still read a
-        // non-pending status (.disconnected/.invalid) for a beat; the connect
-        // wait tolerates that for this long instead of giving up immediately.
+        /// Grace period tolerating a briefly non-pending status immediately after tunnel start.
         public let startGraceInterval: TimeInterval
 
+        /// Creates wait timing with production polling and post-start grace defaults.
         public init(statusPollInterval: TimeInterval = 0.5, startGraceInterval: TimeInterval = 2) {
             self.statusPollInterval = statusPollInterval
             self.startGraceInterval = startGraceInterval
         }
     }
 
-    // iOS's loadAllFromPreferences can transiently return an empty list right
-    // after the extension is torn down or during a network handoff, even though
-    // the saved profile still exists. Re-querying a few times before concluding
-    // "no profile" avoids minting a brand-new manager in that window — which
-    // re-prompts for VPN permission and leaves a duplicate profile (the
-    // "asked to install a new VPN profile after a network change" regression).
+    /// Retry policy for transient empty preference loads before creating a replacement profile.
+    ///
+    /// iOS can briefly report no managers after extension teardown or a network handoff even while
+    /// the saved profile still exists. Re-querying prevents a duplicate profile and permission prompt.
     public struct ReloadBeforeCreatePolicy: Sendable {
+        /// Number of additional loads after the first empty result.
         public let retryCount: Int
+        /// Delay between empty-result retries.
         public let retryDelay: TimeInterval
 
+        /// Creates a transient-empty retry policy.
         public init(retryCount: Int = 2, retryDelay: TimeInterval = 0.4) {
             self.retryCount = retryCount
             self.retryDelay = retryDelay
@@ -85,6 +106,7 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
     private let sleep: @MainActor (TimeInterval) async -> Void
     private let emitEvent: @MainActor (String, [String: String]) -> Void
 
+    /// Creates a controller over platform persistence, status waiting, timing, and event seams.
     public init(
         repository: Repository,
         statusWaiter: any VPNStatusChangeWaiting,
@@ -107,12 +129,12 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         self.emitEvent = emitEvent
     }
 
+    /// Loads the highest-priority existing Lava manager from the current preference snapshot.
     public func loadExistingManager() async throws -> Manager? {
         try await matchingManagers().first
     }
 
-    // Lava-owned managers, preferring the active one, then the canonical
-    // display name (so duplicate cleanup converges on the right survivor).
+    /// Loads Lava-owned managers ordered by active status and then canonical display name.
     public func matchingManagers() async throws -> [Manager] {
         try await repository.loadAll()
             .filter { manager in
@@ -125,15 +147,40 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
             .sorted { selectionPriority($0) < selectionPriority($1) }
     }
 
-    public func loadOrCreateManager(existing: Manager? = nil) async throws -> Manager {
+    /// Resolves or creates the canonical manager, saves it, and removes stale Lava duplicates.
+    ///
+    /// `continueIfOwned` is checked across every suspension. `performPreferenceMutation` lets a
+    /// caller keep each non-cancellable platform save/removal inside its already-owned lifecycle
+    /// fence; a failed ownership check throws `VPNLifecycleMutationError.superseded`.
+    public func loadOrCreateManager(
+        existing: Manager? = nil,
+        continueIfOwned: @escaping @MainActor () -> Bool = { true },
+        performPreferenceMutation: @escaping (
+            @escaping @MainActor () async throws -> Void
+        ) async throws -> Void = { operation in
+            try await operation()
+        }
+    ) async throws -> Manager {
         let current = try await resolveManagerBeforeCreate(existing: existing)
+        guard continueIfOwned() else {
+            throw VPNLifecycleMutationError.superseded
+        }
         let manager = current ?? repository.makeManager()
         if current == nil {
             emitEvent("load-or-create-creating-new-manager", [:])
         }
         repository.applyConfiguration(to: manager)
-        try await repository.saveAndReload(manager)
-        await removeDuplicateManagers(keeping: manager)
+        try await performPreferenceMutation {
+            try await self.repository.saveAndReload(manager)
+        }
+        guard continueIfOwned() else {
+            throw VPNLifecycleMutationError.superseded
+        }
+        try await removeDuplicateManagers(
+            keeping: manager,
+            continueIfOwned: continueIfOwned,
+            performPreferenceMutation: performPreferenceMutation
+        )
         return manager
     }
 
@@ -166,17 +213,46 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         }
     }
 
+    /// Removes one manager directly from the repository.
     public func removeManager(_ manager: Manager) async throws {
         try await repository.remove(manager)
     }
 
-    public func removeDuplicateManagers(keeping kept: Manager) async {
+    /// Best-effort removal of noncanonical Lava managers while caller ownership remains current.
+    ///
+    /// Repository failures are tolerated, but loss of `continueIfOwned` stops further removal.
+    public func removeDuplicateManagers(
+        keeping kept: Manager,
+        continueIfOwned: @escaping @MainActor () -> Bool = { true }
+    ) async {
+        try? await removeDuplicateManagers(
+            keeping: kept,
+            continueIfOwned: continueIfOwned,
+            performPreferenceMutation: { operation in
+                try await operation()
+            }
+        )
+    }
+
+    private func removeDuplicateManagers(
+        keeping kept: Manager,
+        continueIfOwned: @escaping @MainActor () -> Bool,
+        performPreferenceMutation: @escaping (
+            @escaping @MainActor () async throws -> Void
+        ) async throws -> Void
+    ) async throws {
         guard kept.managerDisplayName == LavaTunnelConfigurationIdentity.currentDisplayName else {
             return
         }
 
+        guard continueIfOwned() else {
+            throw VPNLifecycleMutationError.superseded
+        }
         guard let managers = try? await repository.loadAll() else {
             return
+        }
+        guard continueIfOwned() else {
+            throw VPNLifecycleMutationError.superseded
         }
 
         for manager in managers where manager.managerDisplayName != LavaTunnelConfigurationIdentity.currentDisplayName {
@@ -188,13 +264,26 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
                 continue
             }
 
-            try? await repository.remove(manager)
+            guard continueIfOwned() else {
+                throw VPNLifecycleMutationError.superseded
+            }
+            do {
+                try await performPreferenceMutation {
+                    try await self.repository.remove(manager)
+                }
+            } catch let error as ProtectionLifecycleMutationFenceError {
+                throw error
+            } catch {
+                // Duplicate removal stays best-effort. A repository failure cannot make the
+                // canonical manager unsafe; a lifecycle-fence failure above must abort instead.
+            }
         }
     }
 
-    // Waits for the manager's live connection status to reach .connected.
-    // Every observation (including reloads that may yield nil) flows through
-    // onObservation so the caller can keep its published state current.
+    /// Waits for the live connection to reach `.connected` before timeout or a terminal state.
+    ///
+    /// Every observation, including reloads that produce `nil`, is sent to `onObservation` so the
+    /// caller can keep its cached manager and published status synchronized.
     public func waitForConnect(
         timeout: TimeInterval,
         initialManager: Manager?,
@@ -245,6 +334,10 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         return didConnect
     }
 
+    /// Waits until the live connection is no longer stopping, reloading once after timeout.
+    ///
+    /// Every observation is sent to `onObservation`; the result is `false` only when the final
+    /// reloaded status remains stop-pending.
     @discardableResult
     public func waitForStop(
         timeout: TimeInterval,

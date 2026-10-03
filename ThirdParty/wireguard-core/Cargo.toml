@@ -1,0 +1,51 @@
+# PRODUCTION engine packaging — Phase 1 of the chained-VPN-upstream plan
+# (lavasec-infra plans/2026-07-22-vpn-upstream-chaining-implementation-plan.md, D4).
+# Supersedes the Phase-0 throwaway in ThirdParty/wg-spike/ (which stays until the
+# QA-4 pre-release run no longer needs its harness).
+#
+# Packaging contract (D4): the ENGINE source is vendored (boringtun/ — the exact
+# crates.io 0.7.1 tarball contents, provenance hash in README.md) and consumed as a
+# path dependency; transitive deps are pinned by Cargo.lock's sha256 checksums (the
+# committed xcframework means release builds never run cargo — only the CI drift
+# gate fetches, hash-verified). Toolchain pinned in rust-toolchain.toml; the drift
+# gate rebuilds from this tree and byte-compares against the committed artifact —
+# that pairing is the AGPL provenance answer for a Rust artifact the Xcode build
+# cannot produce (shell phases/plugins are structurally rejected by the xcodegen
+# boundary guards).
+[package]
+name = "lavasec-wireguard-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "BSD-3-Clause"
+
+[lib]
+name = "lavasec_wireguard_core"
+# staticlib = the artifact the xcframework slices wrap; rlib = so in-crate
+# integration tests can link and exercise the same C-ABI symbols (spike pattern).
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# The vendored in-tree source is canonical (crypto core only is consumed: Tunn
+# handshake + encapsulate/decapsulate + timers — never the feature-gated device/
+# tun-interface layer, and default-features stays empty).
+boringtun = { path = "boringtun" }
+
+[dev-dependencies]
+boringtun = { path = "boringtun" }
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+strip = "debuginfo"
+# One codegen unit: with lto=true this removes unit-partitioning nondeterminism —
+# the CI drift gate byte-compares a rebuild against the committed artifact, so the
+# release profile must be deterministic, not just fast.
+codegen-units = 1
+# NOTE reproducibility: the built .a also embeds absolute source paths in panic-location
+# metadata (~150 crates.io registry paths), which vary by machine. Those are normalized by
+# `--remap-path-prefix` flags that scripts/build-wireguard-core.sh injects via RUSTFLAGS
+# (Cargo 1.94 has not stabilized the `trim-paths` profile option). The build script is the
+# sole authority for producing the committed artifact, so the drift gate — which re-runs it —
+# applies identical remapping. Do not build the shipped artifact with a bare `cargo build`.

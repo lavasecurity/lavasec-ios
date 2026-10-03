@@ -234,7 +234,7 @@ public enum AdminQAAction: String, CaseIterable, Identifiable, Sendable {
         case .showUserBugReport:
             "Open the normal user bug report sheet."
         case .applyHostedProbes:
-            "Install hosted probe rules for the phone QA page."
+            "Install hosted probe rules for the device QA page."
         case .testDefaultAllow:
             "Prepare the default-allow probe domain."
         case .testAllowlist:

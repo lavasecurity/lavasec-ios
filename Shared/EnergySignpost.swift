@@ -17,5 +17,17 @@ enum EnergySignpost {
     static func event(_ name: StaticString) {
         DNSEventLogSignpost.event(name)
     }
+
+    /// Brackets a synchronous span so Instruments can attribute duration — and, read
+    /// against a footprint trace, memory — to ONE step rather than to a whole timer tick.
+    /// Added for ios-internal#526: the 60 s focus poll shows a recurring ~7 MB / ~13 s
+    /// transient and its tick has four candidate steps, which point events cannot separate.
+    static func begin(_ name: StaticString) {
+        DNSEventLogSignpost.begin(name)
+    }
+
+    static func end(_ name: StaticString) {
+        DNSEventLogSignpost.end(name)
+    }
 }
 #endif

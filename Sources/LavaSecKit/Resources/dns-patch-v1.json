@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "identifier": "app.lavasecurity.dns-patch",
+  "displayName": "Lava Security",
+  "organization": "Lava Security LLC",
+  "serverName": "dns10.quad9.net",
+  "serverAddresses": ["9.9.9.10", "2620:fe::10"]
+}

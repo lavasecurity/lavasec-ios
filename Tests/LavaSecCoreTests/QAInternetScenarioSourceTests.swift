@@ -1,37 +1,22 @@
 import XCTest
 
 final class QAInternetScenarioSourceTests: XCTestCase {
-    func testPhoneQAMenuRendersAtomicInternetSectionsAndConsolidatedSuites() throws {
+    func testPhoneQAMenuUsesOneSearchableCatalogAndGuidedDestinations() throws {
         let source = try readSource(.adminQAView)
-        let phoneQABlock = try sourceBlock(
-            in: source,
-            startingAt: "struct PhoneQAView: View",
-            endingBefore: "private enum PhoneQAHapticPreview"
-        )
-
-        XCTAssertTrue(phoneQABlock.contains("LavaSectionGroup(\"Internet QA Suites\""))
-        XCTAssertTrue(phoneQABlock.contains("ForEach(Array(QAInternetScenarioSuite.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(phoneQABlock.contains("viewModel.applyQAInternetScenarioSuite(suite)"))
-        XCTAssertTrue(phoneQABlock.contains("QAInternetScenarioSuiteRow(suite: suite)"))
-
-        XCTAssertTrue(phoneQABlock.contains("LavaSectionGroup(\"Network Conditions\""))
-        XCTAssertTrue(phoneQABlock.contains("ForEach(Array(QAInternetNetworkCondition.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(phoneQABlock.contains("viewModel.prepareQAInternetNetworkCondition(condition)"))
-        XCTAssertTrue(phoneQABlock.contains("QAInternetNetworkConditionRow(condition: condition)"))
-
-        XCTAssertTrue(phoneQABlock.contains("LavaSectionGroup(\"DNS Setups\""))
-        XCTAssertTrue(phoneQABlock.contains("ForEach(Array(QAInternetDNSSetup.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(phoneQABlock.contains("viewModel.applyQAInternetDNSSetup(setup)"))
-        XCTAssertTrue(phoneQABlock.contains("QAInternetDNSSetupRow(setup: setup)"))
-
-        XCTAssertTrue(phoneQABlock.contains("LavaSectionGroup(\"Blocklist Loads\""))
-        XCTAssertTrue(phoneQABlock.contains("ForEach(Array(QAInternetBlocklistLoad.allCases.enumerated()), id: \\.element.id)"))
-        XCTAssertTrue(phoneQABlock.contains("viewModel.applyQAInternetBlocklistLoad(load)"))
-        XCTAssertTrue(phoneQABlock.contains("QAInternetBlocklistLoadRow(load: load)"))
+        XCTAssertTrue(source.contains("ForEach(sections)"))
+        XCTAssertTrue(source.contains("LocalLogSearchField(text: $search, placeholder: \"Search Device QA\")"))
+        XCTAssertTrue(source.contains(".sheet(item: $condition)"))
+        XCTAssertTrue(source.contains(".sheet(item: $suite)"))
+        XCTAssertTrue(source.contains("condition.testerSteps.enumerated()"))
+        XCTAssertFalse(source.contains("Device QA uses atomic modes"))
+        XCTAssertFalse(source.contains("title: message,\n                    systemImage: \"checkmark.circle.fill\""))
+        for catalog in ["QAInternetScenarioSuite", "QAInternetNetworkCondition", "QAInternetDNSSetup", "QAInternetBlocklistLoad", "PhoneQAHapticPreview", "AdminQAAction", "AdminQAVPNProfileAction"] {
+            XCTAssertTrue(source.contains("\(catalog).allCases"), catalog)
+        }
     }
 
     func testViewModelAppliesInternetScenarioCatalogState() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
         let qaCommandBlock = try sourceBlock(
             in: source,
             startingAt: "#if DEBUG || LAVA_QA_TOOLS\n    func applyHostedQAProbeSet()",
@@ -50,7 +35,7 @@ final class QAInternetScenarioSourceTests: XCTestCase {
     }
 
     func testQABlocklistLoadsRebuildRulesAndSyncBeforePersisting() throws {
-        let source = try readSource(.appViewModel)
+        let source = try readAppViewModelSource()
 
         // A QA load that assigns enabledBlocklistIDs must recompile blockRules and persist
         // in that order, or persistFilterChanges serializes the previous load's rules.

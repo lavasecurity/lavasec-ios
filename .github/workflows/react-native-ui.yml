@@ -1,0 +1,204 @@
+name: React Native UI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # `labeled` is load-bearing: `full-build` is the on-demand switch for
+    # `native-full-app` below. Without this event, adding the label after the latest
+    # push would not re-trigger the workflow, so the switch would only work when the
+    # label happened to predate the push (Codex P2 on PR #784).
+    #
+    # `ready_for_review` is load-bearing the same way: both jobs skip while
+    # `github.event.pull_request.draft` is true, so without the type, flipping a
+    # draft to ready would leave the skipped contexts stale with no new run.
+    # `converted_to_draft` cancels in-flight work when a PR is flipped back
+    # (the new run skips, and the shared concurrency group kills the old one).
+    # `unlabeled` cancels a withdrawn `full-build` request the same way: the
+    # label-free run skips the lane and the concurrency group kills the old one.
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+    inputs:
+      validation:
+        description: 'Compile, full-app journeys, or full-app plus preview parity tour'
+        type: choice
+        options: [compile, full-app-journeys, parity-review]
+        default: compile
+
+permissions:
+  contents: read
+
+concurrency:
+  # Preserve native-input pushes when a later JS/docs-only push skips native.
+  group: react-native-ui-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lava-ui:
+    name: Lava UI tokens, contracts, and iOS bundle
+    # Same public/fork isolation as ios.yml. No native builds, signing, or service
+    # credentials here: this verifies shared UI contracts and both project policies.
+    # Draft PRs are exempt from CI, this job included (see `on.pull_request.types`);
+    # `ready_for_review` re-runs it.
+    if: ${{ github.event.pull_request.draft != true }}
+    # Keep the private runner fixed while public exports use hosted Linux.
+    runs-on: ${{ (github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'))) && 'ubicloud-standard-2' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
+      native_required: ${{ steps.native.outputs.required }}
+    defaults:
+      run:
+        working-directory: ReactNative
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect docs-only diff
+        id: changes
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          docs_only="$(ci/detect-docs-only.sh --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          case "$docs_only" in true|false) ;; *) docs_only=false ;; esac
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v6
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ReactNative/package-lock.json
+      - name: Classify native build inputs
+        id: native
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          required="$(node ci/detect-rn-native-build.mjs --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          case "$required" in true|false) ;; *) required=true ;; esac
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+          if [ "$required" = false ]; then
+            echo 'Only RN JavaScript/tests or documentation changed; full JS checks run, native compilation is unnecessary.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+      - run: npm test
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+      - name: Verify simulator cleanup preserves build status
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+        working-directory: .
+        run: python3 ci/simulator_cleanup_tests.py
+      - run: npm run bundle:ios
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+      # The shipped app uses review/index.ts, independently of the gallery.
+      # Keep its Metro resolution/transform checks even when native work skips.
+      - run: npm run bundle:review
+        if: ${{ steps.changes.outputs.docs_only != 'true' }}
+      - name: Report docs-only validation
+        if: ${{ steps.changes.outputs.docs_only == 'true' }}
+        run: echo 'Documentation-only change; RN dependency installation and native builds are unnecessary.' >> "$GITHUB_STEP_SUMMARY"
+
+  native-review-host:
+    name: Optional preview parity tour
+    # The migration fixture remains available explicitly. Its second cold RN
+    # build and screenshots are not a routine PR gate. Keep simulator jobs serial.
+    needs: native-full-app
+    if: ${{ github.repository == 'lavasecurity/lavasec-ios-internal' && github.event_name == 'workflow_dispatch' && inputs.validation == 'parity-review' }}
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '3.3.12'
+          bundler: '4.0.16'
+          working-directory: ReactNative
+      - name: Build and verify isolated native review host
+        run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/build-review-host.sh
+      - name: Upload review build and evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lava-ui-review-${{ github.sha }}
+          path: ReactNative/.artifacts/review-host/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove generated review dependencies
+        if: ${{ always() }}
+        run: rm -rf ReactNative/node_modules ReactNative/ios/Pods ReactNative/ios/build
+
+  native-full-app:
+    name: React Native full app and UIKit regressions
+    needs: lava-ui
+    # Owned private PRs only, matching light-build.yml. Public/fork CI still
+    # verifies JS contracts and the closed review-project policy on Linux.
+    # On push, dispatch and labelled PRs, only a complete, known JS-only diff skips
+    # native work; unknown outputs after a prerequisite failure run fully, matching
+    # the shared iOS fail-safe. Routine unlabelled PRs skip the lane outright — the
+    # label gate below is the first filter, not the classifier — and a draft skips
+    # even when labelled: `ready_for_review` is when a PR becomes real work.
+    #
+    # ROUTINE PRs DO NOT RUN THIS. It is not a required check, it is a ~25-minute
+    # cold Mac build, and the required `app-compile` in light-build.yml already
+    # compiles the same generated LavaSecRN workspace/scheme for the simulator.
+    # What is unique here — the isolated simulator, the native-containment run and
+    # the ad-hoc-signed build — now runs on push to main, on dispatch, and on a PR
+    # explicitly labelled `full-build`, alongside the Release/device and QA steps
+    # that label already buys in light-build.yml. The classifier below stays as the
+    # push-time scope; it is deliberately conservative (any unknown path, e.g. a CI
+    # workflow edit, requires native), which is right for a full-fidelity lane but
+    # was the wrong trigger for every routine PR.
+    # Identity predicate is `head.repo.full_name == github.repository`, NOT
+    # `head.repo.fork == false`: the latter admits a cross-repository PR whose head
+    # repo is not itself marked a fork, which would execute an outsider's tree on
+    # the owned Mac (Kilo review of PR #780; ios.yml adopted the same predicate).
+    if: ${{ !cancelled() && github.event.pull_request.draft != true && needs.lava-ui.outputs.docs_only != 'true' && needs.lava-ui.outputs.native_required != 'false' && github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' && contains(github.event.pull_request.labels.*.name, 'full-build'))) }}
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: '3.3.12'
+          bundler: '4.0.16'
+          working-directory: ReactNative
+      - name: Build and verify full native application with React Native
+        env:
+          VALIDATION: ${{ inputs.validation || 'compile' }}
+        run: |
+          set -euo pipefail
+          case "$VALIDATION" in
+            compile) mode=--compile ;;
+            full-app-journeys|parity-review) mode=--journeys ;;
+            *) echo "Unexpected RN validation mode: $VALIDATION" >&2; exit 64 ;;
+          esac
+          ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/build-full-app.sh "$mode"
+      - name: Summarize executed validation
+        run: |
+          cat ReactNative/.artifacts/full-app/validation.json >> "$GITHUB_STEP_SUMMARY"
+          cat ReactNative/.artifacts/full-app/native-scaffold-results.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload full-app build and evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lava-rn-full-${{ github.sha }}
+          path: ReactNative/.artifacts/full-app/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove generated full-app dependencies
+        if: ${{ always() }}
+        run: rm -rf ReactNative/node_modules ReactNative/native-app/Pods ReactNative/native-app/build

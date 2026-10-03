@@ -14,10 +14,10 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
     }
 
     func testTunnelIsTheSoleWriter() throws {
-        let source = try readSource(.packetTunnelProvider)
+        let source = try readPacketTunnelProviderSource()
 
         // Owns a writer handle, opened + seeded from the JSON buffer on load.
-        XCTAssertTrue(source.contains("private var dnsEventLog: DNSEventLog?"))
+        XCTAssertTrue(source.contains("var dnsEventLog: DNSEventLog?"))
         XCTAssertTrue(source.contains("dnsEventLog = try? DNSEventLog(url: dnsEventLogURL)"))
         XCTAssertTrue(source.contains("try? dnsEventLog?.seedIfEmpty(from: diagnostics.recentEvents)"))
 
@@ -74,7 +74,7 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
     func testAppReadsTheDepthStoreReadOnlyWithTheClearFloor() throws {
         let source = try readSource(.diagnosticsController)
 
-        XCTAssertTrue(source.contains("func domainHistoryEvents(action: FilterAction, searchText: String, limit: Int) -> [DNSQueryEvent]"))
+        XCTAssertTrue(source.contains("func domainHistoryEvents(action: FilterAction?, searchText: String, limit: Int) -> [DNSQueryEvent]"))
         XCTAssertTrue(source.contains("try? DNSEventLog(url: dnsEventLogURL, readOnly: true)"))
         // Clear is a shared-defaults floor: written on clear, applied on read.
         XCTAssertTrue(source.contains("forKey: LavaSecAppGroup.dnsEventLogClearedAtKeyName"))
@@ -117,8 +117,8 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
     }
 
     func testDomainHistoryListReadsTheDepthStore() throws {
-        let source = try readSource(.diagnosticsDomainHistory)
-        XCTAssertTrue(source.contains("reports.domainHistoryEvents("))
+        let source = try readSource(.reactNativeAppQueries)
+        XCTAssertTrue(source.contains("domainHistory"))
     }
 
     func testLocalLogExportReadsTheDepthStore() throws {
@@ -146,7 +146,7 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         XCTAssertTrue(depthExport.contains("snapshotLog.beginSnapshot()"))
         XCTAssertTrue(controller.contains("log.endSnapshot()"))
 
-        let viewModel = try readSource(.appViewModel)
+        let viewModel = try readAppViewModelSource()
         let export = try sourceBlock(
             in: viewModel,
             startingAt: "func makeLocalLogExportArchive(",
@@ -160,24 +160,21 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         XCTAssertTrue(export.contains("domainHistory: domainHistory"))
     }
 
+    func testStandardExportNeverIncludesDomainHistory() throws {
+        let action = try sourceBlock(in: readSource(.reactNativeAppBridge), startingAt: "case \"logs.export\":", endingBefore: "case \"share.present\":")
+        let auth = try XCTUnwrap(action.range(of: "try await authorize(.appSettings,"))
+        let build = try XCTUnwrap(action.range(of: "model.makeLocalLogExportArchive(includeDomainHistory: false)"))
+        XCTAssertLessThan(auth.lowerBound, build.lowerBound)
+    }
+
     /// Concurrent clears can no longer truncate the archive (the export reads a pinned snapshot),
     /// so the view guard's only remaining job is to stop a second overlapping export from racing
     /// the shared exporter state. The export button must mark the export in flight and disable
     /// itself until the archive bytes are built (#340 follow-up — Codex review of PR #341).
     func testLocalLogExportGuardsOverlappingExports() throws {
-        let view = try readSource(.privacySecuritySettingsView)
-        XCTAssertTrue(view.contains("@State private var isExportingLocalLogs = false"))
-
-        let export = try sourceBlock(
-            in: view,
-            startingAt: "private func exportLocalLogs()",
-            endingBefore: "private func handleLocalLogExportCompletion("
-        )
-        // The flag is raised synchronously and guarded BEFORE authentication, so a double-tap
-        // during the auth prompt can't queue a second overlapping export.
-        XCTAssertTrue(export.contains("guard !isExportingLocalLogs else { return }"))
-        XCTAssertTrue(export.contains("isExportingLocalLogs = true"))
-        XCTAssertTrue(export.contains("defer { isExportingLocalLogs = false }"))
-        XCTAssertTrue(view.contains(".disabled(isExportingLocalLogs)"))
+        let source = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(source.contains("guard !buildingLogExport && !exporting"))
+        XCTAssertTrue(source.contains("buildingLogExport = true"))
+        XCTAssertTrue(source.contains("defer { buildingLogExport = false; publish() }"))
     }
 }

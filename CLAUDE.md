@@ -1,11 +1,28 @@
 # Working in this repo
 
 DNS-filtering iOS app. The app (`LavaSecApp/`), packet tunnel (`LavaSecTunnel/`),
-widget, and App Intents extension consume a layered Swift package. Package code is split
+widget, and App Intents extension consume a layered Swift package. The tunnel is ONE
+class, `PacketTunnelProvider`, spread over `LavaSecTunnel/PacketTunnelProvider.swift`
+(the class declaration, every INSTANCE stored property, and the file-scope helper types —
+`static` stored properties are legal in an extension and stay with their concern) and one
+`extension` file per concern under `LavaSecTunnel/Provider/`;
+a new tunnel file is declared in `project.yml` AND added to
+`SourceFile.packetTunnelProviderSources` (tests read the class as one ordered text).
+`AppViewModel` follows the same shape: stored state in `LavaSecApp/AppViewModel.swift`,
+one extension file per concern under `LavaSecApp/AppViewModel/`, and
+`SourceFile.appViewModelSources` as the second place a new file is registered. Package code is split
 across `LavaSecKit`, `LavaSecNetworking`, `LavaSecDNS`, `LavaSecFilterPipeline`,
 `LavaSecPresentation`, and `LavaSecAppServices`. `LavaSecCore` is the compatibility
 façade that re-exports all six layers. Production process targets link only their approved
 narrow products, so the tunnel does not link Presentation, AppServices, or the façade.
+`LavaSecChainedUpstream` sits beside the layers (WireGuard upstream engine wrapper over the
+`LavaSecWGCore` binary target, the package's only prebuilt artifact); it is outside the
+façade and the packet tunnel is its one approved consumer — see
+`docs/architecture/module-boundaries.md`.
+DNS resolution is layered into three tiers — T0 the chained upstream's own `DNS =`, T1 the
+resolver the user selected, T2 their selected fallback. That scaffold is canonical: express new
+resolver behaviour as a rule about a tier rather than a new policy type beside them, and read
+`docs/architecture/dns-tiers.md` before touching resolver selection, ordering, or egress.
 Executable package tests live in `Tests/LavaSecCoreTests/`. `Shared/` files are
 compiled into multiple targets by pbxproj membership. The pbxproj is GENERATED: edit
 `project.yml` and run `xcodegen generate`, never the pbxproj itself
@@ -14,6 +31,11 @@ for build/test basics and `CONTRIBUTING.md` for ground rules; plans live in the
 `lavasec-infra` repo under `plans/`.
 
 ## Comment conventions
+
+For new-interface work, first read `docs/design-revamp/README.md` and
+`docs/design-revamp/design-review.md`. They identify canonical component owners,
+accepted composition rules, private decision rationale and the required sibling
+comparisons. Review shared atoms inside scaffolds as well as leaf-screen styles.
 
 This codebase deliberately carries dense rationale comments. Keep the culture, follow the
 rules:
@@ -46,8 +68,9 @@ rules:
   registry path and the affected pins in the same PR (`SourceFileRegistryTests` reports
   stale registry paths as one failure). Prefer anchoring `sourceBlock` on `// MARK:`
   headers or function signatures, not on arbitrary code text.
-- Policy logic (pure value types in `Sources/LavaSecCore/*Policy*.swift`) always gets
-  real behavioral tests, never pins.
+- Policy logic (pure value types, e.g. `Sources/LavaSecKit/*Policy*.swift`) always gets
+  real behavioral tests, never pins. Policies live in the layer that owns their semantics —
+  `Sources/LavaSecCore/` holds only the compatibility façade's re-exports, no sources.
 
 ## Concurrency & safety rails
 
