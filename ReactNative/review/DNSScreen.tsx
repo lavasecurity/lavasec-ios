@@ -4,6 +4,7 @@ import {useRoute,type RouteProp} from '@react-navigation/native';
 import {Alert} from '../app/presentation';
 import type {DNSChoice} from '../app/contract';
 import {LavaActionButton,LavaIconButton,LavaToggleControl} from '../src';
+import {colors} from '../src/colors.ios';
 import {Screen,Section,Symbol} from './primitives';
 import {AccessorySlot,AddAction,Group,ListRow,Quiet,toolbarButton,useToolbar} from './scaffold';
 import {OrderedListAction,useSettingsEditToolbar,SettingsIntro,SettingsInset,SettingsSurface,SettingsGlyph} from './settings-scaffold';
@@ -59,6 +60,9 @@ export function DNSScreen(){
   const command=async(key:string)=>{if(!app||pending.current)return false;pending.current=true;setBusy(true);
     try{await app.command({type:'settings.set',key,value:true});return true;}catch(e){report(e);return false;}finally{pending.current=false;setBusy(false);}};
   const state=live?.dnsPatch?.state;const installed=state==='enabled'||state==='disabled';const enabled=state==='enabled';
+  // The bridge supplies a provider only when configuration readback exists.
+  // Selection, catalog matching, and error status do not erase that evidence.
+  const canUninstall=!!systemDNS;
   const checking=state==='checking'||!state;
   const profileBusy=busy||live?.dnsPatch?.busy||checking;
   const profileTitle=checking?'Checking profile…':state==='error'?'Unable to check profile':enabled?'Profile installed and selected':'Select Lava DNS profile';
@@ -69,6 +73,12 @@ export function DNSScreen(){
     if(state==='error')await command('dnsPatchCheck');
     else if(installed)openSettings();
     else if(state==='different'||state==='absent'){if(await command('dnsPatchSetup'))openSettings();}
+  };
+  const uninstallProfile=()=>{
+    if(!app||pending.current||profileBusy)return;
+    Alert.alert('Remove DNS profile?','Remove Lava’s System DNS profile?',[
+      {text:'Cancel',style:'cancel'},{text:'Remove DNS profile',style:'destructive',onPress:()=>void command('dnsPatchRemove')},
+    ]);
   };
   return <Screen><SettingsIntro summary={editable?'Choose who looks up website addresses for your device.':'With fallback off, VPN chaining uses DNS from its WireGuard configuration.'}
     action={!editable?{title:'Review VPN chaining',onPress:()=>nav.navigate('VPNChaining')}:undefined}/>
@@ -91,6 +101,10 @@ export function DNSScreen(){
       {!editing&&systemDNS&&<SettingsSurface tone={enabled?'green':'neutral'} footer={profileNote}>
         <ListRow title={profileTitle} leading={profileBusy?<SettingsGlyph name={profileIcon} busy/>:<Symbol name={profileIcon} tone={enabled?'white':'primary'}/>} action disabled={profileBusy}
           onPress={selectProfile}/>
+      </SettingsSurface>}
+      {!editing&&canUninstall&&<SettingsSurface>
+        <ListRow action title="Uninstall profile" icon="trash" color={colors.errorText} testID="dns.profile.uninstall"
+          disabled={profileBusy||!app} onPress={uninstallProfile}/>
       </SettingsSurface>}
       <Quiet>This profile handles system DNS requests and helps Lava filter with Connectivity Assist.</Quiet>
     </Section>}

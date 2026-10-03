@@ -2326,6 +2326,75 @@ test('profile status distinguishes installed from selected without creating a pr
   expect(screen.queryByText('Profile installed and selected')).toBeNull();expect(command).not.toHaveBeenCalled();
 });
 
+test.each(['enabled','disabled','different'] as const)('installed System DNS (%s) offers a confirmed destructive uninstall without editing',async state=>{
+  const live=tierSnapshot();live.dnsPatch={available:true,state,busy:false,provider:dnsTier('quad9-dot','Quad9','DoT')};
+  let complete!:()=>void;const command=jest.fn(()=>new Promise<void>(resolve=>{complete=resolve;}));
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});const app={command} as unknown as AppStore;
+  try {const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+    const row=()=>screen.UNSAFE_getAllByType(ListRow).find(node=>node.props.testID==='dns.profile.uninstall')!;
+    expect(row().props).toMatchObject({title:'Uninstall profile',icon:'trash',color:colors.errorText,action:true});
+    fireEvent.press(screen.getByRole('button',{name:'Uninstall profile'}));
+    expect(command).not.toHaveBeenCalled();
+    let buttons=alert.mock.calls.at(-1)?.[2];
+    expect(buttons?.map(button=>button.text)).toEqual(['Cancel','Remove profile']);
+    act(()=>buttons?.find(button=>button.style==='cancel')?.onPress?.());
+    expect(command).not.toHaveBeenCalled();expect(screen.getByText('Quad9')).toBeOnTheScreen();
+    fireEvent.press(screen.getByRole('button',{name:'Uninstall profile'}));buttons=alert.mock.calls.at(-1)?.[2];
+    const confirm=buttons?.find(button=>button.style==='destructive')?.onPress;
+    act(()=>{confirm?.();confirm?.();});
+    expect(command).toHaveBeenCalledTimes(1);expect(command).toHaveBeenCalledWith({type:'settings.set',key:'dnsPatchRemove',value:true});
+    expect(screen.getByRole('button',{name:'Uninstall profile'})).toBeDisabled();
+    await act(async()=>complete());
+    view.rerender(<Provider live={{...live,dnsPatch:{...live.dnsPatch!,state:'absent',provider:null}}} app={app}><DNSScreen/></Provider>);
+    expect(screen.queryByTestId('dns.profile.uninstall')).toBeNull();expect(screen.getByText('System DNS not configured')).toBeOnTheScreen();
+    expect(toolbarItems().find((item:{label:string})=>item.label==='Edit')).toBeDefined();
+  }finally{alert.mockRestore();}
+});
+
+test('System DNS uninstall reports removal failure and leaves the installed profile retryable',async()=>{
+  const live=tierSnapshot();live.dnsPatch={available:true,state:'enabled',busy:false,provider:dnsTier('quad9-dot','Quad9','DoT')};
+  const command=jest.fn().mockRejectedValueOnce(new Error('The DNS profile could not be removed.')).mockResolvedValue(null);
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const app={command} as unknown as AppStore;
+  try {const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+    const confirm=async()=>{fireEvent.press(screen.getByRole('button',{name:'Uninstall profile'}));
+      await act(async()=>alert.mock.calls.at(-1)?.[2]?.find(button=>button.style==='destructive')?.onPress?.());};
+    await confirm();expect(alert.mock.calls.at(-1)?.slice(0,2)).toEqual(['Lava',localized('The DNS profile could not be removed.')]);
+    // Native removal failure publishes error status while readback still identifies
+    // the installed provider. Exercise that snapshot rather than keeping live stale.
+    view.rerender(<Provider live={{...live,dnsPatch:{...live.dnsPatch!,state:'error'}}} app={app}><DNSScreen/></Provider>);
+    expect(screen.getByText('Quad9')).toBeOnTheScreen();expect(screen.getByRole('button',{name:'Uninstall profile'})).not.toBeDisabled();
+    await confirm();expect(command).toHaveBeenCalledTimes(2);
+  }finally{alert.mockRestore();}
+});
+
+test('System DNS uninstall is disabled during profile work and hidden while editing',()=>{
+  const live=tierSnapshot();live.dnsPatch={available:true,state:'enabled',busy:true,provider:dnsTier('quad9-dot','Quad9','DoT')};
+  const command=jest.fn();const app={command} as unknown as AppStore;
+  const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+  expect(screen.getByRole('button',{name:'Uninstall profile'})).toBeDisabled();
+  view.rerender(<Provider live={{...live,dnsPatch:{...live.dnsPatch!,busy:false}}} app={app}><DNSScreen/></Provider>);
+  act(()=>toolbarItems().find((item:{label:string})=>item.label==='Edit').onPress());
+  expect(screen.queryByTestId('dns.profile.uninstall')).toBeNull();expect(command).not.toHaveBeenCalled();
+});
+
+test.each(['absent','checking','different','disabled','enabled','error'] as const)('System DNS (%s) without installed configuration readback never offers uninstall',state=>{
+  const live=tierSnapshot();live.dnsPatch={available:true,state,busy:false,provider:null};
+  const command=jest.fn();render(<Provider live={live} app={{command} as unknown as AppStore}><DNSScreen/></Provider>);
+  expect(screen.queryByTestId('dns.profile.uninstall')).toBeNull();expect(command).not.toHaveBeenCalled();
+});
+
+test('an installed System DNS readback remains visible but cannot uninstall while checking',()=>{
+  const live=tierSnapshot();live.dnsPatch={available:true,state:'checking',busy:false,provider:dnsTier('quad9-dot','Quad9','DoT')};
+  const command=jest.fn();const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try {
+    render(<Provider live={live} app={{command} as unknown as AppStore}><DNSScreen/></Provider>);
+    const row=screen.getByRole('button',{name:'Uninstall profile'});
+    expect(row).toBeDisabled();fireEvent.press(row);
+    expect(alert).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
+  }finally{alert.mockRestore();}
+});
+
 test('custom DNS opens the shared pushed form and a saved custom draft stays uncommitted in the picker',async()=>{
   mockExploreParams={target:'tier',index:0};const live=tierSnapshot();const command=jest.fn().mockResolvedValue('dns-editor-token');
   const app={command} as unknown as AppStore;

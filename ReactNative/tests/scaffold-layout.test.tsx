@@ -23,12 +23,12 @@ test('responsive columns share one page scroll and preserve drafts across rotati
   expect(screen.UNSAFE_getAllByType(ScrollView)).toHaveLength(1);
   expect(screen.getByTestId('screen.scroll').props.contentInsetAdjustmentBehavior).toBe('automatic');
   expect(StyleSheet.flatten(screen.getByTestId('screen.scroll').props.contentContainerStyle).height).toBeUndefined();
-  expect(screen.getByTestId('story.columns')).toHaveStyle({flexDirection:'row'});
   fireEvent.changeText(screen.getByTestId('column.draft'),'Keep this draft');
   dimensions.mockReturnValue({width:393,height:852,scale:3,fontScale:1});
   screen.rerender(content());
   expect(screen.UNSAFE_getAllByType(ScrollView)).toHaveLength(1);
-  expect(StyleSheet.flatten(screen.getByTestId('story.columns').props.style).flexDirection).toBeUndefined();
+  // The real-Yoga regression checks the first native resize frame without a
+  // JS rerender. This journey checks that the same input keeps its draft.
   expect(screen.getByTestId('column.draft').props.value).toBe('Keep this draft');
   dimensions.mockRestore();
 });

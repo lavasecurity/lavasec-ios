@@ -63,6 +63,145 @@ final class RNInstalledQAGuardUITests: XCTestCase {
 
 @MainActor
 final class RNFullAppUITests: XCTestCase {
+    func testNavigationScaffoldMatchesPageBackground() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Navigation geometry is checked on an isolated simulator.")
+        #else
+        let app = launch()
+        for appearance in ["Light", "Dark"] {
+            nativeTab(app, "Settings").tap()
+            app.buttons["row.Customization"].tap()
+            let choice = app.segmentedControls["Appearance"].buttons[appearance]
+            XCTAssertTrue(choice.waitForExistence(timeout: 10))
+            choice.tap()
+            XCTAssertTrue(choice.wait(for: \.isSelected, toEqual: true, timeout: 10))
+            nativeTab(app, "Guard").tap()
+            app.buttons["guard.filter"].tap()
+            let library = app.buttons["row.Switch or manage filters"]
+            XCTAssertTrue(library.waitForExistence(timeout: 10))
+            library.tap()
+            try assertNavigationBackgroundMatchesPage(app, title: "Your filters")
+            capture(app, "\(appearance) library shares the page background")
+            nativeBack(app).tap()
+            app.buttons["row.Now filtering"].tap()
+            XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+            try assertNavigationBackgroundMatchesPage(app, title: app.navigationBars.firstMatch.identifier)
+            capture(app, "\(appearance) filter detail shares the page background")
+            nativeBack(app).tap()
+            let automation = app.buttons["row.Auto-switch filters"]
+            XCTAssertTrue(automation.waitForExistence(timeout: 10))
+            automation.tap()
+            try assertNavigationBackgroundMatchesPage(app, title: "Auto-switch filters")
+            capture(app, "\(appearance) embedded automation shares the page background")
+            nativeTab(app, "Guard").tap()
+            nativeTab(app, "Settings").tap()
+            nativeBack(app).tap()
+        }
+        #endif
+    }
+
+    func testNativeNavigationCollapsesAndRestoresOnScroll() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Navigation geometry is checked on an isolated simulator.")
+        #else
+        let app = launch()
+        nativeTab(app, "Settings").tap()
+        let header = app.navigationBars["Settings"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        waitForSettledFrame(header)
+        let expandedHeader = header.frame.height
+        let selectedTab = app.tabBars.buttons["Settings"]
+        waitForSettledFrame(selectedTab)
+        let expandedTab = selectedTab.frame
+        app.swipeUp()
+        waitForSettledFrame(header)
+        XCTAssertLessThan(header.frame.height, expandedHeader - 10,
+                          "UIKit must collapse the large title with the page scroll.")
+        capture(app, "Native navigation after upward content scroll")
+        print("LAVA_NAVIGATION_TABS \(app.tabBars.firstMatch.debugDescription)")
+        if #available(iOS 27.0, *) {
+            // UITabBar retains its full-width safe-area frame when its visible
+            // glass capsule minimizes. Measure the selected control inside it.
+            let minimized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                selectedTab.exists && selectedTab.frame.width < expandedTab.width - 10
+            }, object: selectedTab)
+            XCTAssertEqual(XCTWaiter.wait(for: [minimized], timeout: 5), .completed,
+                           "The native tab must minimize: expanded \(expandedTab), current \(selectedTab.frame).")
+        }
+        app.swipeDown()
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            abs(selectedTab.frame.width - expandedTab.width) < 2
+                && abs(selectedTab.frame.height - expandedTab.height) < 2
+        }, object: selectedTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 5), .completed,
+                       "Reverse scrolling must restore the native tab bar.")
+        capture(app, "Native navigation restored on reverse scroll")
+        #endif
+    }
+
+    func testEmbeddedNativePageMinimizesTabBarOnScroll() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Navigation geometry is checked on an isolated simulator.")
+        #else
+        let app = launch(largeText: true)
+        let filter = app.buttons["guard.filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, filter)
+        filter.tap()
+        let automation = app.buttons["row.Auto-switch filters"]
+        XCTAssertTrue(automation.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, automation)
+        waitForSettledFrame(automation)
+        automation.tap()
+        let header = app.navigationBars["Auto-switch filters"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        waitForSettledFrame(header)
+        // Return to the content edge before measuring the expanded tab control.
+        app.swipeDown()
+        let selectedTab = app.tabBars.buttons["Guard"]
+        waitForSettledFrame(selectedTab)
+        let expandedTab = selectedTab.frame
+        app.swipeUp()
+        capture(app, "Embedded auto-switch native page scrolled with large text")
+        if #available(iOS 27.0, *) {
+            let minimized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                selectedTab.exists && selectedTab.frame.width < expandedTab.width - 10
+            }, object: selectedTab)
+            XCTAssertEqual(XCTWaiter.wait(for: [minimized], timeout: 5), .completed,
+                           "The native scroll view must minimize the enclosing React tab bar.")
+        }
+        #endif
+    }
+
+    private func assertNavigationBackgroundMatchesPage(_ app: XCUIApplication, title: String) throws {
+        let header = app.navigationBars[title]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        waitForSettledFrame(header)
+        let screenshot = app.screenshot().image
+        let image = try XCTUnwrap(screenshot.cgImage)
+        func sample(at point: CGPoint) throws -> [Int] {
+            let crop = try XCTUnwrap(image.cropping(to: CGRect(
+                x: point.x * screenshot.scale, y: point.y * screenshot.scale,
+                width: 1, height: 1)))
+            var rgba = [UInt8](repeating: 0, count: 4)
+            try rgba.withUnsafeMutableBytes { buffer in
+                let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return rgba.prefix(3).map(Int.init)
+        }
+        // The left gutter avoids the native glass Back control and page cards.
+        let x = app.frame.minX + 4
+        let bar = try sample(at: CGPoint(x: x, y: header.frame.midY))
+        let page = try sample(at: CGPoint(x: x, y: header.frame.maxY + 10))
+        for channel in 0..<3 {
+            XCTAssertLessThanOrEqual(abs(bar[channel] - page[channel]), 8,
+                                    "\(title) must not paint a separate stripe: bar \(bar), page \(page).")
+        }
+    }
+
     func testCompactSharedRowsPreserveEditTargetsAndGrowForLargeText() throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Row geometry is checked on an isolated simulator.")
