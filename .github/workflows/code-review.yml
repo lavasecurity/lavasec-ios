@@ -1,7 +1,7 @@
 name: Code Review
 
 # Delegates to the trusted org-wide OCR workflow using the direct DeepSeek API.
-# Requires OCR_DEEPSEEK_AUTH_TOKEN, separate from the legacy Go credential.
+# Requires OCR_LLM_AUTH_TOKEN containing the DeepSeek API key.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -19,4 +19,4 @@ jobs:
       llm_model: deepseek-flash
       use_anthropic: false
     secrets:
-      llm_auth_token: ${{ secrets.OCR_DEEPSEEK_AUTH_TOKEN }}
+      llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
