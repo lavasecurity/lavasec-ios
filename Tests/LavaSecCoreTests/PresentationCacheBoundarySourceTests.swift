@@ -42,8 +42,17 @@ final class PresentationCacheBoundarySourceTests: XCTestCase {
             let start = try XCTUnwrap(bridge.range(of: boundary))
             let tail = String(bridge[start.lowerBound...])
             let end = try XCTUnwrap(tail.range(of: ".store(in: &subscriptions)"))
-            XCTAssertTrue(tail[..<end.lowerBound].contains("presentationCache.invalidate()"))
+            let owner = tail[..<end.lowerBound]
+            XCTAssertTrue(owner.contains("presentationCache.invalidate()"))
+            XCTAssertTrue(owner.contains("MainActor.assumeIsolated"))
+            XCTAssertFalse(owner.contains("Task {"), "Retirement must precede deferred bridge delivery: " + boundary)
         }
+        XCTAssertEqual(bridge.components(separatedBy: "security.$viewAuthenticationRevision").count - 1, 1)
+        let securityOwner = try sourceBlock(in: bridge,
+            startingAt: "security.$viewAuthenticationRevision.removeDuplicates().dropFirst().sink",
+            endingBefore: "NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)")
+        XCTAssertTrue(securityOwner.contains("shareCardSecurityChanged(revision: revision)"))
+        XCTAssertTrue(securityOwner.contains("presentationCache.invalidate()"))
         let js = try readSource(.reactNativeAppReadCache)
         XCTAssertFalse(js.contains("QueryClient"))
         XCTAssertTrue(js.contains("boolean { return false; }"))

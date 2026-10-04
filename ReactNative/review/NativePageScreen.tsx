@@ -85,7 +85,7 @@ export function VPNChainingScreen() {
   useSettingsEditToolbar({editing,busy:locked,canEdit:setup,onEdit:()=>{void ensureDraft().catch(report);},onCancel:cancel,onSave:()=>void commit()});
   const openDNS=()=>{const state=nav.getState();const previous=state.routes[state.index-1];
     if(route.params?.returnTo==='DNS'&&previous?.name==='DNS'&&previous.key===route.params.returnKey)nav.goBack();else nav.navigate('DNS');};
-  if(!app||!live?.qaTools)return null;
+  if(!app)return null;
   return <Screen><SettingsIntro summary="Lava filters first, then sends allowed DNS requests through your WireGuard VPN."/>
     <Section title="Prerequisite" footer="Get a WireGuard config from your VPN provider."><Group>
       <Toggle testID="vpn.setup-toggle" title="I have a WireGuard configuration" value={setup} disabled={locked} onChange={value=>toggle('setup',value)}/>

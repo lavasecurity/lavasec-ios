@@ -2,15 +2,57 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 export const fullAppSources = [
-  ...['LavaNativePageView.mm','LavaSwitchView.mm','ActivityDateBridge.swift','LavaAppearanceModule.mm','LavaChoiceView.mm','LavaControlTrackingGuard.m','LavaContextMenuView.mm','LavaDecorationContent.swift','LavaSymbolPalette.swift','LavaNativeContainment.swift','LavaDecorationView.mm','LavaReviewModule.mm','BundledNarrationPlayer.swift','LavaSliderView.mm','LavaTextFieldView.mm','ReviewDomainValidator.swift','ReviewReferenceContent.swift'].map(file=>`ios/LavaSecUIReview/${file}`),
-  ...['LavaNativePageContent.swift','AppearanceBridge.swift','LavaAppBridge.swift','LavaAppGuard.swift','LavaAppFilters.swift','LavaAppFlows.swift','LavaAppHost.swift','LavaAppModule.mm','LavaAppPresentation.swift','LavaAppQueries.swift','LavaAppSettings.swift'].map(file=>`native-app/${file}`),
+  ...['LavaNativePageView.mm','LavaSwitchView.mm','ActivityDateBridge.swift','LavaAppearanceModule.mm','LavaChoiceView.mm','LavaControlTrackingGuard.m','LavaContextMenuView.mm','LavaDecorationContent.swift','LavaSymbolPalette.swift','LavaNativeContainment.swift','LavaDecorationView.mm','LavaReviewModule.mm','BundledNarrationPlayer.swift','LavaSliderView.mm','LavaTextFieldView.mm','ReviewDomainValidator.swift','ReviewReferenceContent.swift','LavaShareCardSurfaceView.mm','LavaShareQrView.mm','LavaShareCardCapture.swift'].map(file=>`ios/LavaSecUIReview/${file}`),
+  ...['LavaNativePageContent.swift','AppearanceBridge.swift','LavaAppBridge.swift','LavaAppGuard.swift','LavaAppFilters.swift','LavaAppFlows.swift','LavaAppHost.swift','LavaAppModule.mm','LavaAppPresentation.swift','LavaAppQueries.swift','LavaAppSettings.swift','LavaAppShareCard.swift'].map(file=>`native-app/${file}`),
 ];
+const shareCardTestName='LavaRNShareCardTests';
+function reviewedShareCardTestTarget(policy){
+  const check=policy.scripts.find(s=>s.project==='ios/LavaSecUIReview.xcodeproj'&&s.name==='[CP] Check Pods Manifest.lock');
+  assert.ok(check,'The hosted test must reuse the reviewed CocoaPods lock check.');
+  const {project,target,...script}=check;
+  return {
+    name:shareCardTestName,
+    settings:Object.fromEntries(['Debug','QA','Release'].map(config=>[config,{
+      GENERATE_INFOPLIST_FILE:'YES',PRODUCT_NAME:shareCardTestName,PRODUCT_BUNDLE_IDENTIFIER:'com.lavasecurity.lavasec.rn-share-card-tests',
+      SWIFT_OBJC_BRIDGING_HEADER:'',SWIFT_VERSION:'6.0',
+      SWIFT_ENABLE_EMIT_CONST_VALUES:'NO',
+      BUNDLE_LOADER:'$(TEST_HOST)',
+      TEST_HOST:'$(BUILT_PRODUCTS_DIR)/LavaSec.app/LavaSec',TEST_TARGET_NAME:'LavaSec',
+    }])),
+    baseConfigurations:Object.fromEntries(['Debug','QA','Release'].map(config=>[config,
+      `Target Support Files/Pods-${shareCardTestName}/Pods-${shareCardTestName}.${config.toLowerCase()}.xcconfig`])),
+    copies:[],type:'com.apple.product-type.bundle.unit-test',
+    sources:['native-app/tests/share-card/LavaRNShareCardTests.swift'],resources:[],
+    phases:['PBXShellScriptBuildPhase','PBXSourcesBuildPhase','PBXFrameworksBuildPhase','PBXResourcesBuildPhase'],
+    frameworks:[{product:'LavaSecKit'},{product:'GoogleSignIn'},{path:`libPods-${shareCardTestName}.a`,tree:'BUILT_PRODUCTS_DIR'}],
+    rules:[],products:['GoogleSignIn','LavaSecKit'],dependencies:['LavaSec'],scripts:[script],entitlements:[],
+  };
+}
+function reviewedShareCardPodTarget(){
+  const name=`Pods-${shareCardTestName}`;
+  return {
+    name,
+    settings:Object.fromEntries(['Debug','QA','Release'].map(config=>[config,{
+      ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES:'NO',CLANG_ENABLE_OBJC_WEAK:'NO',
+      'CODE_SIGN_IDENTITY[sdk=appletvos*]':'','CODE_SIGN_IDENTITY[sdk=iphoneos*]':'','CODE_SIGN_IDENTITY[sdk=watchos*]':'',
+      ENABLE_MODULE_VERIFIER:'NO',ENABLE_USER_SCRIPT_SANDBOXING:'NO',IPHONEOS_DEPLOYMENT_TARGET:'18.0',
+      MACH_O_TYPE:'staticlib',OTHER_LDFLAGS:'',OTHER_LIBTOOLFLAGS:'',PODS_ROOT:'$(SRCROOT)',
+      PRODUCT_BUNDLE_IDENTIFIER:'org.cocoapods.${PRODUCT_NAME:rfc1034identifier}',SDKROOT:'iphoneos',
+      SKIP_INSTALL:'YES',TARGETED_DEVICE_FAMILY:'1,2',...(config==='Debug'?{}:{VALIDATE_PRODUCT:'YES'}),
+    }])),
+    baseConfigurations:Object.fromEntries(['Debug','QA','Release'].map(config=>[config,`${name}.${config.toLowerCase()}.xcconfig`])),
+    copies:[],type:'com.apple.product-type.library.static',
+    sources:[`native-app/Pods/Target Support Files/${name}/${name}-dummy.m`],resources:[],
+    phases:['PBXHeadersBuildPhase','PBXSourcesBuildPhase','PBXFrameworksBuildPhase','PBXResourcesBuildPhase'],
+    frameworks:[],rules:[],products:[],dependencies:['Pods-LavaSec'],scripts:[],entitlements:[],
+  };
+}
 export function validateFullAppProjects(projects, policy) {
   assert.deepEqual(projects.map(p=>p.project),['../LavaSec.xcodeproj','native-app/LavaSecRN.xcodeproj','native-app/Pods/Pods.xcodeproj']);
   const [native,full,pods]=projects;
   const names=['LavaSec','LavaSecIntents','LavaSecTunnel','LavaSecUITests','LavaSecWidget'];
   assert.deepEqual(native.targets.map(t=>t.name),names);
-  assert.deepEqual(full.targets.map(t=>t.name),names);
+  assert.deepEqual(full.targets.map(t=>t.name),[shareCardTestName,...names]);
   const expected=structuredClone(native);
   expected.project=full.project;
   const app=expected.targets.find(t=>t.name==='LavaSec');
@@ -31,11 +73,18 @@ export function validateFullAppProjects(projects, policy) {
   }
   expected.targets.find(t=>t.name==='LavaSecUITests').sources.push('native-app/tests/RNFullAppUITests.swift');
   expected.targets.find(t=>t.name==='LavaSecUITests').sources.sort();
+  // This exact hosted native-port test graph was inspected after pinned XcodeGen/CocoaPods.
+  // It has no alternate application entry point, resource bundle, entitlement or unreviewed shell hook.
+  expected.targets.unshift(reviewedShareCardTestTarget(policy));
   // Every native source/resource, entitlement, dependency, embedded extension,
   // signing setting and package is preserved. Additional hooks fail closed.
   assert.deepEqual(full,expected,'The full RN graph must preserve the complete native app with only the reviewed presentation additions.');
   assert.deepEqual(pods.packages,[]);
-  assert.deepEqual(Object.fromEntries(pods.targets.map(t=>[t.name,t.type])),JSON.parse(rename(JSON.stringify(policy.podTargets))));
+  const reviewedPodTargets=JSON.parse(rename(JSON.stringify(policy.podTargets)));
+  reviewedPodTargets[`Pods-${shareCardTestName}`]='com.apple.product-type.library.static';
+  assert.deepEqual(Object.fromEntries(pods.targets.map(t=>[t.name,t.type])),reviewedPodTargets);
+  assert.deepEqual(pods.targets.find(t=>t.name===`Pods-${shareCardTestName}`),reviewedShareCardPodTarget(),
+    'The hosted-test Pods aggregate must contain only the inspected dummy source and parent dependency.');
   for(const target of pods.targets){
     assert.deepEqual(target.frameworks,policy.podFrameworks[target.name.replace('Pods-LavaSec','Pods-LavaSecUIReview')]??policy.podFrameworks[target.name]??[]);
     assert.deepEqual(target.entitlements,[]);assert.deepEqual(target.rules,[]);assert.deepEqual(target.products,[]);assert.deepEqual(target.copies,[]);

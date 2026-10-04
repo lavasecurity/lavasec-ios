@@ -141,7 +141,7 @@ private struct LavaSettingsPageContent: View {
     }
     private var canInteract: Bool { admission != nil }
     // The custom-entry page hosts the custom blocklist and custom DNS editors, so its
-    // prompt names what the user opened rather than the QA-only VPN chaining page.
+    // prompt names what the user opened rather than the VPN chaining page.
     private var authorizationReason: String {
         switch page {
         case "automation": return "Open Auto-switch filters"
@@ -168,8 +168,9 @@ private struct LavaSettingsPageContent: View {
                     } }
             }
         }
+        #endif
         if page == "vpnChaining" {
-            VPNChainingSettingsView(showDNSSettings: .constant(false),
+            VPNChainingSettingsView(showDNSSettings: .constant(false), authorizationIsOwnedByParent: true,
                 onOpenDNSSettings: { onNavigate("DNS") },
                 onOpenUpgrade: { onNavigate("Upgrade") },
                 onPresentConfigurationEditor: { index, generation, name, exists, saveDraft, reportRemovalFailure in
@@ -180,7 +181,6 @@ private struct LavaSettingsPageContent: View {
                         reportConfigurationRemovalFailure: reportRemovalFailure)
                 })
         }
-        #endif
     }
     var body: some View {
         // React's native stack owns the one navigation bar and page transition.

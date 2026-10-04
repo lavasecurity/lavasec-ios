@@ -101,7 +101,8 @@ export type AppCommand =
   | {type: 'logs.clear'; kind: string;surface?:'activityViewing'}
   | {type: 'logs.export'; domains: false}
   | {type: 'sudoku.save'; game: SudokuGame}
-  | {type: 'share.query' | 'share.copy' | 'share.card' | 'share.present'; id: string}
+  | {type: 'share.query' | 'share.copy' | 'share.present'; id: string}
+  | {type:'share.card';id:string;token:string}
   | {type: 'purchase.buy'; id: string}
   | {type: 'sudoku.new'}
   | {type:'onboarding.geometry';session:string;phase:OnboardingPresentation['phase'];layoutRevision:number;frames:{panel:OnboardingFrame;mascot:OnboardingFrame;action:OnboardingFrame}}

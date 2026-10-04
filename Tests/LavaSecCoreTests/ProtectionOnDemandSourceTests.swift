@@ -1184,7 +1184,7 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
         let view = try readSource(.vpnChainingSettingsView)
         let body = try sourceBlock(
             in: view,
-            startingAt: "        let status = viewModel.chainedUpstreamSurfaceStatus",
+            startingAt: "    private func pageContent(_ status: AppViewModel.ChainedUpstreamSurfaceStatus)",
             endingBefore: "\n    private func")
         XCTAssertTrue(
             body.contains("let state = viewModel.chainedOperationalState(from: status)"),
@@ -1200,13 +1200,10 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             endingBefore: "    private func chainingRestriction(")
         XCTAssertFalse(sourceCodeOnly(explanation).contains("viewModel."))
         XCTAssertFalse(sourceCodeOnly(explanation).contains("switch"))
-        // 🔴 ONE status read per body pass. Each one opens the configuration store and hits the
-        // Keychain on the main actor and can wait 250 ms for the lifecycle lock; a second read
-        // pays that twice AND reopens the divergence this consolidation closes, because the stores
-        // can move between the two (Codex, PR #637).
+        // Render the one event-refreshed snapshot; credential reads never run in the body.
         XCTAssertEqual(
-            sourceOccurrenceCount(of: "viewModel.chainedUpstreamSurfaceStatus", in: body), 1,
-            "the toggle and its detail line must render from the same snapshot, read once")
+            sourceOccurrenceCount(of: "viewModel.chainedUpstreamSurfaceStatus", in: body), 0,
+            "the toggle and its detail line must render from the same cached snapshot")
         let detail = try sourceBlock(
             in: view,
             startingAt: "    private func chainingRestriction(",

@@ -2,6 +2,8 @@ import XCTest
 import UIKit
 import ImageIO
 import Vision
+import CoreML
+import CoreImage
 
 /// An explicit physical-device qualification lane. Unlike the simulator journeys,
 /// this attaches to the already-running QA installation and never resets, relaunches,
@@ -695,12 +697,13 @@ final class RNFullAppUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
-    private func launch(delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false) -> XCUIApplication {
+    private func launch(delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false, retainShareCardEvidence: Bool = false) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         // Skip onboarding only for this test process; retain real app controllers,
         // configuration storage, security, and extensions throughout the journey.
         app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if retainShareCardEvidence { app.launchArguments.append("-LavaUITestRetainShareCardPNG") }
         if paidPlan { app.launchArguments += ["-LavaQAForcePaidPlan", "YES"] }
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
@@ -4973,6 +4976,180 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertFalse(automationBar.buttons["Close"].exists)
         XCTAssertTrue(app.staticTexts["Switch filters on a schedule or with a Focus."].exists)
         capture(app, "Auto-switch filters uses an ordinary native pushed page")
+    }
+
+    /// The Simulator's public Core Image decoder has separate standalone full
+    /// corpus evidence. This explicit target disposition never falls back from
+    /// a failed decode; physical-device decoding remains a Vision assertion.
+    private func shareCardQrPayloads(in data: Data) throws -> [String?] {
+        #if targetEnvironment(simulator)
+        let context = CIContext(options: [.useSoftwareRenderer: true])
+        let detector = try XCTUnwrap(CIDetector(ofType: CIDetectorTypeQRCode, context: context,
+            options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]))
+        let image = try XCTUnwrap(CIImage(data: data))
+        return detector.features(in: image).map { ($0 as? CIQRCodeFeature)?.messageString }
+        #else
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        try VNImageRequestHandler(data: data, options: [:]).perform([request])
+        return request.results?.map(\.payloadStringValue) ?? []
+        #endif
+    }
+
+    func testSharedReactFilterCardImageExportCancelPreservesSavedFilterAndPrivacy() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Use an isolated simulator for the shared-card export/cancel journey.")
+        #else
+        let app = launch(retainShareCardEvidence: true)
+        let filterTile = app.buttons["guard.filter"]
+        XCTAssertTrue(filterTile.waitForExistence(timeout: 10), app.debugDescription)
+        filterTile.tap()
+        let current = app.buttons["row.Now filtering"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10), app.debugDescription)
+        current.tap()
+        let identity = app.staticTexts["filter.identity.name"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10), app.debugDescription)
+        let savedName = identity.label
+        XCTAssertFalse(savedName.isEmpty)
+        let share = app.buttons["Share your filter"]
+        XCTAssertTrue(share.wait(for: \.isEnabled, toEqual: true, timeout: 10), app.debugDescription)
+        share.tap()
+
+        let shareHeader = fullSheetHeader(app, title: "Share your filter")
+        XCTAssertTrue(shareHeader.waitForExistence(timeout: 15), app.debugDescription)
+        let reveal = app.buttons["Show the QR code"]
+        let visibleQR = app.descendants(matching: .any).matching(identifier: "Filter QR code").firstMatch
+        let setupCode = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'LF1-'")).firstMatch
+        let export = app.navigationBars.buttons["Share filter card"]
+        XCTAssertTrue(reveal.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(setupCode.waitForExistence(timeout: 20), "Read the actual saved filter's native-generated setup code.")
+        let savedCode = setupCode.label
+        XCTAssertTrue(savedCode.hasPrefix("LF1-"))
+        let expectedCode = XCTAttachment(string: savedCode)
+        expectedCode.name = "Shared card independent saved configuration code"
+        expectedCode.lifetime = .keepAlways
+        add(expectedCode)
+        let expectedName = XCTAttachment(string: savedName)
+        expectedName.name = "Shared card independent saved filter name"
+        expectedName.lifetime = .keepAlways
+        add(expectedName)
+        XCTAssertFalse(visibleQR.exists, "Entering Share must not reveal the private QR.")
+
+        for phase in ["initial", "after Security-off reentry"] {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: export)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed,
+                           "The actual mounted shared RN card must be ready before exporting: \(phase).")
+            // Record an inert point between the real heading and disclosure
+            // before the system modal hides the underlying sheet's AX elements.
+            // RN exposes this exact paragraph on both its parent and child
+            // StaticText. Resolve the first matching node and validate its frame.
+            let disclosure = app.staticTexts.matching(NSPredicate(format: "label == %@",
+                "Your filter is shared as-is. Review your blocklists, blocked domains, and allowed exceptions before sharing. Anyone with the setup code can see them.")).firstMatch
+            _ = try XCTUnwrap(disclosure.waitForExistence(timeout: 10) ? disclosure : nil, app.debugDescription)
+            let headerFrame = shareHeader.frame, disclosureFrame = disclosure.frame
+            let gapPoint = CGPoint(x: headerFrame.midX, y: headerFrame.maxY + 8)
+            let outsidePoint = try XCTUnwrap(headerFrame.width > 0 && disclosureFrame.width > 0 && disclosureFrame.height > 0
+                && gapPoint.y < disclosureFrame.minY - 4 ? gapPoint : nil,
+                "The cancellation point must remain in the inert heading/disclosure gap.")
+            export.tap() // Real share.card/capture; opt-in retention only observes this actual chooser's cancellation.
+            let systemSheet = app.otherElements["ActivityListView"].firstMatch
+            XCTAssertTrue(systemSheet.waitForExistence(timeout: 20), app.debugDescription)
+            // These finite image-specific actions were observed in the actual
+            // UIImage chooser. Simulator availability differs from Photos-capable devices.
+            let imageAction = systemSheet.descendants(matching: .any).matching(NSPredicate(
+                format: "label IN %@", ["Save Image", "Assign to Contact", "Create Watch Face"])).firstMatch
+            for _ in 0..<4 where !imageAction.exists { systemSheet.swipeUp() }
+            XCTAssertTrue(imageAction.waitForExistence(timeout: 10),
+                          "The native sheet must offer an observed image-specific activity, not only a text/link item.")
+            // Inspect only. Never invoke any image action, a recipient, or another share activity.
+            let metadata = systemSheet.descendants(matching: .any).matching(NSPredicate(
+                format: "label CONTAINS %@", "Scan to import my Lava filter")).firstMatch
+            XCTAssertTrue(metadata.waitForExistence(timeout: 10), app.debugDescription)
+            capture(app, "Actual shared RN filter-card image share sheet — \(phase)")
+            let hierarchy = XCTAttachment(string: systemSheet.debugDescription)
+            hierarchy.name = "Image-specific system share-sheet hierarchy — \(phase)"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            // LPLinkMetadata intentionally keeps the app icon. This screenshot/AX evidence
+            // identifies the actual image share activity; it cannot inspect exported card pixels.
+            // The observed Simulator UIImage chooser is a popover with no
+            // Close button. Use only its actual system dismissal overlay at the
+            // validated inert point, never an app Close or an image activity.
+            let popovers = app.popovers.containing(.other, identifier: "ActivityListView")
+            let popover = try XCTUnwrap(popovers.count == 1 ? popovers.firstMatch : nil,
+                "The actual image ActivityListView must belong to one system popover.")
+            let windows = app.windows.containing(.other, identifier: "ActivityListView")
+            let window = try XCTUnwrap(windows.count == 1 ? windows.firstMatch : nil)
+            let dismissRegions = app.otherElements.matching(identifier: "PopoverDismissRegion")
+            let dismissRegion = try XCTUnwrap(dismissRegions.count == 1 ? dismissRegions.firstMatch : nil,
+                "Require the observed native popover's dismissal overlay.")
+            let popoverFrame = popover.frame, dismissFrame = dismissRegion.frame
+            _ = try XCTUnwrap(popoverFrame.contains(systemSheet.frame) && window.frame.contains(outsidePoint)
+                && dismissFrame.contains(outsidePoint) && !popoverFrame.contains(outsidePoint)
+                && outsidePoint.y < popoverFrame.minY - 8 ? outsidePoint : nil,
+                "Refuse cancellation unless the real system overlay covers the inert point outside its image popover.")
+            dismissRegion.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: outsidePoint.x - dismissFrame.minX, dy: outsidePoint.y - dismissFrame.minY)).tap()
+            XCTAssertTrue(systemSheet.waitForNonExistence(timeout: 15), app.debugDescription)
+            XCTAssertTrue(fullSheetHeader(app, title: "Share your filter").waitForExistence(timeout: 10))
+            if phase == "initial" {
+                XCTAssertTrue(reveal.waitForExistence(timeout: 10))
+                XCTAssertFalse(visibleQR.exists)
+            } else {
+                XCTAssertTrue(visibleQR.waitForExistence(timeout: 10))
+                XCTAssertFalse(reveal.exists, "Security off preserves the explicitly revealed preview after a cancelled chooser.")
+            }
+            XCTAssertEqual(setupCode.label, savedCode, "Cancelling image export must preserve the saved configuration.")
+            XCTAssertFalse(app.staticTexts["Filter unavailable"].exists)
+            XCTAssertFalse(app.staticTexts["Unavailable"].exists)
+            XCTAssertEqual(app.alerts.count, 0, "A current export must not leave a stale card-token error.")
+
+            if phase == "initial" {
+                scrollFullyIntoView(app, reveal)
+                reveal.tap()
+                XCTAssertTrue(visibleQR.waitForExistence(timeout: 10), app.debugDescription)
+                scrollFullyIntoView(app, visibleQR)
+                let screenshot = XCUIScreen.main.screenshot()
+                let evidence = XCTAttachment(screenshot: screenshot)
+                evidence.name = "On-screen saved-filter preview QR decode (not exported card pixels)"
+                evidence.lifetime = .keepAlways
+                add(evidence)
+                XCTAssertEqual(try shareCardQrPayloads(in: screenshot.pngRepresentation),
+                               ["https://lavasecurity.app/app/import/#" + savedCode],
+                               "The explicitly revealed preview carries the whole real setup code in its fragment.")
+                XCUIDevice.shared.press(.home)
+                let backgrounded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    app.state == .runningBackground || app.state == .runningBackgroundSuspended
+                }, object: app)
+                XCTAssertEqual(XCTWaiter.wait(for: [backgrounded], timeout: 10), .completed)
+                app.activate()
+                XCTAssertTrue(visibleQR.waitForExistence(timeout: 10), "The native-confirmed Security-off choice preserves the revealed QR.")
+                XCTAssertTrue(reveal.waitForNonExistence(timeout: 10))
+                XCTAssertEqual(setupCode.label, savedCode)
+                // Preview display retention grants no export authority. The native
+                // foreground boundary retires the prior token; the next iteration
+                // must remount a fresh ready surface and reach a real image chooser.
+                capture(app, "Shared filter Security-off reentry preserves code and revealed preview QR")
+            }
+        }
+        shareHeader.buttons["Close"].tap()
+        XCTAssertTrue(shareHeader.waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(identity.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(identity.label, savedName)
+        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.navigationBars.buttons["Cancel editing"].exists, "Sharing must never enter or commit an edit.")
+        XCTAssertTrue(share.wait(for: \.isEnabled, toEqual: true, timeout: 10))
+        share.tap()
+        XCTAssertTrue(reveal.waitForExistence(timeout: 15))
+        XCTAssertFalse(visibleQR.exists, "Opening the saved filter's share screen again starts concealed.")
+        XCTAssertTrue(setupCode.waitForExistence(timeout: 15))
+        XCTAssertEqual(setupCode.label, savedCode)
+        capture(app, "Saved filter share reopens unchanged after two actual image-export cancellations")
+        shareHeader.buttons["Close"].tap()
+        XCTAssertTrue(shareHeader.waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertEqual(identity.label, savedName)
+        #endif
     }
 
     func testShareResumeAndDirectSystemExport() throws {

@@ -12,9 +12,9 @@ enum SettingsRoute: Hashable {
     case legalNotices
     case versionNerdStats
     case networkActivity
+    case vpnChaining
 #if DEBUG || LAVA_QA_TOOLS
     case phoneQA
-    case vpnChaining
 #endif
 
     static let settingsTabPolicy = SecurityAccessPolicy.requires(.appSettings)
@@ -50,11 +50,11 @@ enum SettingsRoute: Hashable {
 #if DEBUG || LAVA_QA_TOOLS
         case .phoneQA:
             return .requires(.appSettings)
+#endif
         case .vpnChaining:
             // Same lock as the other Protection Choices subpages: this page can change the
             // data path and holds a WireGuard private key's staging surface.
             return .requires(.appSettings)
-#endif
         }
     }
 
@@ -83,9 +83,9 @@ enum SettingsRoute: Hashable {
 #if DEBUG || LAVA_QA_TOOLS
         case .phoneQA:
             return "Open Device QA settings"
+#endif
         case .vpnChaining:
             return "Open VPN chaining settings"
-#endif
         }
     }
 }

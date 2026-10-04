@@ -19,7 +19,10 @@ app = spec.fetch('targets').fetch('LavaSec')
 spec.fetch('targets').fetch('LavaSecUITests').fetch('sources') << {'path' => 'ReactNative/native-app/tests/RNFullAppUITests.swift'}
 components = %w[LavaNativePageView.h LavaNativePageView.mm LavaSwitchView.h LavaSwitchView.mm LavaContextMenuView.h LavaContextMenuView.mm LavaAppearanceModule.h LavaAppearanceModule.mm LavaDecorationView.h LavaDecorationView.mm LavaDecorationContent.swift LavaSymbolPalette.swift LavaNativeContainment.swift LavaReviewModule.h LavaReviewModule.mm BundledNarrationPlayer.swift LavaTextFieldView.h LavaTextFieldView.mm ReviewDomainValidator.swift LavaControlTrackingGuard.h LavaControlTrackingGuard.m LavaChoiceView.h LavaChoiceView.mm ActivityDateBridge.swift LavaSliderView.h LavaSliderView.mm ReviewReferenceContent.swift]
 components.each { |file| app['sources'] << {'path' => "ReactNative/ios/LavaSecUIReview/#{file}"} }
-%w[LavaNativePageContent.swift LavaAppGuard.swift LavaAppHost.swift LavaAppPresentation.swift LavaAppBridge.swift LavaAppSettings.swift LavaAppQueries.swift LavaAppFilters.swift LavaAppFlows.swift LavaAppModule.h LavaAppModule.mm AppearanceBridge.swift].each do |file|
+%w[LavaShareCardSurfaceView.h LavaShareCardSurfaceView.mm LavaShareQrView.h LavaShareQrView.mm LavaShareCardCapture.swift].each do |file|
+  app['sources'] << {'path' => "ReactNative/ios/LavaSecUIReview/#{file}"}
+end
+%w[LavaNativePageContent.swift LavaAppGuard.swift LavaAppHost.swift LavaAppPresentation.swift LavaAppBridge.swift LavaAppSettings.swift LavaAppQueries.swift LavaAppShareCard.swift LavaAppFilters.swift LavaAppFlows.swift LavaAppModule.h LavaAppModule.mm AppearanceBridge.swift].each do |file|
   app['sources'] << {'path' => "ReactNative/native-app/#{file}"}
 end
 app['sources'] << {'path' => 'ReactNative/.artifacts/LavaUIReview.js', 'buildPhase' => 'resources'}
@@ -33,6 +36,28 @@ app['settings']['base'].merge!({
   'OTHER_SWIFT_FLAGS' => '$(inherited) -D LAVA_REACT_NATIVE',
   'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) LAVA_REACT_NATIVE=1',
 })
+# Native ports only: these tests do not claim the shared React tree was mounted.
+# Source membership is explicit so no fixture enters the shipping app target.
+spec['targets']['LavaRNShareCardTests'] = {
+  'type' => 'bundle.unit-test', 'platform' => 'iOS',
+  'sources' => [{'path' => 'ReactNative/native-app/tests/share-card/LavaRNShareCardTests.swift'}],
+  'dependencies' => [{'target' => 'LavaSec'}, {'package' => 'LavaSecPackage', 'product' => 'LavaSecKit'},
+                     {'package' => 'GoogleSignIn', 'product' => 'GoogleSignIn'}],
+  'settings' => {'base' => {
+    'PRODUCT_NAME' => 'LavaRNShareCardTests',
+    'BUNDLE_LOADER' => '$(TEST_HOST)',
+    'PRODUCT_BUNDLE_IDENTIFIER' => 'com.lavasecurity.lavasec.rn-share-card-tests',
+    'GENERATE_INFOPLIST_FILE' => 'YES', 'TEST_TARGET_NAME' => 'LavaSec',
+    'SWIFT_OBJC_BRIDGING_HEADER' => '', 'SWIFT_VERSION' => '6.0',
+    # This XCTest-only bundle has no AppIntent declarations and inherits the
+    # project's empty protocol list. Do not declare const metadata Swift will not emit.
+    'SWIFT_ENABLE_EMIT_CONST_VALUES' => 'NO',
+  }},
+}
+spec['schemes']['LavaRNShareCardTests'] = {
+  'build' => {'targets' => {'LavaSec' => 'all', 'LavaRNShareCardTests' => 'test'}},
+  'test' => {'config' => 'Debug', 'targets' => ['LavaRNShareCardTests']},
+}
 File.write('.LavaSecRN.project.json', JSON.pretty_generate(spec))
 abort('XcodeGen failed') unless system('xcodegen', 'generate', '--spec', '.LavaSecRN.project.json')
 # Apply the same localization/Icon Composer fixups to the generated copy only.

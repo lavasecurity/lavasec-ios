@@ -69,6 +69,9 @@ extension AppViewModel {
         {
             updateProtectionStatusFromCachedManager()
         }
+        // The provider posts after its eligibility/terminal writes. Update both settings
+        // projections even if it has already stopped and cannot answer a health flush.
+        refreshDNSSettingsPresentation()
         Task { [weak self] in
             guard let self else {
                 return

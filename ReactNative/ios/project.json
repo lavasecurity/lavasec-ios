@@ -73,6 +73,21 @@
           "path": "LavaSecUIReview/LavaDecorationContent.swift"
         },
         {
+          "path": "LavaSecUIReview/LavaShareCardSurfaceView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaShareCardSurfaceView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaShareQrView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaShareQrView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaShareCardCapture.swift"
+        },
+        {
           "path": "LavaSecUIReview/LavaSymbolPalette.swift"
         },
         {

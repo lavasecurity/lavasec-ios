@@ -94,3 +94,18 @@ test('standalone VPN navigation remains available while embedded content attache
   expect(native).toContain('.sheet(isPresented: $showConfigurationEditor)');
   expect(native).toContain('security.requireAuthentication(for: .appSettings, reason: "Edit DNS settings")');
 });
+
+test('production navigation registers VPN chaining while keeping test destinations behind QA',()=>{
+  const source=parse('review/LavaUIReview.tsx');
+  const filter=descendants(source,node=>ts.isCallExpression(node)&&node.expression.getText(source)==='routeDestinations.filter')[0];
+  expect(filter).toBeDefined();
+  const callback=filter.arguments[0];
+  const expression=callback.body.getText(source);
+  const allows=Function('name','app','qaTools',`return (${expression});`);
+  for(const qa of [false,true]){
+    expect(allows('VPNChaining',{}, {current:qa})).toBe(true);
+    expect(allows('DeviceQA',{}, {current:qa})).toBe(qa);
+    expect(allows('Components',{}, {current:qa})).toBe(qa);
+  }
+  expect(allows('VPNChaining',undefined,{current:true})).toBe(false);
+});

@@ -19,27 +19,18 @@ extension AppViewModel {
     /// An event-driven read, shared by native and RN settings. Refresh after
     /// authorization/foreground/profile mutation, not from the five-second poll.
     func refreshDNSSettingsPresentation() {
-        #if DEBUG || LAVA_QA_TOOLS
         dnsSettingsProfileStatus = chainedUpstreamSurfaceStatus
-        #endif
     }
 
     var dnsSettingsPresentation: ChainedDNSSettingsPresentation {
-        #if DEBUG || LAVA_QA_TOOLS
         return dnsSettingsPresentation(from: dnsSettingsProfileStatus)
-        #else
-        return ChainedDNSSettingsPresentation(chainingEnabled: false,
-            fallbackPreference: configuration.chainedTierOneFallbackEnabled, storedIsSplitTunnel: nil)
-        #endif
     }
 
-    #if DEBUG || LAVA_QA_TOOLS
     func dnsSettingsPresentation(from status: ChainedUpstreamSurfaceStatus?) -> ChainedDNSSettingsPresentation {
         ChainedDNSSettingsPresentation(chainingEnabled: configuration.chainedUpstreamEnabled,
             fallbackPreference: configuration.chainedTierOneFallbackEnabled,
             storedIsSplitTunnel: configuration.chainedUpstreamEnabled ? status?.storedConfigurationIsSplitTunnel : true)
     }
-    #endif
 
     /// Recheck after an authorization suspension, before any DNS editor write.
     func mayEditDNSSettingsNow() -> Bool {

@@ -92,7 +92,6 @@ struct LavaAppNativeFlowView: View {
         case "licenses": NavigationStack { BundledLibraryNoticesView().lavaFullSheetHeader("Full License Texts", close: { bridge.flow = nil }) }
         case "feedback": BugReportSheetView(isReportDirty: $bridge.feedbackDraftIsDirty)
         case "customDNS": NavigationStack { DNSResolverSettingsView(onDismissRequested: { bridge.flow = nil }) }
-        #if DEBUG || LAVA_QA_TOOLS
         case "vpnConfiguration":
             VPNChainingConfigurationEditor(
                 reportRemovalFailure: { flow.reportConfigurationRemovalFailure?($0) },
@@ -100,6 +99,7 @@ struct LavaAppNativeFlowView: View {
                 rowIndex: flow.wireGuardIndex, expectedGeneration: flow.wireGuardGeneration,
                 initialName: flow.wireGuardName, isExisting: flow.wireGuardExists,
                 savePendingDraft: flow.saveWireGuardDraft ?? { _, _ in WireGuardChainFailure.changed.localizedDescription })
+        #if DEBUG || LAVA_QA_TOOLS
         case "phoneQA": NavigationStack { PhoneQASettingsView().lavaFullSheetHeader("Phone QA", close: { bridge.flow = nil }) }
         #endif
         case "customBlocklist": NavigationStack {

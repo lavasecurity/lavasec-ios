@@ -243,11 +243,9 @@ struct DNSResolverSettingsView: View {
             viewModel.refreshDNSSettingsPresentation()
             if !hasPendingCustomResolverAddressChange && !hasPendingCustomResolverSecondaryAddressChange && !hasPendingCustomResolverNameChange { resetCustomResolverDrafts() }
         }
-        #if DEBUG || LAVA_QA_TOOLS
         .navigationDestination(isPresented: $showVPNChaining) {
             VPNChainingSettingsView(showDNSSettings: .constant(false), onOpenDNSSettings: { showVPNChaining = false })
         }
-        #endif
         .onDisappear {
             // The VPN review is a child of this exact editor. Retain its temporary
             // fields through that detour; leaving the editor otherwise resets them.

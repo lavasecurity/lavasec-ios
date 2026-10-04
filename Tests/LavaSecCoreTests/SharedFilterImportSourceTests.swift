@@ -305,13 +305,21 @@ final class SharedFilterImportSourceTests: XCTestCase {
     }
 
     func testCardAndOnScreenCodeEncodeTheSameDualUseLink() throws {
-        let source = try readSource(.reactNativeAppQueries)
+        let queries = try readSource(.reactNativeAppQueries)
+        XCTAssertTrue(queries.contains("return try await shareCardQuery(input)"))
+        let source = try readSource(.reactNativeAppShareCard)
         XCTAssertTrue(source.contains("ShareableFilterLink.url(forConfigurationCode: code)"))
-        XCTAssertTrue(source.contains("ShareableFilterCardRenderer.qrImage(for: url.absoluteString)"))
+        XCTAssertTrue(source.contains("ShareableFilterCardRenderer.qrImage(for: basis.payload)"))
+        XCTAssertTrue(source.contains("\"url\": basis.payload"))
+        XCTAssertTrue(source.contains("\"payload\": basis.payload"))
+        XCTAssertTrue(source.contains("\"code\": basis.configurationCode"))
     }
 
     func testOnlyTheImageIsShared() throws {
-        let ui = try readSource(.reactNativeAppBridge)
+        let bridge = try readSource(.reactNativeAppBridge)
+        let ui = try readSource(.reactNativeAppShareCard)
+        XCTAssertTrue(bridge.contains("try shareMountedCard(input)"))
+        XCTAssertFalse(bridge.contains("ShareableFilterCardRenderer.render"))
         XCTAssertTrue(
             ui.contains("ShareSheetPresenter.present(image: image)"),
             "Sharing must offer the PNG alone — never the raw code or URL as a second item."
@@ -328,9 +336,39 @@ final class SharedFilterImportSourceTests: XCTestCase {
     }
 
     func testOversizePayloadWithholdsTheCardInsteadOfShrinkingIt() throws {
-        let source = try readSource(.reactNativeAppBridge)
-        XCTAssertTrue(source.contains("guard let image = ShareableFilterCardRenderer.render"))
-        XCTAssertTrue(source.contains("This filter is too large for an image QR. Copy the setup code instead."))
+        let source = try readSource(.reactNativeAppShareCard)
+        XCTAssertTrue(source.contains("var card: Any = NSNull()"))
+        XCTAssertTrue(source.contains("if let matrix = LavaShareQrMatrix.encode(basis.payload)"))
+        XCTAssertTrue(source.contains("shareCardAuthority.retire()"))
+        XCTAssertTrue(source.contains("LavaShareCardSurfaceRegistry.shared.retire()"))
+        let capture = try readSource(.reactNativeShareCardCapture)
+        XCTAssertTrue(capture.contains("for level in [\"Q\", \"M\", \"L\"]"))
+        XCTAssertTrue(capture.contains("generator.message = Data(payload.utf8)"))
+        XCTAssertFalse(capture.contains("payload.prefix"))
+    }
+
+    func testShippingCardCapturesNormalFabricChildrenWithExactNativeTokenAndQrPixels() throws {
+        let native = try readSource(.reactNativeAppShareCard)
+        XCTAssertTrue(native.contains("let token = input[\"token\"] as? String"))
+        XCTAssertTrue(native.contains("shareCardAuthority.admits(token: token, basis: basis)"))
+        XCTAssertTrue(native.contains("LavaShareCardSurfaceRegistry.shared.capture(token: token"))
+        XCTAssertTrue(native.contains("guard current() else"))
+        XCTAssertFalse(native.contains("ShareableFilterCardRenderer.render"))
+        let surface = try readSource(.reactNativeShareCardSurface)
+        XCTAssertFalse(surface.contains("self.contentView ="))
+        XCTAssertTrue(surface.contains("updateWithView:self"))
+        XCTAssertTrue(surface.contains("removeWithView:self"))
+        let capture = try readSource(.reactNativeShareCardCapture)
+        for required in ["weak var view: UIView?", "entry.ready", "view.window === window",
+                         "pixels.width == 1080", "pixels.height == 1350",
+                         "qr.matchesCapturedPixels(pixels", "entry.ready, qr.prepareForCapture"] {
+            XCTAssertTrue(capture.contains(required), required)
+        }
+        let providers = try readSource(.reactNativePackage)
+        XCTAssertTrue(providers.contains("\"LavaShareCardSurface\": \"LavaShareCardSurfaceView\""))
+        XCTAssertTrue(providers.contains("\"LavaShareQr\": \"LavaShareQrView\""))
+        XCTAssertTrue(try readSource(.reactNativeShareQrSpec).contains("moduleCount: CodegenTypes.Int32"))
+        XCTAssertTrue(try readSource(.reactNativeAppGenerator).contains("tests/share-card/LavaRNShareCardTests.swift"))
     }
 
     func testCardRendererNeverTrimsThePayloadToFit() throws {

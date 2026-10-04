@@ -2157,39 +2157,10 @@ final class AppViewModel: ObservableObject {
     /// its own suspension — the same reason a quiesce window needs an epoch and not a bool.
     var failClosedReconcileRetryEpoch = 0
 
-    // From AppViewModel/AppViewModel+QATooling.swift:
-    #if DEBUG || LAVA_QA_TOOLS
-
-    /// Stages a chained upstream from a pasted WireGuard `.conf` so an S9 device can latch
-    /// chained at all (S9; the production producer is Phase 4's config UI).
-    ///
-    /// EVERY judgement belongs to the package: `ChainedUpstreamStagingRequest` decides
-    /// whether this build may stage and whether the file says something usable, and the
-    /// store's own commit protocol decides how the halves land. What is left here is the
-    /// two things only the app process has — the container and the resolved access group —
-    /// and turning a refusal into a line the operator can read off a device screen.
-    ///
-    /// The identity is passed rather than assumed, and the request refuses `.production`:
-    /// the staging UI compiles under `DEBUG || LAVA_QA_TOOLS` while the store identity is
-    /// chosen by `LAVA_QA_TOOLS` alone, so a Debug build reaches this method addressing the
-    /// PRODUCTION slot — the record a later Release install would read. That is the
-    /// pre-Phase-4 write-path hazard the phase-3 plan's C8 paragraph names, and the refusal
-    /// is what keeps this surface from becoming the C8 trigger.
-    /// Whether a staging call is suspended right now.
-    ///
-    /// ON THE MODEL, not on the view. It was `@State` in `PhoneQAView`, which is recreated
-    /// as `false` whenever the operator navigates away and back — while the unstructured
-    /// staging task keeps running. The reopened view then re-enabled the clear buttons,
-    /// which delete the rotation that task had already committed (Codex, PR #519). The
-    /// model outlives the presentation, so the gate has to live where the work does.
-    ///
-    /// AND IT IS A MUTEX, NOT A PROGRESS INDICATOR — read at the entry to
-    /// ``stageChainedUpstreamForQA(conf:)``, not merely written by it. See that guard for
-    /// why the distinction is the whole point.
-    /// Read on settings entry/resume or profile mutation, never from a rendering snapshot.
+    // VPN settings readback and the credential-write mutex shared with QA staging.
+    // Refresh the snapshot on entry/resume or profile mutation, never while rendering.
     @Published var dnsSettingsProfileStatus: ChainedUpstreamSurfaceStatus?
     @Published var isStagingChainedUpstreamForQA = false
-    #endif
 
     // From AppViewModel/AppViewModel+ReportSurfaces.swift:
 

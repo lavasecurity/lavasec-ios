@@ -1,5 +1,6 @@
 import {Alert, localized, localizedFormat, localizedNumber} from '../app/presentation';
 import {useFilterRoute} from './filter-route';
+import {FilterShareCard,type ShareCardContent} from './FilterShareCard';
 import {SettingsSurface,SettingsIntro} from './settings-scaffold';
 import {StoryStack,FilterOverview,FilterIdentity,FilterEmoji,CatalogSheet,BudgetBar,PrivateQRCode,SetupCodeField} from './story-scaffold';
 import {activeFilterSummary} from './connection-model';
@@ -287,18 +288,20 @@ export function ShareScreen() {
 }
 export function ShareDetailScreen() {
   const {session,app,live}=useReview();const [revealed,setRevealed]=useState(false);const [copied,setCopied]=useState(false);
+  const focused=useIsFocused();const [exportActive,setExportActive]=useState(AppState.currentState==='active');const [cardReady,setCardReady]=useState(false);
   const displayPolicy=useRef(live);displayPolicy.current=live;
   const route=useRoute<RouteProp<ReviewRoutes,'ShareDetail'>>();
   const filter=live?.filters.find(item=>route.params?.id?item.id===route.params.id:item.name===session.shareFilter);
-  const query=useAppQuery<{code:string;url:string;image:string|null}>(filter&&filter.shareable!==false?{type:'share.query',id:filter.id}:null, filter&&filter.shareable!==false?filter.id:undefined, true);
-  const fixture=useMemo<{code:string;url:string;image:string}|null>(()=>{if(app)return null;try{return JSON.parse(NativeReview.getSharePreview(session.shareFilter));}catch{return null;}},[app,session.shareFilter]);
+  const query=useAppQuery<{code:string;url:string;image:string|null;card?:ShareCardContent|null}>(filter&&filter.shareable!==false?{type:'share.query',id:filter.id}:null, filter&&filter.shareable!==false?filter.id:undefined, true);
+  const fixture=useMemo<{code:string;url:string;image:string;card?:ShareCardContent|null}|null>(()=>{if(app)return null;try{return JSON.parse(NativeReview.getSharePreview(session.shareFilter));}catch{return null;}},[app,session.shareFilter]);
   const content=app?query.value:fixture;
   useEffect(()=>{setRevealed(false);setCopied(false);},[filter?.id,content?.code]);
   // A revealed sharing page follows the same native off choice as every other
   // painted page. A new code or a concealment boundary still retires its reveal.
-  useEffect(()=>{const subscription=AppState.addEventListener('change',state=>{if(state!=='active'&&!mayRetainPresentationFrame(displayPolicy.current)){setRevealed(false);setCopied(false);}});return()=>subscription.remove();},[]);
-  useToolbar({unstable_headerRightItems:()=>[toolbarButton('Share filter card','square.and.arrow.up',()=>{if(app&&filter)void app.command({type:'share.card',id:filter.id}).catch(error=>Alert.alert('Lava',error.message));else if(content)void Share.share({message:content.url});},!content?.image)]},[content,app,filter?.id]);
+  useEffect(()=>{const subscription=AppState.addEventListener('change',state=>{setExportActive(state==='active');if(state!=='active'&&!mayRetainPresentationFrame(displayPolicy.current)){setRevealed(false);setCopied(false);}});return()=>subscription.remove();},[]);
+  useToolbar({unstable_headerRightItems:()=>[toolbarButton('Share filter card','square.and.arrow.up',()=>{if(app&&filter&&content?.card&&cardReady)void app.command({type:'share.card',id:filter.id,token:content.card.token}).catch(error=>Alert.alert('Lava',error.message));else if(!app&&content)void Share.share({message:content.url});},app?(!content?.card||!cardReady||!exportActive||!focused):!content?.image)]},[content,app,filter?.id,cardReady,exportActive,focused]);
   return <Sheet>
+    {app&&content?.card&&exportActive&&focused&&<FilterShareCard key={content.card.token} content={content.card} onReady={setCardReady}/>}
     <SettingsIntro summary="Your filter is shared as-is. Review your blocklists, blocked sites, and allowed exceptions before sharing. Anyone with the code can see them." />
     <PrivateQRCode image={content?.image} revealed={revealed} onReveal={()=>setRevealed(true)} available={!!content} loadingMessage={query.error??'Loading filter…'}/>
     <Section title="Setup code"><LavaCard role="panel"><Copy verbatim role="caption" mono color={colors.ink}>{content?.code??''}</Copy></LavaCard><LavaActionButton title={copied?'Copied':'Copy setup code'} disabled={!content} onPress={()=>{if(app&&filter){void app.command({type:'share.copy',id:filter.id}).then(()=>setCopied(true)).catch(error=>Alert.alert('Lava',error.message));}else{NativeReview.copySharePreview(session.shareFilter);setCopied(true);}}} /><Quiet>Share this code only with people you trust.</Quiet></Section>

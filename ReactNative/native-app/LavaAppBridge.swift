@@ -24,6 +24,9 @@ final class LavaAppBridge: NSObject, ObservableObject {
     var reviewedFilter: ReviewedFilter?
     var filterEditAuthenticationInFlight = false
     var filterPresentationEpoch = 0
+    let shareCardAuthority = LavaShareCardAuthority()
+    var shareCardForegroundEpoch: UInt64 = 0
+    var shareCardModuleEpoch: UInt64 = 0
     var standaloneDomainReviews: [String: StandaloneDomainReview] = [:]
     @Published var flow: LavaAppNativeFlow?
     @Published var feedbackDraftIsDirty = false
@@ -97,9 +100,18 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 Task { @MainActor [weak self] in self?.queuePublish() }
             }.store(in: &subscriptions)
         }
+        // These publishers carry the new authority values synchronously, before
+        // deferred snapshot delivery. Changed-then-restored content cannot revive
+        // a previously mounted export token.
+        model.$library.sink { [weak self] in self?.shareCardContentChanged($0) }.store(in: &subscriptions)
+        security.$isAppUnlockBlockingUI.sink { [weak self] in self?.shareCardPrivacyChanged(isBlocked: $0) }.store(in: &subscriptions)
+        security.$isAppUnlockPrivacyMaskVisible.sink { [weak self] in self?.shareCardPrivacyChanged(isBlocked: $0) }.store(in: &subscriptions)
+        security.$isAuthenticationUnavailable.sink { [weak self] in self?.shareCardPrivacyChanged(isBlocked: $0) }.store(in: &subscriptions)
+        security.$passcodeAuthenticationRequest.sink { [weak self] in self?.shareCardPrivacyChanged(isBlocked: $0 != nil) }.store(in: &subscriptions)
         model.account.objectWillChange.sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.presentationSourceGeneration &+= 1
+                self?.shareCardPrivacyChanged(isBlocked: true)
                 self?.presentationCache.invalidate()
             }
         }.store(in: &subscriptions)
@@ -116,8 +128,11 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 }
             }
         }.store(in: &subscriptions)
-        security.$viewAuthenticationRevision.removeDuplicates().dropFirst().sink { [weak self] _ in
-            MainActor.assumeIsolated { self?.presentationCache.invalidate() }
+        security.$viewAuthenticationRevision.removeDuplicates().dropFirst().sink { [weak self] revision in
+            MainActor.assumeIsolated {
+                self?.shareCardSecurityChanged(revision: revision)
+                self?.presentationCache.invalidate()
+            }
         }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.presentationCache.invalidate() }
@@ -125,6 +140,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.security.protectedDataWillBecomeUnavailable()
+                self?.shareCardPrivacyChanged(isBlocked: true)
                 self?.presentationCache.invalidate()
                 self?.publishPrivacyBoundary()
             }
@@ -148,6 +164,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification).sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.stopGuardRamp() }
         }.store(in: &subscriptions)
+        // UIKit posts foreground retirement on the main thread. Revoke before a
+        // deferred React callback can capture a previously authorized surface.
+        NotificationCenter.default.addObserver(self, selector: #selector(shareCardForegroundEnded),
+            name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification).sink { [weak self] _ in
             // Restore the current authorized projection before asynchronous DNS
             // refresh work. snapshot() still withholds fields while Lava is locked.
@@ -157,12 +177,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 await self?.refreshManagedDNSPatch()
             }
         }.store(in: &subscriptions)
-        #if DEBUG || LAVA_QA_TOOLS
         model.$isStagingChainedUpstreamForQA.removeDuplicates().dropFirst().sink { [weak self] staging in
             guard !staging else { return }
             Task { @MainActor [weak self] in self?.model.refreshDNSSettingsPresentation() }
         }.store(in: &subscriptions)
-        #endif
         NotificationCenter.default.publisher(for: .NEDNSSettingsConfigurationDidChange).sink { [weak self] _ in
             Task { @MainActor [weak self] in await self?.refreshManagedDNSPatch() }
         }.store(in: &subscriptions)
@@ -397,10 +415,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
         value["blocklistMetadata"] = Dictionary(uniqueKeysWithValues: blocklistIDs.map { ($0, m.blocklistMetadataText(for: $0) ?? "Waiting for source update".lavaLocalized) })
         #if DEBUG || LAVA_QA_TOOLS
         value["qaTools"] = true
-        value["vpn"] = vpnSettingsState()
         #else
         value["qaTools"] = false
         #endif
+        value["vpn"] = vpnSettingsState()
         if let game = m.sudokuGameState { value["sudoku"] = ["puzzle": encode(game.puzzle), "values": game.userValues, "notes": game.notes.map { $0.sorted() }] }
         if !canReadPresentation(.activityViewing) {
             value["domainHistoryCount"] = 0; value["hasDomainHistory"] = false
@@ -433,18 +451,11 @@ final class LavaAppBridge: NSObject, ObservableObject {
         if let filter = m.filter(id: m.activeFilterID) {
             result["filter"] = ["id": filter.id, "name": filter.name, "count": m.filterRuleCount(for: filter).formatted()]
         }
-        #if DEBUG || LAVA_QA_TOOLS
-        let eligible = true
-        #else
-        let eligible = false
-        #endif
-        result["vpn"] = ["eligible": eligible, "enabled": m.configuration.chainedUpstreamEnabled,
+        result["vpn"] = ["eligible": true, "enabled": m.configuration.chainedUpstreamEnabled,
             "fallbackEnabled": presentation.fallbackEnabled.map { $0 as Any } ?? NSNull()]
-        #if DEBUG || LAVA_QA_TOOLS
         let storedGeneration = m.dnsSettingsProfileStatus?.storedConfigurationGeneration
         result["configurationPending"] = m.tunnelHealth.isChainedUpstreamActive && storedGeneration != nil
             && storedGeneration != m.tunnelHealth.runningChainedUpstreamGeneration
-        #endif
         return result
     }
 
@@ -454,7 +465,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         let targetsGuard = tab == "GuardTab" && screen == "Guard"
         guard targetsGuard || !LavaOnboardingHandoff.shared.keepsGuardVisible else { return }
         #if !DEBUG && !LAVA_QA_TOOLS
-        guard !["phoneQA", "vpnChaining"].contains(screen) else { return }
+        guard screen != "phoneQA" else { return }
         #endif
         navigationSerial += 1
         let serial = navigationSerial
@@ -549,9 +560,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         if name.hasSuffix(".query") || name == "domains.stage" { return try await query(name, input) }
         if name.hasPrefix("library.") { return try await libraryCommand(name, input) }
         if name.hasPrefix("filter.") { return try await filterCommand(name, input) }
-        #if DEBUG || LAVA_QA_TOOLS
         if name.hasPrefix("vpn.") { return try await vpnCommand(name, input) }
-        #endif
         switch name {
         case "discovery.seen":
             guard let raw = input["target"] as? String, let target = LavaDiscovery(rawValue: raw) else { throw CommandError("Unknown discovery target.") }
@@ -561,7 +570,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
             guard let name = input["flow"] as? String,
                   ["account", "backupSetup", "backupRestore", "passcode", "automation", "import", "importCode", "importScan", "licenses", "feedback", "customDNS", "phoneQA"].contains(name) else { throw CommandError("Unknown native flow.") }
             #if !DEBUG && !LAVA_QA_TOOLS
-            guard !["phoneQA", "vpnChaining"].contains(name) else { throw CommandError("Unknown native flow.") }
+            guard name != "phoneQA" else { throw CommandError("Unknown native flow.") }
             #endif
             let surface: SecurityProtectedSurface? = switch name {
             case "account", "backupSetup", "backupRestore", "customDNS", "phoneQA": .appSettings
@@ -614,11 +623,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         case "share.card":
             try await authorize(.appUnlock, "Share filter")
             guard canReadPresentation(.appUnlock) else { throw CommandError("Read access changed.") }
-            guard let id = input["id"] as? String, let filter = model.filter(id: id), model.isFilterShareable(filter) else { throw CommandError("This filter cannot be shared.") }
-            guard let image = ShareableFilterCardRenderer.render(configurationCode: model.shareableFilterCode(for: filter), configuration: ShareableFilterConfiguration(filter: filter)) else {
-                throw CommandError("This filter is too large for an image QR. Copy the setup code instead.")
-            }
-            ShareSheetPresenter.present(image: image)
+            try shareMountedCard(input)
         case "share.copy":
             try await authorize(.appUnlock, "Share filter")
             guard canReadPresentation(.appUnlock) else { throw CommandError("Read access changed.") }

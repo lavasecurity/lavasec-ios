@@ -1070,7 +1070,8 @@ test.each([null,'data:image/png;base64,example'])('sharing retains setup-code co
   Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});
   mockShareFilterID='chosen';
   try {
-    const command=jest.fn().mockResolvedValue({code:'LF1.setup-code',url:'https://example.test/filter',image});
+    const card=image?{token:'mounted-native-token',payload:'https://example.test/filter',moduleCount:37,labels:['1 blocklist']}:null;
+    const command=jest.fn().mockResolvedValue({code:'LF1.setup-code',url:'https://example.test/filter',image,card});
     const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
     const live={filters:[{id:'chosen',name:'Renamed since opening'}]} as AppSnapshot;
     render(<Provider app={app} live={live}><ShareDetailScreen/></Provider>);
@@ -1081,8 +1082,12 @@ test.each([null,'data:image/png;base64,example'])('sharing retains setup-code co
     const shareOptions=[...mockSetOptions.mock.calls].reverse().find(([options])=>options.unstable_headerRightItems)![0];
     expect(shareOptions.unstable_headerLeftItems).toBeUndefined();
     expect(shareOptions.unstable_headerRightItems()).toHaveLength(1);
-    const share=()=>shareOptions.unstable_headerRightItems()[0];
-    expect(share().disabled).toBe(!image);
+    const share=()=>[...mockSetOptions.mock.calls].reverse().find(([options])=>options.unstable_headerRightItems)![0].unstable_headerRightItems()[0];
+    expect(share().disabled).toBe(true);
+    if(card){
+      fireEvent(screen.getByTestId('share-card-qr-field',{includeHiddenElements:true}),'layout',{nativeEvent:{layout:{width:441,height:430}}});
+      await waitFor(()=>expect(share().disabled).toBe(false));
+    }
     if(image) {
       const region=screen.getByTestId('share-qr-region');
       const layoutBefore=region.props.style;
@@ -1092,7 +1097,7 @@ test.each([null,'data:image/png;base64,example'])('sharing retains setup-code co
       expect(screen.queryByRole('button',{name:localized('Show the QR Code')})).toBeNull();
       expect(screen.getByTestId('share-qr-region')).toHaveStyle(layoutBefore);
       await act(async()=>share().onPress());
-      expect(command).toHaveBeenCalledWith({type:'share.card',id:'chosen'});
+      expect(command).toHaveBeenCalledWith({type:'share.card',id:'chosen',token:'mounted-native-token'});
     } else {
       expect(screen.getByText('This filter is too large for a QR code')).toBeOnTheScreen();
       expect(screen.queryByRole('button',{name:localized('Show the QR code')})).toBeNull();
@@ -2542,7 +2547,7 @@ test('a failed DNS profile repair stays on the page and reports the failure',asy
 });
 
 function vpnSnapshot(overrides:Partial<NonNullable<AppSnapshot['vpn']>>={}):AppSnapshot {
-  const live=tierSnapshot();live.qaTools=true;
+  const live=tierSnapshot();live.qaTools=false;
   live.vpn={setup:true,enabled:false,canEnable:true,canEdit:true,fallback:false,canChangeFallback:true,
     needsPlus:false,busy:false,restriction:'',error:'',unavailable:false,generation:'42',rows:[],...overrides};return live;
 }

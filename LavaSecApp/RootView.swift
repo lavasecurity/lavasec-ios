@@ -276,8 +276,8 @@ struct RootView: View {
             case .networkActivity: screen = "Network"
             #if DEBUG || LAVA_QA_TOOLS
             case .phoneQA: screen = "phoneQA"
-            case .vpnChaining: screen = "vpnChaining"
             #endif
+            case .vpnChaining: screen = "vpnChaining"
             case nil: screen = "Settings"
             }
             LavaAppBridge.shared.requestNavigation(tab: "SettingsTab", screen: screen)

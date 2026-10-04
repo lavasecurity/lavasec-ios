@@ -8,6 +8,7 @@ interface NativeProps extends ViewProps {
   tone?: string;
   // Shared controls pin this to app appearance; other decoration inherits traits.
   colorScheme?: string;
+  staticExport?: CodegenTypes.WithDefault<boolean, false>;
   fontPointSize?: CodegenTypes.WithDefault<CodegenTypes.Float, 0>;
   fontWeight?: string;
   guardianGestures?: CodegenTypes.WithDefault<boolean, false>;

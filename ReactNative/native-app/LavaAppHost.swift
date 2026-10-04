@@ -164,9 +164,7 @@ private final class LavaAppViewController: UIViewController {
         let bridge = LavaAppBridge.shared
         guard let presentedFlow, bridge.flow?.id == presentedFlowID else { return }
         var blocksInteractiveDismiss = bridge.flow?.name == "feedback" && bridge.feedbackDraftIsDirty
-        #if DEBUG || LAVA_QA_TOOLS
         blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.model.isStagingChainedUpstreamForQA
-        #endif
         presentedFlow.isModalInPresentation = blocksInteractiveDismiss
     }
     private func presentExportIfNeeded() {

@@ -139,9 +139,7 @@ extension AppViewModel {
         guard shouldContinueProtectionLifecycle() else {
             return false
         }
-        #if DEBUG || LAVA_QA_TOOLS
         guard validateChainedConfigurationForStart() else { return false }
-        #endif
         if persistsExplicitIntent {
             // The user action synchronously advanced the in-memory revision before its Task
             // began. Commit the matching durable direction only after the shared lifecycle fence
@@ -677,9 +675,7 @@ extension AppViewModel {
             return
         }
 
-        #if DEBUG || LAVA_QA_TOOLS
         guard validateChainedConfigurationForStart() else { return }
-        #endif
 
         if persistsExplicitIntent {
             // A user-selected reconnect is a fresh explicit ON. Commit it under the same fence
@@ -1285,6 +1281,11 @@ extension AppViewModel {
             playProtectionStartFailedHaptic()
         }
 
+        // Startup backoff and suppression can change without an app configuration write.
+        // Observe lifecycle transitions, keeping credential I/O out of the unchanged poll.
+        if previousStatus != currentStatus || installedStateChanged {
+            refreshDNSSettingsPresentation()
+        }
         #if DEBUG
         if previousStatus != currentStatus || installedStateChanged {
             logVPNDebugEvent("status-updated", details: tunnelManagerDebugDetails(manager))
