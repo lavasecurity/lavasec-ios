@@ -69,9 +69,65 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
     func testNativeShareSheetUsesTheSharedConcealmentChoiceAndExposesTheStableQRPane() throws {
         let source = try readSource(.reactNativeFilterScreens)
+        XCTAssertTrue(source.contains("AppState.addEventListener('change',state=>{setExportActive(state==='active');if(state!=='active'&&!mayRetainPresentationFrame(displayPolicy.current)){setRevealed(false);setCopied(false);}})"))
+        XCTAssertTrue(source.contains("content?.card&&exportActive&&focused&&<FilterShareCard"))
         XCTAssertTrue(source.contains("mayRetainPresentationFrame(displayPolicy.current)"))
         XCTAssertTrue(source.contains("displayPolicy.current=live"))
         XCTAssertTrue(source.contains("<PrivateQRCode"))
+        XCTAssertTrue(source.contains("revealed={revealed}"))
+        let bridge = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(bridge.contains("selector: #selector(shareCardForegroundEnded)"))
+        XCTAssertTrue(bridge.contains("name: UIApplication.willResignActiveNotification"))
+        let native = try readSource(.reactNativeAppShareCard)
+        let retirement = try XCTUnwrap(native.range(of: "@objc func shareCardForegroundEnded()"))
+        let ending = String(native[retirement.lowerBound...])
+        XCTAssertTrue(ending.contains("shareCardForegroundEpoch &+= 1"))
+        XCTAssertTrue(ending.contains("shareCardAuthority.retire()"))
+        XCTAssertTrue(ending.contains("LavaShareCardSurfaceRegistry.shared.retire()"))
+        XCTAssertTrue(native.contains("canReadPresentation(.appUnlock) && canReadPresentation(.filterEditing)"))
+        let account = try XCTUnwrap(bridge.range(of: "model.account.objectWillChange.sink"))
+        let library = try XCTUnwrap(bridge.range(of: "model.$library.removeDuplicates()", range: account.upperBound..<bridge.endIndex))
+        XCTAssertTrue(bridge[account.lowerBound..<library.lowerBound].contains("shareCardPrivacyChanged(isBlocked: true)"))
+        let unavailable = try XCTUnwrap(bridge.range(of: "NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification)"))
+        let available = try XCTUnwrap(bridge.range(of: "NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)"))
+        XCTAssertTrue(bridge[unavailable.lowerBound..<available.lowerBound].contains("shareCardPrivacyChanged(isBlocked: true)"))
+    }
+
+    /// A biometric prompt resigns the app active while it is displayed, so the
+    /// foreground epoch legitimately advances across a successful authorization.
+    /// Pinning it before the prompt made protected-action users always fail.
+    func testShareCardQueryEstablishesForegroundAuthorityAfterBiometricAuthorization() throws {
+        let native = try readSource(.reactNativeAppShareCard)
+        let query = sourceWithoutCommentLines(try sourceBlock(in: native,
+            startingAt: "func shareCardQuery(", endingBefore: "func shareMountedCard("))
+        let module = try XCTUnwrap(query.range(of: "let module = shareCardModuleEpoch"))
+        let authorize = try XCTUnwrap(query.range(of: "try await authorize(.filterEditing"))
+        XCTAssertLessThan(module.lowerBound, authorize.lowerBound,
+                          "The module retirement epoch must be pinned across the suspension")
+        XCTAssertFalse(query[query.startIndex..<authorize.lowerBound].contains("shareCardForegroundEpoch"),
+                       "The foreground epoch must not be snapshotted before biometric authorization")
+        XCTAssertTrue(query[authorize.upperBound...].contains("let basis = try shareCardBasis(for: id)"),
+                      "The foreground authority must be established after authorization returns")
+    }
+
+    /// A protected `.filterEditing` prompt resigns the app active, which invalidates
+    /// the presentation cache and rotates its generation. Authorizing it after the
+    /// read ticket opens made a successful share authorization look like a revoked
+    /// read, so `share.query` never loaded the card.
+    func testShareQueryAuthorizesFilterEditingBeforeOpeningItsReadTicket() throws {
+        let bridge = try readSource(.reactNativeAppQueries)
+        let query = try sourceBlock(in: bridge, startingAt: "func query(_ name: String",
+                                    endingBefore: "func canReadPresentation(")
+        let epoch = try XCTUnwrap(query.range(of: "let shareModuleEpoch = policy == .share ? shareCardModuleEpoch : nil"))
+        let shareAuth = try XCTUnwrap(query.range(of: "try await authorize(.filterEditing, \"Share Filter\", fresh: false)"))
+        let revalidate = try XCTUnwrap(query.range(of: "guard shareModuleEpoch == shareCardModuleEpoch"))
+        let ticket = try XCTUnwrap(query.range(of: "let ticket = try presentationCache.beginRead("))
+        XCTAssertLessThan(epoch.lowerBound, shareAuth.lowerBound,
+                          "The module retirement epoch must be pinned across the share authorization")
+        XCTAssertLessThan(shareAuth.lowerBound, revalidate.lowerBound,
+                          "The module retirement must be revalidated after the share authorization")
+        XCTAssertLessThan(revalidate.lowerBound, ticket.lowerBound,
+                          "The .filterEditing authorization must precede the presentation read ticket")
     }
 
     // MARK: Import flow — code entry + scanner
@@ -221,8 +277,10 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testShareSheetGuardsOversizedQRCodes() throws {
-        let source = try readSource(.reactNativeAppQueries)
-        XCTAssertTrue(source.contains("ShareableFilterCardRenderer.qrImage(for: url.absoluteString)"))
+        let source = try readSource(.reactNativeAppShareCard)
+        XCTAssertTrue(source.contains("ShareableFilterCardRenderer.qrImage(for: basis.payload)"))
+        XCTAssertTrue(source.contains("if let matrix = LavaShareQrMatrix.encode(basis.payload)"))
+        XCTAssertTrue(source.contains("var card: Any = NSNull()"))
     }
 
     func testCodecCompressesPayload() throws {

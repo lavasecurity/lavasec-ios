@@ -6,6 +6,9 @@ const root=new URL('../review/',import.meta.url);
 const compositions=new Set(['primitives.tsx','scaffold.tsx','story-scaffold.tsx','detail-scaffold.tsx','activity-scaffold.tsx','sudoku-scaffold.tsx','plus-scaffold.tsx','paging-scaffold.tsx','settings-scaffold.tsx','LavaUIReview.tsx']);
 // Shared authoritative state-to-material renderer; owns endpoint geometry and interrupted motion.
 compositions.add('guard-material.tsx');
+// Shared iOS/Android recipient-image composition. Its fixed export pixel geometry
+// is independent of interactive screen/control typography and sender text scale.
+compositions.add('FilterShareCard.tsx');
 // One opaque lifecycle composition serves the root and separate UIKit routes.
 compositions.add('PresentationCover.tsx');
 // Screens arrange shared pieces and own state. Paint, typography and control

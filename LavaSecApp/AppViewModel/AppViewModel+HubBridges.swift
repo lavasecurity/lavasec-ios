@@ -273,6 +273,9 @@ extension AppViewModel: LavaSecurityPlusHubBridging {
         // already-resident tunnel snapshot keeps serving until that point (the
         // INV-TIER-1 resident carve-out) — extra filtering, never fail-open.
         reconcileTierBudgetStatusAfterPlanOrRestoreChange()
+        if previousIsPaid != configuration.isPaid || previousChainedUpstreamEnabled != configuration.chainedUpstreamEnabled {
+            refreshDNSSettingsPresentation()
+        }
     }
 }
 

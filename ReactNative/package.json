@@ -67,7 +67,9 @@
         "LavaSlider": "LavaSliderView",
         "LavaContextMenu": "LavaContextMenuView",
         "LavaSwitch": "LavaSwitchView",
-        "LavaNativePage": "LavaNativePageView"
+        "LavaNativePage": "LavaNativePageView",
+        "LavaShareCardSurface": "LavaShareCardSurfaceView",
+        "LavaShareQr": "LavaShareQrView"
       }
     }
   }

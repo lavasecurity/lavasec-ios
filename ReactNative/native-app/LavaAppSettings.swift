@@ -5,7 +5,6 @@ import LavaSecKit
 import LavaSecAppServices
 
 extension LavaAppBridge {
-    #if DEBUG || LAVA_QA_TOOLS
     // Metadata-only, event-refreshed snapshot. No configuration content crosses the RN bridge.
     func vpnSettingsState() -> [String: Any] {
         guard let status = model.dnsSettingsProfileStatus else { return [:] }
@@ -142,9 +141,7 @@ extension LavaAppBridge {
             editor.saveWireGuardDraft = { [weak self] name, conf in
                 guard let self, var current = self.wireGuardDraft, current.id == sessionID else { return WireGuardChainFailure.changed.localizedDescription }
                 do {
-                    let replacement = try conf.map { try ChainedUpstreamStagingRequest(conf: $0,
-                        identity: LavaSecAppGroup.chainedUpstreamStoreIdentity,
-                        accessGroup: LavaSecAppGroup.chainedUpstreamKeychainAccessGroup ?? "").rotation }
+                    let replacement = try conf.map { try ChainedUpstreamConfParser.rotation(from: $0) }
                     try current.save(index: index, name: name, replacement: replacement)
                     self.wireGuardDraft = current; self.publish()
                     return nil
@@ -156,8 +153,6 @@ extension LavaAppBridge {
         } else { throw CommandError("Unknown VPN action.") }
         return wireGuardDraftMetadata(draft)
     }
-    #endif
-
     func dnsChoice(_ selection: DNSResolutionSelection) -> [String: Any] {
         let preset = selection.resolver ?? .device
         let metadata = preset.transport == .deviceDNS ? "" : resolverMetadata(preset)

@@ -33,6 +33,12 @@ final class ChainedUpstreamReconcileSourceTests: XCTestCase {
                 + "atomic write. After it, the flag would outlive the entitlement on disk and "
                 + "cost a second generation bump, lock acquisition, and backup schedule."
         )
+        let refreshIdx = try XCTUnwrap(block.range(of: "refreshDNSSettingsPresentation()")?.lowerBound)
+        let rollbackIdx = try XCTUnwrap(block.range(of: "configuration.isPaid = previousIsPaid")?.lowerBound)
+        XCTAssertLessThan(persistIdx, refreshIdx, "Publish VPN eligibility only after the plan write succeeds.")
+        XCTAssertLessThan(rollbackIdx, refreshIdx, "A failed write must restore the plan before returning to its cached presentation.")
+        XCTAssertTrue(block.contains("if previousIsPaid != configuration.isPaid || previousChainedUpstreamEnabled != configuration.chainedUpstreamEnabled"),
+                      "Unchanged entitlement checks must not reread VPN credentials.")
     }
 
     /// A failed lapse write rolls BOTH flags back, and retracts the log line it already wrote.

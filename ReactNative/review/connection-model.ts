@@ -67,7 +67,7 @@ export function connectionStages(live: AppSnapshot | undefined, session: Preview
   ];
   // Eligibility is the existing native gate. A muted stage stays on the same
   // connector axis; absence means unavailable, not an implied bypass branch.
-  if(saved?.vpn.eligible ?? live?.qaTools){
+  if(saved?.vpn.eligible ?? !!live){
     const enabled=saved?.vpn.enabled;
     const fallback=saved?.vpn.fallbackEnabled;
     const value=enabled ? 'Enabled' : enabled===false ? 'Disabled' : 'View setup';

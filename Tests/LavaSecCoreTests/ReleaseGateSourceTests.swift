@@ -14,10 +14,14 @@ final class ReleaseGateSourceTests: XCTestCase {
         XCTAssertTrue(collector.contains("Bundle.main.bundleIdentifier == \"com.lavasec.dev.qa\""))
     }
 
-    func testReleaseDNSTierZeroReportsThePersistedPreference() throws {
-        let source = try readSource(.reactNativeAppQueries)
-        XCTAssertTrue(source.contains("model.configuration.chainedUpstreamEnabled"))
-        XCTAssertTrue(source.contains("WireGuard"))
+    func testReleaseVPNMetadataReportsTheSavedConfigurationAndPreference() throws {
+        let source = try sourceBlock(in: try readSource(.reactNativeAppQueries),
+            startingAt: "private func vpnTier()", endingBefore: "func resolverMetadata(")
+        XCTAssertTrue(source.contains("let status = model.chainedUpstreamSurfaceStatus"))
+        XCTAssertTrue(source.contains("status.chainingEnabled"))
+        XCTAssertTrue(source.contains("status.storedConfigurationDNSAddresses"))
+        XCTAssertTrue(source.contains("status.hasConfigurationWithoutKey"))
+        XCTAssertFalse(source.contains("#if DEBUG || LAVA_QA_TOOLS"))
     }
 
     func testInternalRCTagWorkflowChecksTagAgainstMarketingVersionBeforeDispatch() throws {
@@ -190,39 +194,15 @@ final class ReleaseGateSourceTests: XCTestCase {
             "The Admin QA file should close its Release compile gate explicitly."
         )
 
-        // Same whole-file contract for the VPN chaining page. It is a Protection Choices
-        // subpage, so unlike Admin QA it sits among rows that DO ship — which is exactly why
-        // its gate is pinned rather than assumed.
-        let vpnChaining = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(
-            vpnChaining.trimmingCharacters(in: .whitespacesAndNewlines)
-                .hasPrefix("#if DEBUG || LAVA_QA_TOOLS"),
-            "The VPN chaining page should not be compiled into Release."
-        )
-        XCTAssertTrue(
-            vpnChaining.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"),
-            "The VPN chaining file should close its Release compile gate explicitly."
-        )
-
-        // Both gated routes live in ONE gate block, so these pin the block as a whole. A new
-        // gated route must be added here in the same diff — that churn is deliberate, and it
-        // is what stops a route being added to the enum while its Release exclusion is not.
+        // Device QA stays gated; VPN chaining is a shipping settings destination.
         XCTAssertTrue(settings.contains("""
         #if DEBUG || LAVA_QA_TOOLS
             case phoneQA
-            case vpnChaining
         #endif
         """))
         XCTAssertTrue(settings.contains("""
         #if DEBUG || LAVA_QA_TOOLS
                 case .phoneQA:
-                    return .requires(.appSettings)
-                case .vpnChaining:
-        """))
-        XCTAssertTrue(settings.contains("""
-                case .vpnChaining:
-                    // Same lock as the other Protection Choices subpages: this page can change the
-                    // data path and holds a WireGuard private key's staging surface.
                     return .requires(.appSettings)
         #endif
         """))

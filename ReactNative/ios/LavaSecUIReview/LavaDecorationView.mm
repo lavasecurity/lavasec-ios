@@ -46,7 +46,8 @@ using namespace facebook::react;
                              tone:[NSString stringWithUTF8String:next.tone.c_str()]
                       colorScheme:[NSString stringWithUTF8String:next.colorScheme.c_str()]
                     fontPointSize:next.fontPointSize
-                       fontWeight:[NSString stringWithUTF8String:next.fontWeight.c_str()]];
+                       fontWeight:[NSString stringWithUTF8String:next.fontWeight.c_str()]
+                     staticExport:next.staticExport];
   [_decoration configureRevealWithEnabled:next.revealEnabled visible:next.revealVisible
                                        x:next.revealX y:next.revealY radius:next.revealRadius];
   _trackingGuard.enabled = next.guardianGestures;

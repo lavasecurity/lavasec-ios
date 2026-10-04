@@ -197,7 +197,7 @@ extension AppViewModel {
             adminQAStatusMessage = "Chained reset failed: \(error)"
         }
     }
-
+    #endif
 
     /// Everything the VPN-chaining settings surface needs to say WHY the data path is what
     /// it is, rather than only what the user asked for.
@@ -541,6 +541,7 @@ extension AppViewModel {
         }
     }
 
+    #if DEBUG || LAVA_QA_TOOLS
     /// Cable-driven QA setup, so a device run needs no taps.
     ///
     /// The point of a QA build is that it can be automated; until now every chained-upstream
@@ -1199,6 +1200,8 @@ extension AppViewModel {
         logVPNDebugEvent("qa-browser-probe-done")
     }
 
+    #endif
+
     /// Persists the chaining PREFERENCE.
     ///
     /// The data path is latched at start (`TunnelDataPathLatch`), so a successful save
@@ -1233,7 +1236,6 @@ extension AppViewModel {
             vpnMessageIsError = true
         }
     }
-    #endif
 
     func recordDemo(domain: String) {
         let snapshot = currentSnapshot()

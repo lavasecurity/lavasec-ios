@@ -32,6 +32,7 @@ final class LavaDecorationContent: UIView {
     private var renderedSize: CGFloat = -1
     private var mood = "sleeping"
     private var look = "original"
+    private var staticExport = false
     private var drawingTint = UIColor.clear
     private var drawingPointSize: CGFloat = 0
     private var showsDrawing: Bool { symbol.isEmpty || symbol == "share.qr" || symbol == "lava.shield.fill" || symbol == LavaGlyphSymbol.ranking }
@@ -101,6 +102,8 @@ final class LavaDecorationContent: UIView {
         symbol = ""
         mood = "sleeping"
         look = "original"
+        staticExport = false
+        overrideUserInterfaceStyle = .unspecified
         drawingTint = .clear
         drawingPointSize = 0
         symbolView.image = nil
@@ -112,10 +115,12 @@ final class LavaDecorationContent: UIView {
         material.isHidden = true
     }
 
-    @objc func configure(symbol: String, mood: String, look: String, tone: String, colorScheme: String, fontPointSize: Double, fontWeight: String) {
+    @objc func configure(symbol: String, mood: String, look: String, tone: String, colorScheme: String, fontPointSize: Double, fontWeight: String, staticExport: Bool) {
         self.mood = mood
         self.look = look
         self.symbol = symbol
+        self.staticExport = staticExport
+        overrideUserInterfaceStyle = staticExport ? .light : .unspecified
         drawingPointSize = CGFloat(fontPointSize)
         drawingTint = LavaSymbolPalette.color(for: tone, colorScheme: colorScheme)
         let drawing = showsDrawing
@@ -253,13 +258,14 @@ final class LavaDecorationContent: UIView {
                 Text("?").font(.system(size: size * 0.44, weight: .bold, design: .rounded)).foregroundStyle(LavaStyle.secondaryText)
             })
         } else {
-            drawing = AnyView(SoftShieldGuardian(size: size, state: state, shieldStyle: style))
+            drawing = AnyView(SoftShieldGuardian(size: size, state: state, animates: !staticExport, shieldStyle: style))
         }
+        let exportedDrawing = staticExport ? AnyView(drawing.environment(\.colorScheme, .light)) : drawing
         if let guardian {
-            guardian.rootView = drawing
+            guardian.rootView = exportedDrawing
             guardian.viewIfLoaded?.isHidden = false
         } else {
-            let controller = UIHostingController(rootView: drawing)
+            let controller = UIHostingController(rootView: exportedDrawing)
             guardian = controller
             updateContainment()
         }

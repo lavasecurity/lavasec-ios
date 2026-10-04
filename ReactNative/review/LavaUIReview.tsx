@@ -86,7 +86,7 @@ function RootStack({root}: {root: 'Guard' | 'Settings'}) {
     contentStyle: {backgroundColor: rgb(lavaTokens.colors.groupedBackground[scheme])}}}>
     <Stack.Screen name={root} component={root === 'Guard' ? GuardRoute : SettingsRoute}
       options={{title: localized(root),headerShown:true}} />
-    {routeDestinations.filter(([name])=>['VPNChaining','DeviceQA'].includes(name)?!!app&&qaTools.current:name==='Components'?!app||qaTools.current:!app||!['Import','Passcode'].includes(name)).map(([name, component, title]) => <Stack.Screen key={name} name={name} component={component} options={({navigation,route}) => ({title:localized(title),headerBackVisible:true,
+    {routeDestinations.filter(([name])=>name==='VPNChaining'?!!app:name==='DeviceQA'?!!app&&qaTools.current:name==='Components'?!app||qaTools.current:!app||!['Import','Passcode'].includes(name)).map(([name, component, title]) => <Stack.Screen key={name} name={name} component={component} options={({navigation,route}) => ({title:localized(title),headerBackVisible:true,
       ...(!sheets.has(name)&&name!=='Passcode'&&name!=='Sudoku'?pushPresentation:{}),
       ...(name === 'Components' && !app ? {unstable_headerRightItems:()=>[toolbarButton('Close','xmark',()=>NativeReview.close(),false,'review.close')]} : {}),
       headerLargeTitleEnabled: !['Library', 'Filter', 'Share', 'Guardian', 'Review', 'Import', 'ShareDetail', 'Passcode', 'AddDomain', 'AddBlocklist'].includes(name),

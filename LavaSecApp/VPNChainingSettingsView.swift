@@ -1,4 +1,3 @@
-#if DEBUG || LAVA_QA_TOOLS
 import SwiftUI
 import UniformTypeIdentifiers
 import LavaSecKit
@@ -7,14 +6,16 @@ import LavaSecPresentation
 /// Settings → Protection Choices → VPN chaining.
 /// The saved row exposes only metadata. The sheet holds a temporary replacement draft;
 /// private and pre-shared keys are never rehydrated from storage into the editor.
-/// QA-only: the staging API refuses builds addressing the production store.
+/// Uses this build's credential store; QA staging remains a separate test surface.
 struct VPNChainingSettingsView: View {
     @EnvironmentObject private var viewModel: AppViewModel
     @EnvironmentObject private var security: SecurityController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showUpgradePage = false
     @Binding var showDNSSettings: Bool
+    var authorizationIsOwnedByParent = false
     /// A DNS-owned review detour returns to that existing editor after authentication.
     /// Ordinary Settings entry keeps the existing pushed DNS destination.
     var onOpenDNSSettings: (() -> Void)? = nil
@@ -41,7 +42,23 @@ struct VPNChainingSettingsView: View {
     @State private var swapMessage: String?
 
     var body: some View {
-        let status = viewModel.chainedUpstreamSurfaceStatus
+        Group {
+            if let status = viewModel.dnsSettingsProfileStatus { pageContent(status) }
+        }
+        .onAppear { viewModel.refreshDNSSettingsPresentation() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { viewModel.refreshDNSSettingsPresentation() }
+        }
+        .onChange(of: viewModel.configuration) { _, _ in viewModel.refreshDNSSettingsPresentation() }
+        .modifier(VPNSettingsAuthorization(reason: "Open VPN chaining settings",
+            managedByParent: authorizationIsOwnedByParent, onDenied: { dismiss() }))
+    }
+
+    private var canModifySettings: Bool {
+        scenePhase == .active && security.hasCurrentAuthorization(for: .appSettings)
+    }
+
+    private func pageContent(_ status: AppViewModel.ChainedUpstreamSurfaceStatus) -> some View {
         SettingsSubpageContent(
             title: "VPN chaining",
             tier: .technical,
@@ -59,7 +76,10 @@ struct VPNChainingSettingsView: View {
                 LavaSettingsRow {
                     LavaToggleRow(title: "I have a WireGuard configuration", isOn: Binding(
                         get: { viewModel.configuration.wireGuardSetupEnabled },
-                        set: { viewModel.setWireGuardSetupEnabled($0); viewModel.refreshDNSSettingsPresentation() }
+                        set: {
+                            guard canModifySettings else { return }
+                            viewModel.setWireGuardSetupEnabled($0); viewModel.refreshDNSSettingsPresentation()
+                        }
                     ))
                     .accessibilityIdentifier("vpn.setup-toggle")
                     .disabled(viewModel.isStagingChainedUpstreamForQA)
@@ -222,6 +242,7 @@ struct VPNChainingSettingsView: View {
                         Toggle(row.displayName, isOn: Binding(
                             get: { viewModel.configuration.chainedUpstreamEnabled && row.isEnabled },
                             set: { value in
+                                guard canModifySettings else { return }
                                 do { try viewModel.setWireGuardRowEnabled(value, index: index, expectedGeneration: status.storedConfigurationGeneration) }
                                 catch { removalMessage = error.localizedDescription }
                             }))
@@ -233,6 +254,7 @@ struct VPNChainingSettingsView: View {
         }
         if editing && status.storeUnavailableReason == nil && !status.hasConfigurationWithoutKey && pageDraft?.resetsStorage != true {
             Button {
+                guard canModifySettings else { return }
                 if rows.count == 2 {
                     do { try pageDraft?.swapOrder(); swapMessage = nil }
                     catch { swapMessage = error.localizedDescription }
@@ -254,6 +276,7 @@ struct VPNChainingSettingsView: View {
     }
 
     private func removeSelectedConfiguration() {
+        guard canModifySettings else { return }
         do {
             if let index = removalIndex { try pageDraft?.remove(index: index) }
             else { pageDraft?.reset() }
@@ -264,7 +287,10 @@ struct VPNChainingSettingsView: View {
         Binding(
             get: { (viewModel.dnsSettingsPresentation(from: status).canChangeFallback)
                 && viewModel.configuration.chainedTierOneFallbackEnabled },
-            set: { value in viewModel.setChainedTierOneFallbackEnabled(value); viewModel.refreshDNSSettingsPresentation() })
+            set: { value in
+                guard canModifySettings else { return }
+                viewModel.setChainedTierOneFallbackEnabled(value); viewModel.refreshDNSSettingsPresentation()
+            })
     }
 
     // MARK: - Chained DNS fallback (T1)
@@ -343,7 +369,10 @@ struct VPNChainingSettingsView: View {
     ) -> Binding<Bool> {
         Binding(
             get: { viewModel.configuration.chainedUpstreamEnabled },
-            set: { viewModel.setChainedUpstreamEnabled($0); viewModel.refreshDNSSettingsPresentation() })
+            set: {
+                guard canModifySettings else { return }
+                viewModel.setChainedUpstreamEnabled($0); viewModel.refreshDNSSettingsPresentation()
+            })
     }
 
     /// The option's explanation is independent of its value and reconciliation state.
@@ -399,6 +428,7 @@ struct VPNChainingSettingsView: View {
     }
 
     private func beginPageEdit(_ status: AppViewModel.ChainedUpstreamSurfaceStatus) {
+        guard canModifySettings else { return }
         guard !editing else { return }
         do {
             pageDraft = try ChainedUpstreamEditDraft(id: UUID().uuidString, generation: status.storedConfigurationGeneration,
@@ -410,6 +440,7 @@ struct VPNChainingSettingsView: View {
     private func discardPageEdit() { pageDraft = nil; editing = false; removalMessage = nil }
 
     private func commitPageEdit() {
+        guard canModifySettings else { return }
         guard var draft = pageDraft else { return }
         do {
             try viewModel.commitWireGuardPage(&draft)
@@ -419,16 +450,15 @@ struct VPNChainingSettingsView: View {
 
     private func stagePageRow(index: Int, name: String, conf: String?) -> String? {
         do {
-            guard pageDraft != nil else { throw WireGuardChainFailure.changed }
-            let replacement = try conf.map { try ChainedUpstreamStagingRequest(conf: $0,
-                identity: LavaSecAppGroup.chainedUpstreamStoreIdentity,
-                accessGroup: LavaSecAppGroup.chainedUpstreamKeychainAccessGroup ?? "").rotation }
+            guard canModifySettings, pageDraft != nil else { throw WireGuardChainFailure.changed }
+            let replacement = try conf.map { try ChainedUpstreamConfParser.rotation(from: $0) }
             try pageDraft?.save(index: index, name: name, replacement: replacement)
             return nil
         } catch { return error.localizedDescription }
     }
 
     private func openConfigurationEditor(index: Int, status: AppViewModel.ChainedUpstreamSurfaceStatus) {
+        guard canModifySettings else { return }
         beginPageEdit(status)
         let rows = pageDraft?.rows.map(\.configuration) ?? []
         editorIndex = index
@@ -490,6 +520,8 @@ struct VPNChainingConfigurationEditor: View {
     /// Save. Distinct from anything stored: a committed secret lives in the Keychain and is
     /// only ever summarised, never rehydrated into this field.
     @State private var draftConfiguration = ""
+    @State private var isReadingConfiguration = false
+    @State private var importToken = UUID()
 
     /// Content types offered to the importer.
     ///
@@ -500,7 +532,7 @@ struct VPNChainingConfigurationEditor: View {
     /// of this comment claimed the latter, which would have led someone trimming the list to
     /// drop the wrong entries. `.plainText` and `.text` cover exporters that tag properly.
     ///
-    /// Breadth is safe because NOTHING trusts the type: `ChainedUpstreamStagingRequest`
+    /// Breadth is safe because NOTHING trusts the type: `ChainedUpstreamConfParser`
     /// parses the bytes and refuses anything that is not a well-formed configuration.
     private static let importableTypes: [UTType] = {
         var types: [UTType] = [.plainText, .text, .data]
@@ -513,11 +545,11 @@ struct VPNChainingConfigurationEditor: View {
     /// A WireGuard configuration is a few hundred bytes; a large one is a few kilobytes.
     ///
     /// The cap exists because the picker can hand back ANY file the user taps, including a
-    /// multi-gigabyte video, and this read happens on the main actor. Enforced twice — once
-    /// from the file's declared size where the provider offers one, and once on the bytes
+    /// multi-gigabyte video. The background read is bounded independently of provider
+    /// metadata — once from the file's declared size where the provider offers one, and once on the bytes
     /// that actually arrived, which is the check that always runs. Generous enough that no
     /// real configuration is ever refused by it.
-    private static let maximumConfigurationBytes = 64 * 1024
+    nonisolated private static let maximumConfigurationBytes = 64 * 1024
 
 
     var body: some View {
@@ -562,7 +594,13 @@ struct VPNChainingConfigurationEditor: View {
                     VStack(spacing: LavaSpacing.md) { configurationActions }
                 }
             }
-            .onAppear { name = initialName; isApplicationActive = UIApplication.shared.applicationState == .active }
+            .onAppear {
+                name = initialName
+                isApplicationActive = UIApplication.shared.applicationState == .active
+                viewModel.refreshDNSSettingsPresentation()
+            }
+            .onChange(of: viewModel.configuration) { _, _ in viewModel.refreshDNSSettingsPresentation() }
+            .onDisappear { importToken = UUID(); isReadingConfiguration = false }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                 isApplicationActive = false
                 if security.backgroundPrivacyCoverRequired { draftRevealed = false }
@@ -576,6 +614,7 @@ struct VPNChainingConfigurationEditor: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 isApplicationActive = true
+                viewModel.refreshDNSSettingsPresentation()
             }
             .navigationTitle("WireGuard Configuration".lavaLocalized)
             .navigationBarTitleDisplayMode(.inline)
@@ -600,6 +639,7 @@ struct VPNChainingConfigurationEditor: View {
                 allowedContentTypes: Self.importableTypes,
                 allowsMultipleSelection: false,
                 onCompletion: handleImport)
+            .modifier(VPNSettingsAuthorization(reason: "Edit VPN chaining", onDenied: onFinish))
 
         }
     }
@@ -653,10 +693,12 @@ struct VPNChainingConfigurationEditor: View {
     /// The sheet can be opened solely to delete an ineligible device's saved keys.
     /// Recheck at commit too: eligibility can change while a confirmation is open.
     private var canEditConfiguration: Bool {
-        isApplicationActive && security.protectedDataIsAvailableForPresentation
+        guard let status = viewModel.dnsSettingsProfileStatus else { return false }
+        return !isReadingConfiguration && isApplicationActive && security.protectedDataIsAvailableForPresentation
+            && security.hasCurrentAuthorization(for: .appSettings)
             && !viewModel.isStagingChainedUpstreamForQA
             && ChainedSetupPolicy.canEditConfiguration(
-                viewModel.chainedSurfaceInputs(from: viewModel.chainedUpstreamSurfaceStatus))
+                viewModel.chainedSurfaceInputs(from: status))
     }
 
 
@@ -690,16 +732,28 @@ struct VPNChainingConfigurationEditor: View {
             validationMessage = error.localizedDescription
         case .success(let urls):
             guard let url = urls.first else { return }
-            do {
-                // Keep the imported draft concealed until the operator explicitly reveals it.
-                // Saved content is never loaded here. The read caps still apply.
-                draftConfiguration = try readConfiguration(at: url)
-                draftRevealed = false
-                if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { name = url.deletingPathExtension().lastPathComponent }
-            } catch let error as ConfigurationReadFailure {
-                validationMessage = error.message
-            } catch {
-                validationMessage = error.localizedDescription
+            let token = UUID()
+            importToken = token
+            let authorizationRevision = security.viewAuthenticationRevision
+            isReadingConfiguration = true
+            Task {
+                let imported = await Task.detached(priority: .userInitiated) {
+                    Result { try Self.readConfiguration(at: url) }
+                }.value
+                guard importToken == token else { return }
+                isReadingConfiguration = false
+                guard security.viewAuthenticationRevision == authorizationRevision, canEditConfiguration else { return }
+                switch imported {
+                case .success(let text):
+                    // Saved content is never loaded here; imported secrets start concealed.
+                    draftConfiguration = text
+                    draftRevealed = false
+                    if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { name = url.deletingPathExtension().lastPathComponent }
+                case .failure(let error as ConfigurationReadFailure):
+                    validationMessage = error.message
+                case .failure(let error):
+                    validationMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -731,9 +785,9 @@ struct VPNChainingConfigurationEditor: View {
     /// Order matters: the attribute size is checked BEFORE any read, so a wrongly-picked
     /// large file is normally refused rather than loaded. That pre-read gate is BEST-EFFORT
     /// and the code says so — `try?` swallows a failed `resourceValues`, and a provider may
-    /// report no size at all, in which case control falls through to the read. The post-read
-    /// cap is what makes the bound real; the pre-read one is what usually saves the transfer.
-    private func readConfiguration(at url: URL) throws -> String {
+    /// report no size at all. Read at most the cap plus one byte to detect an oversized
+    /// document without materializing it, then validate UTF-8 only within that bound.
+    nonisolated private static func readConfiguration(at url: URL) throws -> String {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
@@ -742,11 +796,18 @@ struct VPNChainingConfigurationEditor: View {
             throw ConfigurationReadFailure.tooLarge(size)
         }
 
-        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
             throw ConfigurationReadFailure.unreadable
         }
-        // Belt and braces: a provider can report a stale or absent size, so the cap is
-        // enforced again on what actually arrived.
+        defer { try? handle.close() }
+        var data = Data()
+        do {
+            while data.count <= Self.maximumConfigurationBytes {
+                let remaining = Self.maximumConfigurationBytes + 1 - data.count
+                guard let chunk = try handle.read(upToCount: min(8 * 1024, remaining)), !chunk.isEmpty else { break }
+                data.append(chunk)
+            }
+        } catch { throw ConfigurationReadFailure.unreadable }
         guard data.count <= Self.maximumConfigurationBytes else {
             throw ConfigurationReadFailure.tooLarge(data.count)
         }
@@ -757,6 +818,7 @@ struct VPNChainingConfigurationEditor: View {
     }
 
     private func saveDraftConfiguration() {
+        viewModel.refreshDNSSettingsPresentation()
         guard canSaveDraft else { return }
         validationMessage = savePendingDraft(name, draftConfiguration.isEmpty ? nil : draftConfiguration)
         if validationMessage == nil {
@@ -768,6 +830,38 @@ struct VPNChainingConfigurationEditor: View {
         }
     }
 
+}
+
+/// Reuses the current Settings grant and closes interaction immediately when it is revoked.
+private struct VPNSettingsAuthorization: ViewModifier {
+    @EnvironmentObject private var security: SecurityController
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isPresented = false
+    let reason: String
+    var managedByParent = false
+    let onDenied: () -> Void
+    private struct Context: Equatable {
+        let visible: Bool
+        let phase: ScenePhase
+        let revision: UInt64
+    }
+    private var context: Context { .init(visible: isPresented, phase: scenePhase, revision: security.viewAuthenticationRevision) }
+    private var canInteract: Bool { isPresented && scenePhase == .active && security.hasCurrentAuthorization(for: .appSettings) }
+
+    func body(content: Content) -> some View {
+        content
+            .allowsHitTesting(canInteract)
+            .accessibilityHidden(!canInteract)
+            .onAppear { isPresented = true }
+            .onDisappear { isPresented = false }
+            .task(id: context) {
+                let request = context
+                guard request.visible, request.phase == .active, !managedByParent else { return }
+                let accepted = await security.requireAuthentication(for: .appSettings, reason: reason)
+                guard !Task.isCancelled, context == request else { return }
+                if !accepted { onDenied() }
+            }
+    }
 }
 
 /// Do not attach SwiftUI destinations to content whose enclosing page stack is
@@ -798,4 +892,3 @@ private struct VPNChainingPageDestinations: ViewModifier {
         }
     }
 }
-#endif

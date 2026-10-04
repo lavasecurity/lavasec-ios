@@ -105,6 +105,34 @@ final class ChainedUpstreamKeychainStoreTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    func testConsumerWireGuardImportCanCommitIntoProductionWhileQAStagingStillRefusesIt() throws {
+        let privateKey = Data(repeating: 7, count: 32)
+        let peerKey = try configuration().peerPublicKey
+        let conf = """
+        [Interface]
+        PrivateKey = \(privateKey.base64EncodedString())
+        Address = 10.64.0.5/32
+        DNS = 10.64.0.1
+        [Peer]
+        PublicKey = \(peerKey)
+        Endpoint = 203.0.113.9:51820
+        AllowedIPs = 0.0.0.0/0
+        """
+        let imported = try ChainedUpstreamConfParser.rotation(from: conf)
+        let store = makeStore(FakeKeyItems(), identity: .production)
+        let generation = try store.saveHop(index: 0, name: "Provider", replacement: imported, expectedGeneration: nil)
+        let record = try XCTUnwrap(store.loadStoredConfigurationRecord())
+        XCTAssertEqual(record.generation, generation)
+        XCTAssertEqual(record.configuration.endpointHost, "203.0.113.9")
+        XCTAssertEqual(record.configuration.dnsAddresses, ["10.64.0.1"])
+        XCTAssertEqual(try store.loadStoredKeyMaterial()?.privateKey, privateKey)
+        XCTAssertThrowsError(try ChainedUpstreamStagingRequest(conf: conf, identity: .production,
+            accessGroup: "ABCDE12345.com.lavasec.app.chained-upstream")) {
+            XCTAssertEqual($0 as? ChainedUpstreamStagingRefusal, .buildMayNotStage(.production))
+        }
+        XCTAssertThrowsError(try ChainedUpstreamConfParser.rotation(from: conf + "\nTable = off"))
+    }
+
     func testEntryReadDuringRotationIsTransientRatherThanMissingSecret() throws {
         let keys = FakeKeyItems()
         let rotating = makeStore(keys)

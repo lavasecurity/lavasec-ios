@@ -15,7 +15,6 @@ import LavaSecAppServices
 
 extension AppViewModel {
     // MARK: - Chained DNS fallback (T1)
-    #if DEBUG || LAVA_QA_TOOLS
     /// A settings commit never implies Guard ON. Coalesce commits for half a second,
     /// then use the same action gate and cross-process fence as an ordinary reconnect.
     /// The worker outlives the page; new input cannot cancel a restart mid-teardown.
@@ -152,7 +151,8 @@ extension AppViewModel {
         }
     }
 
-    /// The editor submits only a new draft; existing keys never leave this store operation.
+    #if DEBUG || LAVA_QA_TOOLS
+    /// Legacy QA helpers; consumer editors commit through `commitWireGuardPage`.
     func saveWireGuardHop(index: Int, name: String, conf: String?, expectedGeneration: UInt64?) -> Bool {
         guard !isStagingChainedUpstreamForQA, configuration.wireGuardSetupEnabled,
               ChainedSetupPolicy.canEditConfiguration(chainedSurfaceInputs(from: chainedUpstreamSurfaceStatus)) else {
@@ -176,6 +176,14 @@ extension AppViewModel {
 
     func removeWireGuardHop(index: Int, expectedGeneration: UInt64) -> Bool {
         guard !isStagingChainedUpstreamForQA else { return false }
+        // QA deletion must refuse the production slot. `editableWireGuardStore()` no
+        // longer carries the production refusal (the shipping commit path edits that
+        // store), so the helper that bypasses `ChainedUpstreamStagingRequest` must
+        // carry its own, exactly like `clearStagedChainedUpstreamForQA`.
+        guard LavaSecAppGroup.chainedUpstreamStoreIdentity != .production else {
+            adminQAStatusMessage = "Removal refused: this build addresses the production store."
+            return false
+        }
         defer { refreshDNSSettingsPresentation() }
         do {
             let store = try editableWireGuardStore()
@@ -192,6 +200,8 @@ extension AppViewModel {
             return true
         } catch { adminQAStatusMessage = error.localizedDescription; return false }
     }
+
+    #endif
 
     /// An explicit row switch is an immediate transaction; draft operations never call it.
     /// The existing commit/reconnect boundary preserves a stopped Guard's intent.
@@ -285,7 +295,6 @@ extension AppViewModel {
         guard let container = LavaSecAppGroup.containerURL,
               let group = LavaSecAppGroup.chainedUpstreamKeychainAccessGroup else { throw WireGuardChainFailure.missingSecret }
         let identity = LavaSecAppGroup.chainedUpstreamStoreIdentity
-        guard identity != .production else { throw ChainedUpstreamStagingRefusal.buildMayNotStage(identity) }
         guard ChainedUpstreamStoreIdentity.identity(forKeychainGroup: group) == identity else {
             throw ChainedUpstreamStagingRefusal.buildIdentityIsInconsistent(identity: identity, group: group)
         }
@@ -293,8 +302,8 @@ extension AppViewModel {
             keyItems: ChainedUpstreamKeychainKeyItemStore(accessGroup: group))
     }
 
-    /// - Parameter enablesChaining: true for the explicit Admin QA staging action;
-    ///   the user-facing editor passes false to preserve its separate routing choice.
+    #if DEBUG || LAVA_QA_TOOLS
+    /// - Parameter enablesChaining: false stages a QA fixture without changing routing.
     /// - Returns: whether the requested operation committed. With `enablesChaining`,
     ///   both storage and enablement must finish before the caller clears the draft.
     ///

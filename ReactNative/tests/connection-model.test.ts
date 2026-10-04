@@ -5,6 +5,7 @@ import {translations} from '../app/translations';
 
 const session=initialSession();
 const snapshot=(extra:Partial<AppSnapshot>={}):AppSnapshot=>({
+  qaTools:false,
   session:{...session,filterID:'old',activeFilterID:'new'},
   protection:{rules:999999,today:{countsEnabled:true,allowed:83,blocked:17}},
   filters:[{id:'new',name:'Personal',count:'12',lists:[],frozen:false,shareable:true,shareSummary:''}],
@@ -51,7 +52,7 @@ test('VPN eligibility controls presence; off and on retain their ordered path po
   expect(on.map(stage=>stage.id)).toEqual(off.map(stage=>stage.id));
   expect(on[2]).toMatchObject({shortTitle:'VPN',value:'Enabled',muted:false});
   expect(on[2]?.explanation).toBe('Your VPN carries allowed DNS requests.');
-  const setup=connectionStages(snapshot({connection:undefined,qaTools:true}),session);
+  const setup=connectionStages(snapshot({connection:undefined}),session);
   expect(setup.find(stage=>stage.id==='vpn')?.explanation).toBe('VPN chaining can send allowed DNS requests through your own VPN.');
   expect(connectionStages({...live,connection:{...live.connection!,vpn:{eligible:false,enabled:false}}},session).map(stage=>stage.id)).toEqual(['phone','filter','dns']);
 });

@@ -17,6 +17,7 @@ import XCTest
 
 /// Repo-relative location of every file pinned by a source-introspection test.
 enum SourceFile: String, CaseIterable {
+    case reactNativePageContent = "ReactNative/native-app/LavaNativePageContent.swift"
     case catalogAuthorizationFixture = "docs/testing/fixtures/catalog-v1.json"
     case qaMetricKitCollector = "LavaSecApp/QAMetricKitCollector.swift"
     // MARK: Documentation contracts
@@ -31,6 +32,12 @@ enum SourceFile: String, CaseIterable {
     case reactNativeAppFilters = "ReactNative/native-app/LavaAppFilters.swift"
     case reactNativeAppReadCache = "ReactNative/app/read-cache.ts"
     case reactNativeAppQueries = "ReactNative/native-app/LavaAppQueries.swift"
+    case reactNativeAppShareCard = "ReactNative/native-app/LavaAppShareCard.swift"
+    case reactNativeShareCardCapture = "ReactNative/ios/LavaSecUIReview/LavaShareCardCapture.swift"
+    case reactNativeShareCardSurface = "ReactNative/ios/LavaSecUIReview/LavaShareCardSurfaceView.mm"
+    case reactNativeShareQrSpec = "ReactNative/specs/LavaShareQrNativeComponent.ts"
+    case reactNativePackage = "ReactNative/package.json"
+    case reactNativeAppGenerator = "ReactNative/native-app/generate-project.rb"
     case reactNativeAppGuard = "ReactNative/native-app/LavaAppGuard.swift"
     case reactNativeFilterScreens = "ReactNative/review/FilterScreens.tsx"
     case reactNativeActivityScreen = "ReactNative/review/ActivityScreen.tsx"

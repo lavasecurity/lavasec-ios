@@ -7,7 +7,23 @@ extension LavaAppBridge {
     func query(_ name: String, _ input: [String: Any]) async throws -> Any {
         guard let policy = PresentationReadPolicy(rawValue: name) else { throw CommandError("Unknown query.") }
         let surface: SecurityProtectedSurface = [.activity, .domains, .network, .stats].contains(policy) ? .activityViewing : policy == .share ? .appUnlock : .filterEditing
+        // `share.query` pins the module retirement epoch across BOTH of its
+        // authorizations: a module invalidation during either biometric suspension
+        // must abort before `shareCardQuery` mints a grant for a torn-down module.
+        let shareModuleEpoch = policy == .share ? shareCardModuleEpoch : nil
         try await authorize(surface, surface == .activityViewing ? "View Activities" : "View filter", fresh: name == "domains.stage")
+        // `share.query` also requires `.filterEditing`. Authorize it BEFORE the
+        // presentation read ticket opens: when it is protected, the biometric
+        // prompt posts `willResignActive`, which invalidates the presentation
+        // cache and rotates its generation. Authorizing inside the ticket window
+        // therefore made a successful share authorization look like a revoked
+        // read, so the card never loaded.
+        if policy == .share {
+            try await authorize(.filterEditing, "Share Filter", fresh: false)
+            guard shareModuleEpoch == shareCardModuleEpoch else {
+                throw CommandError("This filter cannot be shared.")
+            }
+        }
         // Normalize/prune the local source before pinning its revision.
         if policy == .activity || policy == .domains { model.reports.refreshDiagnostics() }
         let revision = security.viewAuthenticationRevision
@@ -149,12 +165,7 @@ extension LavaAppBridge {
             }
 
         case "share.query":
-            guard let id = input["id"] as? String, let filter = model.filter(id: id), model.isFilterShareable(filter) else { throw CommandError("This filter cannot be shared.") }
-            let code = model.shareableFilterCode(for: filter)
-            let url = try ShareableFilterLink.url(forConfigurationCode: code)
-            let image = ShareableFilterCardRenderer.qrImage(for: url.absoluteString)?.pngData()
-                .map { "data:image/png;base64," + $0.base64EncodedString() }
-            return ["code": code, "url": url.absoluteString, "image": image as Any? ?? NSNull()] as [String: Any]
+            return try await shareCardQuery(input)
         case "network.query":
             model.refreshNetworkActivityLog(force: true)
             return model.networkActivityLog.entries.map { entry -> [String: Any] in
@@ -215,7 +226,6 @@ extension LavaAppBridge {
             "app": [["Version", VersionInfo.appVersion], ["Platform", VersionInfo.platformVersion]] + (VersionInfo.sourceRevision.isEmpty ? [] : [["Source", VersionInfo.displayedSourceRevision]])]
     }
     private func vpnTier() -> String {
-        #if DEBUG || LAVA_QA_TOOLS
         let status = model.chainedUpstreamSurfaceStatus
         var rows: [String] = status.chainingEnabled ? [] : ["Off"]
         if let addresses = status.storedConfigurationDNSAddresses {
@@ -225,9 +235,6 @@ extension LavaAppBridge {
             rows.append(addresses.isEmpty ? "No DNS servers configured" : addresses.joined(separator: ", "))
         } else { rows.append(status.storeUnavailableReason == nil ? "No saved configuration" : "Saved configuration unavailable") }
         return rows.map(\.lavaLocalized).joined(separator: "\n")
-        #else
-        return (model.configuration.chainedUpstreamEnabled ? "WireGuard" : "Off").lavaLocalized
-        #endif
     }
     func resolverMetadata(_ preset: DNSResolverPreset) -> String {
         switch preset.transport {
